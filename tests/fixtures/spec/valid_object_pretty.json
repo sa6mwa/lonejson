@@ -1,0 +1,21 @@
+{
+  "name": "valid pretty",
+  "nickname": "vp",
+  "age": 7,
+  "score": 3.25,
+  "active": false,
+  "address": {
+    "city": "Y",
+    "zip": 99
+  },
+  "lucky_numbers": [
+    1,
+    2,
+    3
+  ],
+  "tags": [
+    "x",
+    "y"
+  ],
+  "items": []
+}

@@ -1,0 +1,1 @@
+{"name":"nested ignored","nickname":"ni","age":42,"score":7.75,"active":true,"address":{"city":"N","zip":4242},"lucky_numbers":[1,2,3,4],"tags":["n1","n2"],"items":[{"id":1,"label":"one"}],"metadata":{"deep":{"array":[1,{"x":[2,3,{"y":[4,5,{"z":true}]}]},6]}}}

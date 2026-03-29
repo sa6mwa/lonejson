@@ -1,0 +1,18 @@
+{
+  "outer": {
+    "inner": [
+      1,
+      {
+        "ignored": [
+          2,
+          3,
+          {
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  "message": "deep payload",
+  "id": 4
+}

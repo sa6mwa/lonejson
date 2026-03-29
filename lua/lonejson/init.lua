@@ -1,0 +1,88 @@
+local core = require("lonejson.core")
+
+local M = {}
+
+local function field(kind, opts)
+  opts = opts or {}
+  opts.kind = kind
+  return opts
+end
+
+function M.field(name, spec)
+  spec = spec or {}
+  spec.name = name
+  return spec
+end
+
+function M.string(opts)
+  return field("string", opts)
+end
+
+function M.spooled_text(opts)
+  return field("spooled_text", opts)
+end
+
+function M.spooled_bytes(opts)
+  return field("spooled_bytes", opts)
+end
+
+function M.i64(opts)
+  return field("i64", opts)
+end
+
+function M.u64(opts)
+  return field("u64", opts)
+end
+
+function M.f64(opts)
+  return field("f64", opts)
+end
+
+function M.boolean(opts)
+  return field("boolean", opts)
+end
+
+M.bool = M.boolean
+
+function M.object(opts)
+  return field("object", opts)
+end
+
+function M.string_array(opts)
+  return field("string_array", opts)
+end
+
+function M.i64_array(opts)
+  return field("i64_array", opts)
+end
+
+function M.u64_array(opts)
+  return field("u64_array", opts)
+end
+
+function M.f64_array(opts)
+  return field("f64_array", opts)
+end
+
+function M.boolean_array(opts)
+  return field("boolean_array", opts)
+end
+
+function M.object_array(opts)
+  return field("object_array", opts)
+end
+
+function M.schema(name, fields)
+  return core.compile_schema(name, fields)
+end
+
+function M.chunks(spool, chunk_size)
+  spool:rewind()
+  return function()
+    return spool:read(chunk_size or 4096)
+  end
+end
+
+M.core = core
+
+return M

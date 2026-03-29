@@ -1,0 +1,20 @@
+services:
+  sink:
+    image: python:3.12-alpine
+    working_dir: /app
+    volumes:
+      - ./docker/sink:/app:ro
+    command: ["python", "app.py"]
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - sink
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    volumes:
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./docker/nginx/html:/usr/share/nginx/html:ro
+      - ./docker/nginx/generated:/usr/share/nginx/generated:ro
+      - ./docker/nginx/certs:/etc/nginx/certs:ro

@@ -1,0 +1,16 @@
+CompileFlags:
+  CompilationDatabase: build/debug
+  Remove:
+    - -std=*
+  Add:
+    - -D_POSIX_C_SOURCE=200809L
+    - -std=c89
+    - -Wall
+    - -Wextra
+    - -Wpedantic
+    - -pedantic-errors
+---
+If:
+  PathMatch: (dist|build|\\.cache)/.*
+Index:
+  Background: Skip

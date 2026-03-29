@@ -1,0 +1,17 @@
+/stash/
+/build/
+/.deps/
+/lonejson/
+/src/lua/*.o
+/examples/bin/
+/examples/lua_binding.out
+/docker/nginx/certs/server.crt
+/docker/nginx/certs/server.key
+/docker/nginx/certs/openssl.cnf
+/docker/nginx/generated/
+/perflogs/history.jsonl
+/perflogs/runs/
+/perflogs/lua/history.jsonl
+/perflogs/lua/runs/
+/compile_commands.json
+/dist/
