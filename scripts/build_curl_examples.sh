@@ -9,6 +9,7 @@ mkdir -p "${output_dir}"
 
 cc \
   -D_POSIX_C_SOURCE=200809L \
+  -DLONEJSON_WITH_CURL \
   -std=c89 \
   -Wall \
   -Wextra \
@@ -18,11 +19,13 @@ cc \
   -I "${bundle_root}/include" \
   -o "${output_dir}/curl_get" \
   "${repo_root}/examples/curl_get.c" \
+  "${repo_root}/src/lonejson.c" \
   -L "${bundle_root}/lib" \
   -lcurl -lssl -lcrypto -lnghttp2 -lz
 
 cc \
   -D_POSIX_C_SOURCE=200809L \
+  -DLONEJSON_WITH_CURL \
   -std=c89 \
   -Wall \
   -Wextra \
@@ -32,5 +35,6 @@ cc \
   -I "${bundle_root}/include" \
   -o "${output_dir}/curl_put" \
   "${repo_root}/examples/curl_put.c" \
+  "${repo_root}/src/lonejson.c" \
   -L "${bundle_root}/lib" \
   -lcurl -lssl -lcrypto -lnghttp2 -lz

@@ -1,8 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define LONEJSON_WITH_CURL
-#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct remote_payload {

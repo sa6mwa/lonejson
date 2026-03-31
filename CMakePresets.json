@@ -32,6 +32,45 @@
       }
     },
     {
+      "name": "linux-gnu-release",
+      "inherits": "host",
+      "cacheVariables": {
+        "LONEJSON_TARGET_ARCH": "x86_64",
+        "LONEJSON_TARGET_OS": "linux",
+        "LONEJSON_TARGET_LIBC": "gnu"
+      }
+    },
+    {
+      "name": "linux-musl-release",
+      "inherits": "host",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-musl.cmake",
+      "cacheVariables": {
+        "LONEJSON_TARGET_ARCH": "x86_64",
+        "LONEJSON_TARGET_OS": "linux",
+        "LONEJSON_TARGET_LIBC": "musl"
+      }
+    },
+    {
+      "name": "aarch64-linux-gnu-release",
+      "inherits": "host",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-gnu.cmake"
+    },
+    {
+      "name": "aarch64-linux-musl-release",
+      "inherits": "host",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-musl.cmake"
+    },
+    {
+      "name": "armhf-linux-gnu-release",
+      "inherits": "host",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-gnu.cmake"
+    },
+    {
+      "name": "armhf-linux-musl-release",
+      "inherits": "host",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-musl.cmake"
+    },
+    {
       "name": "asan",
       "inherits": "debug",
       "cacheVariables": {
@@ -75,6 +114,30 @@
       "configurePreset": "fuzz"
     },
     {
+      "name": "linux-gnu-release",
+      "configurePreset": "linux-gnu-release"
+    },
+    {
+      "name": "linux-musl-release",
+      "configurePreset": "linux-musl-release"
+    },
+    {
+      "name": "aarch64-linux-gnu-release",
+      "configurePreset": "aarch64-linux-gnu-release"
+    },
+    {
+      "name": "aarch64-linux-musl-release",
+      "configurePreset": "aarch64-linux-musl-release"
+    },
+    {
+      "name": "armhf-linux-gnu-release",
+      "configurePreset": "armhf-linux-gnu-release"
+    },
+    {
+      "name": "armhf-linux-musl-release",
+      "configurePreset": "armhf-linux-musl-release"
+    },
+    {
       "name": "format",
       "configurePreset": "debug",
       "targets": [
@@ -86,6 +149,69 @@
       "configurePreset": "stack-usage",
       "targets": [
         "stack-usage-report"
+      ]
+    },
+    {
+      "name": "package-archive-linux-gnu",
+      "configurePreset": "linux-gnu-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-linux-musl",
+      "configurePreset": "linux-musl-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-aarch64-linux-gnu",
+      "configurePreset": "aarch64-linux-gnu-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-aarch64-linux-musl",
+      "configurePreset": "aarch64-linux-musl-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-armhf-linux-gnu",
+      "configurePreset": "armhf-linux-gnu-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-armhf-linux-musl",
+      "configurePreset": "armhf-linux-musl-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-single-header",
+      "configurePreset": "host",
+      "targets": [
+        "package-single-header"
+      ]
+    },
+    {
+      "name": "package-checksums",
+      "configurePreset": "host",
+      "targets": [
+        "package-checksums"
+      ]
+    },
+    {
+      "name": "package-clean-dist",
+      "configurePreset": "host",
+      "targets": [
+        "package-clean-dist"
       ]
     }
   ],
@@ -107,6 +233,48 @@
     {
       "name": "asan",
       "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gnu-release",
+      "configurePreset": "linux-gnu-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-musl-release",
+      "configurePreset": "linux-musl-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "aarch64-linux-gnu-release",
+      "configurePreset": "aarch64-linux-gnu-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "aarch64-linux-musl-release",
+      "configurePreset": "aarch64-linux-musl-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "armhf-linux-gnu-release",
+      "configurePreset": "armhf-linux-gnu-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "armhf-linux-musl-release",
+      "configurePreset": "armhf-linux-musl-release",
       "output": {
         "outputOnFailure": true
       }

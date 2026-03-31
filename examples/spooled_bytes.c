@@ -4,7 +4,6 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct binary_blob {
@@ -91,11 +90,14 @@ int main(void) {
     raw[i] = (unsigned char)((i * 7u) & 0xFFu);
   }
   base64_text = base64_encode_bytes(raw, sizeof(raw));
+  if (base64_text == NULL) {
+    fprintf(stderr, "failed to allocate example input\n");
+    return 1;
+  }
   json = make_json(base64_text);
-  if (base64_text == NULL || json == NULL) {
+  if (json == NULL) {
     fprintf(stderr, "failed to allocate example input\n");
     free(base64_text);
-    free(json);
     return 1;
   }
 

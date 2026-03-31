@@ -3,7 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct outbound_bytes_doc {

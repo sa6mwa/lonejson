@@ -2,7 +2,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct fuzz_address {
@@ -45,8 +44,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_status status;
 
   memset(&person, 0, sizeof(person));
-  status =
-      lonejson_parse_buffer(&fuzz_person_map, &person, data, size, NULL, &error);
+  status = lonejson_parse_buffer(&fuzz_person_map, &person, data, size, NULL,
+                                 &error);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     char buffer[1024];
     size_t needed;

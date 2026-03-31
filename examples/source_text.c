@@ -3,7 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define LJ_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct outbound_text_doc {

@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LJ_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct event_log {

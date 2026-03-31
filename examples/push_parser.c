@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct build_info {

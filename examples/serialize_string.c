@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct api_response {

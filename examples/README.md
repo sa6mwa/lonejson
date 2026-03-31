@@ -3,11 +3,25 @@
 `make build` writes the standalone C example binaries to `examples/bin/`. That
 is the intended repository entrypoint for the non-curl examples.
 
-If you want to compile one manually from this directory, use:
+`parse_string.c` and `serialize_jsonl.c` are intentional single-header
+examples. They define `LONEJSON_IMPLEMENTATION` and should be compiled against a
+generated standalone header:
 
 ```sh
 mkdir -p bin
-cc -I ../include -o bin/parse_string parse_string.c
+cc -I ../build/debug/generated/single-header/include \
+  -o bin/parse_string parse_string.c
+```
+
+The remaining standalone examples are linked-library examples. After `make
+build`, compile them against the built archive and the normal public header:
+
+```sh
+mkdir -p bin
+cc -I ../include -o bin/parse_reader parse_reader.c \
+  ../build/debug/liblonejson.a
+cc -I ../include -o bin/serialize_file serialize_file.c \
+  ../build/debug/liblonejson.a
 ```
 
 The same pattern applies to:
@@ -21,13 +35,15 @@ The same pattern applies to:
 * `source_bytes.c` (serializes a caller-owned fd as a Base64 JSON field)
 * `serialize_string.c`
 * `serialize_file.c`
-* `serialize_jsonl.c`
 * `fixed_storage.c`
+
+`parse_string.c` and `serialize_jsonl.c` are the embedded single-header
+variants in the tree; the rest model linked-library use.
 
 The curl examples also define `LONEJSON_WITH_CURL` and need curl headers/libs. With a host-native `liblockdc` dev bundle downloaded via `make deps-host`, a typical command is:
 
 ```sh
-cc -I ../include \
+cc -I ../include ../src/lonejson.c \
    -I ../.deps/liblockdc/x86_64-linux-gnu/root/include \
    -o bin/curl_get curl_get.c \
    -L ../.deps/liblockdc/x86_64-linux-gnu/root/lib \

@@ -6,8 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define LONEJSON_IMPLEMENTATION
-#include "lonejson.h"
+#include "../lonejson_internal.h"
 
 #include <lauxlib.h>
 #include <lua.h>

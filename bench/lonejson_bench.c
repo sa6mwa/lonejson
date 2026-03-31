@@ -11,7 +11,6 @@
 #include <yajl/yajl_gen.h>
 #include <yajl/yajl_parse.h>
 
-#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 #define BENCH_MAX_RESULTS 50u

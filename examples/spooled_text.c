@@ -4,7 +4,6 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define LJ_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct large_message {
@@ -60,11 +59,14 @@ int main(void) {
   int after_cleanup_missing;
 
   body = make_body(480u);
+  if (body == NULL) {
+    fprintf(stderr, "failed to allocate example input\n");
+    return 1;
+  }
   json = make_json(body);
-  if (body == NULL || json == NULL) {
+  if (json == NULL) {
     fprintf(stderr, "failed to allocate example input\n");
     free(body);
-    free(json);
     return 1;
   }
 

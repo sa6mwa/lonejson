@@ -1,7 +1,10 @@
 # lonejson
 
-`lonejson` is a single-header C library for schema-guided JSON input and
-output. It maps JSON objects directly into C structs and back again, with a
+`lonejson` is a schema-guided JSON library for C. In normal source-tree use it
+is built and linked as `liblonejson`, with a public header in
+`include/lonejson.h`. The release process also produces a standalone
+single-header artifact for projects that prefer to vendor one file directly.
+The library maps JSON objects directly into C structs and back again, with a
 particular emphasis on object-framed streams, predictable fixed-capacity
 decoding, and pipelines that need to move large values through JSON without
 holding everything in memory at once.
@@ -34,12 +37,13 @@ descriptors when the data already exists outside the process heap.
 
 ## Feature set
 
-At the core is `include/lonejson.h`, which can parse from C strings, raw
-buffers, reader callbacks, `FILE *`, filesystem paths, and object-framed
-streams built on the same underlying parser. Serialization is available to sink
-callbacks, caller-supplied buffers, allocated strings, `FILE *`, filesystem
-paths, and JSON Lines. Pretty printing is optional and uses a fixed two-space
-indentation style.
+At the core is the public header `include/lonejson.h`, paired with the compiled
+library in the normal build. That API can parse from C strings, raw buffers,
+reader callbacks, `FILE *`, filesystem paths, and object-framed streams built
+on the same underlying parser. Serialization is available to sink callbacks,
+caller-supplied buffers, allocated strings, `FILE *`, filesystem paths, and
+JSON Lines. Pretty printing is optional and uses a fixed two-space indentation
+style.
 
 Field mappings can be fixed-capacity or dynamically allocated. Large inbound
 values can be represented by spool-backed text or base64-decoded byte fields,
@@ -50,18 +54,29 @@ object-framed streaming, and spool-backed fields on the Lua side.
 
 ## Integration
 
-In exactly one C translation unit:
+The repository now supports two integration styles.
+
+The normal development and binary-distribution path is a conventional linked
+library. Include the public header and link `liblonejson.a` or
+`liblonejson.so`:
+
+```c
+#include "lonejson.h"
+```
+
+The standalone single-header release artifact remains available for projects
+that prefer vendoring one file. In that mode, define
+`LONEJSON_IMPLEMENTATION` in exactly one translation unit before including the
+generated standalone header from the release archive:
 
 ```c
 #define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 ```
 
-In every other translation unit:
-
-```c
-#include "lonejson.h"
-```
+The source-tree `include/lonejson.h` is the linked-library public header. The
+generated single-header artifact is a separate release output, not the same
+file.
 
 Short aliases are enabled by default. Disable them if they collide with another
 project:
@@ -95,7 +110,6 @@ outbound values that should be serialized directly from an existing path,
 ### Parse one object into a struct
 
 ```c
-#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct user_doc {
@@ -321,8 +335,19 @@ Release packaging is Makefile-driven:
 make release
 ```
 
-That command produces a compressed versioned header archive, a versioned Lua
-rockspec, a packed source rock, and a SHA-256 manifest under `dist/`. The
+That command produces:
+
+- six binary release tarballs named `liblonejson-<version>-<target>.tar.gz`
+  for the supported GNU and musl Linux targets
+- a compressed standalone single-header artifact,
+  `lonejson-<version>.h.gz`
+- a versioned Lua rockspec
+- a packed Lua source rock
+- a SHA-256 manifest under `dist/`
+
+The binary tarballs contain the declarations-only public header plus the
+matching `liblonejson.a` and `liblonejson.so` artifacts. The compressed header
+artifact is the standalone embedded form for single-header integration. The
 version is taken from an exact `vX.Y.Z` tag on `HEAD`; if the current commit is
 untagged, the release version falls back to `0.0.0`.
 

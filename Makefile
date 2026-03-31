@@ -6,14 +6,26 @@ DEBUG_PRESET := debug
 HOST_PRESET := host
 ASAN_PRESET := asan
 FUZZ_PRESET := fuzz
+RELEASE_BUILD_PRESETS := \
+	linux-gnu-release \
+	linux-musl-release \
+	aarch64-linux-gnu-release \
+	aarch64-linux-musl-release \
+	armhf-linux-gnu-release \
+	armhf-linux-musl-release
+CROSS_RELEASE_PRESETS := \
+	aarch64-linux-gnu-release \
+	aarch64-linux-musl-release \
+	armhf-linux-gnu-release \
+	armhf-linux-musl-release
 LUA ?= lua
 COMPOSE := $(shell if command -v nerdctl >/dev/null 2>&1; then printf '%s' 'nerdctl compose'; elif command -v docker >/dev/null 2>&1; then printf '%s' 'docker compose'; fi)
 RELEASE_VERSION := $(shell ./scripts/release_version.sh)
 DIST_DIR := $(CURDIR)/dist
-RELEASE_HEADER := $(DIST_DIR)/lonejson-$(RELEASE_VERSION).h
-RELEASE_HEADER_GZ := $(RELEASE_HEADER).gz
+RELEASE_HEADER_GZ := $(DIST_DIR)/lonejson-$(RELEASE_VERSION).h.gz
 RELEASE_ROCKSPEC := $(DIST_DIR)/lonejson-$(RELEASE_VERSION)-1.rockspec
 RELEASE_PACK_DIR := $(DIST_DIR)/.pack
+RELEASE_PACK_STAGE_DIR := $(RELEASE_PACK_DIR)/src
 RELEASE_PACK_ROCKSPEC := $(RELEASE_PACK_DIR)/lonejson-$(RELEASE_VERSION)-1.rockspec
 RELEASE_ROCK := $(DIST_DIR)/lonejson-$(RELEASE_VERSION)-1.src.rock
 RELEASE_CHECKSUMS := $(DIST_DIR)/lonejson-$(RELEASE_VERSION)-CHECKSUMS
@@ -34,11 +46,17 @@ LUA_ROCK_TREE := build/luarocks
 LUA_ROCKSPEC := $(LUA_ROCK_TREE)/lonejson-$(RELEASE_VERSION)-1.rockspec
 LUA_ROCK_STAMP := $(LUA_ROCK_TREE)/.installed.stamp
 LUA_ROCK_BUILD_LOCK := $(LUA_ROCK_TREE)/.build.lock
+LUA_ROCK_BUILD_BYPRODUCTS := \
+	$(CURDIR)/lonejson \
+	$(CURDIR)/src/lua/lonejson_lua.o \
+	$(CURDIR)/src/lonejson.o
 LUA_ROCK_SOURCES := \
 	lonejson.rockspec.in \
 	scripts/render_release_rockspec.sh \
 	scripts/release_version.sh \
 	include/lonejson.h \
+	src/lonejson.c \
+	src/lonejson_impl.h \
 	src/lua/lonejson_lua.c \
 	lua/lonejson/init.lua
 
@@ -46,8 +64,10 @@ LUA_ROCK_SOURCES := \
 	help \
 	build \
 	build-host \
+	build-release \
+	release-lua-artifacts \
 	release \
-lua-rock \
+	lua-rock \
 	lua-test \
 	lua-bench \
 	lua-bench-freeze-baseline \
@@ -76,13 +96,15 @@ lua-rock \
 	compose-logs \
 	curl-examples \
 	test-curl-e2e \
-	clean
+	clean \
+	clean-dist
 
 help:
 	@printf '%s\n' \
 		'make build                  Configure and build the full debug tree (tests and standalone examples, excluding lua-* and curl-examples).' \
 		'make build-host             Configure and build the host-native release preset.' \
-		'make release                Package dist/lonejson-<version>.h.gz together with the Lua rockspec and source rock artifacts.' \
+		'make build-release          Configure and build the full shipped release build matrix.' \
+		'make release                Run the Linux release matrix and package generation.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
 		'make lua-test               Build the Lua module and run the Lua integration test.' \
 		'make lua-bench              Run the standalone Lua benchmark harness and compare it to the C latest run.' \
@@ -96,7 +118,7 @@ help:
 		'make asan                   Build and run the ASan/UBSan preset.' \
 		'make fuzz                   Build the libFuzzer targets and run a seeded smoke pass.' \
 		'make stack-usage            Build with compiler stack-usage reporting and print the report.' \
-		'make format                 Run clang-format over the C header/bench/tests/examples.' \
+		'make format                 Run clang-format over the C sources.' \
 		'make deps-host              Download and extract the host-native liblockdc dev bundle.' \
 		'make deps-x86_64-linux-gnu  Download and extract the x86_64 glibc liblockdc dev bundle.' \
 		'make deps-x86_64-linux-musl Download and extract the x86_64 musl liblockdc dev bundle.' \
@@ -112,7 +134,8 @@ help:
 		'make compose-logs           Tail logs from the local compose stack.' \
 		'make curl-examples          Build the curl examples against the host liblockdc dev bundle.' \
 		'make test-curl-e2e          Build and run the curl examples against the local HTTPS rig.' \
-		'make clean                  Remove build/, .deps/, dist/, examples/bin/, and generated Lua module artifacts.'
+		'make clean                  Remove build/, dist/, .deps/, examples/bin/, and generated Lua module artifacts.' \
+		'make clean-dist             Remove dist/ release artifacts only.'
 
 build:
 	cmake --preset $(DEBUG_PRESET)
@@ -123,13 +146,11 @@ build-host:
 	cmake --preset $(HOST_PRESET)
 	cmake --build --preset $(HOST_PRESET)
 
-release: $(RELEASE_HEADER_GZ) $(RELEASE_ROCKSPEC) $(RELEASE_ROCK) $(RELEASE_CHECKSUMS)
-	@printf '%s\n' \
-		"release version: $(RELEASE_VERSION)" \
-		"header: $(RELEASE_HEADER_GZ)" \
-		"rock:   $(RELEASE_ROCKSPEC)" \
-		"packed: $(RELEASE_ROCK)" \
-		"sha256: $(RELEASE_CHECKSUMS)"
+build-release:
+	@set -e; for preset in $(RELEASE_BUILD_PRESETS); do \
+		cmake --preset "$$preset"; \
+		cmake --build --preset "$$preset"; \
+	done
 
 $(DIST_DIR):
 	mkdir -p "$(DIST_DIR)"
@@ -137,29 +158,32 @@ $(DIST_DIR):
 $(RELEASE_PACK_DIR):
 	mkdir -p "$(RELEASE_PACK_DIR)"
 
-$(RELEASE_HEADER_GZ): include/lonejson.h | $(DIST_DIR)
-	rm -f "$(RELEASE_HEADER)"
-	gzip -n -c include/lonejson.h >"$(RELEASE_HEADER_GZ)"
+$(RELEASE_PACK_STAGE_DIR): Makefile .git/index | $(RELEASE_PACK_DIR)
+	rm -rf "$(RELEASE_PACK_STAGE_DIR)"
+	mkdir -p "$(RELEASE_PACK_STAGE_DIR)"
+	git archive --format=tar --worktree-attributes HEAD | tar -xf - -C "$(RELEASE_PACK_STAGE_DIR)"
+	git -C "$(RELEASE_PACK_STAGE_DIR)" init -q
+	git -C "$(RELEASE_PACK_STAGE_DIR)" config user.name "lonejson release pack"
+	git -C "$(RELEASE_PACK_STAGE_DIR)" config user.email "release@lonejson.local"
+	git -C "$(RELEASE_PACK_STAGE_DIR)" add .
+	git -C "$(RELEASE_PACK_STAGE_DIR)" commit -q -m "stage lonejson release sources"
 
 $(RELEASE_ROCKSPEC): lonejson.rockspec.in scripts/render_release_rockspec.sh | $(DIST_DIR)
 	./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(RELEASE_ROCKSPEC)"
 
-$(RELEASE_PACK_ROCKSPEC): lonejson.rockspec.in scripts/render_release_rockspec.sh | $(RELEASE_PACK_DIR)
-	./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(RELEASE_PACK_ROCKSPEC)" "git+file://$(CURDIR)"
+$(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_PACK_STAGE_DIR)
+	cd "$(RELEASE_PACK_STAGE_DIR)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "git+file://$(RELEASE_PACK_STAGE_DIR)" ""
 
 $(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC)
 	rm -f "$(RELEASE_ROCK)"
-	cd "$(RELEASE_PACK_DIR)" && luarocks pack "$(notdir $(RELEASE_PACK_ROCKSPEC))"
-	mv "$(RELEASE_PACK_DIR)/$(notdir $(RELEASE_ROCK))" "$(RELEASE_ROCK)"
+	cd "$(RELEASE_PACK_STAGE_DIR)" && luarocks pack "../$(notdir $(RELEASE_PACK_ROCKSPEC))"
+	mv "$(RELEASE_PACK_STAGE_DIR)/$(notdir $(RELEASE_ROCK))" "$(RELEASE_ROCK)"
 	rm -rf "$(RELEASE_PACK_DIR)"
 
-$(RELEASE_CHECKSUMS): $(RELEASE_HEADER_GZ) $(RELEASE_ROCKSPEC) $(RELEASE_ROCK)
-	cd "$(DIST_DIR)" && \
-	sha256sum \
-		"$(notdir $(RELEASE_HEADER_GZ))" \
-		"$(notdir $(RELEASE_ROCKSPEC))" \
-		"$(notdir $(RELEASE_ROCK))" \
-	> "$(notdir $(RELEASE_CHECKSUMS))"
+release-lua-artifacts: $(RELEASE_ROCKSPEC) $(RELEASE_ROCK)
+
+release:
+	./scripts/run_linux_release_matrix.sh
 
 bench:
 	@bundle_root="$$(./scripts/detect_liblockdc_bundle.sh)" && \
@@ -188,7 +212,6 @@ test-host: build-host
 	ctest --preset $(HOST_PRESET)
 	$(MAKE) lua-test
 
-lua-rock:
 lua-rock: $(LUA_ROCK_STAMP)
 
 $(LUA_ROCKSPEC): $(LUA_ROCK_SOURCES)
@@ -196,7 +219,7 @@ $(LUA_ROCKSPEC): $(LUA_ROCK_SOURCES)
 	./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(LUA_ROCKSPEC)" "git+file://$(CURDIR)"
 
 $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES)
-	flock "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; luarocks make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; touch "$(LUA_ROCK_STAMP)"'
+	flock "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; luarocks make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"'
 
 lua-test: lua-rock
 	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua tests/test_lua.lua
@@ -299,4 +322,7 @@ test-curl-e2e: curl-examples
 	./scripts/test_curl_e2e.sh
 
 clean:
-	cmake -E rm -rf build .deps dist examples/bin lonejson
+	./scripts/clean.sh
+
+clean-dist:
+	./scripts/clean.sh --dist-only

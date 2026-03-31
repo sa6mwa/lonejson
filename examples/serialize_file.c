@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct export_record {

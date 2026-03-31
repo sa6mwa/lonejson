@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LJ_IMPLEMENTATION
+#define LONEJSON_IMPLEMENTATION
 #include "lonejson.h"
 
 typedef struct user_profile {

@@ -92,8 +92,7 @@ static void reset_lonejson_alloc_stats(void) {
 #define LONEJSON_REALLOC test_lonejson_realloc
 #define LONEJSON_FREE test_lonejson_free
 #define LONEJSON_TRACK_WORKSPACE_USAGE 1
-#define LONEJSON_IMPLEMENTATION
-#include "lonejson.h"
+#include "../src/lonejson_internal.h"
 
 typedef struct test_address {
   char city[16];
