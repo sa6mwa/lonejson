@@ -47,6 +47,20 @@ local UInts = lj.schema("UInts", {
   lj.field("tags", lj.string_array { fixed_capacity = 8, overflow = "fail" }),
 })
 
+local Query = lj.schema("Query", {
+  lj.field("id", lj.string { required = true }),
+  lj.field("selector", lj.json_value { required = true }),
+  lj.field("fields", lj.json_value()),
+  lj.field("last_error", lj.json_value()),
+})
+
+local Merge = lj.schema("Merge", {
+  lj.field("id", lj.string()),
+  lj.field("age", lj.i64()),
+  lj.field("selector", lj.json_value()),
+  lj.field("fields", lj.json_value()),
+})
+
 do
   local obj = Test:decode('{"name":"Alice","age":3,"active":true}')
   assert_eq(obj.name, "Alice")
@@ -214,6 +228,149 @@ do
   assert_eq(rec.value, max_u64)
   assert_eq(rec.values[2], above_i64)
   assert_eq(UInts:encode(rec), '{"value":18446744073709551615,"values":[1,9223372036854775808,18446744073709551615],"tags":["a","b"]}')
+end
+
+do
+  local obj = Query:decode('{"id":"q-42","selector":{"op":"and","clauses":[{"field":"status","value":"open"},{"field":"priority","gte":3}]},"fields":["id","title",{"metrics":[true,null,3.14]}],"last_error":null}')
+  assert_eq(obj.id, "q-42")
+  assert_eq(getmetatable(obj.selector).__lonejson_json_kind, "object")
+  assert_eq(obj.selector.op, "and")
+  assert_eq(getmetatable(obj.selector.clauses).__lonejson_json_kind, "array")
+  assert_eq(obj.selector.clauses[2].gte, 3)
+  assert_eq(getmetatable(obj.fields).__lonejson_json_kind, "array")
+  assert_eq(obj.fields[3].metrics[1], true)
+  assert_true(obj.fields[3].metrics[2] == lj.json_null)
+  assert_true(obj.last_error == nil)
+end
+
+do
+  local obj = Query:decode('{"id":"q-null","selector":{"a":null,"b":[1,null,2]},"fields":{"inner":[null,true]},"last_error":null}')
+  local encoded
+
+  assert_true(obj.selector.a == lj.json_null)
+  assert_true(obj.selector.b[2] == lj.json_null)
+  assert_true(obj.fields.inner[1] == lj.json_null)
+  assert_true(obj.last_error == nil)
+
+  encoded = Query:encode(obj)
+  assert_true(encoded:find('"a":null', 1, true) ~= nil)
+  assert_true(encoded:find('"b":[1,null,2]', 1, true) ~= nil)
+  assert_true(encoded:find('"inner":[null,true]', 1, true) ~= nil)
+end
+
+do
+  local path = "/tmp/lonejson-lua-query-stream.json"
+  local f = assert(io.open(path, "wb"))
+  local stream
+  local obj, err, status
+
+  f:write('{"id":"stream-1","selector":{"kind":"term","field":"name","value":"alice"},"fields":["id",{"deep":[true,false,null,4.5]}],"last_error":{"code":"bad","retryable":false}}')
+  f:close()
+
+  stream = Query:stream_path(path)
+  obj, err, status = stream:next()
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.selector.kind, "term")
+  assert_eq(getmetatable(obj.fields).__lonejson_json_kind, "array")
+  assert_eq(obj.fields[2].deep[1], true)
+  assert_eq(obj.fields[2].deep[2], false)
+  assert_true(obj.fields[2].deep[3] == lj.json_null)
+  assert_eq(obj.last_error.code, "bad")
+  assert_eq(obj.last_error.retryable, false)
+  obj, err, status = stream:next()
+  assert_eq(status, "eof")
+  stream:close()
+  os.remove(path)
+end
+
+do
+  local rec = Query:new_record()
+  Query:decode_into(rec, '{"id":"record-null","selector":{"x":[null,1],"y":{"z":null}}}')
+  assert_true(rec.selector.x[1] == lj.json_null)
+  assert_true(rec.selector.y.z == lj.json_null)
+  assert_true(Query:encode(rec):find('"x":[null,1]', 1, true) ~= nil)
+end
+
+do
+  local rec = Merge:new_record()
+
+  Merge:assign(rec, {
+    id = "old",
+    age = 7,
+    selector = lj.json_object { a = 1 },
+    fields = lj.json_array { "keep" },
+  })
+  Merge:decode_into(rec, '{"selector":{"b":2}}', { clear_destination = false })
+
+  assert_eq(rec.id, "old")
+  assert_eq(rec.age, 7)
+  assert_eq(getmetatable(rec.selector).__lonejson_json_kind, "object")
+  assert_true(rec.selector.a == nil)
+  assert_eq(rec.selector.b, 2)
+  assert_eq(getmetatable(rec.fields).__lonejson_json_kind, "array")
+  assert_eq(rec.fields[1], "keep")
+end
+
+do
+  local path = "/tmp/lonejson-lua-merge-stream.json"
+  local f = assert(io.open(path, "wb"))
+  local stream
+  local rec = Merge:new_record()
+  local obj, err, status
+
+  f:write('{"id":"stream-old","age":9,"selector":{"a":1},"fields":["keep"]}')
+  f:write('{"selector":{"b":2}}')
+  f:close()
+
+  stream = Merge:stream_path(path, { clear_destination = false })
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.id, "stream-old")
+  assert_eq(obj.age, 9)
+  assert_eq(obj.selector.a, 1)
+  assert_eq(obj.fields[1], "keep")
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.id, "stream-old")
+  assert_eq(obj.age, 9)
+  assert_true(obj.selector.a == nil)
+  assert_eq(obj.selector.b, 2)
+  assert_eq(obj.fields[1], "keep")
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "eof")
+  stream:close()
+  os.remove(path)
+end
+
+do
+  local rec = Query:new_record()
+  local encoded
+  local roundtrip
+
+  Query:assign(rec, {
+    id = "assign",
+    selector = lj.json_object {
+      op = "or",
+      clauses = lj.json_array {
+        lj.json_object { field = "state", value = "ready" },
+        lj.json_object { field = "retries", lt = 5 },
+      },
+    },
+    fields = lj.json_array { "id", "title", lj.json_object { nested = lj.json_array { true, false, 1.25 } } },
+    last_error = nil,
+  })
+  encoded = Query:encode(rec)
+  assert_true(encoded:find('"selector":{"clauses":[', 1, true) ~= nil)
+  assert_true(encoded:find('"last_error":null', 1, true) ~= nil)
+  roundtrip = Query:decode(encoded)
+  assert_eq(roundtrip.selector.clauses[1].field, "state")
+  assert_eq(roundtrip.fields[3].nested[3], 1.25)
+  assert_eq(getmetatable(roundtrip.fields).__lonejson_json_kind, "array")
 end
 
 print("lua tests passed")

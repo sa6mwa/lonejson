@@ -48,9 +48,20 @@ style.
 Field mappings can be fixed-capacity or dynamically allocated. Large inbound
 values can be represented by spool-backed text or base64-decoded byte fields,
 and large outbound values can be serialized from source-backed text or binary
-fields. Short aliases are enabled by default through `lj_*` and `LJ_*`. The
-repository also ships a Lua binding with a schema DSL, reusable records,
-object-framed streaming, and spool-backed fields on the Lua side.
+fields. Arbitrary embedded JSON values can be represented by
+`lonejson_json_value`, which lets one mapped field contain an opaque JSON
+object, array, scalar, or `null` without turning it into a JSON string. The
+same surface also exposes `lonejson_value_visitor` and `lonejson_visit_value_*`
+for streaming one arbitrary JSON value as structured callbacks without
+building a DOM. Short aliases are enabled by default through `lj_*` and
+`LJ_*`. The repository also ships a Lua binding with a schema DSL, reusable
+records, object-framed streaming, spool-backed fields, and native-Lua
+`json_value` decoding built on the same visitor model.
+
+When you need caller-owned fixed-capacity array backing storage during parse,
+initialize the destination first with `lonejson_init(...)`, configure that
+backing storage, and parse with `clear_destination = 0` so lonejson preserves
+the configured arrays instead of rebuilding the destination from scratch.
 
 ## Integration
 
@@ -102,8 +113,11 @@ Large-value handling is expressed explicitly. `lonejson_spooled` and
 `lonejson_spool_options` are for inbound values that may spill to disk.
 `lonejson_source` and the corresponding `lonejson_source_set_*` helpers are for
 outbound values that should be serialized directly from an existing path,
-`FILE *`, or file descriptor. Parse and write behavior is configured through
-`lonejson_parse_options` and `lonejson_write_options`.
+`FILE *`, or file descriptor. `lonejson_json_value` covers the related case
+where a typed envelope needs to embed one already-formed JSON value directly,
+and `lonejson_visit_value_*` covers the lower-level case where one arbitrary
+JSON value should be visited without a schema. Parse and write behavior is
+configured through `lonejson_parse_options` and `lonejson_write_options`.
 
 ## Quick start
 
@@ -271,6 +285,120 @@ lonejson_source_set_path(&doc.payload, "payload.bin");
 Ownership is explicit. lonejson only auto-closes sources it opened itself;
 caller-owned `FILE *` and file descriptors remain caller-owned.
 
+### Embedded arbitrary JSON values
+
+Use `lonejson_json_value` when one mapped field should contain arbitrary JSON
+rather than a JSON string:
+
+```c
+typedef struct query_doc {
+  char namespace_[16];
+  lonejson_json_value selector;
+  lonejson_json_value fields;
+} query_doc;
+
+static const lonejson_field query_doc_fields[] = {
+  LONEJSON_FIELD_STRING_FIXED_REQ(query_doc, namespace_, "namespace",
+                                  LONEJSON_OVERFLOW_FAIL),
+  LONEJSON_FIELD_JSON_VALUE_REQ(query_doc, selector, "selector"),
+  LONEJSON_FIELD_JSON_VALUE(query_doc, fields, "fields")
+};
+```
+
+You can populate the handle from memory, a reader callback, a `FILE *`, a file
+descriptor, or a path. lonejson validates that the handle contains exactly one
+JSON value when serializing.
+
+On parse, `lonejson_json_value` is stream-first. Callers must opt into one of
+three inbound behaviors before decoding:
+
+- `lonejson_json_value_set_parse_sink(...)` streams compact JSON bytes to a
+  caller sink as lonejson validates the nested value incrementally
+- `lonejson_json_value_set_parse_visitor(...)` streams structured object,
+  array, string, number, boolean, and null events to a caller visitor while
+  applying `lonejson_value_limits`
+- `lonejson_json_value_enable_parse_capture(...)` explicitly captures compact
+  JSON bytes into owned storage for later reuse or re-emission
+
+When using inbound parse sinks, parse visitors, or explicit capture, initialize
+the destination first and parse with `clear_destination = 0` so the configured
+`json_value` handles remain attached:
+
+```c
+lonejson_parse_options options = lonejson_default_parse_options();
+options.clear_destination = 0;
+```
+
+Visitor mode is the zero-retention parse path for arbitrary embedded JSON:
+
+```c
+lonejson_value_visitor visitor = lonejson_default_value_visitor();
+visitor.object_begin = on_object_begin;
+visitor.object_key_begin = on_object_key_begin;
+visitor.object_key_chunk = on_object_key_chunk;
+visitor.object_key_end = on_object_key_end;
+visitor.string_begin = on_string_begin;
+visitor.string_chunk = on_string_chunk;
+visitor.string_end = on_string_end;
+visitor.number_begin = on_number_begin;
+visitor.number_chunk = on_number_chunk;
+visitor.number_end = on_number_end;
+visitor.boolean_value = on_boolean;
+visitor.null_value = on_null;
+
+status = lonejson_json_value_set_parse_visitor(&doc.selector, &visitor, user,
+                                               NULL, &error);
+```
+
+### Visiting Arbitrary JSON Values
+
+Use `lonejson_visit_value_*` when you need to parse one arbitrary JSON value
+without mapping it into a typed schema or building a DOM. The visitor API emits
+structural events plus chunked decoded strings/object keys and bounded number
+tokens.
+
+```c
+lonejson_value_visitor visitor = lonejson_default_value_visitor();
+visitor.object_begin = on_object_begin;
+visitor.object_key_begin = on_key_begin;
+visitor.object_key_chunk = on_key_chunk;
+visitor.object_key_end = on_key_end;
+visitor.string_begin = on_string_begin;
+visitor.string_chunk = on_string_chunk;
+visitor.string_end = on_string_end;
+visitor.number_begin = on_number_begin;
+visitor.number_chunk = on_number_chunk;
+visitor.number_end = on_number_end;
+visitor.boolean_value = on_boolean;
+visitor.null_value = on_null;
+
+lonejson_value_limits limits = lonejson_default_value_limits();
+limits.max_depth = 32;
+
+status = lonejson_visit_value_cstr(json, &visitor, user, &limits, &error);
+```
+
+Default limits are intentionally conservative. Strings, object keys, and total
+input size remain bounded; excessively deep or oversized input fails cleanly
+instead of allocating without limit.
+
+In the Lua binding, nested `json_value` nulls round-trip through the singleton
+`lj.json_null` so they remain distinguishable inside arrays and objects. A
+whole-field JSON `null` still maps to Lua `nil`.
+
+For public structs, prefer lonejson's initializers and default helpers over
+manual `memset` or `{0}`:
+
+- `lonejson_init(map, &value)` for mapped structs
+- `lonejson_json_value_init`, `lonejson_source_init`, `lonejson_spooled_init`
+  for explicit handles
+- `lonejson_default_parse_options()`, `lonejson_default_write_options()`,
+  `lonejson_default_value_visitor()`, and `lonejson_default_read_result()`
+  for option/result structs
+
+`lonejson_error` is output-only and does not need prior initialization, but
+`lonejson_error_init()` is available when you want an explicit empty state.
+
 ## Pretty printing
 
 Pretty printing is optional and uses two-space indentation:
@@ -282,6 +410,24 @@ options.pretty = 1;
 
 The same option applies to normal JSON serializers and to JSONL serializers,
 where each record is formatted independently and then terminated by `\n`.
+
+## Benchmarks
+
+The repository includes two benchmark harnesses:
+
+- `make bench` runs the C benchmark suite and compares lonejson against the
+  frozen baseline in `perflogs/baseline.json`
+- `make lua-bench` runs the Lua benchmark suite and compares Lua lanes against
+  `perflogs/lua/baseline.json`, with informational sibling ratios against the
+  latest C lonejson run
+
+The C benchmark harness is now self-contained. It no longer depends on YAJL or
+another external C comparator library. When the benchmark schema, case set, or
+measurement method changes, refresh the committed baseline with:
+
+```sh
+make bench-freeze-baseline
+```
 
 ## Short aliases
 
@@ -296,7 +442,8 @@ default and can be disabled with:
 ## Lua binding
 
 The repository also ships a Lua binding with schema-guided decoding, reusable
-records, object-framed streams, and spool-backed fields.
+records, object-framed streams, spool-backed fields, and native-Lua arbitrary
+`json_value` fields backed by the C visitor path.
 
 Build and install it into the local LuaRocks tree:
 
@@ -357,8 +504,10 @@ The standard verification commands are:
 
 ```sh
 make test
+make asan
 make bench
 make lua-bench
+make fuzz
 ```
 
 ## License

@@ -1,0 +1,1 @@
+{"selector":{"op":"and","clauses":[{"field":"status","value":"open"},{"field":"priority","gte":3}]},"fields":["id","title",{"metrics":["size","latency",true,null,3.14,-12345.678e-9]}],"ok":true,"missing":null}

@@ -15,3 +15,4 @@
 /perflogs/lua/runs/
 /compile_commands.json
 /dist/
+/fuzz/generated/

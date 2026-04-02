@@ -30,7 +30,6 @@ set(LONEJSON_GENERATED_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/include")
 set(LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/single-header/include")
 set(LONEJSON_GENERATED_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/fixtures")
 set(LONEJSON_TEST_BUNDLE_ROOT "" CACHE PATH "Root directory for extracted liblockdc dev bundle content used by tests.")
-set(LONEJSON_BENCH_BUNDLE_ROOT "" CACHE PATH "Root directory for extracted liblockdc dev bundle content used by benchmarks.")
 set(LONEJSON_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "Artifact architecture name")
 set(LONEJSON_TARGET_OS "${CMAKE_SYSTEM_NAME}" CACHE STRING "Artifact operating system name")
 set(LONEJSON_TARGET_LIBC "" CACHE STRING "Artifact libc suffix for Linux targets (gnu, musl, or empty)")
@@ -197,15 +196,11 @@ if(LONEJSON_BUILD_EXAMPLES)
 endif()
 
 if(LONEJSON_BUILD_BENCHMARKS)
-  if(NOT LONEJSON_BENCH_BUNDLE_ROOT)
-    message(FATAL_ERROR "LONEJSON_BUILD_BENCHMARKS requires -D LONEJSON_BENCH_BUNDLE_ROOT=/path/to/liblockdc/.../root")
-  endif()
   add_executable(lonejson_bench bench/lonejson_bench.c)
   target_include_directories(lonejson_bench PRIVATE
-    "${LONEJSON_PUBLIC_INCLUDE_DIR}"
-    "${LONEJSON_BENCH_BUNDLE_ROOT}/include")
-  target_link_directories(lonejson_bench PRIVATE "${LONEJSON_BENCH_BUNDLE_ROOT}/lib")
-  target_link_libraries(lonejson_bench PRIVATE lonejson yajl_s)
+    "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}")
+  target_compile_definitions(lonejson_bench PRIVATE LONEJSON_IMPLEMENTATION)
+  add_dependencies(lonejson_bench package-single-header)
   if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(lonejson_bench PRIVATE -Wno-long-long)
   endif()
@@ -236,6 +231,26 @@ if(LONEJSON_BUILD_FUZZERS)
   target_link_options(lonejson_fuzz_mapped_parse PRIVATE
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_mapped_parse)
+
+  add_executable(lonejson_fuzz_json_value fuzz/fuzz_json_value.c)
+  target_include_directories(lonejson_fuzz_json_value PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_json_value PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_json_value PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_json_value PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_json_value)
+
+  add_executable(lonejson_fuzz_value_visitor fuzz/fuzz_value_visitor.c)
+  target_include_directories(lonejson_fuzz_value_visitor PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_value_visitor PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_value_visitor PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_value_visitor PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_value_visitor)
 endif()
 
 if(CLANG_FORMAT_BIN)
@@ -249,6 +264,8 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_validate.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_mapped_parse.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_main.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_link_consumer.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_short_names.c"

@@ -42,9 +42,9 @@ int main(void) {
   char short_json[128];
   char long_json[128];
 
-  memset(&doc, 0, sizeof(doc));
-  memset(&short_record, 0, sizeof(short_record));
-  memset(&long_record, 0, sizeof(long_record));
+  lj_init(&short_doc_map, &doc);
+  lj_init(&short_parse_doc_map, &short_record);
+  lonejson_init(&short_parse_doc_map, &long_record);
   strcpy(doc.id, "ok");
 
   fd = mkstemp(path);

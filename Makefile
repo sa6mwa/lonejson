@@ -39,13 +39,22 @@ LUA_PERF_HISTORY := $(CURDIR)/perflogs/lua/history.jsonl
 LUA_PERF_BASELINE := $(CURDIR)/perflogs/lua/baseline.json
 LUA_PERF_ARCHIVE_DIR := $(CURDIR)/perflogs/lua/runs
 PERF_ITERATIONS ?= 100
-FUZZ_RUNS ?= 1000
+FUZZ_TIME ?= 30
+FUZZ_LONG_TIME ?= 300
+FUZZ_GENERATED_DIR := fuzz/generated
 FUZZ_VALIDATE_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/validate
 FUZZ_MAPPED_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/mapped
+FUZZ_JSON_VALUE_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/json_value
+FUZZ_VALUE_VISITOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/value_visitor
+FUZZ_VALIDATE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/validate
+FUZZ_MAPPED_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/mapped
+FUZZ_JSON_VALUE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/json_value
+FUZZ_VALUE_VISITOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/value_visitor
 LUA_ROCK_TREE := build/luarocks
 LUA_ROCKSPEC := $(LUA_ROCK_TREE)/lonejson-$(RELEASE_VERSION)-1.rockspec
 LUA_ROCK_STAMP := $(LUA_ROCK_TREE)/.installed.stamp
 LUA_ROCK_BUILD_LOCK := $(LUA_ROCK_TREE)/.build.lock
+LUA_ROCK_EXTRA_CFLAGS ?= -O3 -DNDEBUG -fno-semantic-interposition
 LUA_ROCK_BUILD_BYPRODUCTS := \
 	$(CURDIR)/lonejson \
 	$(CURDIR)/src/lua/lonejson_lua.o \
@@ -72,13 +81,16 @@ LUA_ROCK_SOURCES := \
 	lua-bench \
 	lua-bench-freeze-baseline \
 	lua-bench-compare \
+	lua-bench-gate \
 	bench \
 	bench-freeze-baseline \
 	bench-compare \
+	bench-gate \
 	test \
 	test-host \
 	asan \
 	fuzz \
+	fuzz-long \
 	stack-usage \
 	format \
 	deps-host \
@@ -107,16 +119,19 @@ help:
 		'make release                Run the Linux release matrix and package generation.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
 		'make lua-test               Build the Lua module and run the Lua integration test.' \
-		'make lua-bench              Run the standalone Lua benchmark harness and compare it to the C latest run.' \
+		'make lua-bench              Run the standalone Lua benchmark harness, compare it, and enforce the Lua benchmark gate.' \
 		'make lua-bench-freeze-baseline Freeze the last Lua benchmark history entry as the Lua baseline.' \
 		'make lua-bench-compare      Compare perflogs/lua/latest.json against perflogs/lua/baseline.json.' \
-		'make bench                  Build and run the host benchmark against the vendored JSON corpus.' \
+		'make lua-bench-gate         Enforce the Lua benchmark gate against perflogs/lua/baseline.json.' \
+		'make bench                  Build and run the host benchmark against the vendored JSON corpus, then enforce the benchmark gate.' \
 		'make bench-freeze-baseline  Freeze the last history entry as the current benchmark baseline.' \
 		'make bench-compare          Compare perflogs/latest.json against perflogs/baseline.json.' \
+		'make bench-gate             Enforce the benchmark gate against perflogs/baseline.json.' \
 		'make test                   Build and run the debug test preset.' \
 		'make test-host              Build and run the host-native test preset.' \
 		'make asan                   Build and run the ASan/UBSan preset.' \
-		'make fuzz                   Build the libFuzzer targets and run a seeded smoke pass.' \
+		'make fuzz                   Build all libFuzzer targets and run a seeded 30s pass for each.' \
+		'make fuzz-long              Run the same fuzz targets with a several-minute soak per target.' \
 		'make stack-usage            Build with compiler stack-usage reporting and print the report.' \
 		'make format                 Run clang-format over the C sources.' \
 		'make deps-host              Download and extract the host-native liblockdc dev bundle.' \
@@ -186,23 +201,28 @@ release:
 	./scripts/run_linux_release_matrix.sh
 
 bench:
-	@bundle_root="$$(./scripts/detect_liblockdc_bundle.sh)" && \
-	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON -D LONEJSON_BENCH_BUNDLE_ROOT="$$bundle_root" && \
+	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
-	if [ -f "$(PERF_BASELINE)" ]; then ./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$(PERF_LATEST)"; fi
+	if [ -f "$(PERF_BASELINE)" ]; then \
+		./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$(PERF_LATEST)" && \
+		./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$(PERF_LATEST)"; \
+	fi
 
 bench-freeze-baseline:
-	@bundle_root="$$(./scripts/detect_liblockdc_bundle.sh)" && \
-	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON -D LONEJSON_BENCH_BUNDLE_ROOT="$$bundle_root" && \
+	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	./build/$(HOST_PRESET)/lonejson_bench freeze-baseline "$(PERF_HISTORY)" "$(PERF_BASELINE)"
 
 bench-compare:
-	@bundle_root="$$(./scripts/detect_liblockdc_bundle.sh)" && \
-	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON -D LONEJSON_BENCH_BUNDLE_ROOT="$$bundle_root" && \
+	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$(PERF_LATEST)"
+
+bench-gate:
+	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
+	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
+	./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$(PERF_LATEST)"
 
 test: build
 	ctest --preset $(DEBUG_PRESET)
@@ -219,7 +239,7 @@ $(LUA_ROCKSPEC): $(LUA_ROCK_SOURCES)
 	./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(LUA_ROCKSPEC)" "git+file://$(CURDIR)"
 
 $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES)
-	flock "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; luarocks make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"'
+	flock "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" luarocks make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"'
 
 lua-test: lua-rock
 	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua tests/test_lua.lua
@@ -227,13 +247,19 @@ lua-test: lua-rock
 lua-bench: lua-rock
 	@if [ ! -f "$(PERF_LATEST)" ]; then $(MAKE) bench PERF_ITERATIONS=$(PERF_ITERATIONS); fi
 	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
-	if [ -f "$(LUA_PERF_BASELINE)" ]; then lua bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"; fi
+	if [ -f "$(LUA_PERF_BASELINE)" ]; then \
+		lua bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)" && \
+		lua bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"; \
+	fi
 
 lua-bench-freeze-baseline: lua-rock
 	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua bench/lonejson_lua_bench.lua freeze-baseline "$(LUA_PERF_HISTORY)" "$(LUA_PERF_BASELINE)"
 
 lua-bench-compare: lua-rock
 	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
+
+lua-bench-gate: lua-rock
+	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
 
 asan:
 	cmake --preset $(ASAN_PRESET)
@@ -242,20 +268,36 @@ asan:
 
 fuzz:
 	cmake --preset $(FUZZ_PRESET)
-	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse
-	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)"
+	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_json_value lonejson_fuzz_value_visitor
+	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)"
+	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)"
 	cmake -E make_directory "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
+	cmake -E make_directory "$(FUZZ_JSON_VALUE_CORPUS_DIR)/json_value" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/mapped" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/value_visitor"
+	cmake -E make_directory "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages"
 	cp -R tests/fixtures/vendor/json_test_suite/test_parsing/. "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor/"
 	cp -R tests/fixtures/spec/. "$(FUZZ_VALIDATE_CORPUS_DIR)/spec/"
 	cp -R tests/fixtures/languages/. "$(FUZZ_VALIDATE_CORPUS_DIR)/languages/"
 	cp -R fuzz/corpus/mapped/. "$(FUZZ_MAPPED_CORPUS_DIR)/mapped/"
 	cp -R tests/fixtures/spec/. "$(FUZZ_MAPPED_CORPUS_DIR)/spec/"
 	cp -R tests/fixtures/languages/. "$(FUZZ_MAPPED_CORPUS_DIR)/languages/"
+	cp -R fuzz/corpus/json_value/. "$(FUZZ_JSON_VALUE_CORPUS_DIR)/json_value/"
+	cp -R fuzz/corpus/mapped/. "$(FUZZ_JSON_VALUE_CORPUS_DIR)/mapped/"
+	cp -R fuzz/corpus/value_visitor/. "$(FUZZ_JSON_VALUE_CORPUS_DIR)/value_visitor/"
+	cp -R fuzz/corpus/value_visitor/. "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor/"
+	cp -R fuzz/corpus/json_value/. "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value/"
+	cp -R tests/fixtures/languages/. "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages/"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/validate"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/mapped"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_validate -runs=$(FUZZ_RUNS) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/validate/ "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse -runs=$(FUZZ_RUNS) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/mapped/ "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/json_value"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/value_visitor"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_validate -max_total_time=$(FUZZ_TIME) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/validate/ "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse -max_total_time=$(FUZZ_TIME) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/mapped/ "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_json_value -max_total_time=$(FUZZ_TIME) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/json_value/ "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/json_value" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/mapped" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/value_visitor"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_value_visitor -max_total_time=$(FUZZ_TIME) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_visitor/ "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages"
+
+fuzz-long:
+	$(MAKE) fuzz FUZZ_TIME=$(FUZZ_LONG_TIME)
 
 stack-usage:
 	cmake --preset stack-usage

@@ -39,8 +39,8 @@ int main(void) {
   lonejson_write_options options;
   char buffer[256];
 
-  memset(&log_record, 0, sizeof(log_record));
-  memset(&error, 0, sizeof(error));
+  lonejson_init(&consumer_log_map, &log_record);
+  lonejson_error_init(&error);
 
   status =
       lonejson_parse_cstr(&consumer_log_map, &log_record, json, NULL, &error);

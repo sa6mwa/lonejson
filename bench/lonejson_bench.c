@@ -8,20 +8,17 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <yajl/yajl_gen.h>
-#include <yajl/yajl_parse.h>
-
 #include "lonejson.h"
 
-#define BENCH_MAX_RESULTS 50u
+#define BENCH_MAX_RESULTS 64u
 #define BENCH_MAX_FILES 512u
 #define BENCH_PARSE_ITEM_CAPACITY 8u
 #define BENCH_JSONL_RECORDS 8u
 #define BENCH_SAMPLE_COUNT 5u
 #define BENCH_MIN_SAMPLE_NS 100000000u
 #define BENCH_NOISE_DELTA_PCT 3.0
-#define BENCH_MATERIAL_DELTA_PCT 10.0
-#define BENCH_SCHEMA_VERSION 8u
+#define BENCH_MATERIAL_DELTA_PCT 5.0
+#define BENCH_SCHEMA_VERSION 12u
 
 typedef enum bench_doc_kind {
   BENCH_DOC_VALID = 1,
@@ -109,6 +106,13 @@ typedef struct bench_record_dynamic {
   lonejson_string_array tags;
   lonejson_object_array items;
 } bench_record_dynamic;
+
+typedef struct bench_json_value_doc {
+  char id[24];
+  lonejson_json_value selector;
+  lonejson_json_value fields;
+  lonejson_json_value last_error;
+} bench_json_value_doc;
 
 typedef struct bench_fixed_target {
   bench_record_fixed record;
@@ -284,29 +288,6 @@ typedef struct bench_count_sink {
   size_t total;
 } bench_count_sink;
 
-typedef enum bench_yajl_mode {
-  BENCH_YAJL_ROOT = 1,
-  BENCH_YAJL_ADDRESS,
-  BENCH_YAJL_ITEMS_ARRAY,
-  BENCH_YAJL_ITEM,
-  BENCH_YAJL_NUMBERS_ARRAY,
-  BENCH_YAJL_TAGS_ARRAY,
-  BENCH_YAJL_IGNORE_ARRAY,
-  BENCH_YAJL_IGNORE_MAP
-} bench_yajl_mode;
-
-typedef struct bench_yajl_parse_ctx {
-  bench_fixed_target *target;
-  bench_yajl_mode stack[16];
-  size_t depth;
-  char key[32];
-  size_t current_item_index;
-  size_t completed_objects;
-  size_t expected_objects;
-  int allow_multiple;
-  int failed;
-} bench_yajl_parse_ctx;
-
 typedef struct bench_serialize_case {
   const lonejson_map *map;
   const void *src;
@@ -325,6 +306,30 @@ typedef struct bench_jsonl_serialize_case {
   lonejson_write_options options;
 } bench_jsonl_serialize_case;
 
+typedef struct bench_visit_state {
+  size_t object_count;
+  size_t array_count;
+  size_t key_bytes;
+  size_t string_bytes;
+  size_t number_bytes;
+  size_t bool_count;
+  size_t null_count;
+} bench_visit_state;
+
+typedef struct bench_visit_case {
+  const unsigned char *json;
+  size_t json_len;
+  size_t reader_chunk_size;
+  size_t min_key_bytes;
+  size_t min_string_bytes;
+  size_t min_number_bytes;
+  size_t min_objects;
+  size_t min_arrays;
+  size_t min_bools;
+  size_t min_nulls;
+  int use_reader;
+} bench_visit_case;
+
 typedef int (*bench_validate_fn)(const unsigned char *data, size_t len);
 typedef int (*bench_simple_case_fn)(void *ctx);
 
@@ -340,14 +345,22 @@ static int bench_prepare_benchmark_cases(
     bench_parse_case *parse_dynamic_case, bench_stream_case *stream_case,
     bench_serialize_case *serialize_case,
     bench_serialize_case *serialize_pretty_case,
+    bench_parse_case *parse_json_value_case,
+    bench_serialize_case *json_value_serialize_case,
+    bench_serialize_case *json_value_serialize_pretty_case,
+    bench_serialize_case *json_value_source_serialize_case,
+    bench_serialize_case *json_value_source_serialize_pretty_case,
     bench_jsonl_serialize_case *jsonl_case,
     bench_jsonl_serialize_case *jsonl_pretty_case,
     bench_record_fixed *serialize_record, bench_record_fixed *jsonl_records,
+    bench_json_value_doc *json_value_record,
+    bench_json_value_doc *json_value_source_record,
     char *expected_json, size_t expected_json_capacity,
     char *expected_pretty_json, size_t expected_pretty_json_capacity,
     char *jsonl_buffer, size_t jsonl_buffer_capacity, char *pretty_jsonl_buffer,
     size_t pretty_jsonl_buffer_capacity, char *stream_buffer,
-    size_t stream_buffer_capacity);
+    size_t stream_buffer_capacity, char *json_value_path,
+    size_t json_value_path_capacity);
 
 static const char bench_parse_json[] =
     "{\"name\":\"Alice\",\"nickname\":\"Wonderland\",\"age\":34,"
@@ -357,6 +370,32 @@ static const char bench_parse_json[] =
     "\"tags\":[\"admin\",\"ops\"],"
     "\"items\":[{\"id\":1,\"label\":\"alpha\"},{\"id\":2,"
     "\"label\":\"bravo-longer-than-fit\"}]}";
+
+static const char bench_json_value_parse_json[] =
+    "{\"id\":\"q-42\","
+    "\"selector\":{\"op\":\"and\",\"clauses\":[{\"field\":\"status\","
+    "\"value\":\"open\"},{\"field\":\"priority\",\"gte\":3}]},"
+    "\"fields\":[\"id\",\"title\",{\"metrics\":[\"size\",\"latency\",true,"
+    "null,3.14]}],"
+    "\"last_error\":{\"code\":\"E_IO\",\"retry\":false,"
+    "\"details\":{\"attempt\":2,\"backoff_ms\":250}}}";
+
+static const char bench_json_value_selector_json[] =
+    "{\"op\":\"and\",\"clauses\":[{\"field\":\"status\",\"value\":\"open\"},"
+    "{\"field\":\"priority\",\"gte\":3}]}";
+
+static const char bench_json_value_fields_json[] =
+    "[\"id\",\"title\",{\"metrics\":[\"size\",\"latency\",true,null,3.14]}]";
+
+static const char bench_json_value_last_error_json[] =
+    "{\"code\":\"E_IO\",\"retry\":false,"
+    "\"details\":{\"attempt\":2,\"backoff_ms\":250}}";
+
+static const char bench_visit_mixed_value_json[] =
+    "{\"selector\":{\"op\":\"and\",\"clauses\":[{\"field\":\"status\","
+    "\"value\":\"open\"},{\"field\":\"priority\",\"gte\":3}]},"
+    "\"fields\":[\"id\",\"title\",{\"metrics\":[\"size\",\"latency\",true,"
+    "null,3.14,-12345.678e-9]}],\"ok\":true,\"missing\":null}";
 
 static const char bench_vendor_long_strings_json[] =
     "{\"x\":[{\"id\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}], "
@@ -437,6 +476,15 @@ static const lonejson_field bench_record_dynamic_fields[] = {
                                 LONEJSON_OVERFLOW_FAIL)};
 LONEJSON_MAP_DEFINE(bench_record_dynamic_map, bench_record_dynamic,
                     bench_record_dynamic_fields);
+
+static const lonejson_field bench_json_value_doc_fields[] = {
+    LONEJSON_FIELD_STRING_FIXED_REQ(bench_json_value_doc, id, "id",
+                                    LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_JSON_VALUE_REQ(bench_json_value_doc, selector, "selector"),
+    LONEJSON_FIELD_JSON_VALUE_REQ(bench_json_value_doc, fields, "fields"),
+    LONEJSON_FIELD_JSON_VALUE(bench_json_value_doc, last_error, "last_error")};
+LONEJSON_MAP_DEFINE(bench_json_value_doc_map, bench_json_value_doc,
+                    bench_json_value_doc_fields);
 
 static const lonejson_field bench_vendor_long_item_fields[] = {
     LONEJSON_FIELD_STRING_FIXED_REQ(bench_vendor_long_item, id, "id",
@@ -914,311 +962,6 @@ static int bench_lonejson_validate(const unsigned char *data, size_t len) {
   return lonejson_validate_buffer(data, len, &error) == LONEJSON_STATUS_OK;
 }
 
-static int bench_yajl_validate(const unsigned char *data, size_t len) {
-  yajl_handle hand;
-  yajl_status status;
-  int ok;
-
-  hand = yajl_alloc(NULL, NULL, NULL);
-  if (hand == NULL) {
-    return 0;
-  }
-  status = yajl_parse(hand, data, len);
-  if (status == yajl_status_ok) {
-    status = yajl_complete_parse(hand);
-  }
-  ok = status == yajl_status_ok ? 1 : 0;
-  yajl_free(hand);
-  return ok;
-}
-
-static void bench_yajl_ctx_reset_object(bench_yajl_parse_ctx *ctx) {
-  bench_init_fixed_target(ctx->target);
-  ctx->current_item_index = 0u;
-  ctx->key[0] = '\0';
-}
-
-static bench_yajl_mode
-bench_yajl_current_mode(const bench_yajl_parse_ctx *ctx) {
-  if (ctx->depth == 0u) {
-    return BENCH_YAJL_IGNORE_MAP;
-  }
-  return ctx->stack[ctx->depth - 1u];
-}
-
-static int bench_yajl_push(bench_yajl_parse_ctx *ctx, bench_yajl_mode mode) {
-  if (ctx->depth == sizeof(ctx->stack) / sizeof(ctx->stack[0])) {
-    ctx->failed = 1;
-    return 0;
-  }
-  ctx->stack[ctx->depth++] = mode;
-  return 1;
-}
-
-static void bench_yajl_pop(bench_yajl_parse_ctx *ctx) {
-  if (ctx->depth != 0u) {
-    --ctx->depth;
-  }
-}
-
-static int bench_yajl_root_complete(bench_yajl_parse_ctx *ctx) {
-  int ok;
-
-  ok = ctx->allow_multiple ? bench_check_stream_fixed_target(ctx->target)
-                           : bench_check_parse_fixed_target(ctx->target);
-  if (!ok) {
-    ctx->failed = 1;
-    return 0;
-  }
-  ++ctx->completed_objects;
-  return 1;
-}
-
-static int bench_yajl_null_cb(void *user) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_yajl_boolean_cb(void *user, int boolVal) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  if (bench_yajl_current_mode(ctx) == BENCH_YAJL_ROOT &&
-      strcmp(ctx->key, "active") == 0) {
-    ctx->target->record.active = boolVal ? true : false;
-  }
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_yajl_integer_cb(void *user, long long integerVal) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  bench_yajl_mode mode = bench_yajl_current_mode(ctx);
-  lonejson_int64 value = (lonejson_int64)integerVal;
-
-  if (mode == BENCH_YAJL_ROOT && strcmp(ctx->key, "age") == 0) {
-    ctx->target->record.age = value;
-  } else if (mode == BENCH_YAJL_ADDRESS && strcmp(ctx->key, "zip") == 0) {
-    ctx->target->record.address.zip = value;
-  } else if (mode == BENCH_YAJL_ITEM && strcmp(ctx->key, "id") == 0) {
-    if (ctx->current_item_index < ctx->target->record.items.capacity) {
-      ctx->target->item_storage[ctx->current_item_index].id = value;
-    }
-  } else if (mode == BENCH_YAJL_NUMBERS_ARRAY) {
-    size_t idx = ctx->target->record.lucky_numbers.count;
-    if (idx < ctx->target->record.lucky_numbers.capacity) {
-      ctx->target->numbers_storage[idx] = value;
-      ctx->target->record.lucky_numbers.count = idx + 1u;
-    } else {
-      ctx->failed = 1;
-      return 0;
-    }
-  }
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_yajl_double_cb(void *user, double value) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  if (bench_yajl_current_mode(ctx) == BENCH_YAJL_ROOT &&
-      strcmp(ctx->key, "score") == 0) {
-    ctx->target->record.score = value;
-  }
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_yajl_number_cb(void *user, const char *text, size_t len) {
-  char buffer[64];
-  size_t copy_len;
-
-  copy_len = len;
-  if (copy_len >= sizeof(buffer)) {
-    copy_len = sizeof(buffer) - 1u;
-  }
-  memcpy(buffer, text, copy_len);
-  buffer[copy_len] = '\0';
-  if (strchr(buffer, '.') != NULL || strchr(buffer, 'e') != NULL ||
-      strchr(buffer, 'E') != NULL) {
-    return bench_yajl_double_cb(user, strtod(buffer, NULL));
-  }
-  return bench_yajl_integer_cb(user, strtoll(buffer, NULL, 10));
-}
-
-static int bench_yajl_string_cb(void *user, const unsigned char *text,
-                                size_t len) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  bench_yajl_mode mode = bench_yajl_current_mode(ctx);
-  size_t copy_len;
-
-  if (mode == BENCH_YAJL_ROOT && strcmp(ctx->key, "name") == 0) {
-    copy_len = len < sizeof(ctx->target->record.name) - 1u
-                   ? len
-                   : sizeof(ctx->target->record.name) - 1u;
-    memcpy(ctx->target->record.name, text, copy_len);
-    ctx->target->record.name[copy_len] = '\0';
-  } else if (mode == BENCH_YAJL_ROOT && strcmp(ctx->key, "nickname") == 0) {
-    copy_len = len < sizeof(ctx->target->record.nickname) - 1u
-                   ? len
-                   : sizeof(ctx->target->record.nickname) - 1u;
-    memcpy(ctx->target->record.nickname, text, copy_len);
-    ctx->target->record.nickname[copy_len] = '\0';
-  } else if (mode == BENCH_YAJL_ADDRESS && strcmp(ctx->key, "city") == 0) {
-    copy_len = len < sizeof(ctx->target->record.address.city) - 1u
-                   ? len
-                   : sizeof(ctx->target->record.address.city) - 1u;
-    memcpy(ctx->target->record.address.city, text, copy_len);
-    ctx->target->record.address.city[copy_len] = '\0';
-  } else if (mode == BENCH_YAJL_ITEM && strcmp(ctx->key, "label") == 0) {
-    if (ctx->current_item_index < ctx->target->record.items.capacity) {
-      copy_len = len < sizeof(ctx->target->item_storage[0].label) - 1u
-                     ? len
-                     : sizeof(ctx->target->item_storage[0].label) - 1u;
-      memcpy(ctx->target->item_storage[ctx->current_item_index].label, text,
-             copy_len);
-      ctx->target->item_storage[ctx->current_item_index].label[copy_len] = '\0';
-    }
-  }
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_yajl_start_map_cb(void *user) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  bench_yajl_mode mode;
-
-  if (ctx->depth == 0u) {
-    bench_yajl_ctx_reset_object(ctx);
-    return bench_yajl_push(ctx, BENCH_YAJL_ROOT);
-  }
-  mode = bench_yajl_current_mode(ctx);
-  if (mode == BENCH_YAJL_ROOT && strcmp(ctx->key, "address") == 0) {
-    ctx->key[0] = '\0';
-    return bench_yajl_push(ctx, BENCH_YAJL_ADDRESS);
-  }
-  if (mode == BENCH_YAJL_ITEMS_ARRAY) {
-    if (ctx->current_item_index >= ctx->target->record.items.capacity) {
-      ctx->failed = 1;
-      return 0;
-    }
-    return bench_yajl_push(ctx, BENCH_YAJL_ITEM);
-  }
-  return bench_yajl_push(ctx, BENCH_YAJL_IGNORE_MAP);
-}
-
-static int bench_yajl_map_key_cb(void *user, const unsigned char *key,
-                                 size_t len) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  size_t copy_len = len < sizeof(ctx->key) - 1u ? len : sizeof(ctx->key) - 1u;
-  memcpy(ctx->key, key, copy_len);
-  ctx->key[copy_len] = '\0';
-  return 1;
-}
-
-static int bench_yajl_end_map_cb(void *user) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  bench_yajl_mode mode = bench_yajl_current_mode(ctx);
-
-  if (mode == BENCH_YAJL_ITEM) {
-    ctx->current_item_index += 1u;
-    ctx->target->record.items.count = ctx->current_item_index;
-  } else if (mode == BENCH_YAJL_ROOT) {
-    if (!bench_yajl_root_complete(ctx)) {
-      return 0;
-    }
-  }
-  bench_yajl_pop(ctx);
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_yajl_start_array_cb(void *user) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  if (bench_yajl_current_mode(ctx) == BENCH_YAJL_ROOT &&
-      strcmp(ctx->key, "lucky_numbers") == 0) {
-    ctx->key[0] = '\0';
-    return bench_yajl_push(ctx, BENCH_YAJL_NUMBERS_ARRAY);
-  }
-  if (bench_yajl_current_mode(ctx) == BENCH_YAJL_ROOT &&
-      strcmp(ctx->key, "items") == 0) {
-    ctx->key[0] = '\0';
-    ctx->current_item_index = 0u;
-    ctx->target->record.items.count = 0u;
-    return bench_yajl_push(ctx, BENCH_YAJL_ITEMS_ARRAY);
-  }
-  if (bench_yajl_current_mode(ctx) == BENCH_YAJL_ROOT &&
-      strcmp(ctx->key, "tags") == 0) {
-    ctx->key[0] = '\0';
-    return bench_yajl_push(ctx, BENCH_YAJL_TAGS_ARRAY);
-  }
-  return bench_yajl_push(ctx, BENCH_YAJL_IGNORE_ARRAY);
-}
-
-static int bench_yajl_end_array_cb(void *user) {
-  bench_yajl_parse_ctx *ctx = (bench_yajl_parse_ctx *)user;
-  bench_yajl_pop(ctx);
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_yajl_parse_target_buffer(bench_fixed_target *target,
-                                          const unsigned char *data, size_t len,
-                                          int allow_multiple,
-                                          size_t expected_objects,
-                                          size_t chunk_size,
-                                          size_t *out_completed) {
-  bench_yajl_parse_ctx ctx;
-  yajl_callbacks callbacks;
-  yajl_handle hand;
-  yajl_status status;
-  size_t offset;
-
-  memset(&ctx, 0, sizeof(ctx));
-  memset(&callbacks, 0, sizeof(callbacks));
-  ctx.target = target;
-  ctx.expected_objects = expected_objects;
-  ctx.allow_multiple = allow_multiple;
-  callbacks.yajl_null = bench_yajl_null_cb;
-  callbacks.yajl_boolean = bench_yajl_boolean_cb;
-  callbacks.yajl_integer = bench_yajl_integer_cb;
-  callbacks.yajl_double = bench_yajl_double_cb;
-  callbacks.yajl_number = bench_yajl_number_cb;
-  callbacks.yajl_string = bench_yajl_string_cb;
-  callbacks.yajl_start_map = bench_yajl_start_map_cb;
-  callbacks.yajl_map_key = bench_yajl_map_key_cb;
-  callbacks.yajl_end_map = bench_yajl_end_map_cb;
-  callbacks.yajl_start_array = bench_yajl_start_array_cb;
-  callbacks.yajl_end_array = bench_yajl_end_array_cb;
-  hand = yajl_alloc(&callbacks, NULL, &ctx);
-  if (hand == NULL) {
-    return 0;
-  }
-  if (allow_multiple) {
-    yajl_config(hand, yajl_allow_multiple_values, 1);
-  }
-  offset = 0u;
-  while (offset < len) {
-    size_t take = chunk_size == 0u ? len - offset : chunk_size;
-    if (take > len - offset) {
-      take = len - offset;
-    }
-    status = yajl_parse(hand, data + offset, take);
-    if (status != yajl_status_ok || ctx.failed) {
-      yajl_free(hand);
-      return 0;
-    }
-    offset += take;
-  }
-  status = yajl_complete_parse(hand);
-  yajl_free(hand);
-  if (status != yajl_status_ok || ctx.failed) {
-    return 0;
-  }
-  if (out_completed != NULL) {
-    *out_completed = ctx.completed_objects;
-  }
-  return ctx.completed_objects == expected_objects;
-}
-
 static int bench_validation_once(const bench_validation_case *ctx,
                                  lonejson_uint64 *out_mismatches) {
   size_t i;
@@ -1330,6 +1073,66 @@ static int bench_check_dynamic_record(const bench_record_dynamic *record) {
       strcmp(record->tags.items[1], "ops") != 0 || record->items.count != 2u ||
       items[0].id != 1 || strcmp(items[0].label, "alpha") != 0 ||
       items[1].id != 2 || strcmp(items[1].label, "bravo-longer-th") != 0) {
+    return 0;
+  }
+  return 1;
+}
+
+static void bench_init_json_value_doc(bench_json_value_doc *doc) {
+  memset(doc, 0, sizeof(*doc));
+  lonejson_json_value_init(&doc->selector);
+  lonejson_json_value_init(&doc->fields);
+  lonejson_json_value_init(&doc->last_error);
+}
+
+static void bench_cleanup_json_value_doc(bench_json_value_doc *doc) {
+  lonejson_cleanup(&bench_json_value_doc_map, doc);
+}
+
+static int bench_check_json_value_doc(const bench_json_value_doc *doc) {
+  return strcmp(doc->id, "q-42") == 0 &&
+         doc->selector.kind == LONEJSON_JSON_VALUE_BUFFER &&
+         doc->fields.kind == LONEJSON_JSON_VALUE_BUFFER &&
+         doc->last_error.kind == LONEJSON_JSON_VALUE_BUFFER &&
+         doc->selector.json != NULL &&
+         strcmp(doc->selector.json, bench_json_value_selector_json) == 0 &&
+         doc->fields.json != NULL &&
+         strcmp(doc->fields.json, bench_json_value_fields_json) == 0 &&
+         doc->last_error.json != NULL &&
+         strcmp(doc->last_error.json, bench_json_value_last_error_json) == 0;
+}
+
+static int bench_prepare_json_value_doc(bench_json_value_doc *doc) {
+  lonejson_error error;
+
+  bench_init_json_value_doc(doc);
+  memcpy(doc->id, "q-42", 5u);
+  if (lonejson_json_value_set_buffer(&doc->selector, bench_json_value_selector_json,
+                                     strlen(bench_json_value_selector_json),
+                                     &error) != LONEJSON_STATUS_OK ||
+      lonejson_json_value_set_buffer(&doc->fields, bench_json_value_fields_json,
+                                     strlen(bench_json_value_fields_json),
+                                     &error) != LONEJSON_STATUS_OK ||
+      lonejson_json_value_set_buffer(&doc->last_error,
+                                     bench_json_value_last_error_json,
+                                     strlen(bench_json_value_last_error_json),
+                                     &error) != LONEJSON_STATUS_OK) {
+    bench_cleanup_json_value_doc(doc);
+    return 0;
+  }
+  return 1;
+}
+
+static int bench_prepare_json_value_source_doc(bench_json_value_doc *doc,
+                                               const char *fields_path) {
+  lonejson_error error;
+
+  if (!bench_prepare_json_value_doc(doc)) {
+    return 0;
+  }
+  if (lonejson_json_value_set_path(&doc->fields, fields_path, &error) !=
+      LONEJSON_STATUS_OK) {
+    bench_cleanup_json_value_doc(doc);
     return 0;
   }
   return 1;
@@ -1547,6 +1350,147 @@ static int bench_parse_dynamic_buffer_case(void *user) {
   return ok;
 }
 
+static int bench_parse_json_value_buffer_case(void *user) {
+  bench_parse_case *ctx;
+  bench_json_value_doc doc;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson_parse_options options;
+  int ok;
+
+  ctx = (bench_parse_case *)user;
+  bench_init_json_value_doc(&doc);
+  options = lonejson_default_parse_options();
+  options.clear_destination = 0;
+  if (lonejson_json_value_enable_parse_capture(&doc.selector, &error) !=
+          LONEJSON_STATUS_OK ||
+      lonejson_json_value_enable_parse_capture(&doc.fields, &error) !=
+          LONEJSON_STATUS_OK ||
+      lonejson_json_value_enable_parse_capture(&doc.last_error, &error) !=
+          LONEJSON_STATUS_OK) {
+    bench_cleanup_json_value_doc(&doc);
+    return 0;
+  }
+  status = lonejson_parse_buffer(ctx->map, &doc, ctx->json, ctx->json_len,
+                                 &options, &error);
+  ok = status == LONEJSON_STATUS_OK && bench_check_json_value_doc(&doc);
+  if (ok) {
+    g_bench_sink += (lonejson_uint64)doc.fields.len;
+  }
+  bench_cleanup_json_value_doc(&doc);
+  return ok;
+}
+
+static lonejson_status bench_visit_object_begin(void *user,
+                                                lonejson_error *error) {
+  bench_visit_state *state = (bench_visit_state *)user;
+  (void)error;
+  ++state->object_count;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status bench_visit_array_begin(void *user,
+                                               lonejson_error *error) {
+  bench_visit_state *state = (bench_visit_state *)user;
+  (void)error;
+  ++state->array_count;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status bench_visit_key_chunk(void *user, const char *data,
+                                             size_t len,
+                                             lonejson_error *error) {
+  bench_visit_state *state = (bench_visit_state *)user;
+  (void)data;
+  (void)error;
+  state->key_bytes += len;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status bench_visit_string_chunk(void *user, const char *data,
+                                                size_t len,
+                                                lonejson_error *error) {
+  bench_visit_state *state = (bench_visit_state *)user;
+  (void)data;
+  (void)error;
+  state->string_bytes += len;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status bench_visit_number_chunk(void *user, const char *data,
+                                                size_t len,
+                                                lonejson_error *error) {
+  bench_visit_state *state = (bench_visit_state *)user;
+  (void)data;
+  (void)error;
+  state->number_bytes += len;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status bench_visit_bool(void *user, int value,
+                                        lonejson_error *error) {
+  bench_visit_state *state = (bench_visit_state *)user;
+  (void)value;
+  (void)error;
+  ++state->bool_count;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status bench_visit_null(void *user, lonejson_error *error) {
+  bench_visit_state *state = (bench_visit_state *)user;
+  (void)error;
+  ++state->null_count;
+  return LONEJSON_STATUS_OK;
+}
+
+static int bench_visit_value_case(void *user) {
+  bench_visit_case *ctx = (bench_visit_case *)user;
+  bench_visit_state state;
+  lonejson_value_visitor visitor;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&state, 0, sizeof(state));
+  memset(&visitor, 0, sizeof(visitor));
+  visitor.object_begin = bench_visit_object_begin;
+  visitor.array_begin = bench_visit_array_begin;
+  visitor.object_key_chunk = bench_visit_key_chunk;
+  visitor.string_chunk = bench_visit_string_chunk;
+  visitor.number_chunk = bench_visit_number_chunk;
+  visitor.boolean_value = bench_visit_bool;
+  visitor.null_value = bench_visit_null;
+
+  if (ctx->use_reader) {
+    bench_mem_reader reader;
+
+    reader.data = ctx->json;
+    reader.len = ctx->json_len;
+    reader.offset = 0u;
+    reader.chunk_size = ctx->reader_chunk_size;
+    status = lonejson_visit_value_reader(bench_mem_reader_fn, &reader, &visitor,
+                                         &state, NULL, &error);
+  } else {
+    status = lonejson_visit_value_buffer(ctx->json, ctx->json_len, &visitor,
+                                         &state, NULL, &error);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    return 0;
+  }
+  if (state.object_count < ctx->min_objects ||
+      state.array_count < ctx->min_arrays ||
+      state.key_bytes < ctx->min_key_bytes ||
+      state.string_bytes < ctx->min_string_bytes ||
+      state.number_bytes < ctx->min_number_bytes ||
+      state.bool_count < ctx->min_bools || state.null_count < ctx->min_nulls) {
+    return 0;
+  }
+  g_bench_sink += (lonejson_uint64)(state.object_count + state.array_count +
+                                    state.key_bytes + state.string_bytes +
+                                    state.number_bytes + state.bool_count +
+                                    state.null_count);
+  return 1;
+}
+
 static int bench_parse_reader_fixed_case(void *user) {
   bench_parse_case *ctx;
   bench_fixed_target target;
@@ -1574,36 +1518,6 @@ static int bench_parse_reader_fixed_case(void *user) {
     return 0;
   }
   g_bench_sink += (lonejson_uint64)target.record.items.count;
-  return 1;
-}
-
-static int bench_yajl_parse_buffer_fixed_case(void *user) {
-  bench_parse_case *ctx;
-  bench_fixed_target target;
-  size_t completed;
-
-  ctx = (bench_parse_case *)user;
-  bench_init_fixed_target(&target);
-  if (!bench_yajl_parse_target_buffer(&target, (const unsigned char *)ctx->json,
-                                      ctx->json_len, 0, 1u, 0u, &completed)) {
-    return 0;
-  }
-  g_bench_sink += (lonejson_uint64)completed;
-  return 1;
-}
-
-static int bench_yajl_parse_reader_fixed_case(void *user) {
-  bench_parse_case *ctx;
-  bench_fixed_target target;
-  size_t completed;
-
-  ctx = (bench_parse_case *)user;
-  bench_init_fixed_target(&target);
-  if (!bench_yajl_parse_target_buffer(&target, (const unsigned char *)ctx->json,
-                                      ctx->json_len, 0, 1u, 97u, &completed)) {
-    return 0;
-  }
-  g_bench_sink += (lonejson_uint64)completed;
   return 1;
 }
 
@@ -1757,862 +1671,6 @@ static int bench_stream_lockd_case(void *user) {
   return seen == ctx->object_count;
 }
 
-typedef enum bench_vendor_yajl_mode {
-  BENCH_VENDOR_YAJL_ROOT = 1,
-  BENCH_VENDOR_YAJL_LONG_X_ARRAY,
-  BENCH_VENDOR_YAJL_LONG_X_ITEM,
-  BENCH_VENDOR_YAJL_IGNORE_ARRAY,
-  BENCH_VENDOR_YAJL_IGNORE_MAP
-} bench_vendor_yajl_mode;
-
-typedef struct bench_vendor_yajl_ctx {
-  bench_vendor_doc_kind kind;
-  char key[32];
-  size_t depth;
-  size_t completed_objects;
-  int failed;
-  bench_vendor_yajl_mode stack[8];
-  union {
-    bench_vendor_long_target *long_target;
-    bench_vendor_numbers_doc *numbers_doc;
-    bench_vendor_unicode_doc *unicode_doc;
-    bench_vendor_language_wide_doc *language_wide_doc;
-  } target;
-} bench_vendor_yajl_ctx;
-
-typedef enum bench_lockd_yajl_mode {
-  BENCH_LOCKD_YAJL_ROOT = 1,
-  BENCH_LOCKD_YAJL_GIT,
-  BENCH_LOCKD_YAJL_CONFIG,
-  BENCH_LOCKD_YAJL_CASES_ARRAY,
-  BENCH_LOCKD_YAJL_CASE,
-  BENCH_LOCKD_YAJL_PHASES,
-  BENCH_LOCKD_YAJL_PHASE,
-  BENCH_LOCKD_YAJL_IGNORE_ARRAY,
-  BENCH_LOCKD_YAJL_IGNORE_MAP
-} bench_lockd_yajl_mode;
-
-typedef enum bench_lockd_phase_slot {
-  BENCH_LOCKD_PHASE_NONE = 0,
-  BENCH_LOCKD_PHASE_ACQUIRE,
-  BENCH_LOCKD_PHASE_ATTACH,
-  BENCH_LOCKD_PHASE_DELETE,
-  BENCH_LOCKD_PHASE_GET,
-  BENCH_LOCKD_PHASE_RELEASE,
-  BENCH_LOCKD_PHASE_TOTAL,
-  BENCH_LOCKD_PHASE_UPDATE,
-  BENCH_LOCKD_PHASE_QUERY,
-  BENCH_LOCKD_PHASE_ACQUIRE_A,
-  BENCH_LOCKD_PHASE_ACQUIRE_B,
-  BENCH_LOCKD_PHASE_DECIDE,
-  BENCH_LOCKD_PHASE_UPDATE_A,
-  BENCH_LOCKD_PHASE_UPDATE_B
-} bench_lockd_phase_slot;
-
-typedef struct bench_lockd_yajl_ctx {
-  bench_lockd_target *target;
-  bench_lockd_yajl_mode stack[16];
-  size_t depth;
-  size_t current_case_index;
-  size_t completed_objects;
-  size_t expected_objects;
-  char key[32];
-  bench_lockd_phase_slot current_phase;
-  int failed;
-} bench_lockd_yajl_ctx;
-
-static bench_vendor_yajl_mode
-bench_vendor_yajl_current_mode(const bench_vendor_yajl_ctx *ctx) {
-  if (ctx->depth == 0u) {
-    return BENCH_VENDOR_YAJL_IGNORE_MAP;
-  }
-  return ctx->stack[ctx->depth - 1u];
-}
-
-static int bench_vendor_yajl_push(bench_vendor_yajl_ctx *ctx,
-                                  bench_vendor_yajl_mode mode) {
-  if (ctx->depth == sizeof(ctx->stack) / sizeof(ctx->stack[0])) {
-    ctx->failed = 1;
-    return 0;
-  }
-  ctx->stack[ctx->depth++] = mode;
-  return 1;
-}
-
-static void bench_vendor_yajl_pop(bench_vendor_yajl_ctx *ctx) {
-  if (ctx->depth != 0u) {
-    --ctx->depth;
-  }
-}
-
-static int bench_vendor_yajl_map_key_cb(void *user, const unsigned char *key,
-                                        size_t len) {
-  bench_vendor_yajl_ctx *ctx = (bench_vendor_yajl_ctx *)user;
-  size_t copy_len = len < sizeof(ctx->key) - 1u ? len : sizeof(ctx->key) - 1u;
-  memcpy(ctx->key, key, copy_len);
-  ctx->key[copy_len] = '\0';
-  return 1;
-}
-
-static int bench_vendor_yajl_start_map_cb(void *user) {
-  bench_vendor_yajl_ctx *ctx = (bench_vendor_yajl_ctx *)user;
-  bench_vendor_yajl_mode mode = bench_vendor_yajl_current_mode(ctx);
-
-  if (ctx->depth == 0u) {
-    if (ctx->kind == BENCH_VENDOR_LONG_STRINGS) {
-      bench_init_vendor_long_target(ctx->target.long_target);
-    } else if (ctx->kind == BENCH_VENDOR_EXTREME_NUMBERS) {
-      memset(ctx->target.numbers_doc, 0, sizeof(*ctx->target.numbers_doc));
-    } else if (ctx->kind == BENCH_VENDOR_STRING_UNICODE ||
-               ctx->kind == BENCH_VENDOR_JAPANESE_UTF8 ||
-               ctx->kind == BENCH_VENDOR_HEBREW_UTF8 ||
-               ctx->kind == BENCH_VENDOR_ARABIC_UTF8) {
-      memset(ctx->target.unicode_doc, 0, sizeof(*ctx->target.unicode_doc));
-    } else if (ctx->kind == BENCH_VENDOR_JAPANESE_WIDE ||
-               ctx->kind == BENCH_VENDOR_HEBREW_WIDE ||
-               ctx->kind == BENCH_VENDOR_ARABIC_WIDE) {
-      memset(ctx->target.language_wide_doc, 0,
-             sizeof(*ctx->target.language_wide_doc));
-    }
-    ctx->key[0] = '\0';
-    return bench_vendor_yajl_push(ctx, BENCH_VENDOR_YAJL_ROOT);
-  }
-  if (ctx->kind == BENCH_VENDOR_LONG_STRINGS &&
-      mode == BENCH_VENDOR_YAJL_LONG_X_ARRAY) {
-    return bench_vendor_yajl_push(ctx, BENCH_VENDOR_YAJL_LONG_X_ITEM);
-  }
-  return bench_vendor_yajl_push(ctx, BENCH_VENDOR_YAJL_IGNORE_MAP);
-}
-
-static int bench_vendor_yajl_end_map_cb(void *user) {
-  bench_vendor_yajl_ctx *ctx = (bench_vendor_yajl_ctx *)user;
-  bench_vendor_yajl_mode mode = bench_vendor_yajl_current_mode(ctx);
-
-  if (ctx->kind == BENCH_VENDOR_LONG_STRINGS &&
-      mode == BENCH_VENDOR_YAJL_LONG_X_ITEM) {
-    ctx->target.long_target->doc.x.count = 1u;
-  } else if (mode == BENCH_VENDOR_YAJL_ROOT) {
-    int ok = 0;
-    if (ctx->kind == BENCH_VENDOR_LONG_STRINGS) {
-      ok = bench_check_vendor_long_target(ctx->target.long_target);
-    } else if (ctx->kind == BENCH_VENDOR_EXTREME_NUMBERS) {
-      ok = bench_check_vendor_numbers(ctx->target.numbers_doc);
-    } else if (ctx->kind == BENCH_VENDOR_STRING_UNICODE) {
-      ok = bench_check_vendor_unicode(ctx->target.unicode_doc);
-    } else if (ctx->kind == BENCH_VENDOR_JAPANESE_UTF8 ||
-               ctx->kind == BENCH_VENDOR_HEBREW_UTF8 ||
-               ctx->kind == BENCH_VENDOR_ARABIC_UTF8) {
-      ok = bench_check_vendor_language_text(ctx->kind, ctx->target.unicode_doc);
-    } else if (ctx->kind == BENCH_VENDOR_JAPANESE_WIDE ||
-               ctx->kind == BENCH_VENDOR_HEBREW_WIDE ||
-               ctx->kind == BENCH_VENDOR_ARABIC_WIDE) {
-      ok = bench_check_vendor_language_wide(ctx->kind,
-                                            ctx->target.language_wide_doc);
-    }
-    if (!ok) {
-      ctx->failed = 1;
-      return 0;
-    }
-    ctx->completed_objects = 1u;
-  }
-  bench_vendor_yajl_pop(ctx);
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_vendor_yajl_start_array_cb(void *user) {
-  bench_vendor_yajl_ctx *ctx = (bench_vendor_yajl_ctx *)user;
-  if (ctx->kind == BENCH_VENDOR_LONG_STRINGS &&
-      bench_vendor_yajl_current_mode(ctx) == BENCH_VENDOR_YAJL_ROOT &&
-      strcmp(ctx->key, "x") == 0) {
-    ctx->key[0] = '\0';
-    return bench_vendor_yajl_push(ctx, BENCH_VENDOR_YAJL_LONG_X_ARRAY);
-  }
-  return bench_vendor_yajl_push(ctx, BENCH_VENDOR_YAJL_IGNORE_ARRAY);
-}
-
-static int bench_vendor_yajl_end_array_cb(void *user) {
-  bench_vendor_yajl_ctx *ctx = (bench_vendor_yajl_ctx *)user;
-  bench_vendor_yajl_pop(ctx);
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_vendor_yajl_string_cb(void *user, const unsigned char *text,
-                                       size_t len) {
-  bench_vendor_yajl_ctx *ctx = (bench_vendor_yajl_ctx *)user;
-  bench_vendor_yajl_mode mode = bench_vendor_yajl_current_mode(ctx);
-  size_t copy_len;
-
-  if (ctx->kind == BENCH_VENDOR_LONG_STRINGS) {
-    if (mode == BENCH_VENDOR_YAJL_ROOT && strcmp(ctx->key, "id") == 0) {
-      copy_len = len < sizeof(ctx->target.long_target->doc.id) - 1u
-                     ? len
-                     : sizeof(ctx->target.long_target->doc.id) - 1u;
-      memcpy(ctx->target.long_target->doc.id, text, copy_len);
-      ctx->target.long_target->doc.id[copy_len] = '\0';
-    } else if (mode == BENCH_VENDOR_YAJL_LONG_X_ITEM &&
-               strcmp(ctx->key, "id") == 0) {
-      copy_len = len < sizeof(ctx->target.long_target->items[0].id) - 1u
-                     ? len
-                     : sizeof(ctx->target.long_target->items[0].id) - 1u;
-      memcpy(ctx->target.long_target->items[0].id, text, copy_len);
-      ctx->target.long_target->items[0].id[copy_len] = '\0';
-    }
-  } else if ((ctx->kind == BENCH_VENDOR_STRING_UNICODE ||
-              ctx->kind == BENCH_VENDOR_JAPANESE_UTF8 ||
-              ctx->kind == BENCH_VENDOR_HEBREW_UTF8 ||
-              ctx->kind == BENCH_VENDOR_ARABIC_UTF8) &&
-             mode == BENCH_VENDOR_YAJL_ROOT && strcmp(ctx->key, "title") == 0) {
-    copy_len = len < sizeof(ctx->target.unicode_doc->title) - 1u
-                   ? len
-                   : sizeof(ctx->target.unicode_doc->title) - 1u;
-    memcpy(ctx->target.unicode_doc->title, text, copy_len);
-    ctx->target.unicode_doc->title[copy_len] = '\0';
-  } else if ((ctx->kind == BENCH_VENDOR_JAPANESE_WIDE ||
-              ctx->kind == BENCH_VENDOR_HEBREW_WIDE ||
-              ctx->kind == BENCH_VENDOR_ARABIC_WIDE) &&
-             mode == BENCH_VENDOR_YAJL_ROOT) {
-    bench_vendor_language_wide_doc *doc = ctx->target.language_wide_doc;
-    char *dst = NULL;
-    size_t dst_size = 0u;
-
-    if (strcmp(ctx->key, "lang") == 0) {
-      dst = doc->lang;
-      dst_size = sizeof(doc->lang);
-    } else if (strcmp(ctx->key, "script") == 0) {
-      dst = doc->script;
-      dst_size = sizeof(doc->script);
-    } else if (strcmp(ctx->key, "source") == 0) {
-      dst = doc->source;
-      dst_size = sizeof(doc->source);
-    } else if (strcmp(ctx->key, "title") == 0) {
-      dst = doc->title;
-      dst_size = sizeof(doc->title);
-    } else if (strcmp(ctx->key, "summary") == 0) {
-      dst = doc->summary;
-      dst_size = sizeof(doc->summary);
-    } else if (strcmp(ctx->key, "body") == 0) {
-      dst = doc->body;
-      dst_size = sizeof(doc->body);
-    }
-    if (dst != NULL && dst_size > 0u) {
-      copy_len = len < dst_size - 1u ? len : dst_size - 1u;
-      memcpy(dst, text, copy_len);
-      dst[copy_len] = '\0';
-    }
-  }
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_vendor_yajl_number_cb(void *user, const char *text,
-                                       size_t len) {
-  bench_vendor_yajl_ctx *ctx = (bench_vendor_yajl_ctx *)user;
-  char buffer[64];
-  size_t copy_len;
-  double value;
-
-  if (ctx->kind == BENCH_VENDOR_EXTREME_NUMBERS &&
-      bench_vendor_yajl_current_mode(ctx) != BENCH_VENDOR_YAJL_ROOT) {
-    ctx->key[0] = '\0';
-    return 1;
-  }
-  copy_len = len < sizeof(buffer) - 1u ? len : sizeof(buffer) - 1u;
-  memcpy(buffer, text, copy_len);
-  buffer[copy_len] = '\0';
-  value = strtod(buffer, NULL);
-  if (ctx->kind == BENCH_VENDOR_EXTREME_NUMBERS) {
-    if (strcmp(ctx->key, "min") == 0) {
-      ctx->target.numbers_doc->min = value;
-    } else if (strcmp(ctx->key, "max") == 0) {
-      ctx->target.numbers_doc->max = value;
-    }
-  } else if (ctx->kind == BENCH_VENDOR_JAPANESE_WIDE ||
-             ctx->kind == BENCH_VENDOR_HEBREW_WIDE ||
-             ctx->kind == BENCH_VENDOR_ARABIC_WIDE) {
-    if (strcmp(ctx->key, "chars") == 0) {
-      ctx->target.language_wide_doc->metrics.chars = (lonejson_int64)value;
-    } else if (strcmp(ctx->key, "segments") == 0) {
-      ctx->target.language_wide_doc->metrics.segments = (lonejson_int64)value;
-    }
-  }
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_yajl_stream_vendor_doc_case(void *user) {
-  bench_vendor_doc_case *ctx = (bench_vendor_doc_case *)user;
-  yajl_callbacks callbacks;
-  yajl_handle hand;
-  yajl_status status;
-  bench_vendor_yajl_ctx parse_ctx;
-  size_t offset;
-
-  memset(&callbacks, 0, sizeof(callbacks));
-  memset(&parse_ctx, 0, sizeof(parse_ctx));
-  parse_ctx.kind = ctx->kind;
-  callbacks.yajl_string = bench_vendor_yajl_string_cb;
-  callbacks.yajl_number = bench_vendor_yajl_number_cb;
-  callbacks.yajl_start_map = bench_vendor_yajl_start_map_cb;
-  callbacks.yajl_map_key = bench_vendor_yajl_map_key_cb;
-  callbacks.yajl_end_map = bench_vendor_yajl_end_map_cb;
-  callbacks.yajl_start_array = bench_vendor_yajl_start_array_cb;
-  callbacks.yajl_end_array = bench_vendor_yajl_end_array_cb;
-
-  if (ctx->kind == BENCH_VENDOR_LONG_STRINGS) {
-    bench_vendor_long_target target;
-    parse_ctx.target.long_target = &target;
-    hand = yajl_alloc(&callbacks, NULL, &parse_ctx);
-    if (hand == NULL) {
-      return 0;
-    }
-    offset = 0u;
-    while (offset < ctx->json_len) {
-      size_t take = 31u;
-      if (take > ctx->json_len - offset) {
-        take = ctx->json_len - offset;
-      }
-      status = yajl_parse(hand, ctx->json + offset, take);
-      if (status != yajl_status_ok || parse_ctx.failed) {
-        yajl_free(hand);
-        return 0;
-      }
-      offset += take;
-    }
-    status = yajl_complete_parse(hand);
-    yajl_free(hand);
-    return status == yajl_status_ok && !parse_ctx.failed &&
-           parse_ctx.completed_objects == 1u;
-  } else if (ctx->kind == BENCH_VENDOR_EXTREME_NUMBERS) {
-    bench_vendor_numbers_doc doc;
-    parse_ctx.target.numbers_doc = &doc;
-    hand = yajl_alloc(&callbacks, NULL, &parse_ctx);
-    if (hand == NULL) {
-      return 0;
-    }
-    offset = 0u;
-    while (offset < ctx->json_len) {
-      size_t take = 31u;
-      if (take > ctx->json_len - offset) {
-        take = ctx->json_len - offset;
-      }
-      status = yajl_parse(hand, ctx->json + offset, take);
-      if (status != yajl_status_ok || parse_ctx.failed) {
-        yajl_free(hand);
-        return 0;
-      }
-      offset += take;
-    }
-    status = yajl_complete_parse(hand);
-    yajl_free(hand);
-    return status == yajl_status_ok && !parse_ctx.failed &&
-           parse_ctx.completed_objects == 1u;
-  } else if (ctx->kind == BENCH_VENDOR_STRING_UNICODE) {
-    bench_vendor_unicode_doc doc;
-    parse_ctx.target.unicode_doc = &doc;
-    hand = yajl_alloc(&callbacks, NULL, &parse_ctx);
-    if (hand == NULL) {
-      return 0;
-    }
-    offset = 0u;
-    while (offset < ctx->json_len) {
-      size_t take = 31u;
-      if (take > ctx->json_len - offset) {
-        take = ctx->json_len - offset;
-      }
-      status = yajl_parse(hand, ctx->json + offset, take);
-      if (status != yajl_status_ok || parse_ctx.failed) {
-        yajl_free(hand);
-        return 0;
-      }
-      offset += take;
-    }
-    status = yajl_complete_parse(hand);
-    yajl_free(hand);
-    return status == yajl_status_ok && !parse_ctx.failed &&
-           parse_ctx.completed_objects == 1u;
-  } else if (ctx->kind == BENCH_VENDOR_JAPANESE_UTF8 ||
-             ctx->kind == BENCH_VENDOR_HEBREW_UTF8 ||
-             ctx->kind == BENCH_VENDOR_ARABIC_UTF8) {
-    bench_vendor_unicode_doc doc;
-    parse_ctx.target.unicode_doc = &doc;
-    hand = yajl_alloc(&callbacks, NULL, &parse_ctx);
-    if (hand == NULL) {
-      return 0;
-    }
-    offset = 0u;
-    while (offset < ctx->json_len) {
-      size_t take = 31u;
-      if (take > ctx->json_len - offset) {
-        take = ctx->json_len - offset;
-      }
-      status = yajl_parse(hand, ctx->json + offset, take);
-      if (status != yajl_status_ok || parse_ctx.failed) {
-        yajl_free(hand);
-        return 0;
-      }
-      offset += take;
-    }
-    status = yajl_complete_parse(hand);
-    yajl_free(hand);
-    return status == yajl_status_ok && !parse_ctx.failed &&
-           parse_ctx.completed_objects == 1u;
-  } else if (ctx->kind == BENCH_VENDOR_JAPANESE_WIDE ||
-             ctx->kind == BENCH_VENDOR_HEBREW_WIDE ||
-             ctx->kind == BENCH_VENDOR_ARABIC_WIDE) {
-    bench_vendor_language_wide_doc doc;
-    parse_ctx.target.language_wide_doc = &doc;
-    hand = yajl_alloc(&callbacks, NULL, &parse_ctx);
-    if (hand == NULL) {
-      return 0;
-    }
-    offset = 0u;
-    while (offset < ctx->json_len) {
-      size_t take = 31u;
-      if (take > ctx->json_len - offset) {
-        take = ctx->json_len - offset;
-      }
-      status = yajl_parse(hand, ctx->json + offset, take);
-      if (status != yajl_status_ok || parse_ctx.failed) {
-        yajl_free(hand);
-        return 0;
-      }
-      offset += take;
-    }
-    status = yajl_complete_parse(hand);
-    yajl_free(hand);
-    return status == yajl_status_ok && !parse_ctx.failed &&
-           parse_ctx.completed_objects == 1u;
-  }
-  return 0;
-}
-
-static bench_lockd_yajl_mode
-bench_lockd_yajl_current_mode(const bench_lockd_yajl_ctx *ctx) {
-  if (ctx->depth == 0u) {
-    return BENCH_LOCKD_YAJL_IGNORE_MAP;
-  }
-  return ctx->stack[ctx->depth - 1u];
-}
-
-static int bench_lockd_yajl_push(bench_lockd_yajl_ctx *ctx,
-                                 bench_lockd_yajl_mode mode) {
-  if (ctx->depth == sizeof(ctx->stack) / sizeof(ctx->stack[0])) {
-    ctx->failed = 1;
-    return 0;
-  }
-  ctx->stack[ctx->depth++] = mode;
-  return 1;
-}
-
-static void bench_lockd_yajl_pop(bench_lockd_yajl_ctx *ctx) {
-  if (ctx->depth != 0u) {
-    --ctx->depth;
-  }
-}
-
-static bench_lockd_phase_slot bench_lockd_yajl_phase_from_key(const char *key) {
-  if (strcmp(key, "acquire") == 0) {
-    return BENCH_LOCKD_PHASE_ACQUIRE;
-  }
-  if (strcmp(key, "attach") == 0) {
-    return BENCH_LOCKD_PHASE_ATTACH;
-  }
-  if (strcmp(key, "delete") == 0) {
-    return BENCH_LOCKD_PHASE_DELETE;
-  }
-  if (strcmp(key, "get") == 0) {
-    return BENCH_LOCKD_PHASE_GET;
-  }
-  if (strcmp(key, "release") == 0) {
-    return BENCH_LOCKD_PHASE_RELEASE;
-  }
-  if (strcmp(key, "total") == 0) {
-    return BENCH_LOCKD_PHASE_TOTAL;
-  }
-  if (strcmp(key, "update") == 0) {
-    return BENCH_LOCKD_PHASE_UPDATE;
-  }
-  if (strcmp(key, "query") == 0) {
-    return BENCH_LOCKD_PHASE_QUERY;
-  }
-  if (strcmp(key, "acquire-a") == 0) {
-    return BENCH_LOCKD_PHASE_ACQUIRE_A;
-  }
-  if (strcmp(key, "acquire-b") == 0) {
-    return BENCH_LOCKD_PHASE_ACQUIRE_B;
-  }
-  if (strcmp(key, "decide") == 0) {
-    return BENCH_LOCKD_PHASE_DECIDE;
-  }
-  if (strcmp(key, "update-a") == 0) {
-    return BENCH_LOCKD_PHASE_UPDATE_A;
-  }
-  if (strcmp(key, "update-b") == 0) {
-    return BENCH_LOCKD_PHASE_UPDATE_B;
-  }
-  return BENCH_LOCKD_PHASE_NONE;
-}
-
-static bench_lockd_case_result *
-bench_lockd_yajl_current_case(bench_lockd_yajl_ctx *ctx) {
-  if (ctx->current_case_index >= ctx->target->record.cases.capacity) {
-    return NULL;
-  }
-  return &ctx->target->case_storage[ctx->current_case_index];
-}
-
-static bench_lockd_phase_stats *
-bench_lockd_yajl_current_phase_stats(bench_lockd_yajl_ctx *ctx) {
-  bench_lockd_case_result *current_case;
-
-  current_case = bench_lockd_yajl_current_case(ctx);
-  if (current_case == NULL) {
-    return NULL;
-  }
-  switch (ctx->current_phase) {
-  case BENCH_LOCKD_PHASE_ACQUIRE:
-    return &current_case->phases.acquire;
-  case BENCH_LOCKD_PHASE_ATTACH:
-    return &current_case->phases.attach;
-  case BENCH_LOCKD_PHASE_DELETE:
-    return &current_case->phases.delete_phase;
-  case BENCH_LOCKD_PHASE_GET:
-    return &current_case->phases.get_phase;
-  case BENCH_LOCKD_PHASE_RELEASE:
-    return &current_case->phases.release;
-  case BENCH_LOCKD_PHASE_TOTAL:
-    return &current_case->phases.total;
-  case BENCH_LOCKD_PHASE_UPDATE:
-    return &current_case->phases.update;
-  case BENCH_LOCKD_PHASE_QUERY:
-    return &current_case->phases.query;
-  case BENCH_LOCKD_PHASE_ACQUIRE_A:
-    return &current_case->phases.acquire_a;
-  case BENCH_LOCKD_PHASE_ACQUIRE_B:
-    return &current_case->phases.acquire_b;
-  case BENCH_LOCKD_PHASE_DECIDE:
-    return &current_case->phases.decide;
-  case BENCH_LOCKD_PHASE_UPDATE_A:
-    return &current_case->phases.update_a;
-  case BENCH_LOCKD_PHASE_UPDATE_B:
-    return &current_case->phases.update_b;
-  case BENCH_LOCKD_PHASE_NONE:
-  default:
-    return NULL;
-  }
-}
-
-static int bench_lockd_yajl_null_cb(void *user) {
-  bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_lockd_yajl_boolean_cb(void *user, int boolVal) {
-  bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-  bench_lockd_yajl_mode mode;
-
-  mode = bench_lockd_yajl_current_mode(ctx);
-  if (mode == BENCH_LOCKD_YAJL_GIT && strcmp(ctx->key, "dirty") == 0) {
-    ctx->target->record.git.dirty = boolVal ? true : false;
-  } else if (mode == BENCH_LOCKD_YAJL_ROOT && strcmp(ctx->key, "golden") == 0) {
-    ctx->target->record.golden = boolVal ? true : false;
-  } else if (mode == BENCH_LOCKD_YAJL_CONFIG &&
-             strcmp(ctx->key, "qrf_disabled") == 0) {
-    ctx->target->record.config.qrf_disabled = boolVal ? true : false;
-  }
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_lockd_yajl_integer_cb(void *user, long long integerVal) {
-  bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-  bench_lockd_yajl_mode mode;
-  bench_lockd_case_result *current_case;
-  bench_lockd_phase_stats *phase;
-  lonejson_int64 value;
-
-  mode = bench_lockd_yajl_current_mode(ctx);
-  current_case = bench_lockd_yajl_current_case(ctx);
-  phase = bench_lockd_yajl_current_phase_stats(ctx);
-  value = (lonejson_int64)integerVal;
-
-  if (mode == BENCH_LOCKD_YAJL_CONFIG) {
-    if (strcmp(ctx->key, "concurrency") == 0) {
-      ctx->target->record.config.concurrency = value;
-    } else if (strcmp(ctx->key, "runs") == 0) {
-      ctx->target->record.config.runs = value;
-    } else if (strcmp(ctx->key, "warmup") == 0) {
-      ctx->target->record.config.warmup = value;
-    }
-  } else if (mode == BENCH_LOCKD_YAJL_CASE && current_case != NULL) {
-    if (strcmp(ctx->key, "size") == 0) {
-      current_case->size = value;
-    } else if (strcmp(ctx->key, "ops") == 0) {
-      current_case->ops = value;
-    } else if (strcmp(ctx->key, "payload_bytes") == 0) {
-      current_case->payload_bytes = value;
-    } else if (strcmp(ctx->key, "attachment_bytes") == 0) {
-      current_case->attachment_bytes = value;
-    }
-  } else if (mode == BENCH_LOCKD_YAJL_PHASE && phase != NULL) {
-    if (strcmp(ctx->key, "ops") == 0) {
-      phase->ops = value;
-    } else if (strcmp(ctx->key, "errors") == 0) {
-      phase->errors = value;
-    }
-  }
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_lockd_yajl_number_cb(void *user, const char *text,
-                                      size_t len) {
-  char buffer[64];
-  size_t copy_len;
-
-  copy_len = len;
-  if (copy_len >= sizeof(buffer)) {
-    copy_len = sizeof(buffer) - 1u;
-  }
-  memcpy(buffer, text, copy_len);
-  buffer[copy_len] = '\0';
-  if (strchr(buffer, '.') != NULL || strchr(buffer, 'e') != NULL ||
-      strchr(buffer, 'E') != NULL) {
-    bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-    ctx->key[0] = '\0';
-    return 1;
-  }
-  return bench_lockd_yajl_integer_cb(user, strtoll(buffer, NULL, 10));
-}
-
-static int bench_lockd_yajl_string_cb(void *user, const unsigned char *text,
-                                      size_t len) {
-  bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-  bench_lockd_yajl_mode mode;
-  bench_lockd_case_result *current_case;
-  char *dst;
-  size_t capacity;
-  size_t copy_len;
-
-  mode = bench_lockd_yajl_current_mode(ctx);
-  current_case = bench_lockd_yajl_current_case(ctx);
-  dst = NULL;
-  capacity = 0u;
-  if (mode == BENCH_LOCKD_YAJL_ROOT) {
-    if (strcmp(ctx->key, "run_id") == 0) {
-      dst = ctx->target->record.run_id;
-      capacity = sizeof(ctx->target->record.run_id);
-    } else if (strcmp(ctx->key, "timestamp") == 0) {
-      dst = ctx->target->record.timestamp;
-      capacity = sizeof(ctx->target->record.timestamp);
-    } else if (strcmp(ctx->key, "history_branch") == 0) {
-      dst = ctx->target->record.history_branch;
-      capacity = sizeof(ctx->target->record.history_branch);
-    } else if (strcmp(ctx->key, "preset") == 0) {
-      dst = ctx->target->record.preset;
-      capacity = sizeof(ctx->target->record.preset);
-    } else if (strcmp(ctx->key, "backend") == 0) {
-      dst = ctx->target->record.backend;
-      capacity = sizeof(ctx->target->record.backend);
-    } else if (strcmp(ctx->key, "store") == 0) {
-      dst = ctx->target->record.store;
-      capacity = sizeof(ctx->target->record.store);
-    } else if (strcmp(ctx->key, "disk_root") == 0) {
-      dst = ctx->target->record.disk_root;
-      capacity = sizeof(ctx->target->record.disk_root);
-    }
-  } else if (mode == BENCH_LOCKD_YAJL_GIT) {
-    if (strcmp(ctx->key, "short_sha") == 0) {
-      dst = ctx->target->record.git.short_sha;
-      capacity = sizeof(ctx->target->record.git.short_sha);
-    }
-  } else if (mode == BENCH_LOCKD_YAJL_CONFIG) {
-    if (strcmp(ctx->key, "ha_mode") == 0) {
-      dst = ctx->target->record.config.ha_mode;
-      capacity = sizeof(ctx->target->record.config.ha_mode);
-    } else if (strcmp(ctx->key, "query_return") == 0) {
-      dst = ctx->target->record.config.query_return;
-      capacity = sizeof(ctx->target->record.config.query_return);
-    }
-  } else if (mode == BENCH_LOCKD_YAJL_CASE && current_case != NULL) {
-    if (strcmp(ctx->key, "workload") == 0) {
-      dst = current_case->workload;
-      capacity = sizeof(current_case->workload);
-    }
-  }
-  if (dst != NULL && capacity != 0u) {
-    copy_len = len < capacity - 1u ? len : capacity - 1u;
-    memcpy(dst, text, copy_len);
-    dst[copy_len] = '\0';
-  }
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_lockd_yajl_start_map_cb(void *user) {
-  bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-  bench_lockd_yajl_mode mode;
-
-  if (ctx->depth == 0u) {
-    bench_init_lockd_target(ctx->target);
-    ctx->current_case_index = 0u;
-    ctx->current_phase = BENCH_LOCKD_PHASE_NONE;
-    ctx->key[0] = '\0';
-    return bench_lockd_yajl_push(ctx, BENCH_LOCKD_YAJL_ROOT);
-  }
-  mode = bench_lockd_yajl_current_mode(ctx);
-  if (mode == BENCH_LOCKD_YAJL_ROOT && strcmp(ctx->key, "git") == 0) {
-    ctx->key[0] = '\0';
-    return bench_lockd_yajl_push(ctx, BENCH_LOCKD_YAJL_GIT);
-  }
-  if (mode == BENCH_LOCKD_YAJL_ROOT && strcmp(ctx->key, "config") == 0) {
-    ctx->key[0] = '\0';
-    return bench_lockd_yajl_push(ctx, BENCH_LOCKD_YAJL_CONFIG);
-  }
-  if (mode == BENCH_LOCKD_YAJL_CASES_ARRAY) {
-    if (ctx->current_case_index >= ctx->target->record.cases.capacity) {
-      ctx->failed = 1;
-      return 0;
-    }
-    ctx->key[0] = '\0';
-    return bench_lockd_yajl_push(ctx, BENCH_LOCKD_YAJL_CASE);
-  }
-  if (mode == BENCH_LOCKD_YAJL_CASE && strcmp(ctx->key, "phases") == 0) {
-    ctx->key[0] = '\0';
-    return bench_lockd_yajl_push(ctx, BENCH_LOCKD_YAJL_PHASES);
-  }
-  if (mode == BENCH_LOCKD_YAJL_PHASES) {
-    ctx->current_phase = bench_lockd_yajl_phase_from_key(ctx->key);
-    ctx->key[0] = '\0';
-    return bench_lockd_yajl_push(ctx, BENCH_LOCKD_YAJL_PHASE);
-  }
-  return bench_lockd_yajl_push(ctx, BENCH_LOCKD_YAJL_IGNORE_MAP);
-}
-
-static int bench_lockd_yajl_map_key_cb(void *user, const unsigned char *key,
-                                       size_t len) {
-  bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-  size_t copy_len;
-
-  copy_len = len < sizeof(ctx->key) - 1u ? len : sizeof(ctx->key) - 1u;
-  memcpy(ctx->key, key, copy_len);
-  ctx->key[copy_len] = '\0';
-  return 1;
-}
-
-static int bench_lockd_yajl_end_map_cb(void *user) {
-  bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-  bench_lockd_yajl_mode mode;
-
-  mode = bench_lockd_yajl_current_mode(ctx);
-  if (mode == BENCH_LOCKD_YAJL_PHASE) {
-    ctx->current_phase = BENCH_LOCKD_PHASE_NONE;
-  } else if (mode == BENCH_LOCKD_YAJL_CASE) {
-    ctx->current_case_index += 1u;
-    ctx->target->record.cases.count = ctx->current_case_index;
-  } else if (mode == BENCH_LOCKD_YAJL_ROOT) {
-    if (!bench_check_lockd_record(ctx->target, ctx->completed_objects)) {
-      ctx->failed = 1;
-      return 0;
-    }
-    ++ctx->completed_objects;
-  }
-  bench_lockd_yajl_pop(ctx);
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_lockd_yajl_start_array_cb(void *user) {
-  bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-
-  if (bench_lockd_yajl_current_mode(ctx) == BENCH_LOCKD_YAJL_ROOT &&
-      strcmp(ctx->key, "cases") == 0) {
-    ctx->key[0] = '\0';
-    ctx->current_case_index = 0u;
-    ctx->target->record.cases.count = 0u;
-    return bench_lockd_yajl_push(ctx, BENCH_LOCKD_YAJL_CASES_ARRAY);
-  }
-  return bench_lockd_yajl_push(ctx, BENCH_LOCKD_YAJL_IGNORE_ARRAY);
-}
-
-static int bench_lockd_yajl_end_array_cb(void *user) {
-  bench_lockd_yajl_ctx *ctx = (bench_lockd_yajl_ctx *)user;
-  bench_lockd_yajl_pop(ctx);
-  ctx->key[0] = '\0';
-  return 1;
-}
-
-static int bench_yajl_stream_lockd_case(void *user) {
-  bench_lockd_case *ctx;
-  bench_lockd_yajl_ctx parse_ctx;
-  yajl_callbacks callbacks;
-  yajl_handle hand;
-  yajl_status status;
-  size_t offset;
-  bench_lockd_target target;
-
-  ctx = (bench_lockd_case *)user;
-  memset(&parse_ctx, 0, sizeof(parse_ctx));
-  memset(&callbacks, 0, sizeof(callbacks));
-  callbacks.yajl_null = bench_lockd_yajl_null_cb;
-  callbacks.yajl_boolean = bench_lockd_yajl_boolean_cb;
-  callbacks.yajl_integer = bench_lockd_yajl_integer_cb;
-  callbacks.yajl_number = bench_lockd_yajl_number_cb;
-  callbacks.yajl_string = bench_lockd_yajl_string_cb;
-  callbacks.yajl_start_map = bench_lockd_yajl_start_map_cb;
-  callbacks.yajl_map_key = bench_lockd_yajl_map_key_cb;
-  callbacks.yajl_end_map = bench_lockd_yajl_end_map_cb;
-  callbacks.yajl_start_array = bench_lockd_yajl_start_array_cb;
-  callbacks.yajl_end_array = bench_lockd_yajl_end_array_cb;
-  parse_ctx.target = &target;
-  parse_ctx.expected_objects = ctx->object_count;
-  hand = yajl_alloc(&callbacks, NULL, &parse_ctx);
-  if (hand == NULL) {
-    return 0;
-  }
-  yajl_config(hand, yajl_allow_multiple_values, 1);
-  offset = 0u;
-  while (offset < ctx->jsonl_len) {
-    size_t take = 257u;
-    if (take > ctx->jsonl_len - offset) {
-      take = ctx->jsonl_len - offset;
-    }
-    status = yajl_parse(hand, ctx->jsonl + offset, take);
-    if (status != yajl_status_ok || parse_ctx.failed) {
-      yajl_free(hand);
-      return 0;
-    }
-    offset += take;
-  }
-  status = yajl_complete_parse(hand);
-  yajl_free(hand);
-  if (status != yajl_status_ok || parse_ctx.failed ||
-      parse_ctx.completed_objects != ctx->object_count) {
-    return 0;
-  }
-  g_bench_sink += (lonejson_uint64)parse_ctx.completed_objects;
-  return 1;
-}
-
-static int bench_yajl_stream_fixed_case(void *user) {
-  bench_stream_case *ctx;
-  bench_fixed_target target;
-  size_t completed;
-
-  ctx = (bench_stream_case *)user;
-  bench_init_fixed_target(&target);
-  if (!bench_yajl_parse_target_buffer(&target, ctx->stream_json,
-                                      ctx->stream_len, 1, ctx->object_count,
-                                      83u, &completed)) {
-    return 0;
-  }
-  g_bench_sink += (lonejson_uint64)completed;
-  return 1;
-}
-
 static lonejson_status bench_count_sink_write(void *user, const void *data,
                                               size_t len,
                                               lonejson_error *error) {
@@ -2728,151 +1786,6 @@ static int bench_serialize_jsonl_alloc_case(void *user) {
     g_bench_sink += (lonejson_uint64)strlen(jsonl);
   }
   LONEJSON_FREE(jsonl);
-  return ok;
-}
-
-static int bench_yajl_emit_record(yajl_gen gen,
-                                  const bench_record_fixed *record) {
-  size_t i;
-  if (yajl_gen_map_open(gen) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"name", 4u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)record->name,
-                      strlen(record->name)) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"nickname", 8u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)record->nickname,
-                      strlen(record->nickname)) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"age", 3u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_integer(gen, record->age) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"score", 5u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_double(gen, record->score) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"active", 6u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_bool(gen, record->active ? 1 : 0) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"address", 7u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_map_open(gen) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"city", 4u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)record->address.city,
-                      strlen(record->address.city)) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"zip", 3u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_integer(gen, record->address.zip) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_map_close(gen) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"lucky_numbers", 13u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_array_open(gen) != yajl_gen_status_ok)
-    return 0;
-  for (i = 0; i < record->lucky_numbers.count; ++i) {
-    if (yajl_gen_integer(gen, record->lucky_numbers.items[i]) !=
-        yajl_gen_status_ok)
-      return 0;
-  }
-  if (yajl_gen_array_close(gen) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_string(gen, (const unsigned char *)"items", 5u) !=
-      yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_array_open(gen) != yajl_gen_status_ok)
-    return 0;
-  for (i = 0; i < record->items.count; ++i) {
-    const bench_item *item = &((const bench_item *)record->items.items)[i];
-    if (yajl_gen_map_open(gen) != yajl_gen_status_ok)
-      return 0;
-    if (yajl_gen_string(gen, (const unsigned char *)"id", 2u) !=
-        yajl_gen_status_ok)
-      return 0;
-    if (yajl_gen_integer(gen, item->id) != yajl_gen_status_ok)
-      return 0;
-    if (yajl_gen_string(gen, (const unsigned char *)"label", 5u) !=
-        yajl_gen_status_ok)
-      return 0;
-    if (yajl_gen_string(gen, (const unsigned char *)item->label,
-                        strlen(item->label)) != yajl_gen_status_ok)
-      return 0;
-    if (yajl_gen_map_close(gen) != yajl_gen_status_ok)
-      return 0;
-  }
-  if (yajl_gen_array_close(gen) != yajl_gen_status_ok)
-    return 0;
-  if (yajl_gen_map_close(gen) != yajl_gen_status_ok)
-    return 0;
-  return 1;
-}
-
-static void bench_yajl_count_print(void *user, const char *str, size_t len) {
-  bench_count_sink *sink = (bench_count_sink *)user;
-  (void)str;
-  sink->total += len;
-}
-
-static int bench_yajl_serialize_sink_case(void *user) {
-  bench_serialize_case *ctx;
-  yajl_gen gen;
-  bench_count_sink sink;
-  int ok;
-
-  ctx = (bench_serialize_case *)user;
-  memset(&sink, 0, sizeof(sink));
-  gen = yajl_gen_alloc(NULL);
-  if (gen == NULL) {
-    return 0;
-  }
-  yajl_gen_config(gen, yajl_gen_print_callback, bench_yajl_count_print, &sink);
-  ok = bench_yajl_emit_record(gen, (const bench_record_fixed *)ctx->src);
-  yajl_gen_free(gen);
-  if (!ok || sink.total != ctx->expected_len) {
-    return 0;
-  }
-  g_bench_sink += (lonejson_uint64)sink.total;
-  return 1;
-}
-
-static int bench_yajl_serialize_buffer_case(void *user) {
-  bench_serialize_case *ctx;
-  yajl_gen gen;
-  const unsigned char *buf;
-  size_t len;
-  int ok;
-
-  ctx = (bench_serialize_case *)user;
-  gen = yajl_gen_alloc(NULL);
-  if (gen == NULL) {
-    return 0;
-  }
-  ok = bench_yajl_emit_record(gen, (const bench_record_fixed *)ctx->src);
-  if (!ok || yajl_gen_get_buf(gen, &buf, &len) != yajl_gen_status_ok) {
-    yajl_gen_free(gen);
-    return 0;
-  }
-  ok = len == ctx->expected_len && memcmp(buf, ctx->expected_json, len) == 0;
-  if (ok) {
-    g_bench_sink += (lonejson_uint64)len;
-  }
-  yajl_gen_free(gen);
   return ok;
 }
 
@@ -3154,14 +2067,27 @@ static int bench_prepare_benchmark_cases(
     bench_parse_case *parse_dynamic_case, bench_stream_case *stream_case,
     bench_serialize_case *serialize_case,
     bench_serialize_case *serialize_pretty_case,
+    bench_parse_case *parse_json_value_case,
+    bench_serialize_case *json_value_serialize_case,
+    bench_serialize_case *json_value_serialize_pretty_case,
+    bench_serialize_case *json_value_source_serialize_case,
+    bench_serialize_case *json_value_source_serialize_pretty_case,
     bench_jsonl_serialize_case *jsonl_case,
     bench_jsonl_serialize_case *jsonl_pretty_case,
     bench_record_fixed *serialize_record, bench_record_fixed *jsonl_records,
+    bench_json_value_doc *json_value_record,
+    bench_json_value_doc *json_value_source_record,
     char *expected_json, size_t expected_json_capacity,
     char *expected_pretty_json, size_t expected_pretty_json_capacity,
     char *jsonl_buffer, size_t jsonl_buffer_capacity, char *pretty_jsonl_buffer,
     size_t pretty_jsonl_buffer_capacity, char *stream_buffer,
-    size_t stream_buffer_capacity) {
+    size_t stream_buffer_capacity, char *json_value_path,
+    size_t json_value_path_capacity) {
+  const char *json_value_source_file = "tests/fixtures/languages/japanese_hojoki_wide.json";
+  char *json_value_expected = NULL;
+  char *json_value_pretty_expected = NULL;
+  char *json_value_source_expected = NULL;
+  char *json_value_source_pretty_expected = NULL;
   lonejson_write_options pretty_options;
   size_t offset;
   size_t i;
@@ -3245,6 +2171,72 @@ static int bench_prepare_benchmark_cases(
   serialize_pretty_case->expected_json = expected_pretty_json;
   serialize_pretty_case->expected_len = strlen(expected_pretty_json);
   serialize_pretty_case->options = pretty_options;
+
+  parse_json_value_case->map = &bench_json_value_doc_map;
+  parse_json_value_case->json = bench_json_value_parse_json;
+  parse_json_value_case->json_len = strlen(bench_json_value_parse_json);
+  parse_json_value_case->object_count = 1u;
+  parse_json_value_case->prepared_destination = 0;
+
+  if (!bench_prepare_json_value_doc(json_value_record)) {
+    return 1;
+  }
+  if (snprintf(json_value_path, json_value_path_capacity, "%s",
+               json_value_source_file) >= (int)json_value_path_capacity) {
+    bench_cleanup_json_value_doc(json_value_record);
+    return 1;
+  }
+  if (!bench_prepare_json_value_source_doc(json_value_source_record,
+                                           json_value_path)) {
+    bench_cleanup_json_value_doc(json_value_record);
+    return 1;
+  }
+  json_value_expected = lonejson_serialize_alloc(&bench_json_value_doc_map,
+                                                 json_value_record, NULL, NULL,
+                                                 NULL);
+  json_value_pretty_expected =
+      lonejson_serialize_alloc(&bench_json_value_doc_map, json_value_record,
+                               NULL, &pretty_options, NULL);
+  json_value_source_expected =
+      lonejson_serialize_alloc(&bench_json_value_doc_map, json_value_source_record,
+                               NULL, NULL, NULL);
+  json_value_source_pretty_expected = lonejson_serialize_alloc(
+      &bench_json_value_doc_map, json_value_source_record, NULL, &pretty_options,
+      NULL);
+  if (json_value_expected == NULL || json_value_pretty_expected == NULL ||
+      json_value_source_expected == NULL ||
+      json_value_source_pretty_expected == NULL) {
+    LONEJSON_FREE(json_value_expected);
+    LONEJSON_FREE(json_value_pretty_expected);
+    LONEJSON_FREE(json_value_source_expected);
+    LONEJSON_FREE(json_value_source_pretty_expected);
+    bench_cleanup_json_value_doc(json_value_record);
+    bench_cleanup_json_value_doc(json_value_source_record);
+    return 1;
+  }
+  json_value_serialize_case->map = &bench_json_value_doc_map;
+  json_value_serialize_case->src = json_value_record;
+  json_value_serialize_case->expected_json = json_value_expected;
+  json_value_serialize_case->expected_len = strlen(json_value_expected);
+  json_value_serialize_case->options = lonejson_default_write_options();
+  *json_value_serialize_pretty_case = *json_value_serialize_case;
+  json_value_serialize_pretty_case->expected_json = json_value_pretty_expected;
+  json_value_serialize_pretty_case->expected_len =
+      strlen(json_value_pretty_expected);
+  json_value_serialize_pretty_case->options = pretty_options;
+
+  json_value_source_serialize_case->map = &bench_json_value_doc_map;
+  json_value_source_serialize_case->src = json_value_source_record;
+  json_value_source_serialize_case->expected_json = json_value_source_expected;
+  json_value_source_serialize_case->expected_len =
+      strlen(json_value_source_expected);
+  json_value_source_serialize_case->options = lonejson_default_write_options();
+  *json_value_source_serialize_pretty_case = *json_value_source_serialize_case;
+  json_value_source_serialize_pretty_case->expected_json =
+      json_value_source_pretty_expected;
+  json_value_source_serialize_pretty_case->expected_len =
+      strlen(json_value_source_pretty_expected);
+  json_value_source_serialize_pretty_case->options = pretty_options;
   return 0;
 }
 
@@ -3266,6 +2258,7 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   bench_parse_case_short parse_fixed_short_case;
   bench_parse_case parse_fixed_prepared_case;
   bench_parse_case parse_dynamic_case;
+  bench_parse_case parse_json_value_case;
   bench_stream_case stream_case;
   bench_stream_case stream_prepared_case;
   bench_lockd_case lockd_case;
@@ -3280,15 +2273,26 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   bench_vendor_doc_case vendor_arabic_wide_case;
   bench_serialize_case serialize_case;
   bench_serialize_case serialize_pretty_case;
+  bench_serialize_case json_value_serialize_case;
+  bench_serialize_case json_value_serialize_pretty_case;
+  bench_serialize_case json_value_source_serialize_case;
+  bench_serialize_case json_value_source_serialize_pretty_case;
+  bench_visit_case visit_selector_case;
+  bench_visit_case visit_selector_reader_case;
+  bench_visit_case visit_mixed_case;
+  bench_visit_case visit_japanese_wide_case;
   bench_jsonl_serialize_case jsonl_case;
   bench_jsonl_serialize_case jsonl_pretty_case;
   bench_record_fixed serialize_record;
   bench_record_fixed jsonl_records[BENCH_JSONL_RECORDS];
+  bench_json_value_doc json_value_record;
+  bench_json_value_doc json_value_source_record;
   char expected_json[1024];
   char expected_pretty_json[2048];
   char jsonl_buffer[4096];
   char pretty_jsonl_buffer[8192];
   char stream_buffer[8192];
+  char json_value_path[PATH_MAX];
   unsigned char *lockd_jsonl_data;
   size_t lockd_jsonl_len;
   unsigned char *japanese_json_data;
@@ -3372,16 +2376,21 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
       (lonejson_uint64)LONEJSON_PUSH_PARSER_BUFFER_SIZE;
   run.reader_buffer_size = (lonejson_uint64)LONEJSON_READER_BUFFER_SIZE;
   run.stream_buffer_size = (lonejson_uint64)LONEJSON_STREAM_BUFFER_SIZE;
-  run.results.count = 50u;
+  run.results.count = 0u;
 
   if (bench_prepare_benchmark_cases(
           &parse_fixed_case, &parse_fixed_short_case, &parse_dynamic_case,
-          &stream_case, &serialize_case, &serialize_pretty_case, &jsonl_case,
-          &jsonl_pretty_case, &serialize_record, jsonl_records, expected_json,
+          &stream_case, &serialize_case, &serialize_pretty_case,
+          &parse_json_value_case, &json_value_serialize_case,
+          &json_value_serialize_pretty_case, &json_value_source_serialize_case,
+          &json_value_source_serialize_pretty_case, &jsonl_case,
+          &jsonl_pretty_case, &serialize_record, jsonl_records,
+          &json_value_record, &json_value_source_record, expected_json,
           sizeof(expected_json), expected_pretty_json,
           sizeof(expected_pretty_json), jsonl_buffer, sizeof(jsonl_buffer),
           pretty_jsonl_buffer, sizeof(pretty_jsonl_buffer), stream_buffer,
-          sizeof(stream_buffer)) != 0) {
+          sizeof(stream_buffer), json_value_path, sizeof(json_value_path)) !=
+      0) {
     free(lockd_jsonl_data);
     free(japanese_json_data);
     free(hebrew_json_data);
@@ -3435,207 +2444,245 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   vendor_arabic_wide_case.map = &bench_vendor_language_wide_map;
   vendor_arabic_wide_case.json = arabic_wide_json_data;
   vendor_arabic_wide_case.json_len = arabic_wide_json_len;
+  memset(&visit_selector_case, 0, sizeof(visit_selector_case));
+  visit_selector_case.json = (const unsigned char *)bench_json_value_selector_json;
+  visit_selector_case.json_len = strlen(bench_json_value_selector_json);
+  visit_selector_case.reader_chunk_size = 0u;
+  visit_selector_case.min_key_bytes = 20u;
+  visit_selector_case.min_string_bytes = 18u;
+  visit_selector_case.min_number_bytes = 1u;
+  visit_selector_case.min_objects = 3u;
+  visit_selector_case.min_arrays = 1u;
+  visit_selector_case.use_reader = 0;
+  visit_selector_reader_case = visit_selector_case;
+  visit_selector_reader_case.use_reader = 1;
+  visit_selector_reader_case.reader_chunk_size = 17u;
+  memset(&visit_mixed_case, 0, sizeof(visit_mixed_case));
+  visit_mixed_case.json = (const unsigned char *)bench_visit_mixed_value_json;
+  visit_mixed_case.json_len = strlen(bench_visit_mixed_value_json);
+  visit_mixed_case.reader_chunk_size = 0u;
+  visit_mixed_case.min_key_bytes = 30u;
+  visit_mixed_case.min_string_bytes = 25u;
+  visit_mixed_case.min_number_bytes = 15u;
+  visit_mixed_case.min_objects = 5u;
+  visit_mixed_case.min_arrays = 2u;
+  visit_mixed_case.min_bools = 2u;
+  visit_mixed_case.min_nulls = 1u;
+  visit_mixed_case.use_reader = 0;
+  memset(&visit_japanese_wide_case, 0, sizeof(visit_japanese_wide_case));
+  visit_japanese_wide_case.json = japanese_wide_json_data;
+  visit_japanese_wide_case.json_len = japanese_wide_json_len;
+  visit_japanese_wide_case.reader_chunk_size = 257u;
+  visit_japanese_wide_case.min_key_bytes = 30u;
+  visit_japanese_wide_case.min_string_bytes = 400u;
+  visit_japanese_wide_case.min_number_bytes = 1u;
+  visit_japanese_wide_case.min_objects = 2u;
+  visit_japanese_wide_case.min_arrays = 0u;
+  visit_japanese_wide_case.use_reader = 1;
 
-  bench_run_validation_case(&run.result_storage[0], "validate/corpus/lonejson",
-                            bench_lonejson_validate, docs, doc_count,
-                            iterations, total_bytes);
-  bench_run_validation_case(&run.result_storage[1], "validate/corpus/yajl",
-                            bench_yajl_validate, docs, doc_count, iterations,
-                            total_bytes);
-  bench_run_simple_case(&run.result_storage[2], "parse/buffer_fixed/lonejson",
-                        "parse", bench_parse_fixed_buffer_case,
-                        &parse_fixed_case, iterations,
-                        parse_fixed_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[3], "parse/buffer_fixed/yajl",
-                        "parse", bench_yajl_parse_buffer_fixed_case,
-                        &parse_fixed_case, iterations,
-                        parse_fixed_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[4], "parse/buffer_dynamic/lonejson",
-                        "parse", bench_parse_dynamic_buffer_case,
-                        &parse_dynamic_case, iterations,
-                        parse_dynamic_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[5], "parse/buffer_fixed/lj",
-                        "parse", bench_parse_fixed_buffer_short_case,
-                        &parse_fixed_short_case, iterations,
-                        parse_fixed_short_case.json_len, 1u);
-  bench_run_simple_case(
-      &run.result_storage[6], "parse/buffer_fixed_prepared/lonejson", "parse",
-      bench_parse_fixed_buffer_case, &parse_fixed_prepared_case, iterations,
-      parse_fixed_prepared_case.json_len, 1u);
-  bench_run_simple_case(
-      &run.result_storage[7], "parse/buffer_fixed_prepared/yajl", "parse",
-      bench_yajl_parse_buffer_fixed_case, &parse_fixed_prepared_case,
-      iterations, parse_fixed_prepared_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[8], "parse/reader_fixed/lonejson",
-                        "parse", bench_parse_reader_fixed_case,
-                        &parse_fixed_case, iterations,
-                        parse_fixed_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[9], "parse/reader_fixed/yajl",
-                        "parse", bench_yajl_parse_reader_fixed_case,
-                        &parse_fixed_case, iterations,
-                        parse_fixed_case.json_len, 1u);
-  bench_run_simple_case(
-      &run.result_storage[10], "parse/reader_fixed_prepared/lonejson", "parse",
-      bench_parse_reader_fixed_case, &parse_fixed_prepared_case, iterations,
-      parse_fixed_prepared_case.json_len, 1u);
-  bench_run_simple_case(
-      &run.result_storage[11], "parse/reader_fixed_prepared/yajl", "parse",
-      bench_yajl_parse_reader_fixed_case, &parse_fixed_prepared_case,
-      iterations, parse_fixed_prepared_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[12], "stream/object_fixed/lonejson",
-                        "stream", bench_stream_fixed_case, &stream_case,
-                        iterations, stream_case.stream_len,
-                        stream_case.object_count);
-  bench_run_simple_case(&run.result_storage[13], "stream/object_fixed/yajl",
-                        "stream", bench_yajl_stream_fixed_case, &stream_case,
-                        iterations, stream_case.stream_len,
-                        stream_case.object_count);
-  bench_run_simple_case(
-      &run.result_storage[14], "stream/object_fixed_prepared/lonejson",
-      "stream", bench_stream_fixed_case, &stream_prepared_case, iterations,
-      stream_prepared_case.stream_len, stream_prepared_case.object_count);
-  bench_run_simple_case(
-      &run.result_storage[15], "stream/object_fixed_prepared/yajl", "stream",
-      bench_yajl_stream_fixed_case, &stream_prepared_case, iterations,
-      stream_prepared_case.stream_len, stream_prepared_case.object_count);
-  bench_run_simple_case(&run.result_storage[16],
-                        "stream/doc_long_strings/lonejson", "stream",
-                        bench_stream_vendor_doc_case, &vendor_long_case,
-                        iterations, vendor_long_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[17], "stream/doc_long_strings/yajl",
-                        "stream", bench_yajl_stream_vendor_doc_case,
-                        &vendor_long_case, iterations,
-                        vendor_long_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[18],
-                        "stream/doc_extreme_numbers/lonejson", "stream",
-                        bench_stream_vendor_doc_case, &vendor_numbers_case,
-                        iterations, vendor_numbers_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[19],
-                        "stream/doc_extreme_numbers/yajl", "stream",
-                        bench_yajl_stream_vendor_doc_case, &vendor_numbers_case,
-                        iterations, vendor_numbers_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[20],
-                        "stream/doc_string_unicode/lonejson", "stream",
-                        bench_stream_vendor_doc_case, &vendor_unicode_case,
-                        iterations, vendor_unicode_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[21],
-                        "stream/doc_string_unicode/yajl", "stream",
-                        bench_yajl_stream_vendor_doc_case, &vendor_unicode_case,
-                        iterations, vendor_unicode_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[22], "stream/lockdbench/lonejson",
-                        "stream", bench_stream_lockd_case, &lockd_case,
-                        iterations, lockd_case.jsonl_len,
-                        lockd_case.object_count);
-  bench_run_simple_case(&run.result_storage[23], "stream/lockdbench/yajl",
-                        "stream", bench_yajl_stream_lockd_case, &lockd_case,
-                        iterations, lockd_case.jsonl_len,
-                        lockd_case.object_count);
-  bench_run_simple_case(&run.result_storage[24], "stream/doc_japanese/lonejson",
-                        "stream", bench_stream_vendor_doc_case,
-                        &vendor_japanese_case, iterations,
-                        vendor_japanese_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[25], "stream/doc_japanese/yajl",
-                        "stream", bench_yajl_stream_vendor_doc_case,
-                        &vendor_japanese_case, iterations,
-                        vendor_japanese_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[26], "stream/doc_hebrew/lonejson",
-                        "stream", bench_stream_vendor_doc_case,
-                        &vendor_hebrew_case, iterations,
-                        vendor_hebrew_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[27], "stream/doc_hebrew/yajl",
-                        "stream", bench_yajl_stream_vendor_doc_case,
-                        &vendor_hebrew_case, iterations,
-                        vendor_hebrew_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[28], "stream/doc_arabic/lonejson",
-                        "stream", bench_stream_vendor_doc_case,
-                        &vendor_arabic_case, iterations,
-                        vendor_arabic_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[29], "stream/doc_arabic/yajl",
-                        "stream", bench_yajl_stream_vendor_doc_case,
-                        &vendor_arabic_case, iterations,
-                        vendor_arabic_case.json_len, 1u);
-  bench_run_simple_case(
-      &run.result_storage[30], "stream/doc_japanese_wide/lonejson", "stream",
-      bench_stream_vendor_doc_case, &vendor_japanese_wide_case, iterations,
-      vendor_japanese_wide_case.json_len, 1u);
-  bench_run_simple_case(
-      &run.result_storage[31], "stream/doc_japanese_wide/yajl", "stream",
-      bench_yajl_stream_vendor_doc_case, &vendor_japanese_wide_case, iterations,
-      vendor_japanese_wide_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[32],
-                        "stream/doc_hebrew_wide/lonejson", "stream",
-                        bench_stream_vendor_doc_case, &vendor_hebrew_wide_case,
-                        iterations, vendor_hebrew_wide_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[33], "stream/doc_hebrew_wide/yajl",
-                        "stream", bench_yajl_stream_vendor_doc_case,
-                        &vendor_hebrew_wide_case, iterations,
-                        vendor_hebrew_wide_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[34],
-                        "stream/doc_arabic_wide/lonejson", "stream",
-                        bench_stream_vendor_doc_case, &vendor_arabic_wide_case,
-                        iterations, vendor_arabic_wide_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[35], "stream/doc_arabic_wide/yajl",
-                        "stream", bench_yajl_stream_vendor_doc_case,
-                        &vendor_arabic_wide_case, iterations,
-                        vendor_arabic_wide_case.json_len, 1u);
-  bench_run_simple_case(&run.result_storage[36], "serialize/sink/lonejson",
-                        "serialize", bench_serialize_sink_case, &serialize_case,
-                        iterations, serialize_case.expected_len, 1u);
-  bench_run_simple_case(&run.result_storage[37], "serialize/sink/yajl",
-                        "serialize", bench_yajl_serialize_sink_case,
-                        &serialize_case, iterations,
-                        serialize_case.expected_len, 1u);
-  bench_run_simple_case(&run.result_storage[38], "serialize/buffer/lonejson",
-                        "serialize", bench_serialize_buffer_case,
-                        &serialize_case, iterations,
-                        serialize_case.expected_len, 1u);
-  bench_run_simple_case(&run.result_storage[39], "serialize/buffer/yajl",
-                        "serialize", bench_yajl_serialize_buffer_case,
-                        &serialize_case, iterations,
-                        serialize_case.expected_len, 1u);
-  bench_run_simple_case(&run.result_storage[40], "serialize/alloc/lonejson",
-                        "serialize", bench_serialize_alloc_case,
-                        &serialize_case, iterations,
-                        serialize_case.expected_len, 1u);
-  bench_run_simple_case(
-      &run.result_storage[41], "serialize/jsonl_sink/lonejson", "serialize",
-      bench_serialize_jsonl_sink_case, &jsonl_case, iterations,
-      jsonl_case.expected_len, BENCH_JSONL_RECORDS);
-  bench_run_simple_case(
-      &run.result_storage[42], "serialize/jsonl_buffer/lonejson", "serialize",
-      bench_serialize_jsonl_buffer_case, &jsonl_case, iterations,
-      jsonl_case.expected_len, BENCH_JSONL_RECORDS);
-  bench_run_simple_case(
-      &run.result_storage[43], "serialize/jsonl_alloc/lonejson", "serialize",
-      bench_serialize_jsonl_alloc_case, &jsonl_case, iterations,
-      jsonl_case.expected_len, BENCH_JSONL_RECORDS);
-  bench_run_simple_case(&run.result_storage[44],
-                        "serialize/sink_pretty/lonejson", "serialize",
-                        bench_serialize_sink_case, &serialize_pretty_case,
-                        iterations, serialize_pretty_case.expected_len, 1u);
-  bench_run_simple_case(&run.result_storage[45],
-                        "serialize/buffer_pretty/lonejson", "serialize",
-                        bench_serialize_buffer_case, &serialize_pretty_case,
-                        iterations, serialize_pretty_case.expected_len, 1u);
-  bench_run_simple_case(&run.result_storage[46],
-                        "serialize/alloc_pretty/lonejson", "serialize",
-                        bench_serialize_alloc_case, &serialize_pretty_case,
-                        iterations, serialize_pretty_case.expected_len, 1u);
-  bench_run_simple_case(
-      &run.result_storage[47], "serialize/jsonl_sink_pretty/lonejson",
-      "serialize", bench_serialize_jsonl_sink_case, &jsonl_pretty_case,
-      iterations, jsonl_pretty_case.expected_len, BENCH_JSONL_RECORDS);
-  bench_run_simple_case(
-      &run.result_storage[48], "serialize/jsonl_buffer_pretty/lonejson",
-      "serialize", bench_serialize_jsonl_buffer_case, &jsonl_pretty_case,
-      iterations, jsonl_pretty_case.expected_len, BENCH_JSONL_RECORDS);
-  bench_run_simple_case(
-      &run.result_storage[49], "serialize/jsonl_alloc_pretty/lonejson",
-      "serialize", bench_serialize_jsonl_alloc_case, &jsonl_pretty_case,
-      iterations, jsonl_pretty_case.expected_len, BENCH_JSONL_RECORDS);
+  {
+    size_t result_index = 0u;
+
+    bench_run_validation_case(&run.result_storage[result_index++],
+                              "validate/corpus/lonejson",
+                              bench_lonejson_validate, docs, doc_count,
+                              iterations, total_bytes);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "parse/buffer_fixed/lonejson", "parse",
+                          bench_parse_fixed_buffer_case, &parse_fixed_case,
+                          iterations, parse_fixed_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "parse/buffer_dynamic/lonejson", "parse",
+                          bench_parse_dynamic_buffer_case, &parse_dynamic_case,
+                          iterations, parse_dynamic_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "parse/buffer_fixed/lj", "parse",
+                          bench_parse_fixed_buffer_short_case,
+                          &parse_fixed_short_case, iterations,
+                          parse_fixed_short_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "parse/buffer_fixed_prepared/lonejson", "parse",
+                          bench_parse_fixed_buffer_case,
+                          &parse_fixed_prepared_case, iterations,
+                          parse_fixed_prepared_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "parse/reader_fixed/lonejson", "parse",
+                          bench_parse_reader_fixed_case, &parse_fixed_case,
+                          iterations, parse_fixed_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "parse/reader_fixed_prepared/lonejson", "parse",
+                          bench_parse_reader_fixed_case,
+                          &parse_fixed_prepared_case, iterations,
+                          parse_fixed_prepared_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/object_fixed/lonejson", "stream",
+                          bench_stream_fixed_case, &stream_case, iterations,
+                          stream_case.stream_len, stream_case.object_count);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/object_fixed_prepared/lonejson", "stream",
+                          bench_stream_fixed_case, &stream_prepared_case,
+                          iterations, stream_prepared_case.stream_len,
+                          stream_prepared_case.object_count);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/doc_long_strings/lonejson", "stream",
+                          bench_stream_vendor_doc_case, &vendor_long_case,
+                          iterations, vendor_long_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/doc_extreme_numbers/lonejson", "stream",
+                          bench_stream_vendor_doc_case, &vendor_numbers_case,
+                          iterations, vendor_numbers_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/doc_string_unicode/lonejson", "stream",
+                          bench_stream_vendor_doc_case, &vendor_unicode_case,
+                          iterations, vendor_unicode_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/lockdbench/lonejson", "stream",
+                          bench_stream_lockd_case, &lockd_case, iterations,
+                          lockd_case.jsonl_len, lockd_case.object_count);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/doc_japanese/lonejson", "stream",
+                          bench_stream_vendor_doc_case, &vendor_japanese_case,
+                          iterations, vendor_japanese_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/doc_hebrew/lonejson", "stream",
+                          bench_stream_vendor_doc_case, &vendor_hebrew_case,
+                          iterations, vendor_hebrew_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/doc_arabic/lonejson", "stream",
+                          bench_stream_vendor_doc_case, &vendor_arabic_case,
+                          iterations, vendor_arabic_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/doc_japanese_wide/lonejson", "stream",
+                          bench_stream_vendor_doc_case,
+                          &vendor_japanese_wide_case, iterations,
+                          vendor_japanese_wide_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/doc_hebrew_wide/lonejson", "stream",
+                          bench_stream_vendor_doc_case,
+                          &vendor_hebrew_wide_case, iterations,
+                          vendor_hebrew_wide_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "stream/doc_arabic_wide/lonejson", "stream",
+                          bench_stream_vendor_doc_case,
+                          &vendor_arabic_wide_case, iterations,
+                          vendor_arabic_wide_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/sink/lonejson", "serialize",
+                          bench_serialize_sink_case, &serialize_case,
+                          iterations, serialize_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/buffer/lonejson", "serialize",
+                          bench_serialize_buffer_case, &serialize_case,
+                          iterations, serialize_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/alloc/lonejson", "serialize",
+                          bench_serialize_alloc_case, &serialize_case,
+                          iterations, serialize_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/jsonl_sink/lonejson", "serialize",
+                          bench_serialize_jsonl_sink_case, &jsonl_case,
+                          iterations, jsonl_case.expected_len,
+                          BENCH_JSONL_RECORDS);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/jsonl_buffer/lonejson", "serialize",
+                          bench_serialize_jsonl_buffer_case, &jsonl_case,
+                          iterations, jsonl_case.expected_len,
+                          BENCH_JSONL_RECORDS);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/jsonl_alloc/lonejson", "serialize",
+                          bench_serialize_jsonl_alloc_case, &jsonl_case,
+                          iterations, jsonl_case.expected_len,
+                          BENCH_JSONL_RECORDS);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/sink_pretty/lonejson", "serialize",
+                          bench_serialize_sink_case, &serialize_pretty_case,
+                          iterations, serialize_pretty_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/buffer_pretty/lonejson", "serialize",
+                          bench_serialize_buffer_case, &serialize_pretty_case,
+                          iterations, serialize_pretty_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/alloc_pretty/lonejson", "serialize",
+                          bench_serialize_alloc_case, &serialize_pretty_case,
+                          iterations, serialize_pretty_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/jsonl_sink_pretty/lonejson", "serialize",
+                          bench_serialize_jsonl_sink_case, &jsonl_pretty_case,
+                          iterations, jsonl_pretty_case.expected_len,
+                          BENCH_JSONL_RECORDS);
+    bench_run_simple_case(
+        &run.result_storage[result_index++],
+        "serialize/jsonl_buffer_pretty/lonejson", "serialize",
+        bench_serialize_jsonl_buffer_case, &jsonl_pretty_case, iterations,
+        jsonl_pretty_case.expected_len, BENCH_JSONL_RECORDS);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/jsonl_alloc_pretty/lonejson",
+                          "serialize", bench_serialize_jsonl_alloc_case,
+                          &jsonl_pretty_case, iterations,
+                          jsonl_pretty_case.expected_len,
+                          BENCH_JSONL_RECORDS);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "parse/buffer_json_value/lonejson", "parse",
+                          bench_parse_json_value_buffer_case,
+                          &parse_json_value_case, iterations,
+                          parse_json_value_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/json_value_sink/lonejson", "serialize",
+                          bench_serialize_sink_case, &json_value_serialize_case,
+                          iterations, json_value_serialize_case.expected_len,
+                          1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/json_value_alloc/lonejson", "serialize",
+                          bench_serialize_alloc_case,
+                          &json_value_serialize_case, iterations,
+                          json_value_serialize_case.expected_len, 1u);
+    bench_run_simple_case(
+        &run.result_storage[result_index++],
+        "serialize/json_value_sink_pretty/lonejson", "serialize",
+        bench_serialize_sink_case, &json_value_serialize_pretty_case,
+        iterations, json_value_serialize_pretty_case.expected_len, 1u);
+    bench_run_simple_case(
+        &run.result_storage[result_index++],
+        "serialize/json_value_alloc_pretty/lonejson", "serialize",
+        bench_serialize_alloc_case, &json_value_serialize_pretty_case,
+        iterations, json_value_serialize_pretty_case.expected_len, 1u);
+    bench_run_simple_case(
+        &run.result_storage[result_index++],
+        "serialize/json_value_source_alloc/lonejson", "serialize",
+        bench_serialize_alloc_case, &json_value_source_serialize_case,
+        iterations, json_value_source_serialize_case.expected_len, 1u);
+    bench_run_simple_case(
+        &run.result_storage[result_index++],
+        "serialize/json_value_source_alloc_pretty/lonejson", "serialize",
+        bench_serialize_alloc_case, &json_value_source_serialize_pretty_case,
+        iterations, json_value_source_serialize_pretty_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "visit/value_selector/lonejson", "visit",
+                          bench_visit_value_case, &visit_selector_case,
+                          iterations, visit_selector_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "visit/value_selector_reader/lonejson", "visit",
+                          bench_visit_value_case, &visit_selector_reader_case,
+                          iterations, visit_selector_reader_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "visit/value_mixed/lonejson", "visit",
+                          bench_visit_value_case, &visit_mixed_case,
+                          iterations, visit_mixed_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "visit/value_japanese_wide/lonejson", "visit",
+                          bench_visit_value_case, &visit_japanese_wide_case,
+                          iterations, visit_japanese_wide_case.json_len, 1u);
+    run.results.count = result_index;
+  }
 
   bench_print_run_report(&run);
   if (bench_write_outputs(&run, latest_path, history_path, archive_dir) != 0) {
+    bench_cleanup_json_value_doc(&json_value_record);
+    bench_cleanup_json_value_doc(&json_value_source_record);
+    LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
+    LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
+    LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
+    LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
     free(lockd_jsonl_data);
     free(japanese_json_data);
     free(hebrew_json_data);
@@ -3646,6 +2693,12 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
     bench_free_docs(docs, doc_count);
     return 1;
   }
+  bench_cleanup_json_value_doc(&json_value_record);
+  bench_cleanup_json_value_doc(&json_value_source_record);
+  LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
+  LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
+  LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
+  LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
   free(lockd_jsonl_data);
   free(japanese_json_data);
   free(hebrew_json_data);
@@ -3662,6 +2715,7 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   bench_parse_case_short parse_fixed_short_case;
   bench_parse_case parse_fixed_prepared_case;
   bench_parse_case parse_dynamic_case;
+  bench_parse_case parse_json_value_case;
   bench_stream_case stream_case;
   bench_stream_case stream_prepared_case;
   bench_lockd_case lockd_case;
@@ -3676,15 +2730,26 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   bench_vendor_doc_case vendor_arabic_wide_case;
   bench_serialize_case serialize_case;
   bench_serialize_case serialize_pretty_case;
+  bench_serialize_case json_value_serialize_case;
+  bench_serialize_case json_value_serialize_pretty_case;
+  bench_serialize_case json_value_source_serialize_case;
+  bench_serialize_case json_value_source_serialize_pretty_case;
+  bench_visit_case visit_selector_case;
+  bench_visit_case visit_selector_reader_case;
+  bench_visit_case visit_mixed_case;
+  bench_visit_case visit_japanese_wide_case;
   bench_jsonl_serialize_case jsonl_case;
   bench_jsonl_serialize_case jsonl_pretty_case;
   bench_record_fixed serialize_record;
   bench_record_fixed jsonl_records[BENCH_JSONL_RECORDS];
+  bench_json_value_doc json_value_record;
+  bench_json_value_doc json_value_source_record;
   char expected_json[1024];
   char expected_pretty_json[2048];
   char jsonl_buffer[4096];
   char pretty_jsonl_buffer[8192];
   char stream_buffer[8192];
+  char json_value_path[PATH_MAX];
   unsigned char *lockd_jsonl_data;
   size_t lockd_jsonl_len;
   unsigned char *japanese_json_data;
@@ -3722,12 +2787,17 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   arabic_wide_json_len = 0u;
   if (bench_prepare_benchmark_cases(
           &parse_fixed_case, &parse_fixed_short_case, &parse_dynamic_case,
-          &stream_case, &serialize_case, &serialize_pretty_case, &jsonl_case,
-          &jsonl_pretty_case, &serialize_record, jsonl_records, expected_json,
+          &stream_case, &serialize_case, &serialize_pretty_case,
+          &parse_json_value_case, &json_value_serialize_case,
+          &json_value_serialize_pretty_case, &json_value_source_serialize_case,
+          &json_value_source_serialize_pretty_case, &jsonl_case,
+          &jsonl_pretty_case, &serialize_record, jsonl_records,
+          &json_value_record, &json_value_source_record, expected_json,
           sizeof(expected_json), expected_pretty_json,
           sizeof(expected_pretty_json), jsonl_buffer, sizeof(jsonl_buffer),
           pretty_jsonl_buffer, sizeof(pretty_jsonl_buffer), stream_buffer,
-          sizeof(stream_buffer)) != 0) {
+          sizeof(stream_buffer), json_value_path, sizeof(json_value_path)) !=
+      0) {
     return 1;
   }
   if (bench_read_file("tests/fixtures/lockdbench.jsonl", &lockd_jsonl_data,
@@ -3798,6 +2868,39 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   vendor_arabic_wide_case.map = &bench_vendor_language_wide_map;
   vendor_arabic_wide_case.json = arabic_wide_json_data;
   vendor_arabic_wide_case.json_len = arabic_wide_json_len;
+  memset(&visit_selector_case, 0, sizeof(visit_selector_case));
+  visit_selector_case.json = (const unsigned char *)bench_json_value_selector_json;
+  visit_selector_case.json_len = strlen(bench_json_value_selector_json);
+  visit_selector_case.min_key_bytes = 20u;
+  visit_selector_case.min_string_bytes = 18u;
+  visit_selector_case.min_number_bytes = 1u;
+  visit_selector_case.min_objects = 3u;
+  visit_selector_case.min_arrays = 1u;
+  visit_selector_case.use_reader = 0;
+  visit_selector_reader_case = visit_selector_case;
+  visit_selector_reader_case.use_reader = 1;
+  visit_selector_reader_case.reader_chunk_size = 17u;
+  memset(&visit_mixed_case, 0, sizeof(visit_mixed_case));
+  visit_mixed_case.json = (const unsigned char *)bench_visit_mixed_value_json;
+  visit_mixed_case.json_len = strlen(bench_visit_mixed_value_json);
+  visit_mixed_case.min_key_bytes = 30u;
+  visit_mixed_case.min_string_bytes = 25u;
+  visit_mixed_case.min_number_bytes = 15u;
+  visit_mixed_case.min_objects = 5u;
+  visit_mixed_case.min_arrays = 2u;
+  visit_mixed_case.min_bools = 2u;
+  visit_mixed_case.min_nulls = 1u;
+  visit_mixed_case.use_reader = 0;
+  memset(&visit_japanese_wide_case, 0, sizeof(visit_japanese_wide_case));
+  visit_japanese_wide_case.json = japanese_wide_json_data;
+  visit_japanese_wide_case.json_len = japanese_wide_json_len;
+  visit_japanese_wide_case.reader_chunk_size = 257u;
+  visit_japanese_wide_case.min_key_bytes = 30u;
+  visit_japanese_wide_case.min_string_bytes = 400u;
+  visit_japanese_wide_case.min_number_bytes = 1u;
+  visit_japanese_wide_case.min_objects = 2u;
+  visit_japanese_wide_case.min_arrays = 0u;
+  visit_japanese_wide_case.use_reader = 1;
 
   fn = NULL;
   ctx = NULL;
@@ -3817,26 +2920,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "stream";
     bytes_per_call = stream_prepared_case.stream_len;
     docs_per_call = stream_prepared_case.object_count;
-  } else if (strcmp(case_name, "stream/object_fixed/yajl") == 0) {
-    fn = bench_yajl_stream_fixed_case;
-    ctx = &stream_case;
-    group = "stream";
-    bytes_per_call = stream_case.stream_len;
-    docs_per_call = stream_case.object_count;
-  } else if (strcmp(case_name, "stream/object_fixed_prepared/yajl") == 0) {
-    fn = bench_yajl_stream_fixed_case;
-    ctx = &stream_prepared_case;
-    group = "stream";
-    bytes_per_call = stream_prepared_case.stream_len;
-    docs_per_call = stream_prepared_case.object_count;
   } else if (strcmp(case_name, "stream/doc_long_strings/lonejson") == 0) {
     fn = bench_stream_vendor_doc_case;
-    ctx = &vendor_long_case;
-    group = "stream";
-    bytes_per_call = vendor_long_case.json_len;
-    docs_per_call = 1u;
-  } else if (strcmp(case_name, "stream/doc_long_strings/yajl") == 0) {
-    fn = bench_yajl_stream_vendor_doc_case;
     ctx = &vendor_long_case;
     group = "stream";
     bytes_per_call = vendor_long_case.json_len;
@@ -3847,20 +2932,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "stream";
     bytes_per_call = vendor_numbers_case.json_len;
     docs_per_call = 1u;
-  } else if (strcmp(case_name, "stream/doc_extreme_numbers/yajl") == 0) {
-    fn = bench_yajl_stream_vendor_doc_case;
-    ctx = &vendor_numbers_case;
-    group = "stream";
-    bytes_per_call = vendor_numbers_case.json_len;
-    docs_per_call = 1u;
   } else if (strcmp(case_name, "stream/doc_string_unicode/lonejson") == 0) {
     fn = bench_stream_vendor_doc_case;
-    ctx = &vendor_unicode_case;
-    group = "stream";
-    bytes_per_call = vendor_unicode_case.json_len;
-    docs_per_call = 1u;
-  } else if (strcmp(case_name, "stream/doc_string_unicode/yajl") == 0) {
-    fn = bench_yajl_stream_vendor_doc_case;
     ctx = &vendor_unicode_case;
     group = "stream";
     bytes_per_call = vendor_unicode_case.json_len;
@@ -3871,20 +2944,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "stream";
     bytes_per_call = vendor_japanese_case.json_len;
     docs_per_call = 1u;
-  } else if (strcmp(case_name, "stream/doc_japanese/yajl") == 0) {
-    fn = bench_yajl_stream_vendor_doc_case;
-    ctx = &vendor_japanese_case;
-    group = "stream";
-    bytes_per_call = vendor_japanese_case.json_len;
-    docs_per_call = 1u;
   } else if (strcmp(case_name, "stream/doc_hebrew/lonejson") == 0) {
     fn = bench_stream_vendor_doc_case;
-    ctx = &vendor_hebrew_case;
-    group = "stream";
-    bytes_per_call = vendor_hebrew_case.json_len;
-    docs_per_call = 1u;
-  } else if (strcmp(case_name, "stream/doc_hebrew/yajl") == 0) {
-    fn = bench_yajl_stream_vendor_doc_case;
     ctx = &vendor_hebrew_case;
     group = "stream";
     bytes_per_call = vendor_hebrew_case.json_len;
@@ -3895,20 +2956,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "stream";
     bytes_per_call = vendor_arabic_case.json_len;
     docs_per_call = 1u;
-  } else if (strcmp(case_name, "stream/doc_arabic/yajl") == 0) {
-    fn = bench_yajl_stream_vendor_doc_case;
-    ctx = &vendor_arabic_case;
-    group = "stream";
-    bytes_per_call = vendor_arabic_case.json_len;
-    docs_per_call = 1u;
   } else if (strcmp(case_name, "stream/doc_japanese_wide/lonejson") == 0) {
     fn = bench_stream_vendor_doc_case;
-    ctx = &vendor_japanese_wide_case;
-    group = "stream";
-    bytes_per_call = vendor_japanese_wide_case.json_len;
-    docs_per_call = 1u;
-  } else if (strcmp(case_name, "stream/doc_japanese_wide/yajl") == 0) {
-    fn = bench_yajl_stream_vendor_doc_case;
     ctx = &vendor_japanese_wide_case;
     group = "stream";
     bytes_per_call = vendor_japanese_wide_case.json_len;
@@ -3919,32 +2968,14 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "stream";
     bytes_per_call = vendor_hebrew_wide_case.json_len;
     docs_per_call = 1u;
-  } else if (strcmp(case_name, "stream/doc_hebrew_wide/yajl") == 0) {
-    fn = bench_yajl_stream_vendor_doc_case;
-    ctx = &vendor_hebrew_wide_case;
-    group = "stream";
-    bytes_per_call = vendor_hebrew_wide_case.json_len;
-    docs_per_call = 1u;
   } else if (strcmp(case_name, "stream/doc_arabic_wide/lonejson") == 0) {
     fn = bench_stream_vendor_doc_case;
     ctx = &vendor_arabic_wide_case;
     group = "stream";
     bytes_per_call = vendor_arabic_wide_case.json_len;
     docs_per_call = 1u;
-  } else if (strcmp(case_name, "stream/doc_arabic_wide/yajl") == 0) {
-    fn = bench_yajl_stream_vendor_doc_case;
-    ctx = &vendor_arabic_wide_case;
-    group = "stream";
-    bytes_per_call = vendor_arabic_wide_case.json_len;
-    docs_per_call = 1u;
   } else if (strcmp(case_name, "stream/lockdbench/lonejson") == 0) {
     fn = bench_stream_lockd_case;
-    ctx = &lockd_case;
-    group = "stream";
-    bytes_per_call = lockd_case.jsonl_len;
-    docs_per_call = lockd_case.object_count;
-  } else if (strcmp(case_name, "stream/lockdbench/yajl") == 0) {
-    fn = bench_yajl_stream_lockd_case;
     ctx = &lockd_case;
     group = "stream";
     bytes_per_call = lockd_case.jsonl_len;
@@ -3967,18 +2998,6 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "parse";
     bytes_per_call = parse_fixed_prepared_case.json_len;
     docs_per_call = 1u;
-  } else if (strcmp(case_name, "parse/buffer_fixed/yajl") == 0) {
-    fn = bench_yajl_parse_buffer_fixed_case;
-    ctx = &parse_fixed_case;
-    group = "parse";
-    bytes_per_call = parse_fixed_case.json_len;
-    docs_per_call = 1u;
-  } else if (strcmp(case_name, "parse/buffer_fixed_prepared/yajl") == 0) {
-    fn = bench_yajl_parse_buffer_fixed_case;
-    ctx = &parse_fixed_prepared_case;
-    group = "parse";
-    bytes_per_call = parse_fixed_prepared_case.json_len;
-    docs_per_call = 1u;
   } else if (strcmp(case_name, "parse/reader_fixed/lonejson") == 0) {
     fn = bench_parse_reader_fixed_case;
     ctx = &parse_fixed_case;
@@ -3991,17 +3010,11 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "parse";
     bytes_per_call = parse_fixed_prepared_case.json_len;
     docs_per_call = 1u;
-  } else if (strcmp(case_name, "parse/reader_fixed/yajl") == 0) {
-    fn = bench_yajl_parse_reader_fixed_case;
-    ctx = &parse_fixed_case;
+  } else if (strcmp(case_name, "parse/buffer_json_value/lonejson") == 0) {
+    fn = bench_parse_json_value_buffer_case;
+    ctx = &parse_json_value_case;
     group = "parse";
-    bytes_per_call = parse_fixed_case.json_len;
-    docs_per_call = 1u;
-  } else if (strcmp(case_name, "parse/reader_fixed_prepared/yajl") == 0) {
-    fn = bench_yajl_parse_reader_fixed_case;
-    ctx = &parse_fixed_prepared_case;
-    group = "parse";
-    bytes_per_call = parse_fixed_prepared_case.json_len;
+    bytes_per_call = parse_json_value_case.json_len;
     docs_per_call = 1u;
   } else if (strcmp(case_name, "serialize/sink/lonejson") == 0) {
     fn = bench_serialize_sink_case;
@@ -4075,8 +3088,78 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "serialize";
     bytes_per_call = jsonl_pretty_case.expected_len;
     docs_per_call = BENCH_JSONL_RECORDS;
+  } else if (strcmp(case_name, "serialize/json_value_sink/lonejson") == 0) {
+    fn = bench_serialize_sink_case;
+    ctx = &json_value_serialize_case;
+    group = "serialize";
+    bytes_per_call = json_value_serialize_case.expected_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "serialize/json_value_alloc/lonejson") == 0) {
+    fn = bench_serialize_alloc_case;
+    ctx = &json_value_serialize_case;
+    group = "serialize";
+    bytes_per_call = json_value_serialize_case.expected_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "serialize/json_value_sink_pretty/lonejson") ==
+             0) {
+    fn = bench_serialize_sink_case;
+    ctx = &json_value_serialize_pretty_case;
+    group = "serialize";
+    bytes_per_call = json_value_serialize_pretty_case.expected_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "serialize/json_value_alloc_pretty/lonejson") ==
+             0) {
+    fn = bench_serialize_alloc_case;
+    ctx = &json_value_serialize_pretty_case;
+    group = "serialize";
+    bytes_per_call = json_value_serialize_pretty_case.expected_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "serialize/json_value_source_alloc/lonejson") ==
+             0) {
+    fn = bench_serialize_alloc_case;
+    ctx = &json_value_source_serialize_case;
+    group = "serialize";
+    bytes_per_call = json_value_source_serialize_case.expected_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name,
+                    "serialize/json_value_source_alloc_pretty/lonejson") == 0) {
+    fn = bench_serialize_alloc_case;
+    ctx = &json_value_source_serialize_pretty_case;
+    group = "serialize";
+    bytes_per_call = json_value_source_serialize_pretty_case.expected_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "visit/value_selector/lonejson") == 0) {
+    fn = bench_visit_value_case;
+    ctx = &visit_selector_case;
+    group = "visit";
+    bytes_per_call = visit_selector_case.json_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "visit/value_selector_reader/lonejson") == 0) {
+    fn = bench_visit_value_case;
+    ctx = &visit_selector_reader_case;
+    group = "visit";
+    bytes_per_call = visit_selector_reader_case.json_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "visit/value_mixed/lonejson") == 0) {
+    fn = bench_visit_value_case;
+    ctx = &visit_mixed_case;
+    group = "visit";
+    bytes_per_call = visit_mixed_case.json_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "visit/value_japanese_wide/lonejson") == 0) {
+    fn = bench_visit_value_case;
+    ctx = &visit_japanese_wide_case;
+    group = "visit";
+    bytes_per_call = visit_japanese_wide_case.json_len;
+    docs_per_call = 1u;
   } else {
     fprintf(stderr, "unknown case '%s'\n", case_name);
+    bench_cleanup_json_value_doc(&json_value_record);
+    bench_cleanup_json_value_doc(&json_value_source_record);
+    LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
+    LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
+    LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
+    LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
     free(lockd_jsonl_data);
     free(japanese_json_data);
     free(hebrew_json_data);
@@ -4089,6 +3172,12 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
 
   bench_run_simple_case(&result, case_name, group, fn, ctx, iterations,
                         bytes_per_call, docs_per_call);
+  bench_cleanup_json_value_doc(&json_value_record);
+  bench_cleanup_json_value_doc(&json_value_source_record);
+  LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
+  LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
+  LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
+  LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
   free(lockd_jsonl_data);
   free(japanese_json_data);
   free(hebrew_json_data);
@@ -4209,6 +3298,19 @@ static void bench_print_compare_result(const bench_result *baseline,
          docs_delta_pct, (double)latest->mismatch_count);
 }
 
+static int bench_is_material_regression(const bench_result *baseline,
+                                        const bench_result *latest) {
+  double mib_delta_pct;
+
+  if (baseline->mib_per_sec <= 0.0 || latest->mib_per_sec >= baseline->mib_per_sec) {
+    return 0;
+  }
+  mib_delta_pct = ((latest->mib_per_sec - baseline->mib_per_sec) /
+                   baseline->mib_per_sec) *
+                  100.0;
+  return strcmp(bench_delta_classification(mib_delta_pct), "material") == 0;
+}
+
 static int bench_compare_command(const char *baseline_path,
                                  const char *latest_path) {
   bench_run baseline;
@@ -4262,6 +3364,60 @@ static int bench_compare_command(const char *baseline_path,
   return 0;
 }
 
+static int bench_gate_command(const char *baseline_path,
+                              const char *latest_path) {
+  bench_run baseline;
+  bench_run latest;
+  size_t i;
+  size_t missing_count;
+  size_t material_regression_count;
+  int schema_mismatch;
+  int config_mismatch;
+
+  if (bench_read_run(baseline_path, &baseline) != 0 ||
+      bench_read_run(latest_path, &latest) != 0) {
+    return 1;
+  }
+
+  schema_mismatch = baseline.schema_version != latest.schema_version;
+  config_mismatch =
+      baseline.parser_buffer_size != latest.parser_buffer_size ||
+      baseline.push_parser_buffer_size != latest.push_parser_buffer_size ||
+      baseline.reader_buffer_size != latest.reader_buffer_size ||
+      baseline.stream_buffer_size != latest.stream_buffer_size ||
+      baseline.iterations != latest.iterations;
+  missing_count = 0u;
+  material_regression_count = 0u;
+  for (i = 0; i < latest.results.count; ++i) {
+    const bench_result *base;
+
+    base = bench_find_result(&baseline, latest.result_storage[i].name);
+    if (base == NULL) {
+      ++missing_count;
+      continue;
+    }
+    if (bench_is_material_regression(base, &latest.result_storage[i])) {
+      ++material_regression_count;
+    }
+  }
+
+  printf("gate baseline=%s latest=%s\n", baseline_path, latest_path);
+  printf("  schema mismatch: %s\n", schema_mismatch ? "yes" : "no");
+  printf("  config mismatch: %s\n", config_mismatch ? "yes" : "no");
+  printf("  missing results: %lu\n", (unsigned long)missing_count);
+  printf("  material regressions: %lu\n",
+         (unsigned long)material_regression_count);
+
+  if (schema_mismatch || config_mismatch || missing_count != 0u ||
+      material_regression_count != 0u) {
+    fprintf(stderr,
+            "benchmark gate failed: refresh the baseline for intentional "
+            "benchmark-schema changes or fix the regressions before landing\n");
+    return 1;
+  }
+  return 0;
+}
+
 static void bench_usage(const char *argv0) {
   fprintf(stderr,
           "usage:\n"
@@ -4269,8 +3425,9 @@ static void bench_usage(const char *argv0) {
           "<iterations>\n"
           "  %s case <case-name> <iterations>\n"
           "  %s freeze-baseline <history.jsonl> <baseline.json>\n"
-          "  %s compare <baseline.json> <latest.json>\n",
-          argv0, argv0, argv0, argv0);
+          "  %s compare <baseline.json> <latest.json>\n"
+          "  %s gate <baseline.json> <latest.json>\n",
+          argv0, argv0, argv0, argv0, argv0);
 }
 
 int main(int argc, char **argv) {
@@ -4315,6 +3472,13 @@ int main(int argc, char **argv) {
       return 1;
     }
     return bench_compare_command(argv[2], argv[3]);
+  }
+  if (strcmp(argv[1], "gate") == 0) {
+    if (argc != 4) {
+      bench_usage(argv[0]);
+      return 1;
+    }
+    return bench_gate_command(argv[2], argv[3]);
   }
   bench_usage(argv[0]);
   return 1;

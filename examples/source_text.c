@@ -26,7 +26,7 @@ int main(void) {
   int fd;
   char *json;
 
-  memset(&doc, 0, sizeof(doc));
+  lj_init(&outbound_text_doc_map, &doc);
   strcpy(doc.id, "txt-1");
 
   fd = mkstemp(path);

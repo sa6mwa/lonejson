@@ -29,6 +29,12 @@ The same pattern applies to:
 * `parse_file.c`
 * `parse_reader.c`
 * `push_parser.c` (object-framed streaming reader example)
+* `json_value_buffer.c` (embeds selector/fields JSON directly from memory)
+* `json_value_parse.c` (enables explicit parse capture for opaque embedded JSON
+  values and re-emits them)
+* `json_value_visitor.c` (streams parsed embedded JSON through visitor
+  callbacks without retaining raw bytes)
+* `json_value_source.c` (streams embedded JSON values from filesystem paths)
 * `spooled_text.c` (forces spill-to-disk, shows temp path, and confirms cleanup)
 * `spooled_bytes.c` (forces Base64 decode spill-to-disk and confirms cleanup)
 * `source_text.c` (serializes a caller-declared JSON text field from a filesystem path)
@@ -39,6 +45,12 @@ The same pattern applies to:
 
 `parse_string.c` and `serialize_jsonl.c` are the embedded single-header
 variants in the tree; the rest model linked-library use.
+
+The linked-library examples intentionally use lonejson's public initializers and
+default helpers instead of manual `memset` or `{0}` for public structs:
+`lonejson_init` / `lj_init` for mapped values, `*_init` for handles, and
+`lonejson_default_*` / `lj_default_*` for option, visitor, and read-result
+structs.
 
 The curl examples also define `LONEJSON_WITH_CURL` and need curl headers/libs. With a host-native `liblockdc` dev bundle downloaded via `make deps-host`, a typical command is:
 

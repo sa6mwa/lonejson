@@ -80,6 +80,7 @@ int main(void) {
     return 1;
   }
 
+  puts("");
   puts("upload completed");
   curl_easy_cleanup(curl);
   lonejson_curl_upload_cleanup(&upload_ctx);

@@ -22,7 +22,7 @@ LJ_MAP_DEFINE(metric_sample_map, metric_sample, metric_sample_fields);
 static lj_read_result chunk_reader(void *user, unsigned char *buffer,
                                    size_t capacity) {
   chunk_reader_state *state = (chunk_reader_state *)user;
-  lj_read_result result = {0};
+  lj_read_result result = lj_default_read_result();
   size_t remaining = strlen(state->json) - state->offset;
   size_t chunk = remaining < 5u ? remaining : 5u;
 
@@ -42,6 +42,8 @@ int main(void) {
   lj_error error;
   lj_stream *stream;
   lj_stream_result result;
+
+  lj_init(&metric_sample_map, &sample);
 
   stream = lj_stream_open_reader(&metric_sample_map, chunk_reader, &state, NULL,
                                  &error);

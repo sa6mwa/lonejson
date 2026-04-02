@@ -26,6 +26,10 @@ function M.spooled_bytes(opts)
   return field("spooled_bytes", opts)
 end
 
+function M.json_value(opts)
+  return field("json_value", opts)
+end
+
 function M.i64(opts)
   return field("i64", opts)
 end
@@ -72,6 +76,16 @@ function M.object_array(opts)
   return field("object_array", opts)
 end
 
+function M.json_array(value)
+  value = value or {}
+  return setmetatable(value, { __lonejson_json_kind = "array" })
+end
+
+function M.json_object(value)
+  value = value or {}
+  return setmetatable(value, { __lonejson_json_kind = "object" })
+end
+
 function M.schema(name, fields)
   return core.compile_schema(name, fields)
 end
@@ -84,5 +98,6 @@ function M.chunks(spool, chunk_size)
 end
 
 M.core = core
+M.json_null = core.json_null()
 
 return M

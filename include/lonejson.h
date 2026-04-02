@@ -108,7 +108,8 @@ typedef unsigned long long lonejson_uint64;
 #if defined(_MSC_VER)
 #define LONEJSON_SHORT_ALIAS_INLINE static __inline
 #elif defined(__GNUC__) || defined(__clang__)
-#define LONEJSON_SHORT_ALIAS_INLINE static __inline__ __attribute__((unused))
+#define LONEJSON_SHORT_ALIAS_INLINE                                             \
+  static __inline__ __attribute__((unused, always_inline))
 #else
 #define LONEJSON_SHORT_ALIAS_INLINE static
 #endif
@@ -182,9 +183,11 @@ extern "C" {
  * `lonejson_serialize_*` and `lonejson_serialize_jsonl_*`. Ownership and reuse
  * of mapped values is handled by `lonejson_cleanup` and `lonejson_reset`.
  * Large inbound values are represented by `lonejson_spooled`, large outbound
- * values by `lonejson_source`, and behavior is configured through
- * `lonejson_parse_options`, `lonejson_spool_options`, and
- * `lonejson_write_options`.
+ * values by `lonejson_source`, and arbitrary embedded JSON values by
+ * `lonejson_json_value`. One arbitrary JSON value can also be consumed without
+ * a schema through `lonejson_value_visitor` and `lonejson_visit_value_*`.
+ * Behavior is configured through `lonejson_parse_options`,
+ * `lonejson_spool_options`, and `lonejson_write_options`.
  *
  * The small examples below are meant as orientation, not as exhaustive
  * coverage. The repository examples are fuller programs with proper error
@@ -319,10 +322,62 @@ extern "C" {
  * &error); lonejson_cleanup(&outbound_doc_map, &doc);
  * ```
  *
+ * Embedded arbitrary JSON values are stream-first on parse. The caller
+ * configures whether the nested value should be streamed to a raw sink,
+ * streamed as structured visitor callbacks, or explicitly captured for later
+ * reuse:
+ *
+ * ```c
+ * typedef struct query_doc {
+ *   char namespace_[16];
+ *   lonejson_json_value selector;
+ * } query_doc;
+ *
+ * static const lonejson_field query_doc_fields[] = {
+ *   LONEJSON_FIELD_STRING_FIXED_REQ(query_doc, namespace_, "namespace",
+ *                                   LONEJSON_OVERFLOW_FAIL),
+ *   LONEJSON_FIELD_JSON_VALUE_REQ(query_doc, selector, "selector")
+ * };
+ *
+ * LONEJSON_MAP_DEFINE(query_doc_map, query_doc, query_doc_fields);
+ *
+ * query_doc doc;
+ * lonejson_parse_options options = lonejson_default_parse_options();
+ *
+ * lonejson_init(&query_doc_map, &doc);
+ * options.clear_destination = 0;
+ * lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+ * lonejson_parse_cstr(&query_doc_map, &doc,
+ *                     "{\"namespace\":\"ops\",\"selector\":{\"op\":\"and\"}}",
+ *                     &options, &error);
+ * lonejson_json_value_write_to_sink(&doc.selector, sink_fn, sink_user, &error);
+ * lonejson_cleanup(&query_doc_map, &doc);
+ * ```
+ *
+ * The lower-level visitor API is useful when you need to parse exactly one
+ * JSON value without a schema and without retaining it:
+ *
+ * ```c
+ * lonejson_value_visitor visitor = lonejson_default_value_visitor();
+ * lonejson_value_limits limits = lonejson_default_value_limits();
+ *
+ * visitor.object_begin = on_object_begin;
+ * visitor.object_key_chunk = on_object_key_chunk;
+ * visitor.string_chunk = on_string_chunk;
+ * visitor.number_chunk = on_number_chunk;
+ *
+ * lonejson_visit_value_cstr("{\"ok\":true,\"n\":42}", &visitor, user, &limits,
+ *                           &error);
+ * ```
+ *
  * The repository examples expand these patterns into complete programs covering
  * one-shot parsing, object-framed streams, fixed-capacity fields, spool-to-disk
  * fields, source-backed outbound fields, JSONL output, optional curl
- * integration, and the Lua binding.
+ * integration, and the Lua binding. For public structs, prefer lonejson's
+ * explicit initializers and default helpers over manual `memset` or `{0}`:
+ * `lonejson_init`, `lonejson_error_init`, `lonejson_default_parse_options`,
+ * `lonejson_default_write_options`, `lonejson_default_value_visitor`, and the
+ * handle-specific `*_init` helpers.
  */
 
 /** Major component of the lonejson header version. */
@@ -432,6 +487,7 @@ typedef enum lonejson_field_kind {
   LONEJSON_FIELD_KIND_BASE64_STREAM,
   LONEJSON_FIELD_KIND_STRING_SOURCE,
   LONEJSON_FIELD_KIND_BASE64_SOURCE,
+  LONEJSON_FIELD_KIND_JSON_VALUE,
   LONEJSON_FIELD_KIND_I64,
   LONEJSON_FIELD_KIND_U64,
   LONEJSON_FIELD_KIND_F64,
@@ -457,6 +513,22 @@ typedef enum lonejson_source_kind {
   LONEJSON_SOURCE_PATH = 3
 } lonejson_source_kind;
 
+/** Backing mode used by `lonejson_json_value` opaque embedded JSON handles. */
+typedef enum lonejson_json_value_kind {
+  /** No value configured. Serializes as JSON `null`. */
+  LONEJSON_JSON_VALUE_NULL = 0,
+  /** Owned compact JSON bytes retained in memory. */
+  LONEJSON_JSON_VALUE_BUFFER = 1,
+  /** Read JSON bytes from a caller-provided reader callback. */
+  LONEJSON_JSON_VALUE_READER = 2,
+  /** Read JSON bytes from a caller-provided `FILE *`. */
+  LONEJSON_JSON_VALUE_FILE = 3,
+  /** Read JSON bytes from a caller-provided file descriptor. */
+  LONEJSON_JSON_VALUE_FD = 4,
+  /** Open and read JSON bytes from a filesystem path on each serialization. */
+  LONEJSON_JSON_VALUE_PATH = 5
+} lonejson_json_value_kind;
+
 /** Storage model used by a mapped field. */
 typedef enum lonejson_storage_kind {
   /** lonejson owns and allocates storage as needed. */
@@ -475,7 +547,11 @@ typedef enum lonejson_overflow_policy {
   LONEJSON_OVERFLOW_TRUNCATE_SILENT = 2
 } lonejson_overflow_policy;
 
-/** Detailed error information populated by most public APIs. */
+/** Detailed error information populated by most public APIs. Caller-provided
+ * error outputs do not need prior initialization because lonejson overwrites
+ * them on entry, but `lonejson_error_init` is available when you want an
+ * explicit known-empty state.
+ */
 typedef struct lonejson_error {
   /** Primary status code for the failure or warning. */
   lonejson_status code;
@@ -665,7 +741,10 @@ struct lonejson_map {
   size_t field_count;
 };
 
-/** Optional controls for mapped parsing and streaming. */
+/** Optional controls for mapped parsing and streaming. Use
+ * `lonejson_default_parse_options()` instead of manual zeroing so new fields
+ * keep their intended defaults.
+ */
 typedef struct lonejson_parse_options {
   /** When non-zero, lonejson initializes the destination before parsing. */
   int clear_destination;
@@ -677,7 +756,10 @@ typedef struct lonejson_parse_options {
   size_t max_depth;
 } lonejson_parse_options;
 
-/** Result returned by reader callbacks and `lonejson_spooled_read`. */
+/** Result returned by reader callbacks and `lonejson_spooled_read`. Use
+ * `lonejson_default_read_result()` when constructing one manually inside a
+ * reader callback instead of open-coding `memset` or `{0}`.
+ */
 typedef struct lonejson_read_result {
   /** Number of bytes placed into the supplied buffer. */
   size_t bytes_read;
@@ -693,8 +775,138 @@ typedef struct lonejson_read_result {
 typedef lonejson_read_result (*lonejson_reader_fn)(void *user,
                                                    unsigned char *buffer,
                                                    size_t capacity);
+/** Generic sink callback used by serializer APIs and raw spool writers. */
+typedef lonejson_status (*lonejson_sink_fn)(void *user, const void *data,
+                                            size_t len, lonejson_error *error);
 
-/** Options controlling serialization into buffers and sinks. */
+/** Controls how a `lonejson_json_value` field receives inbound parsed JSON.
+ * Parse is stream-first by default; callers must deliberately choose one of
+ * these modes before decoding into a `JSON_VALUE` field.
+ */
+typedef enum lonejson_json_value_parse_mode {
+  /** Parsing a `JSON_VALUE` field fails unless the caller configures a parse
+   * sink or enables explicit capture first.
+   */
+  LONEJSON_JSON_VALUE_PARSE_NONE = 0,
+  /** Parsing streams compact JSON bytes incrementally to a caller sink. */
+  LONEJSON_JSON_VALUE_PARSE_SINK = 1,
+  /** Parsing streams structured JSON visitor events incrementally. */
+  LONEJSON_JSON_VALUE_PARSE_VISITOR = 2,
+  /** Parsing captures compact JSON bytes into owned storage. */
+  LONEJSON_JSON_VALUE_PARSE_CAPTURE = 3
+} lonejson_json_value_parse_mode;
+
+/** Limits applied while visiting an arbitrary JSON value. Zero means "use the
+ * library default" for that field except `max_total_bytes`, where zero means
+ * "unlimited". The default helper currently resolves to a depth limit of `64`,
+ * a decoded string limit of `1 MiB`, a key limit of `64 KiB`, and a number
+ * token limit of `256` bytes.
+ */
+typedef struct lonejson_value_limits {
+  /** Maximum allowed nesting depth while parsing a value. */
+  size_t max_depth;
+  /** Maximum decoded byte length for one JSON string value. */
+  size_t max_string_bytes;
+  /** Maximum raw byte length for one JSON number token. */
+  size_t max_number_bytes;
+  /** Maximum decoded byte length for one object key. */
+  size_t max_key_bytes;
+  /** Maximum raw byte length consumed while parsing the value. Zero means
+   * unlimited.
+   */
+  size_t max_total_bytes;
+} lonejson_value_limits;
+
+/** Callback signature for structure and boundary events during arbitrary JSON
+ * value visiting.
+ */
+typedef lonejson_status (*lonejson_value_event_fn)(void *user,
+                                                   lonejson_error *error);
+/** Callback signature for chunked decoded text delivery during arbitrary JSON
+ * value visiting.
+ */
+typedef lonejson_status (*lonejson_value_chunk_fn)(void *user, const char *data,
+                                                   size_t len,
+                                                   lonejson_error *error);
+/** Callback signature for boolean scalar delivery during arbitrary JSON value
+ * visiting.
+ */
+typedef lonejson_status (*lonejson_value_bool_fn)(void *user, int value,
+                                                  lonejson_error *error);
+
+/** Visitor callbacks for one arbitrary JSON value. String values and object
+ * keys are delivered as decoded UTF-8 in chunks. Number values are delivered as
+ * raw token bytes in chunks. Any callback may be `NULL` when the caller does
+ * not need that event. Use `lonejson_default_value_visitor()` instead of
+ * manual zeroing when you want the empty visitor state. The callback sequence
+ * is balanced:
+ * `object_begin/object_end`, `array_begin/array_end`, and matching
+ * begin/chunk/end triplets for keys, strings, and numbers.
+ */
+typedef struct lonejson_value_visitor {
+  lonejson_value_event_fn object_begin;
+  lonejson_value_event_fn object_end;
+  lonejson_value_event_fn object_key_begin;
+  lonejson_value_chunk_fn object_key_chunk;
+  lonejson_value_event_fn object_key_end;
+  lonejson_value_event_fn array_begin;
+  lonejson_value_event_fn array_end;
+  lonejson_value_event_fn string_begin;
+  lonejson_value_chunk_fn string_chunk;
+  lonejson_value_event_fn string_end;
+  lonejson_value_event_fn number_begin;
+  lonejson_value_chunk_fn number_chunk;
+  lonejson_value_event_fn number_end;
+  lonejson_value_bool_fn boolean_value;
+  lonejson_value_event_fn null_value;
+} lonejson_value_visitor;
+
+/** Opaque JSON value handle used by embedded arbitrary JSON fields. Parsing is
+ * stream-first: the caller must configure either a parse sink, a parse
+ * visitor, or explicit parse capture before decoding inbound JSON into this
+ * field. Serialization can source one JSON value from memory, reader
+ * callbacks, files, file descriptors, or reopenable paths.
+ */
+typedef struct lonejson_json_value {
+  /** Current configured value kind. `LONEJSON_JSON_VALUE_NULL` emits `null`. */
+  lonejson_json_value_kind kind;
+  /** Owned compact JSON bytes when `kind == LONEJSON_JSON_VALUE_BUFFER`. */
+  char *json;
+  /** Logical byte length of `json`. */
+  size_t len;
+  /** Caller-provided reader callback when `kind == LONEJSON_JSON_VALUE_READER`.
+   */
+  lonejson_reader_fn reader;
+  /** Caller-provided reader callback user data. */
+  void *reader_user;
+  /** Caller-provided file handle when `kind == LONEJSON_JSON_VALUE_FILE`. */
+  FILE *fp;
+  /** Caller-provided file descriptor when `kind == LONEJSON_JSON_VALUE_FD`. */
+  int fd;
+  /** Owned filesystem path when `kind == LONEJSON_JSON_VALUE_PATH`. */
+  char *path;
+  /** Parse-time delivery mode for inbound JSON values. */
+  lonejson_json_value_parse_mode parse_mode;
+  /** Caller-provided sink callback when `parse_mode ==
+   * LONEJSON_JSON_VALUE_PARSE_SINK`.
+   */
+  lonejson_sink_fn parse_sink;
+  /** Caller-provided sink callback user data. */
+  void *parse_sink_user;
+  /** Caller-provided visitor when `parse_mode ==
+   * LONEJSON_JSON_VALUE_PARSE_VISITOR`.
+   */
+  const lonejson_value_visitor *parse_visitor;
+  /** Caller-provided visitor user data. */
+  void *parse_visitor_user;
+  /** Limits applied while parsing through `parse_visitor`. */
+  lonejson_value_limits parse_visitor_limits;
+} lonejson_json_value;
+
+/** Options controlling serialization into buffers and sinks. Use
+ * `lonejson_default_write_options()` instead of manual zeroing so new fields
+ * keep their intended defaults.
+ */
 typedef struct lonejson_write_options {
   /** Buffer overflow handling policy for fixed-capacity output buffers. */
   lonejson_overflow_policy overflow_policy;
@@ -702,10 +914,6 @@ typedef struct lonejson_write_options {
    */
   int pretty;
 } lonejson_write_options;
-
-/** Generic sink callback used by serializer APIs and raw spool writers. */
-typedef lonejson_status (*lonejson_sink_fn)(void *user, const void *data,
-                                            size_t len, lonejson_error *error);
 
 /** Defines a static mapping table for a struct type from a separately declared
  * field array. */
@@ -927,6 +1135,45 @@ typedef lonejson_status (*lonejson_sink_fn)(void *user, const void *data,
    LONEJSON__KEY_LAST(key),                                                    \
    offsetof(type, member),                                                     \
    LONEJSON_FIELD_KIND_BASE64_SOURCE,                                          \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_REQUIRED,                                                    \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL}
+
+/** Maps an arbitrary embedded JSON value into a `lonejson_json_value` member.
+ * The field accepts any JSON value on parse and emits that value directly on
+ * serialize without wrapping it as a JSON string. Before parsing into this
+ * field, configure the destination handle for sink, visitor, or capture mode.
+ */
+#define LONEJSON_FIELD_JSON_VALUE(type, member, key)                           \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_JSON_VALUE,                                             \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   0u,                                                                         \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL}
+
+/** Maps a required arbitrary embedded JSON value into a `lonejson_json_value`
+ * member. Before parsing into this field, configure the destination handle
+ * for sink, visitor, or capture mode.
+ */
+#define LONEJSON_FIELD_JSON_VALUE_REQ(type, member, key)                       \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_JSON_VALUE,                                             \
    LONEJSON_STORAGE_FIXED,                                                     \
    LONEJSON_OVERFLOW_FAIL,                                                     \
    LONEJSON_FIELD_REQUIRED,                                                    \
@@ -1216,6 +1463,12 @@ typedef lonejson_status (*lonejson_sink_fn)(void *user, const void *data,
 
 /** Returns the library's default spool options. */
 lonejson_spool_options lonejson_default_spool_options(void);
+/** Initializes an error struct to the empty `OK` state. */
+void lonejson_error_init(lonejson_error *error);
+/** Returns the empty default read result used by reader callbacks. */
+lonejson_read_result lonejson_default_read_result(void);
+/** Returns the empty visitor with all callbacks set to `NULL`. */
+lonejson_value_visitor lonejson_default_value_visitor(void);
 /** Initializes a spool handle to its default or caller-configured empty state.
  */
 void lonejson_spooled_init(lonejson_spooled *value,
@@ -1266,10 +1519,88 @@ lonejson_status lonejson_source_set_path(lonejson_source *value,
 lonejson_status lonejson_source_write_to_sink(const lonejson_source *value,
                                               lonejson_sink_fn sink, void *user,
                                               lonejson_error *error);
+/** Initializes an embedded JSON value handle to the empty `null` state with no
+ * inbound parse destination configured. This is the required starting state
+ * before setting parse sink, parse visitor, parse capture, or outbound source
+ * configuration.
+ */
+void lonejson_json_value_init(lonejson_json_value *value);
+/** Resets an embedded JSON value handle to the empty `null` state. */
+void lonejson_json_value_reset(lonejson_json_value *value);
+/** Releases any storage or path owned by an embedded JSON value handle and
+ * resets it. */
+void lonejson_json_value_cleanup(lonejson_json_value *value);
+/** Validates one JSON value from a memory buffer, stores a compact owned copy,
+ * and configures the handle to serialize from memory. Use this when retained
+ * ownership is intentional; it is not the default parse path for
+ * `JSON_VALUE` fields.
+ */
+lonejson_status lonejson_json_value_set_buffer(lonejson_json_value *value,
+                                               const void *data, size_t len,
+                                               lonejson_error *error);
+/** Configures an embedded JSON value handle to stream inbound parsed JSON
+ * bytes to a caller sink as they are validated. Callers using parse sinks must
+ * keep the handle configured across parsing, typically by initializing the
+ * destination first and parsing with `clear_destination = 0`.
+ */
+lonejson_status lonejson_json_value_set_parse_sink(lonejson_json_value *value,
+                                                   lonejson_sink_fn sink,
+                                                   void *user,
+                                                   lonejson_error *error);
+/** Configures an embedded JSON value handle to deliver inbound parsed JSON as
+ * structured visitor callbacks. Callers using parse visitors must keep the
+ * handle configured across parsing, typically by initializing the destination
+ * first and parsing with `clear_destination = 0`. The supplied limits may be
+ * `NULL` to use `lonejson_default_value_limits()`.
+ */
+lonejson_status lonejson_json_value_set_parse_visitor(
+    lonejson_json_value *value, const lonejson_value_visitor *visitor,
+    void *user, const lonejson_value_limits *limits, lonejson_error *error);
+/** Enables explicit parse-time capture of one inbound JSON value into owned
+ * compact bytes. This is the opt-in storage path for callers that need to
+ * retain a parsed arbitrary JSON value after decoding.
+ */
+lonejson_status
+lonejson_json_value_enable_parse_capture(lonejson_json_value *value,
+                                         lonejson_error *error);
+/** Configures an embedded JSON value handle to stream from a caller-provided
+ * reader callback at serialize time. Reader-backed values are consumed in one
+ * pass per serialization call. */
+lonejson_status lonejson_json_value_set_reader(lonejson_json_value *value,
+                                               lonejson_reader_fn reader,
+                                               void *user,
+                                               lonejson_error *error);
+/** Configures an embedded JSON value handle to read from a caller-owned
+ * `FILE *`. */
+lonejson_status lonejson_json_value_set_file(lonejson_json_value *value,
+                                             FILE *fp, lonejson_error *error);
+/** Configures an embedded JSON value handle to read from a caller-owned file
+ * descriptor. */
+lonejson_status lonejson_json_value_set_fd(lonejson_json_value *value, int fd,
+                                           lonejson_error *error);
+/** Configures an embedded JSON value handle to reopen and stream a filesystem
+ * path. lonejson owns the duplicated path string and frees it on cleanup. */
+lonejson_status lonejson_json_value_set_path(lonejson_json_value *value,
+                                             const char *path,
+                                             lonejson_error *error);
+/** Streams the compact form of one embedded JSON value to a generic sink while
+ * validating that the handle contains exactly one JSON value. */
+lonejson_status lonejson_json_value_write_to_sink(
+    const lonejson_json_value *value, lonejson_sink_fn sink, void *user,
+    lonejson_error *error);
 
-/** Returns the library's default parse options. */
+/** Returns the library's default parse options. The current defaults clear the
+ * destination, reject duplicate keys, and cap nesting depth at `64`.
+ */
 lonejson_parse_options lonejson_default_parse_options(void);
-/** Returns the library's default write options. */
+/** Returns the library's default limits for arbitrary JSON value visitors.
+ * The current defaults are depth `64`, string `1 MiB`, key `64 KiB`, number
+ * token `256` bytes, and unlimited total bytes.
+ */
+lonejson_value_limits lonejson_default_value_limits(void);
+/** Returns the library's default write options. The current defaults use
+ * compact output with `LONEJSON_OVERFLOW_FAIL`.
+ */
 lonejson_write_options lonejson_default_write_options(void);
 /** Returns a stable string name for a `lonejson_status` value. */
 const char *lonejson_status_string(lonejson_status status);
@@ -1357,6 +1688,50 @@ lonejson_status lonejson_validate_filep(FILE *fp, lonejson_error *error);
 /** Validates JSON from a filesystem path. */
 lonejson_status lonejson_validate_path(const char *path, lonejson_error *error);
 
+/** Visits exactly one JSON value from a caller-provided buffer. The call
+ * fails on malformed JSON or on trailing non-whitespace bytes after the first
+ * complete value.
+ */
+lonejson_status lonejson_visit_value_buffer(
+    const void *data, size_t len, const lonejson_value_visitor *visitor,
+    void *user, const lonejson_value_limits *limits, lonejson_error *error);
+/** Visits exactly one JSON value from a NUL-terminated string. The call fails
+ * on malformed JSON or on trailing non-whitespace bytes after the first
+ * complete value.
+ */
+lonejson_status lonejson_visit_value_cstr(
+    const char *json, const lonejson_value_visitor *visitor, void *user,
+    const lonejson_value_limits *limits, lonejson_error *error);
+/** Visits exactly one JSON value from a caller-provided reader callback. The
+ * call fails on malformed JSON or on trailing non-whitespace bytes after the
+ * first complete value.
+ */
+lonejson_status lonejson_visit_value_reader(
+    lonejson_reader_fn reader, void *reader_user,
+    const lonejson_value_visitor *visitor, void *user,
+    const lonejson_value_limits *limits, lonejson_error *error);
+/** Visits exactly one JSON value from an open `FILE *`. The call fails on
+ * malformed JSON or on trailing non-whitespace bytes after the first complete
+ * value.
+ */
+lonejson_status lonejson_visit_value_filep(
+    FILE *fp, const lonejson_value_visitor *visitor, void *user,
+    const lonejson_value_limits *limits, lonejson_error *error);
+/** Visits exactly one JSON value from a filesystem path. The call fails on
+ * malformed JSON or on trailing non-whitespace bytes after the first complete
+ * value.
+ */
+lonejson_status lonejson_visit_value_path(
+    const char *path, const lonejson_value_visitor *visitor, void *user,
+    const lonejson_value_limits *limits, lonejson_error *error);
+/** Visits exactly one JSON value from a file descriptor, including Unix domain
+ * sockets. The call fails on malformed JSON or on trailing non-whitespace
+ * bytes after the first complete value.
+ */
+lonejson_status lonejson_visit_value_fd(
+    int fd, const lonejson_value_visitor *visitor, void *user,
+    const lonejson_value_limits *limits, lonejson_error *error);
+
 /** Serializes a mapped struct to a generic output sink callback. */
 lonejson_status lonejson_serialize_sink(const lonejson_map *map,
                                         const void *src, lonejson_sink_fn sink,
@@ -1428,6 +1803,12 @@ lonejson_serialize_jsonl_path(const lonejson_map *map, const void *items,
 
 /** Frees dynamic storage owned by a mapped value. */
 void lonejson_cleanup(const lonejson_map *map, void *value);
+/** Initializes a mapped value according to its field descriptors. Use this
+ * instead of manual `memset` when you need a known reusable starting state,
+ * when you plan to parse with `clear_destination = 0`, or when you are
+ * configuring caller-owned fixed-capacity array backing storage before parse.
+ */
+void lonejson_init(const lonejson_map *map, void *value);
 /** Clears a mapped value while preserving caller-owned fixed-capacity array
  * backing storage. */
 void lonejson_reset(const lonejson_map *map, void *value);
@@ -1513,6 +1894,7 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_KIND_BASE64_STREAM LONEJSON_FIELD_KIND_BASE64_STREAM
 #define LJ_FIELD_KIND_STRING_SOURCE LONEJSON_FIELD_KIND_STRING_SOURCE
 #define LJ_FIELD_KIND_BASE64_SOURCE LONEJSON_FIELD_KIND_BASE64_SOURCE
+#define LJ_FIELD_KIND_JSON_VALUE LONEJSON_FIELD_KIND_JSON_VALUE
 #define LJ_FIELD_KIND_I64 LONEJSON_FIELD_KIND_I64
 #define LJ_FIELD_KIND_U64 LONEJSON_FIELD_KIND_U64
 #define LJ_FIELD_KIND_F64 LONEJSON_FIELD_KIND_F64
@@ -1529,6 +1911,13 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_SOURCE_FILE LONEJSON_SOURCE_FILE
 #define LJ_SOURCE_FD LONEJSON_SOURCE_FD
 #define LJ_SOURCE_PATH LONEJSON_SOURCE_PATH
+
+#define LJ_JSON_VALUE_NULL LONEJSON_JSON_VALUE_NULL
+#define LJ_JSON_VALUE_BUFFER LONEJSON_JSON_VALUE_BUFFER
+#define LJ_JSON_VALUE_READER LONEJSON_JSON_VALUE_READER
+#define LJ_JSON_VALUE_FILE LONEJSON_JSON_VALUE_FILE
+#define LJ_JSON_VALUE_FD LONEJSON_JSON_VALUE_FD
+#define LJ_JSON_VALUE_PATH LONEJSON_JSON_VALUE_PATH
 
 #define LJ_STORAGE_DYNAMIC LONEJSON_STORAGE_DYNAMIC
 #define LJ_STORAGE_FIXED LONEJSON_STORAGE_FIXED
@@ -1556,6 +1945,8 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_STRING_SOURCE_REQ LONEJSON_FIELD_STRING_SOURCE_REQ
 #define LJ_FIELD_BASE64_SOURCE LONEJSON_FIELD_BASE64_SOURCE
 #define LJ_FIELD_BASE64_SOURCE_REQ LONEJSON_FIELD_BASE64_SOURCE_REQ
+#define LJ_FIELD_JSON_VALUE LONEJSON_FIELD_JSON_VALUE
+#define LJ_FIELD_JSON_VALUE_REQ LONEJSON_FIELD_JSON_VALUE_REQ
 #define LJ_FIELD_BASE64_STREAM_OPTS LONEJSON_FIELD_BASE64_STREAM_OPTS
 #define LJ_FIELD_I64 LONEJSON_FIELD_I64
 #define LJ_FIELD_I64_REQ LONEJSON_FIELD_I64_REQ
@@ -1574,275 +1965,433 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_BOOL_ARRAY LONEJSON_FIELD_BOOL_ARRAY
 #define LJ_FIELD_OBJECT_ARRAY LONEJSON_FIELD_OBJECT_ARRAY
 
-/** Short alias of `lonejson_uint32`. */
+/** 32-bit unsigned integer type used by lonejson. */
 typedef lonejson_uint32 lj_uint32;
-/** Short alias of `lonejson_int64`. */
+/** 64-bit signed integer type used by lonejson. */
 typedef lonejson_int64 lj_int64;
-/** Short alias of `lonejson_uint64`. */
+/** 64-bit unsigned integer type used by lonejson. */
 typedef lonejson_uint64 lj_uint64;
-/** Short alias of `lonejson_status`. */
+/** Status code returned by lonejson operations. */
 typedef lonejson_status lj_status;
-/** Short alias of `lonejson_field_kind`. */
+/** Enumerates the supported mapped field kinds. */
 typedef lonejson_field_kind lj_field_kind;
-/** Short alias of `lonejson_source_kind`. */
+/** Enumerates the backing source kinds used by `lj_source`. */
 typedef lonejson_source_kind lj_source_kind;
-/** Short alias of `lonejson_storage_kind`. */
+/** Enumerates the backing kinds supported by `lj_json_value`. */
+typedef lonejson_json_value_kind lj_json_value_kind;
+/** Selects how `lj_json_value` handles inbound parsed JSON. */
+typedef lonejson_json_value_parse_mode lj_json_value_parse_mode;
+/** Bounded limits applied while visiting one `lj_json_value`. */
+typedef lonejson_value_limits lj_value_limits;
+/** Visitor callbacks for one arbitrary `lj_json_value`, including balanced
+ * structure events and chunked string/key/number delivery.
+ */
+typedef lonejson_value_visitor lj_value_visitor;
+/** Describes whether mapped storage is dynamic or fixed-capacity. */
 typedef lonejson_storage_kind lj_storage_kind;
-/** Short alias of `lonejson_overflow_policy`. */
+/** Overflow handling policy for fixed-capacity string storage. */
 typedef lonejson_overflow_policy lj_overflow_policy;
-/** Short alias of `lonejson_error`. */
+/** Detailed error information produced by lonejson APIs. */
 typedef lonejson_error lj_error;
-/** Short alias of `lonejson_spool_options`. */
+/** Configuration for spooled string and base64 storage. */
 typedef lonejson_spool_options lj_spool_options;
-/** Short alias of `lonejson_spooled`. */
+/** Spooled byte container used for streamed string and base64 fields. */
 typedef lonejson_spooled lj_spooled;
-/** Short alias of `lonejson_source`. */
+/** Source-backed string or base64 value that can serialize from file, fd, or path. */
 typedef lonejson_source lj_source;
-/** Short alias of `lonejson_string_array`. */
+/** Opaque arbitrary JSON value that can be memory-backed or source-backed. */
+typedef lonejson_json_value lj_json_value;
+/** Dynamic or fixed-capacity array of UTF-8 strings. */
 typedef lonejson_string_array lj_string_array;
-/** Short alias of `lonejson_i64_array`. */
+/** Dynamic or fixed-capacity array of 64-bit signed integers. */
 typedef lonejson_i64_array lj_i64_array;
-/** Short alias of `lonejson_u64_array`. */
+/** Dynamic or fixed-capacity array of 64-bit unsigned integers. */
 typedef lonejson_u64_array lj_u64_array;
-/** Short alias of `lonejson_f64_array`. */
+/** Dynamic or fixed-capacity array of double-precision numbers. */
 typedef lonejson_f64_array lj_f64_array;
-/** Short alias of `lonejson_bool_array`. */
+/** Dynamic or fixed-capacity array of boolean values. */
 typedef lonejson_bool_array lj_bool_array;
-/** Short alias of `lonejson_object_array`. */
+/** Dynamic or fixed-capacity array of mapped object values. */
 typedef lonejson_object_array lj_object_array;
-/** Short alias of `lonejson_field`. */
+/** Field descriptor used to map one JSON member to one struct member. */
 typedef lonejson_field lj_field;
-/** Short alias of `lonejson_map`. */
+/** Mapping description that defines how a struct is parsed and serialized. */
 typedef lonejson_map lj_map;
-/** Short alias of `lonejson_stream`. */
+/** Incremental parser for object-framed JSON streams. */
 typedef lonejson_stream lj_stream;
-/** Short alias of `lonejson_parse_options`. */
+/** Options that customize parsing behavior. */
 typedef lonejson_parse_options lj_parse_options;
-/** Short alias of `lonejson_read_result`. */
+/** Result of reading bytes from a caller-supplied reader callback. */
 typedef lonejson_read_result lj_read_result;
-/** Short alias of `lonejson_reader_fn`. */
+/** Reader callback used to supply JSON bytes incrementally. */
 typedef lonejson_reader_fn lj_reader_fn;
-/** Short alias of `lonejson_write_options`. */
+/** Options that customize serialization behavior. */
 typedef lonejson_write_options lj_write_options;
-/** Short alias of `lonejson_sink_fn`. */
+/** Sink callback that receives serialized JSON bytes. */
 typedef lonejson_sink_fn lj_sink_fn;
-/** Short alias of `lonejson_stream_result`. */
+/** Result returned when advancing an object-framed JSON stream. */
 typedef lonejson_stream_result lj_stream_result;
 
-/** Short alias of `lonejson_default_spool_options`. */
+/** Returns the default configuration for spooled storage. */
 LONEJSON_SHORT_ALIAS_INLINE lj_spool_options lj_default_spool_options(void) {
   return lonejson_default_spool_options();
 }
-/** Short alias of `lonejson_spooled_init`. */
+/** Initializes an error struct to the empty `OK` state. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_error_init(lj_error *error) {
+  lonejson_error_init(error);
+}
+/** Returns the empty default read result used by reader callbacks. */
+LONEJSON_SHORT_ALIAS_INLINE lj_read_result lj_default_read_result(void) {
+  return lonejson_default_read_result();
+}
+/** Returns the empty visitor with all callbacks set to `NULL`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_value_visitor lj_default_value_visitor(void) {
+  return lonejson_default_value_visitor();
+}
+/** Initializes a spooled byte container. */
 LONEJSON_SHORT_ALIAS_INLINE void
 lj_spooled_init(lj_spooled *value, const lj_spool_options *options) {
   lonejson_spooled_init(value, options);
 }
-/** Short alias of `lonejson_spooled_reset`. */
+/** Clears a spooled value while keeping its reusable storage. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_spooled_reset(lj_spooled *value) {
   lonejson_spooled_reset(value);
 }
-/** Short alias of `lonejson_spooled_cleanup`. */
+/** Releases resources owned by a spooled value. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_spooled_cleanup(lj_spooled *value) {
   lonejson_spooled_cleanup(value);
 }
-/** Short alias of `lonejson_spooled_size`. */
+/** Returns the number of bytes currently stored in a spooled value. */
 LONEJSON_SHORT_ALIAS_INLINE size_t lj_spooled_size(const lj_spooled *value) {
   return lonejson_spooled_size(value);
 }
-/** Short alias of `lonejson_spooled_spilled`. */
+/** Reports whether a spooled value has spilled from memory to a temporary file. */
 LONEJSON_SHORT_ALIAS_INLINE int lj_spooled_spilled(const lj_spooled *value) {
   return lonejson_spooled_spilled(value);
 }
-/** Short alias of `lonejson_spooled_rewind`. */
+/** Rewinds a spooled value so it can be read again from the beginning. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_spooled_rewind(lj_spooled *value,
                                                         lj_error *error) {
   return lonejson_spooled_rewind(value, error);
 }
-/** Short alias of `lonejson_spooled_read`. */
+/** Reads bytes from a spooled value into a caller-provided buffer. */
 LONEJSON_SHORT_ALIAS_INLINE lj_read_result
 lj_spooled_read(lj_spooled *value, unsigned char *buffer, size_t capacity) {
   return lonejson_spooled_read(value, buffer, capacity);
 }
-/** Short alias of `lonejson_spooled_write_to_sink`. */
+/** Streams the contents of a spooled value to an output sink. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_spooled_write_to_sink(
     const lj_spooled *value, lj_sink_fn sink, void *user, lj_error *error) {
   return lonejson_spooled_write_to_sink(value, sink, user, error);
 }
-/** Short alias of `lonejson_source_init`. */
+/** Initializes a source-backed string or base64 handle. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_source_init(lj_source *value) {
   lonejson_source_init(value);
 }
-/** Short alias of `lonejson_source_reset`. */
+/** Resets a source handle to the empty state. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_source_reset(lj_source *value) {
   lonejson_source_reset(value);
 }
-/** Short alias of `lonejson_source_cleanup`. */
+/** Releases resources owned by a source handle. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_source_cleanup(lj_source *value) {
   lonejson_source_cleanup(value);
 }
-/** Short alias of `lonejson_source_set_file`. */
+/** Configures a source handle to read from an open `FILE *`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_source_set_file(lj_source *value,
                                                          FILE *fp,
                                                          lj_error *error) {
   return lonejson_source_set_file(value, fp, error);
 }
-/** Short alias of `lonejson_source_set_fd`. */
+/** Configures a source handle to read from a file descriptor. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_source_set_fd(lj_source *value, int fd,
                                                        lj_error *error) {
   return lonejson_source_set_fd(value, fd, error);
 }
-/** Short alias of `lonejson_source_set_path`. */
+/** Configures a source handle to read from a filesystem path. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_source_set_path(lj_source *value,
                                                          const char *path,
                                                          lj_error *error) {
   return lonejson_source_set_path(value, path, error);
 }
-/** Short alias of `lonejson_source_write_to_sink`. */
+/** Streams the contents referenced by a source handle to an output sink. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_source_write_to_sink(
     const lj_source *value, lj_sink_fn sink, void *user, lj_error *error) {
   return lonejson_source_write_to_sink(value, sink, user, error);
 }
-/** Short alias of `lonejson_default_parse_options`. */
+/** Initializes an arbitrary JSON value handle. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_json_value_init(lj_json_value *value) {
+  lonejson_json_value_init(value);
+}
+/** Resets an arbitrary JSON value handle to JSON `null`. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_json_value_reset(lj_json_value *value) {
+  lonejson_json_value_reset(value);
+}
+/** Releases resources owned by an arbitrary JSON value handle. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_json_value_cleanup(lj_json_value *value) {
+  lonejson_json_value_cleanup(value);
+}
+/** Sets an arbitrary JSON value from a caller-provided memory buffer. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_json_value_set_buffer(lj_json_value *value, const void *data, size_t len,
+                         lj_error *error) {
+  return lonejson_json_value_set_buffer(value, data, len, error);
+}
+
+/** Streams inbound parsed JSON bytes from an arbitrary JSON field to a caller
+ * sink. Keep the handle configured across parse, typically by setting
+ * `clear_destination = 0`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_json_value_set_parse_sink(lj_json_value *value, lj_sink_fn sink, void *user,
+                             lj_error *error) {
+  return lonejson_json_value_set_parse_sink(value, sink, user, error);
+}
+
+/** Streams inbound parsed JSON from an arbitrary JSON field as structured
+ * visitor callbacks with the provided limits. Pass `NULL` limits to use
+ * `lj_default_value_limits()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_json_value_set_parse_visitor(lj_json_value *value,
+                                const lj_value_visitor *visitor, void *user,
+                                const lj_value_limits *limits,
+                                lj_error *error) {
+  return lonejson_json_value_set_parse_visitor(value, visitor, user, limits,
+                                               error);
+}
+
+/** Enables explicit parse-time capture for an arbitrary JSON field so decoded
+ * bytes remain available in the handle after parsing.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_json_value_enable_parse_capture(lj_json_value *value, lj_error *error) {
+  return lonejson_json_value_enable_parse_capture(value, error);
+}
+/** Sets an arbitrary JSON value from a caller-supplied reader callback. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_json_value_set_reader(lj_json_value *value, lj_reader_fn reader, void *user,
+                         lj_error *error) {
+  return lonejson_json_value_set_reader(value, reader, user, error);
+}
+/** Sets an arbitrary JSON value from an open `FILE *`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_json_value_set_file(lj_json_value *value, FILE *fp, lj_error *error) {
+  return lonejson_json_value_set_file(value, fp, error);
+}
+/** Sets an arbitrary JSON value from a file descriptor. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_json_value_set_fd(lj_json_value *value, int fd, lj_error *error) {
+  return lonejson_json_value_set_fd(value, fd, error);
+}
+/** Sets an arbitrary JSON value from a filesystem path. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_json_value_set_path(lj_json_value *value, const char *path,
+                       lj_error *error) {
+  return lonejson_json_value_set_path(value, path, error);
+}
+/** Validates and streams an arbitrary JSON value to an output sink. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_write_to_sink(
+    const lj_json_value *value, lj_sink_fn sink, void *user, lj_error *error) {
+  return lonejson_json_value_write_to_sink(value, sink, user, error);
+}
+/** Returns the default parsing options. */
 LONEJSON_SHORT_ALIAS_INLINE lj_parse_options lj_default_parse_options(void) {
   return lonejson_default_parse_options();
 }
-/** Short alias of `lonejson_default_write_options`. */
+/** Returns lonejson's default bounded limits for arbitrary JSON value
+ * visitors: depth `64`, string `1 MiB`, key `64 KiB`, number `256` bytes,
+ * unlimited total bytes.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_value_limits lj_default_value_limits(void) {
+  return lonejson_default_value_limits();
+}
+/** Returns the default serialization options. */
 LONEJSON_SHORT_ALIAS_INLINE lj_write_options lj_default_write_options(void) {
   return lonejson_default_write_options();
 }
-/** Short alias of `lonejson_status_string`. */
+/** Returns a human-readable string for a status code. */
 LONEJSON_SHORT_ALIAS_INLINE const char *lj_status_string(lj_status status) {
   return lonejson_status_string(status);
 }
-/** Short alias of `lonejson_stream_open_reader`. */
+/** Opens an object-framed JSON stream over a reader callback. */
 LONEJSON_SHORT_ALIAS_INLINE lj_stream *
 lj_stream_open_reader(const lj_map *map, lj_reader_fn reader, void *user,
                       const lj_parse_options *options, lj_error *error) {
   return lonejson_stream_open_reader(map, reader, user, options, error);
 }
-/** Short alias of `lonejson_stream_open_filep`. */
+/** Opens an object-framed JSON stream over an open `FILE *`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_stream *
 lj_stream_open_filep(const lj_map *map, FILE *fp,
                      const lj_parse_options *options, lj_error *error) {
   return lonejson_stream_open_filep(map, fp, options, error);
 }
-/** Short alias of `lonejson_stream_open_path`. */
+/** Opens an object-framed JSON stream over a filesystem path. */
 LONEJSON_SHORT_ALIAS_INLINE lj_stream *
 lj_stream_open_path(const lj_map *map, const char *path,
                     const lj_parse_options *options, lj_error *error) {
   return lonejson_stream_open_path(map, path, options, error);
 }
-/** Short alias of `lonejson_stream_open_fd`. */
+/** Opens an object-framed JSON stream over a file descriptor. */
 LONEJSON_SHORT_ALIAS_INLINE lj_stream *
 lj_stream_open_fd(const lj_map *map, int fd, const lj_parse_options *options,
                   lj_error *error) {
   return lonejson_stream_open_fd(map, fd, options, error);
 }
-/** Short alias of `lonejson_stream_next`. */
+/** Parses the next top-level JSON object from a stream into `dst`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_stream_result lj_stream_next(lj_stream *stream,
                                                             void *dst,
                                                             lj_error *error) {
   return lonejson_stream_next(stream, dst, error);
 }
-/** Short alias of `lonejson_stream_error`. */
+/** Returns the last error recorded by a stream parser. */
 LONEJSON_SHORT_ALIAS_INLINE const lj_error *
 lj_stream_error(const lj_stream *stream) {
   return lonejson_stream_error(stream);
 }
-/** Short alias of `lonejson_stream_close`. */
+/** Closes a stream parser and releases its resources. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_stream_close(lj_stream *stream) {
   lonejson_stream_close(stream);
 }
-/** Short alias of `lonejson_parse_buffer`. */
+/** Parses a JSON buffer into a mapped struct. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_parse_buffer(const lj_map *map, void *dst, const void *data, size_t len,
                 const lj_parse_options *options, lj_error *error) {
   return lonejson_parse_buffer(map, dst, data, len, options, error);
 }
-/** Short alias of `lonejson_parse_cstr`. */
+/** Parses a NUL-terminated JSON string into a mapped struct. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_parse_cstr(const lj_map *map, void *dst, const char *json,
               const lj_parse_options *options, lj_error *error) {
   return lonejson_parse_cstr(map, dst, json, options, error);
 }
-/** Short alias of `lonejson_parse_reader`. */
+/** Parses JSON from a reader callback into a mapped struct. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_parse_reader(const lj_map *map, void *dst, lj_reader_fn reader, void *user,
                 const lj_parse_options *options, lj_error *error) {
   return lonejson_parse_reader(map, dst, reader, user, options, error);
 }
-/** Short alias of `lonejson_parse_filep`. */
+/** Parses JSON from an open `FILE *` into a mapped struct. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_parse_filep(const lj_map *map, void *dst, FILE *fp,
                const lj_parse_options *options, lj_error *error) {
   return lonejson_parse_filep(map, dst, fp, options, error);
 }
-/** Short alias of `lonejson_parse_path`. */
+/** Parses JSON from a filesystem path into a mapped struct. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_parse_path(const lj_map *map, void *dst, const char *path,
               const lj_parse_options *options, lj_error *error) {
   return lonejson_parse_path(map, dst, path, options, error);
 }
-/** Short alias of `lonejson_validate_buffer`. */
+/** Validates that a buffer contains syntactically valid JSON. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_validate_buffer(const void *data,
                                                          size_t len,
                                                          lj_error *error) {
   return lonejson_validate_buffer(data, len, error);
 }
-/** Short alias of `lonejson_validate_cstr`. */
+/** Validates that a NUL-terminated string contains syntactically valid JSON. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_validate_cstr(const char *json,
                                                        lj_error *error) {
   return lonejson_validate_cstr(json, error);
 }
-/** Short alias of `lonejson_validate_reader`. */
+/** Validates JSON produced by a reader callback. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_validate_reader(lj_reader_fn reader,
                                                          void *user,
                                                          lj_error *error) {
   return lonejson_validate_reader(reader, user, error);
 }
-/** Short alias of `lonejson_validate_filep`. */
+/** Validates JSON read from an open `FILE *`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_validate_filep(FILE *fp,
                                                         lj_error *error) {
   return lonejson_validate_filep(fp, error);
 }
-/** Short alias of `lonejson_validate_path`. */
+/** Validates JSON read from a filesystem path. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_validate_path(const char *path,
-                                                       lj_error *error) {
+                                                      lj_error *error) {
   return lonejson_validate_path(path, error);
 }
-/** Short alias of `lonejson_serialize_sink`. */
+/** Visits exactly one JSON value from a caller-provided buffer and rejects
+ * trailing non-whitespace bytes after that value.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_visit_value_buffer(const void *data, size_t len, const lj_value_visitor *visitor,
+                      void *user, const lj_value_limits *limits,
+                      lj_error *error) {
+  return lonejson_visit_value_buffer(data, len, visitor, user, limits, error);
+}
+/** Visits exactly one JSON value from a NUL-terminated string and rejects
+ * trailing non-whitespace bytes after that value.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_visit_value_cstr(const char *json, const lj_value_visitor *visitor, void *user,
+                    const lj_value_limits *limits, lj_error *error) {
+  return lonejson_visit_value_cstr(json, visitor, user, limits, error);
+}
+/** Visits exactly one JSON value from a caller-provided reader callback and
+ * rejects trailing non-whitespace bytes after that value.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_visit_value_reader(lj_reader_fn reader, void *reader_user,
+                      const lj_value_visitor *visitor, void *user,
+                      const lj_value_limits *limits, lj_error *error) {
+  return lonejson_visit_value_reader(reader, reader_user, visitor, user, limits,
+                                     error);
+}
+/** Visits exactly one JSON value from an open `FILE *` and rejects trailing
+ * non-whitespace bytes after that value.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_visit_value_filep(FILE *fp, const lj_value_visitor *visitor, void *user,
+                     const lj_value_limits *limits, lj_error *error) {
+  return lonejson_visit_value_filep(fp, visitor, user, limits, error);
+}
+/** Visits exactly one JSON value from a filesystem path and rejects trailing
+ * non-whitespace bytes after that value.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_visit_value_path(const char *path, const lj_value_visitor *visitor, void *user,
+                    const lj_value_limits *limits, lj_error *error) {
+  return lonejson_visit_value_path(path, visitor, user, limits, error);
+}
+/** Visits exactly one JSON value from a file descriptor and rejects trailing
+ * non-whitespace bytes after that value.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_visit_value_fd(int fd, const lj_value_visitor *visitor, void *user,
+                  const lj_value_limits *limits, lj_error *error) {
+  return lonejson_visit_value_fd(fd, visitor, user, limits, error);
+}
+/** Serializes a mapped struct to a generic output sink callback. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_sink(
     const lj_map *map, const void *src, lj_sink_fn sink, void *user,
     const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_sink(map, src, sink, user, options, error);
 }
-/** Short alias of `lonejson_serialize_buffer`. */
+/** Serializes a mapped struct into a caller-provided output buffer. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_buffer(
     const lj_map *map, const void *src, char *buffer, size_t capacity,
     size_t *needed, const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_buffer(map, src, buffer, capacity, needed, options,
                                    error);
 }
-/** Short alias of `lonejson_serialize_alloc`. */
+/** Serializes a mapped struct into a newly allocated JSON string. */
 LONEJSON_SHORT_ALIAS_INLINE char *
 lj_serialize_alloc(const lj_map *map, const void *src, size_t *out_len,
                    const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_alloc(map, src, out_len, options, error);
 }
-/** Short alias of `lonejson_serialize_filep`. */
+/** Serializes a mapped struct to an open `FILE *`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_serialize_filep(const lj_map *map, const void *src, FILE *fp,
                    const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_filep(map, src, fp, options, error);
 }
-/** Short alias of `lonejson_serialize_path`. */
+/** Serializes a mapped struct to a filesystem path. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_serialize_path(const lj_map *map, const void *src, const char *path,
                   const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_path(map, src, path, options, error);
 }
-/** Short alias of `lonejson_serialize_jsonl_sink`. */
+/** Serializes an array of mapped structs as JSONL records to an output sink. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_serialize_jsonl_sink(const lj_map *map, const void *items, size_t count,
                         size_t stride, lj_sink_fn sink, void *user,
@@ -1850,7 +2399,7 @@ lj_serialize_jsonl_sink(const lj_map *map, const void *items, size_t count,
   return lonejson_serialize_jsonl_sink(map, items, count, stride, sink, user,
                                        options, error);
 }
-/** Short alias of `lonejson_serialize_jsonl_buffer`. */
+/** Serializes an array of mapped structs as JSONL records into a buffer. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_jsonl_buffer(
     const lj_map *map, const void *items, size_t count, size_t stride,
     char *buffer, size_t capacity, size_t *needed,
@@ -1858,7 +2407,7 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_jsonl_buffer(
   return lonejson_serialize_jsonl_buffer(map, items, count, stride, buffer,
                                          capacity, needed, options, error);
 }
-/** Short alias of `lonejson_serialize_jsonl_alloc`. */
+/** Serializes an array of mapped structs as JSONL records into a new string. */
 LONEJSON_SHORT_ALIAS_INLINE char *
 lj_serialize_jsonl_alloc(const lj_map *map, const void *items, size_t count,
                          size_t stride, size_t *out_len,
@@ -1866,72 +2415,76 @@ lj_serialize_jsonl_alloc(const lj_map *map, const void *items, size_t count,
   return lonejson_serialize_jsonl_alloc(map, items, count, stride, out_len,
                                         options, error);
 }
-/** Short alias of `lonejson_serialize_jsonl_filep`. */
+/** Serializes an array of mapped structs as JSONL records to an open `FILE *`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_jsonl_filep(
     const lj_map *map, const void *items, size_t count, size_t stride, FILE *fp,
     const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_jsonl_filep(map, items, count, stride, fp, options,
                                         error);
 }
-/** Short alias of `lonejson_serialize_jsonl_path`. */
+/** Serializes an array of mapped structs as JSONL records to a filesystem path. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_jsonl_path(
     const lj_map *map, const void *items, size_t count, size_t stride,
     const char *path, const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_jsonl_path(map, items, count, stride, path, options,
                                        error);
 }
-/** Short alias of `lonejson_cleanup`. */
+/** Frees dynamic storage owned by a mapped value. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_cleanup(const lj_map *map, void *value) {
   lonejson_cleanup(map, value);
 }
-/** Short alias of `lonejson_reset`. */
+/** Initializes a mapped value according to its field descriptors. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_init(const lj_map *map, void *value) {
+  lonejson_init(map, value);
+}
+/** Resets a mapped value while preserving caller-owned fixed backing storage. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_reset(const lj_map *map, void *value) {
   lonejson_reset(map, value);
 }
 #ifdef LONEJSON_WITH_CURL
-/** Short alias of `lonejson_curl_parse`. */
+/** Curl response parser state for feeding bytes into lonejson incrementally. */
 typedef lonejson_curl_parse lj_curl_parse;
-/** Short alias of `lonejson_curl_upload`. */
+/** Curl upload state for serving serialized JSON bytes to libcurl. */
 typedef lonejson_curl_upload lj_curl_upload;
-/** Short alias of `lonejson_curl_parse_init`. */
+/** Initializes a curl parse adapter for use with `CURLOPT_WRITEFUNCTION`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_curl_parse_init(lj_curl_parse *ctx, const lj_map *map, void *dst,
                    const lj_parse_options *options) {
   return lonejson_curl_parse_init(ctx, map, dst, options);
 }
-/** Short alias of `lonejson_curl_write_callback`. */
+/** Curl write callback that forwards response bytes into a parse adapter. */
 LONEJSON_SHORT_ALIAS_INLINE size_t lj_curl_write_callback(char *ptr,
                                                           size_t size,
                                                           size_t nmemb,
                                                           void *userdata) {
   return lonejson_curl_write_callback(ptr, size, nmemb, userdata);
 }
-/** Short alias of `lonejson_curl_parse_finish`. */
+/** Finalizes parsing after curl has delivered the complete response body. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_curl_parse_finish(lj_curl_parse *ctx) {
   return lonejson_curl_parse_finish(ctx);
 }
-/** Short alias of `lonejson_curl_parse_cleanup`. */
+/** Releases resources owned by a curl parse adapter. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_curl_parse_cleanup(lj_curl_parse *ctx) {
   lonejson_curl_parse_cleanup(ctx);
 }
-/** Short alias of `lonejson_curl_upload_init`. */
+/** Initializes a curl upload adapter for a mapped struct. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_curl_upload_init(lj_curl_upload *ctx, const lj_map *map, const void *src,
                     const lj_write_options *options) {
   return lonejson_curl_upload_init(ctx, map, src, options);
 }
-/** Short alias of `lonejson_curl_read_callback`. */
+/** Curl read callback that serves serialized JSON bytes from an upload adapter. */
 LONEJSON_SHORT_ALIAS_INLINE size_t lj_curl_read_callback(char *ptr, size_t size,
                                                          size_t nmemb,
                                                          void *userdata) {
   return lonejson_curl_read_callback(ptr, size, nmemb, userdata);
 }
-/** Short alias of `lonejson_curl_upload_size`. */
+/** Returns the payload size exposed by a curl upload adapter. */
 LONEJSON_SHORT_ALIAS_INLINE curl_off_t
 lj_curl_upload_size(const lj_curl_upload *ctx) {
   return lonejson_curl_upload_size(ctx);
 }
-/** Short alias of `lonejson_curl_upload_cleanup`. */
+/** Releases resources owned by a curl upload adapter. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_curl_upload_cleanup(lj_curl_upload *ctx) {
   lonejson_curl_upload_cleanup(ctx);
 }

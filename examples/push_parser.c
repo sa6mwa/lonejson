@@ -23,7 +23,7 @@ LONEJSON_MAP_DEFINE(build_info_map, build_info, build_info_fields);
 static lonejson_read_result build_reader(void *user, unsigned char *buffer,
                                          size_t capacity) {
   build_reader_state *st = (build_reader_state *)user;
-  lonejson_read_result rr = {0};
+  lonejson_read_result rr = lonejson_default_read_result();
   size_t remaining = strlen(st->json) - st->offset;
   size_t chunk = remaining < 6u ? remaining : 6u;
 
@@ -45,6 +45,8 @@ int main(void) {
   lonejson_error error;
   lonejson_stream *stream;
   lonejson_stream_result result;
+
+  lonejson_init(&build_info_map, &info);
 
   stream = lonejson_stream_open_reader(&build_info_map, build_reader, &state,
                                        NULL, &error);

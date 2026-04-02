@@ -63,6 +63,11 @@ eval "$(luarocks path --tree build/luarocks)"
 The example program in [`examples/lua_binding.lua`](../examples/lua_binding.lua)
 is a good companion to this document.
 
+When you also use the C API around the Lua binding, follow the same
+initialization rule as the rest of lonejson: use the public `*_init` and
+`lonejson_default_*` helpers for public structs instead of manual `memset`
+or `{0}`.
+
 ## The schema DSL
 
 The binding starts with a schema description. A schema is a name plus a list of
@@ -99,6 +104,7 @@ The field constructors mirror the main families in the C library:
 - `lj.f64`
 - `lj.bool` / `lj.boolean`
 - `lj.object`
+- `lj.json_value`
 - `lj.string_array`
 - `lj.i64_array`
 - `lj.u64_array`
@@ -107,6 +113,42 @@ The field constructors mirror the main families in the C library:
 - `lj.object_array`
 - `lj.spooled_text`
 - `lj.spooled_bytes`
+
+`lj.json_value` maps one field to arbitrary nested JSON. In Lua it decodes to
+native Lua values: objects become tables tagged as objects, arrays become
+tables tagged as arrays, strings become Lua strings, numbers become Lua
+numbers, booleans become booleans, and nested JSON `null` values become the
+singleton `lj.json_null` so they survive round-trips inside arrays and objects.
+When the entire `json_value` field is JSON `null`, the field itself is exposed
+as Lua `nil`.
+
+In table-returning decode paths, `json_value` is built directly from lonejson's
+streamed parse visitor callbacks into normal Lua values; it does not first
+materialize the whole nested value as retained raw JSON bytes on the C side.
+Reusable record mode still keeps an explicit retained C representation so the
+record can be accessed repeatedly after decode.
+
+Use `lj.json_object(tbl)` and `lj.json_array(tbl)` when you want to preserve
+object-vs-array intent while assigning arbitrary JSON values from Lua tables,
+especially for empty tables.
+
+```lua
+local Query = lj.schema("Query", {
+  lj.field("namespace", lj.string { required = true }),
+  lj.field("selector", lj.json_value { required = true }),
+  lj.field("fields", lj.json_value()),
+})
+
+local q = Query:decode([[{
+  "namespace": "ops",
+  "selector": {"op":"and","clauses":[{"field":"status","value":"open"}]},
+  "fields": ["id", "title", {"metrics":["latency", true, 3.14]}]
+}]])
+
+assert(q.selector.op == "and")
+assert(q.fields[1] == "id")
+assert(q.fields[3].metrics[2] == lj.json_null)
+```
 
 The shape is intentionally explicit. A schema is not an afterthought; it is the
 contract that makes the rest of the API efficient and predictable.

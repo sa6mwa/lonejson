@@ -6,7 +6,7 @@ local BENCH_SAMPLE_COUNT = 5
 local BENCH_MIN_SAMPLE_NS = 100000000
 local BENCH_SCHEMA_VERSION = 6
 local BENCH_NOISE_DELTA_PCT = 3.0
-local BENCH_MATERIAL_DELTA_PCT = 10.0
+local BENCH_MATERIAL_DELTA_PCT = 5.0
 
 local PARSE_JSON = table.concat({
   '{"name":"Alice","nickname":"Wonderland","age":34,',
@@ -1305,12 +1305,61 @@ local function compare_runs(baseline_path, latest_path)
   end
 end
 
+local function is_material_regression(prior, current)
+  local delta_pct
+  if prior == nil or prior.mib_per_sec == 0.0 then
+    return false
+  end
+  if current.mib_per_sec >= prior.mib_per_sec then
+    return false
+  end
+  delta_pct = ((current.mib_per_sec - prior.mib_per_sec) / prior.mib_per_sec) * 100.0
+  return classify_delta(delta_pct) == "material"
+end
+
+local function gate_tracked_result(current)
+  return not current.name:match("/cjson$")
+end
+
+local function gate_runs(baseline_path, latest_path)
+  local baseline = BenchRunSchema:decode_path(baseline_path)
+  local latest = BenchRunSchema:decode_path(latest_path)
+  local baseline_index = index_results(baseline)
+  local schema_mismatch = baseline.schema_version ~= latest.schema_version
+  local missing = 0
+  local material = 0
+  local i
+
+  for i = 1, #latest.results do
+    local current = latest.results[i]
+    local prior = baseline_index[current.name]
+    if not gate_tracked_result(current) then
+      -- Ignore non-lonejson sibling/reference lanes in the hard gate.
+    elseif prior == nil then
+      missing = missing + 1
+    elseif is_material_regression(prior, current) then
+      material = material + 1
+    end
+  end
+
+  print(string.format("lua gate baseline=%s latest=%s", baseline_path, latest_path))
+  print(string.format("  schema mismatch: %s", schema_mismatch and "yes" or "no"))
+  print(string.format("  missing results: %d", missing))
+  print(string.format("  material regressions: %d", material))
+
+  if schema_mismatch or missing ~= 0 or material ~= 0 then
+    io.stderr:write("lua benchmark gate failed: refresh the baseline for intentional benchmark-schema changes or fix the regressions before landing\n")
+    os.exit(1)
+  end
+end
+
 local function usage()
   io.stderr:write("usage:\n")
   io.stderr:write("  lua bench/lonejson_lua_bench.lua run <c_latest> <latest> <history> <archive_dir> <iterations>\n")
   io.stderr:write("  lua bench/lonejson_lua_bench.lua case <c_latest> <case_name> <iterations>\n")
   io.stderr:write("  lua bench/lonejson_lua_bench.lua freeze-baseline <history> <baseline>\n")
   io.stderr:write("  lua bench/lonejson_lua_bench.lua compare <baseline> <latest>\n")
+  io.stderr:write("  lua bench/lonejson_lua_bench.lua gate <baseline> <latest>\n")
   os.exit(1)
 end
 
@@ -1331,6 +1380,8 @@ elseif cmd == "case" then
   run_single_case(arg[3], tonumber(arg[4]) or 1, arg[2])
 elseif cmd == "compare" then
   compare_runs(arg[2], arg[3])
+elseif cmd == "gate" then
+  gate_runs(arg[2], arg[3])
 else
   usage()
 end

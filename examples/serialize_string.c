@@ -16,10 +16,11 @@ static const lonejson_field api_response_fields[] = {
 LONEJSON_MAP_DEFINE(api_response_map, api_response, api_response_fields);
 
 int main(void) {
-  api_response response = {0};
+  api_response response;
   lonejson_error error;
   char *json;
 
+  lonejson_init(&api_response_map, &response);
   response.message = "created";
   response.code = 201;
   response.retry = false;

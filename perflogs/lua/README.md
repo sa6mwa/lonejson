@@ -16,3 +16,10 @@ The Lua benchmark harness is separate from the C benchmark harness. It compares 
 If `lua-cjson` is available in the active Lua environment, the harness also adds bounded-memory decode lanes for it. Those third-party cases are intentionally limited to one-shot decode scenarios and line-by-line JSONL decode from `lockdbench.jsonl`; they are not used for lonejson-style streaming or large generated fixture runs.
 
 The multilingual `*_wide/*` lanes are included specifically to show that this advantage is not limited to single-field objects.
+
+`lua-bench-gate` is the hard check for the Lua harness:
+
+* it fails if the Lua benchmark schema version differs from the baseline
+* it fails if the baseline is missing any current lonejson Lua benchmark lanes
+* it fails on any negative throughput regression of `5%` or more
+* it does not gate on `cjson` sibling/reference lanes
