@@ -32,6 +32,13 @@
       }
     },
     {
+      "name": "host-curl",
+      "inherits": "host",
+      "cacheVariables": {
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
+    },
+    {
       "name": "linux-gnu-release",
       "inherits": "host",
       "cacheVariables": {
@@ -48,6 +55,20 @@
         "LONEJSON_TARGET_ARCH": "x86_64",
         "LONEJSON_TARGET_OS": "linux",
         "LONEJSON_TARGET_LIBC": "musl"
+      }
+    },
+    {
+      "name": "linux-gnu-curl-release",
+      "inherits": "linux-gnu-release",
+      "cacheVariables": {
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
+    },
+    {
+      "name": "linux-musl-curl-release",
+      "inherits": "linux-musl-release",
+      "cacheVariables": {
+        "LONEJSON_BUILD_WITH_CURL": "ON"
       }
     },
     {
@@ -69,6 +90,34 @@
       "name": "armhf-linux-musl-release",
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-musl.cmake"
+    },
+    {
+      "name": "aarch64-linux-gnu-curl-release",
+      "inherits": "aarch64-linux-gnu-release",
+      "cacheVariables": {
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
+    },
+    {
+      "name": "aarch64-linux-musl-curl-release",
+      "inherits": "aarch64-linux-musl-release",
+      "cacheVariables": {
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
+    },
+    {
+      "name": "armhf-linux-gnu-curl-release",
+      "inherits": "armhf-linux-gnu-release",
+      "cacheVariables": {
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
+    },
+    {
+      "name": "armhf-linux-musl-curl-release",
+      "inherits": "armhf-linux-musl-release",
+      "cacheVariables": {
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
     },
     {
       "name": "asan",
@@ -106,6 +155,10 @@
       "configurePreset": "host"
     },
     {
+      "name": "host-curl",
+      "configurePreset": "host-curl"
+    },
+    {
       "name": "asan",
       "configurePreset": "asan"
     },
@@ -122,6 +175,14 @@
       "configurePreset": "linux-musl-release"
     },
     {
+      "name": "linux-gnu-curl-release",
+      "configurePreset": "linux-gnu-curl-release"
+    },
+    {
+      "name": "linux-musl-curl-release",
+      "configurePreset": "linux-musl-curl-release"
+    },
+    {
       "name": "aarch64-linux-gnu-release",
       "configurePreset": "aarch64-linux-gnu-release"
     },
@@ -136,6 +197,22 @@
     {
       "name": "armhf-linux-musl-release",
       "configurePreset": "armhf-linux-musl-release"
+    },
+    {
+      "name": "aarch64-linux-gnu-curl-release",
+      "configurePreset": "aarch64-linux-gnu-curl-release"
+    },
+    {
+      "name": "aarch64-linux-musl-curl-release",
+      "configurePreset": "aarch64-linux-musl-curl-release"
+    },
+    {
+      "name": "armhf-linux-gnu-curl-release",
+      "configurePreset": "armhf-linux-gnu-curl-release"
+    },
+    {
+      "name": "armhf-linux-musl-curl-release",
+      "configurePreset": "armhf-linux-musl-curl-release"
     },
     {
       "name": "format",
@@ -161,6 +238,20 @@
     {
       "name": "package-archive-linux-musl",
       "configurePreset": "linux-musl-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-linux-gnu-curl",
+      "configurePreset": "linux-gnu-curl-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-linux-musl-curl",
+      "configurePreset": "linux-musl-curl-release",
       "targets": [
         "package-archive"
       ]
@@ -194,10 +285,45 @@
       ]
     },
     {
+      "name": "package-archive-aarch64-linux-gnu-curl",
+      "configurePreset": "aarch64-linux-gnu-curl-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-aarch64-linux-musl-curl",
+      "configurePreset": "aarch64-linux-musl-curl-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-armhf-linux-gnu-curl",
+      "configurePreset": "armhf-linux-gnu-curl-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-armhf-linux-musl-curl",
+      "configurePreset": "armhf-linux-musl-curl-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
       "name": "package-single-header",
       "configurePreset": "host",
       "targets": [
         "package-single-header"
+      ]
+    },
+    {
+      "name": "package-source",
+      "configurePreset": "host",
+      "targets": [
+        "package-source"
       ]
     },
     {
@@ -231,6 +357,13 @@
       }
     },
     {
+      "name": "host-curl",
+      "configurePreset": "host-curl",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
       "name": "asan",
       "configurePreset": "asan",
       "output": {
@@ -247,6 +380,20 @@
     {
       "name": "linux-musl-release",
       "configurePreset": "linux-musl-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gnu-curl-release",
+      "configurePreset": "linux-gnu-curl-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-musl-curl-release",
+      "configurePreset": "linux-musl-curl-release",
       "output": {
         "outputOnFailure": true
       }
@@ -275,6 +422,34 @@
     {
       "name": "armhf-linux-musl-release",
       "configurePreset": "armhf-linux-musl-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "aarch64-linux-gnu-curl-release",
+      "configurePreset": "aarch64-linux-gnu-curl-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "aarch64-linux-musl-curl-release",
+      "configurePreset": "aarch64-linux-musl-curl-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "armhf-linux-gnu-curl-release",
+      "configurePreset": "armhf-linux-gnu-curl-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "armhf-linux-musl-curl-release",
+      "configurePreset": "armhf-linux-musl-curl-release",
       "output": {
         "outputOnFailure": true
       }

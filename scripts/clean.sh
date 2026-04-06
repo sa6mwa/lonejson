@@ -55,6 +55,7 @@ remove_path() {
 if [ "$mode" = "all" ]; then
     remove_path "$root_dir/build"
     remove_path "$root_dir/.deps"
+    remove_path "$root_dir/.luarocks-build"
     remove_path "$root_dir/examples/bin"
     remove_path "$root_dir/lonejson"
 fi

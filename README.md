@@ -89,6 +89,15 @@ The source-tree `include/lonejson.h` is the linked-library public header. The
 generated single-header artifact is a separate release output, not the same
 file.
 
+curl integration remains optional at compile time. When you want the curl
+adapter declarations, define `LONEJSON_WITH_CURL` before including
+`lonejson.h` and compile against a build environment that provides curl
+headers and libraries. `lonejson_curl_upload_init()` now sits on top of the
+public pull-style generator API and feeds libcurl through
+`CURLOPT_READFUNCTION` without materializing the whole JSON payload first.
+That upload path currently reports `-1` for the total size because lonejson
+does not prebuffer or pre-count the payload.
+
 Short aliases are enabled by default. Disable them if they collide with another
 project:
 
@@ -105,9 +114,10 @@ by `lonejson_parse_cstr`, `lonejson_parse_buffer`, `lonejson_parse_reader`,
 `lonejson_parse_filep`, and `lonejson_parse_path`, with `lonejson_validate_*`
 variants available when syntax validation is all you need. Streaming uses
 `lonejson_stream_open_*`, `lonejson_stream_next`, `lonejson_stream_error`, and
-`lonejson_stream_close`. Serialization is exposed through `lonejson_serialize_*`
-and `lonejson_serialize_jsonl_*`. Ownership and reuse of mapped values is
-handled by `lonejson_cleanup` and `lonejson_reset`.
+`lonejson_stream_close`. Serialization is exposed through `lonejson_serialize_*`,
+`lonejson_serialize_jsonl_*`, and the pull-style
+`lonejson_generator_init/read/cleanup` trio. Ownership and reuse of mapped
+values is handled by `lonejson_cleanup` and `lonejson_reset`.
 
 Large-value handling is expressed explicitly. `lonejson_spooled` and
 `lonejson_spool_options` are for inbound values that may spill to disk.
@@ -118,6 +128,38 @@ where a typed envelope needs to embed one already-formed JSON value directly,
 and `lonejson_visit_value_*` covers the lower-level case where one arbitrary
 JSON value should be visited without a schema. Parse and write behavior is
 configured through `lonejson_parse_options` and `lonejson_write_options`.
+
+The new generator surface is the transport-facing serializer primitive. It is
+bounded and pull-based rather than sink-driven, so adapters like curl upload do
+not need worker threads or hidden full-payload buffers. It supports the normal
+mapped serializer surface plus `lonejson_source`, `lonejson_spooled`, and
+`lonejson_json_value` fields. `json_value` fields are streamed through the
+generator directly instead of silently falling back to buffered serialization.
+
+```c
+lonejson_generator generator;
+unsigned char chunk[4096];
+size_t out_len;
+int eof;
+
+status = lonejson_generator_init(&generator, &event_map, &event, NULL);
+if (status != LONEJSON_STATUS_OK) {
+  fprintf(stderr, "generator init failed: %s\n", generator.error.message);
+  return 1;
+}
+
+eof = 0;
+while (!eof) {
+  status = lonejson_generator_read(&generator, chunk, sizeof(chunk), &out_len,
+                                   &eof);
+  if (status != LONEJSON_STATUS_OK) {
+    fprintf(stderr, "generator read failed: %s\n", generator.error.message);
+    break;
+  }
+  fwrite(chunk, 1u, out_len, stdout);
+}
+lonejson_generator_cleanup(&generator);
+```
 
 ## Quick start
 
@@ -233,12 +275,18 @@ static const lonejson_field ingest_doc_fields[] = {
 LONEJSON_MAP_DEFINE(ingest_doc_map, ingest_doc, ingest_doc_fields);
 ```
 
-Then configure spill behavior at parse time:
+Then configure spill behavior on the field mapping:
 
 ```c
-lonejson_parse_options options = lonejson_default_parse_options();
-options.spool.memory_limit = 64u * 1024u;
-options.spool.temp_dir = "/tmp";
+static const lonejson_spool_options ingest_spool = {
+  64u * 1024u,
+  0u,
+  "/tmp"
+};
+
+static const lonejson_field ingest_doc_fields[] = {
+  LONEJSON_FIELD_STRING_STREAM_OPTS(ingest_doc, body, "body", &ingest_spool)
+};
 ```
 
 The resulting `lonejson_spooled` value remains in memory when it is small and
@@ -392,8 +440,12 @@ manual `memset` or `{0}`:
 - `lonejson_init(map, &value)` for mapped structs
 - `lonejson_json_value_init`, `lonejson_source_init`, `lonejson_spooled_init`
   for explicit handles
+- `lonejson_json_value_init_with_allocator` and
+  `lonejson_spooled_init_with_allocator` when an explicit allocator should own
+  future internal allocations
 - `lonejson_default_parse_options()`, `lonejson_default_write_options()`,
-  `lonejson_default_value_visitor()`, and `lonejson_default_read_result()`
+  `lonejson_default_value_visitor()`, `lonejson_default_read_result()`, and
+  `lonejson_default_allocator()`
   for option/result structs
 
 `lonejson_error` is output-only and does not need prior initialization, but
@@ -410,6 +462,48 @@ options.pretty = 1;
 
 The same option applies to normal JSON serializers and to JSONL serializers,
 where each record is formatted independently and then terminated by `\n`.
+
+When you use the default alloc-returning serializer, release the returned
+buffer with `LONEJSON_FREE()`:
+
+```c
+char *json = lonejson_serialize_alloc(&user_doc_map, &doc, NULL, NULL, &error);
+if (json == NULL) {
+  return 1;
+}
+
+puts(json);
+LONEJSON_FREE(json);
+```
+
+Custom allocators can be attached per parse or write operation. For
+alloc-returning serializers with a custom allocator, use the owned-buffer
+variants:
+
+```c
+static void *my_malloc(void *ctx, size_t size) { return malloc(size); }
+static void *my_realloc(void *ctx, void *ptr, size_t size) {
+  return realloc(ptr, size);
+}
+static void my_free(void *ctx, void *ptr) { free(ptr); }
+
+lonejson_allocator allocator = lonejson_default_allocator();
+lonejson_parse_options parse_options = lonejson_default_parse_options();
+lonejson_write_options write_options = lonejson_default_write_options();
+
+allocator.malloc_fn = my_malloc;
+allocator.realloc_fn = my_realloc;
+allocator.free_fn = my_free;
+parse_options.allocator = &allocator;
+write_options.allocator = &allocator;
+
+lonejson_owned_buffer owned = lonejson_default_owned_buffer();
+if (lonejson_serialize_owned(&user_doc_map, &doc, &owned, &write_options,
+                             &error) == LONEJSON_STATUS_OK) {
+  puts(owned.data);
+}
+lonejson_owned_buffer_free(&owned);
+```
 
 ## Benchmarks
 
@@ -484,19 +578,20 @@ make release
 
 That command produces:
 
-- six binary release tarballs named `liblonejson-<version>-<target>.tar.gz`
-  for the supported GNU and musl Linux targets
+- a source-only archive, `lonejson-<version>.tar.gz`
 - a compressed standalone single-header artifact,
   `lonejson-<version>.h.gz`
-- a versioned Lua rockspec
-- a packed Lua source rock
+- a versioned Lua rockspec and packed Lua source rock
 - a SHA-256 manifest under `dist/`
 
-The binary tarballs contain the declarations-only public header plus the
-matching `liblonejson.a` and `liblonejson.so` artifacts. The compressed header
-artifact is the standalone embedded form for single-header integration. The
-version is taken from an exact `vX.Y.Z` tag on `HEAD`; if the current commit is
-untagged, the release version falls back to `0.0.0`.
+The compressed header artifact is the standalone embedded form for
+single-header integration. The source-only archive contains the repository
+source tree without generated build output or local stash material. The Lua
+source package prefers a curl-enabled native build when curl is available in
+the build environment and falls back automatically to a curl-free build
+otherwise. The release version comes from `VERSION` when present in the source
+tree, otherwise from an exact `vX.Y.Z` tag on `HEAD`, and otherwise falls back
+to `0.0.0`.
 
 ## Verification
 
@@ -504,11 +599,15 @@ The standard verification commands are:
 
 ```sh
 make test
+make test-all-bindings
 make asan
-make bench
-make lua-bench
+make bench-gate
+make lua-bench-gate
 make fuzz
 ```
+
+`make test-all` is the C-centric aggregate suite. Use
+`make test-all-bindings` when you also want the optional Lua binding tests.
 
 ## License
 

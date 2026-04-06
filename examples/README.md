@@ -29,6 +29,7 @@ The same pattern applies to:
 * `parse_file.c`
 * `parse_reader.c`
 * `push_parser.c` (object-framed streaming reader example)
+* `generator_pull.c` (pull-style generator example for transport adapters)
 * `json_value_buffer.c` (embeds selector/fields JSON directly from memory)
 * `json_value_parse.c` (enables explicit parse capture for opaque embedded JSON
   values and re-emits them)

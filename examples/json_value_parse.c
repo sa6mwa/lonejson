@@ -76,7 +76,7 @@ int main(void) {
 
   printf("pretty=%s\n", pretty);
 
-  free(pretty);
+  LONEJSON_FREE(pretty);
   lj_cleanup(&parsed_envelope_map, &doc);
   return 0;
 }

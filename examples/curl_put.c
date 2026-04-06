@@ -36,10 +36,14 @@ int main(void) {
   const char *ca_path;
   upload_payload payload = {"from curl_put.c", 77};
   lonejson_curl_upload upload_ctx;
+  lonejson_status status;
 
-  if (lonejson_curl_upload_init(&upload_ctx, &upload_payload_map, &payload,
-                                NULL) != LONEJSON_STATUS_OK) {
-    fprintf(stderr, "upload init failed: %s\n", upload_ctx.error.message);
+  status = lonejson_curl_upload_init(&upload_ctx, &upload_payload_map, &payload,
+                                     NULL);
+  if (status != LONEJSON_STATUS_OK) {
+    fprintf(stderr, "upload init failed: %s\n",
+            upload_ctx.generator.error.message);
+    lonejson_curl_upload_cleanup(&upload_ctx);
     return 1;
   }
 

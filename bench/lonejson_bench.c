@@ -18,7 +18,8 @@
 #define BENCH_MIN_SAMPLE_NS 100000000u
 #define BENCH_NOISE_DELTA_PCT 3.0
 #define BENCH_MATERIAL_DELTA_PCT 5.0
-#define BENCH_SCHEMA_VERSION 12u
+#define BENCH_REVIEW_IMPROVEMENT_PCT 10.0
+#define BENCH_SCHEMA_VERSION 17u
 
 typedef enum bench_doc_kind {
   BENCH_DOC_VALID = 1,
@@ -119,6 +120,9 @@ typedef struct bench_fixed_target {
   lonejson_int64 numbers_storage[BENCH_PARSE_ITEM_CAPACITY];
   bench_item item_storage[BENCH_PARSE_ITEM_CAPACITY];
 } bench_fixed_target;
+
+static int bench_validate_loaded_run(const bench_run *run);
+static size_t bench_count_result_mismatches(const bench_run *run);
 
 typedef struct bench_mem_reader {
   const unsigned char *data;
@@ -680,12 +684,6 @@ static void bench_run_prepare(bench_run *run) {
   run->results.capacity = BENCH_MAX_RESULTS;
   run->results.elem_size = sizeof(run->result_storage[0]);
   run->results.flags = LONEJSON_ARRAY_FIXED_CAPACITY;
-}
-
-static void bench_run_copy(bench_run *dst, const bench_run *src) {
-  memcpy(dst, src, sizeof(*dst));
-  memcpy(dst->result_storage, src->result_storage, sizeof(dst->result_storage));
-  dst->results.items = dst->result_storage;
 }
 
 static void bench_u64_to_string(lonejson_uint64 value, char *buffer,
@@ -1574,14 +1572,23 @@ static int bench_stream_vendor_doc_case(void *user) {
   lonejson_stream *stream;
   lonejson_stream_result result;
   lonejson_error error;
+  lonejson_parse_options options;
 
   ctx = (bench_vendor_doc_case *)user;
   reader.data = ctx->json;
   reader.len = ctx->json_len;
   reader.offset = 0u;
-  reader.chunk_size = 31u;
+  /* Use the configured stream-sized reader path here. Tiny synthetic chunks
+   * overstress callback overhead and were the remaining source of full-suite
+   * instability in the vendor stream lanes. */
+  reader.chunk_size = LONEJSON_STREAM_BUFFER_SIZE;
+  options = lonejson_default_parse_options();
+  if (ctx->kind == BENCH_VENDOR_LONG_STRINGS) {
+    /* This case uses a fixed-capacity prepared object-array target. */
+    options.clear_destination = 0;
+  }
   stream = lonejson_stream_open_reader(ctx->map, bench_mem_reader_fn, &reader,
-                                       NULL, &error);
+                                       &options, &error);
   if (stream == NULL) {
     return 0;
   }
@@ -2308,6 +2315,7 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   unsigned char *arabic_wide_json_data;
   size_t arabic_wide_json_len;
   size_t doc_count;
+  size_t mismatch_count;
   lonejson_uint64 total_bytes;
   lonejson_uint64 y_count;
   lonejson_uint64 n_count;
@@ -2674,8 +2682,50 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           iterations, visit_japanese_wide_case.json_len, 1u);
     run.results.count = result_index;
   }
+  if (!bench_validate_loaded_run(&run)) {
+    fprintf(stderr,
+            "benchmark run failed: generated run data is incomplete or "
+            "corrupted\n");
+    bench_cleanup_json_value_doc(&json_value_record);
+    bench_cleanup_json_value_doc(&json_value_source_record);
+    LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
+    LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
+    LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
+    LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
+    free(lockd_jsonl_data);
+    free(japanese_json_data);
+    free(hebrew_json_data);
+    free(arabic_json_data);
+    free(japanese_wide_json_data);
+    free(hebrew_wide_json_data);
+    free(arabic_wide_json_data);
+    bench_free_docs(docs, doc_count);
+    return 1;
+  }
 
   bench_print_run_report(&run);
+  mismatch_count = bench_count_result_mismatches(&run);
+  if (mismatch_count != 0u) {
+    fprintf(stderr,
+            "benchmark run failed: %lu benchmark case(s) produced mismatches; "
+            "fix correctness before using these results\n",
+            (unsigned long)mismatch_count);
+    bench_cleanup_json_value_doc(&json_value_record);
+    bench_cleanup_json_value_doc(&json_value_source_record);
+    LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
+    LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
+    LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
+    LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
+    free(lockd_jsonl_data);
+    free(japanese_json_data);
+    free(hebrew_json_data);
+    free(arabic_json_data);
+    free(japanese_wide_json_data);
+    free(hebrew_wide_json_data);
+    free(arabic_wide_json_data);
+    bench_free_docs(docs, doc_count);
+    return 1;
+  }
   if (bench_write_outputs(&run, latest_path, history_path, archive_dir) != 0) {
     bench_cleanup_json_value_doc(&json_value_record);
     bench_cleanup_json_value_doc(&json_value_source_record);
@@ -3192,10 +3242,13 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
 }
 
 static int bench_read_run(const char *path, bench_run *run) {
+  lonejson_parse_options options;
   lonejson_error error;
 
   bench_run_prepare(run);
-  if (lonejson_parse_path(&bench_run_map, run, path, NULL, &error) !=
+  options = lonejson_default_parse_options();
+  options.clear_destination = 0;
+  if (lonejson_parse_path(&bench_run_map, run, path, &options, &error) !=
       LONEJSON_STATUS_OK) {
     return 1;
   }
@@ -3203,38 +3256,132 @@ static int bench_read_run(const char *path, bench_run *run) {
   return 0;
 }
 
-static int bench_freeze_baseline_command(const char *history_path,
-                                         const char *baseline_path) {
-  bench_run current;
-  bench_run last;
-  lonejson_stream *stream;
-  lonejson_stream_result result;
+static int bench_read_last_history_line(const char *history_path, char **line_out,
+                                        size_t *len_out) {
+  FILE *fp;
+  char *line;
+  char *last_valid;
+  size_t len;
+  size_t cap;
+  int ch;
+  lonejson_parse_options options;
+  bench_run parsed;
   lonejson_error error;
-  int have_last;
 
-  stream =
-      lonejson_stream_open_path(&bench_run_map, history_path, NULL, &error);
-  if (stream == NULL) {
+  if (line_out == NULL || len_out == NULL) {
     return 1;
   }
-  bench_run_prepare(&current);
-  bench_run_prepare(&last);
-  have_last = 0;
-
-  for (;;) {
-    result = lonejson_stream_next(stream, &current, &error);
-    if (result == LONEJSON_STREAM_EOF) {
-      break;
-    }
-    if (result != LONEJSON_STREAM_OBJECT) {
-      lonejson_stream_close(stream);
-      return 1;
-    }
-    bench_run_copy(&last, &current);
-    have_last = 1;
+  *line_out = NULL;
+  *len_out = 0u;
+  fp = fopen(history_path, "rb");
+  if (fp == NULL) {
+    return 1;
   }
-  lonejson_stream_close(stream);
-  if (!have_last) {
+  cap = 4096u;
+  line = (char *)malloc(cap);
+  if (line == NULL) {
+    fclose(fp);
+    return 1;
+  }
+  last_valid = NULL;
+  len = 0u;
+  options = lonejson_default_parse_options();
+  options.clear_destination = 0;
+  while ((ch = fgetc(fp)) != EOF) {
+    if (len + 1u >= cap) {
+      char *grown = (char *)realloc(line, cap * 2u);
+      if (grown == NULL) {
+        free(line);
+        free(last_valid);
+        fclose(fp);
+        return 1;
+      }
+      line = grown;
+      cap *= 2u;
+    }
+    line[len++] = (char)ch;
+    if (ch == '\n') {
+      while (len != 0u &&
+             (line[len - 1u] == '\n' || line[len - 1u] == '\r')) {
+        --len;
+      }
+      if (len != 0u) {
+        line[len] = '\0';
+        bench_run_prepare(&parsed);
+        if (lonejson_parse_buffer(&bench_run_map, &parsed, line, len, &options,
+                                  &error) == LONEJSON_STATUS_OK &&
+            bench_validate_loaded_run(&parsed)) {
+          char *copy = (char *)malloc(len + 1u);
+          if (copy == NULL) {
+            free(line);
+            free(last_valid);
+            fclose(fp);
+            return 1;
+          }
+          memcpy(copy, line, len + 1u);
+          free(last_valid);
+          last_valid = copy;
+        }
+        len = 0u;
+      }
+    }
+  }
+  fclose(fp);
+  while (len != 0u && (line[len - 1u] == '\n' || line[len - 1u] == '\r')) {
+    --len;
+  }
+  if (len != 0u) {
+    line[len] = '\0';
+    bench_run_prepare(&parsed);
+    if (lonejson_parse_buffer(&bench_run_map, &parsed, line, len, &options,
+                              &error) == LONEJSON_STATUS_OK &&
+        bench_validate_loaded_run(&parsed)) {
+      char *copy = (char *)malloc(len + 1u);
+      if (copy == NULL) {
+        free(line);
+        free(last_valid);
+        return 1;
+      }
+      memcpy(copy, line, len + 1u);
+      free(last_valid);
+      last_valid = copy;
+    }
+  }
+  free(line);
+  if (last_valid == NULL) {
+    return 1;
+  }
+  *len_out = strlen(last_valid);
+  *line_out = last_valid;
+  return 0;
+}
+
+static int bench_freeze_baseline_command(const char *history_path,
+                                         const char *baseline_path) {
+  bench_run last;
+  lonejson_parse_options options;
+  lonejson_error error;
+  char *last_line;
+  size_t last_len;
+
+  last_line = NULL;
+  last_len = 0u;
+  if (bench_read_last_history_line(history_path, &last_line, &last_len) != 0) {
+    return 1;
+  }
+  bench_run_prepare(&last);
+  options = lonejson_default_parse_options();
+  options.clear_destination = 0;
+  if (lonejson_parse_buffer(&bench_run_map, &last, last_line, last_len,
+                            &options, &error) != LONEJSON_STATUS_OK) {
+    free(last_line);
+    return 1;
+  }
+  free(last_line);
+  if (!bench_validate_loaded_run(&last)) {
+    fprintf(stderr,
+            "benchmark freeze-baseline failed: history contains incomplete or "
+            "corrupted run data\n");
     return 1;
   }
   if (bench_make_parent_dirs(baseline_path) != 0) {
@@ -3258,20 +3405,64 @@ static const bench_result *bench_find_result(const bench_run *run,
   return NULL;
 }
 
-static const char *bench_delta_classification(double delta_pct) {
-  double abs_delta;
+static int bench_validate_loaded_run(const bench_run *run) {
+  size_t i;
+  size_t j;
 
-  abs_delta = delta_pct;
-  if (abs_delta < 0.0) {
-    abs_delta = -abs_delta;
+  if (run == NULL) {
+    return 0;
   }
-  if (abs_delta < BENCH_NOISE_DELTA_PCT) {
-    return "noise";
+  if (run->results.count == 0u) {
+    return 0;
   }
-  if (abs_delta < BENCH_MATERIAL_DELTA_PCT) {
-    return "small";
+  for (i = 0; i < run->results.count; ++i) {
+    if (run->result_storage[i].name[0] == '\0' ||
+        run->result_storage[i].group[0] == '\0') {
+      return 0;
+    }
+    for (j = i + 1u; j < run->results.count; ++j) {
+      if (strcmp(run->result_storage[i].name, run->result_storage[j].name) ==
+          0) {
+        return 0;
+      }
+    }
   }
-  return "material";
+  return 1;
+}
+
+static size_t bench_count_result_mismatches(const bench_run *run) {
+  size_t i;
+  size_t mismatch_count;
+
+  if (run == NULL) {
+    return 0u;
+  }
+  mismatch_count = 0u;
+  for (i = 0u; i < run->results.count; ++i) {
+    if (run->result_storage[i].mismatch_count != 0u) {
+      ++mismatch_count;
+    }
+  }
+  return mismatch_count;
+}
+
+static const char *bench_delta_classification(double delta_pct) {
+  if (delta_pct <= -BENCH_MATERIAL_DELTA_PCT) {
+    return "material-reg";
+  }
+  if (delta_pct <= -BENCH_NOISE_DELTA_PCT) {
+    return "small-reg";
+  }
+  if (delta_pct >= BENCH_REVIEW_IMPROVEMENT_PCT) {
+    return "review-imp";
+  }
+  if (delta_pct >= BENCH_MATERIAL_DELTA_PCT) {
+    return "material-imp";
+  }
+  if (delta_pct >= BENCH_NOISE_DELTA_PCT) {
+    return "small-imp";
+  }
+  return "noise";
 }
 
 static void bench_print_compare_result(const bench_result *baseline,
@@ -3292,23 +3483,56 @@ static void bench_print_compare_result(const bench_result *baseline,
                       baseline->docs_per_sec) *
                      100.0;
   }
-  delta_class = bench_delta_classification(mib_delta_pct);
-  printf("%-40s %11.3f %11.3f %9.2f%% %-8s %10.2f%% %10.0f\n", latest->name,
+  if (baseline->mismatch_count != 0u || latest->mismatch_count != 0u) {
+    delta_class = "broken";
+  } else {
+    delta_class = bench_delta_classification(mib_delta_pct);
+  }
+  printf("%-40s %11.3f %11.3f %9.2f%% %-12s %10.2f%% %10.0f\n", latest->name,
          latest->mib_per_sec, baseline->mib_per_sec, mib_delta_pct, delta_class,
          docs_delta_pct, (double)latest->mismatch_count);
+}
+
+static int bench_is_small_regression(const bench_result *baseline,
+                                     const bench_result *latest) {
+  double mib_delta_pct;
+
+  if (baseline->mib_per_sec <= 0.0 ||
+      latest->mib_per_sec >= baseline->mib_per_sec) {
+    return 0;
+  }
+  mib_delta_pct = ((latest->mib_per_sec - baseline->mib_per_sec) /
+                   baseline->mib_per_sec) *
+                  100.0;
+  return strcmp(bench_delta_classification(mib_delta_pct), "small-reg") == 0;
 }
 
 static int bench_is_material_regression(const bench_result *baseline,
                                         const bench_result *latest) {
   double mib_delta_pct;
 
-  if (baseline->mib_per_sec <= 0.0 || latest->mib_per_sec >= baseline->mib_per_sec) {
+  if (baseline->mib_per_sec <= 0.0 ||
+      latest->mib_per_sec >= baseline->mib_per_sec) {
     return 0;
   }
   mib_delta_pct = ((latest->mib_per_sec - baseline->mib_per_sec) /
                    baseline->mib_per_sec) *
                   100.0;
-  return strcmp(bench_delta_classification(mib_delta_pct), "material") == 0;
+  return strcmp(bench_delta_classification(mib_delta_pct), "material-reg") == 0;
+}
+
+static int bench_is_large_improvement(const bench_result *baseline,
+                                      const bench_result *latest) {
+  double mib_delta_pct;
+
+  if (baseline->mib_per_sec <= 0.0 ||
+      latest->mib_per_sec <= baseline->mib_per_sec) {
+    return 0;
+  }
+  mib_delta_pct = ((latest->mib_per_sec - baseline->mib_per_sec) /
+                   baseline->mib_per_sec) *
+                  100.0;
+  return strcmp(bench_delta_classification(mib_delta_pct), "review-imp") == 0;
 }
 
 static int bench_compare_command(const char *baseline_path,
@@ -3322,13 +3546,22 @@ static int bench_compare_command(const char *baseline_path,
       bench_read_run(latest_path, &latest) != 0) {
     return 1;
   }
+  if (!bench_validate_loaded_run(&baseline) ||
+      !bench_validate_loaded_run(&latest)) {
+    fprintf(stderr,
+            "benchmark compare failed: loaded run data is incomplete or "
+            "corrupted; rerun 'make bench' and 'make bench-freeze-baseline'\n");
+    return 1;
+  }
 
   printf("compare baseline=%s latest=%s\n", baseline_path, latest_path);
-  printf("%-40s %11s %11s %10s %-8s %11s %10s\n", "benchmark", "latest MiB/s",
-         "base MiB/s", "delta", "class", "docs delta", "mismatch");
-  printf("%-40s %11s %11s %10s %-8s %11s %10s\n",
+  printf("%-40s %11s %11s %10s %-12s %11s %10s\n", "benchmark",
+         "latest MiB/s", "base MiB/s", "delta", "class", "docs delta",
+         "mismatch");
+  printf("%-40s %11s %11s %10s %-12s %11s %10s\n",
          "----------------------------------------", "-----------",
-         "-----------", "----------", "--------", "-----------", "----------");
+         "-----------", "----------", "------------", "-----------",
+         "----------");
   if (baseline.schema_version != latest.schema_version) {
     printf("warning: schema_version differs (baseline=%.0f latest=%.0f); "
            "refresh the frozen baseline before interpreting deltas\n",
@@ -3347,7 +3580,7 @@ static int bench_compare_command(const char *baseline_path,
     const bench_result *base;
     base = bench_find_result(&baseline, latest.result_storage[i].name);
     if (base == NULL) {
-      printf("%-40s %11s %11s %10s %-8s %11s %10s\n",
+      printf("%-40s %11s %11s %10s %-12s %11s %10s\n",
              latest.result_storage[i].name, "missing", "missing", "missing",
              "missing", "missing", "missing");
       ++missing_count;
@@ -3370,12 +3603,22 @@ static int bench_gate_command(const char *baseline_path,
   bench_run latest;
   size_t i;
   size_t missing_count;
+  size_t small_regression_count;
   size_t material_regression_count;
+  size_t large_improvement_count;
+  size_t mismatch_count;
   int schema_mismatch;
   int config_mismatch;
 
   if (bench_read_run(baseline_path, &baseline) != 0 ||
       bench_read_run(latest_path, &latest) != 0) {
+    return 1;
+  }
+  if (!bench_validate_loaded_run(&baseline) ||
+      !bench_validate_loaded_run(&latest)) {
+    fprintf(stderr,
+            "benchmark gate failed: loaded run data is incomplete or "
+            "corrupted; rerun 'make bench' and 'make bench-freeze-baseline'\n");
     return 1;
   }
 
@@ -3387,7 +3630,10 @@ static int bench_gate_command(const char *baseline_path,
       baseline.stream_buffer_size != latest.stream_buffer_size ||
       baseline.iterations != latest.iterations;
   missing_count = 0u;
+  small_regression_count = 0u;
   material_regression_count = 0u;
+  large_improvement_count = 0u;
+  mismatch_count = bench_count_result_mismatches(&latest);
   for (i = 0; i < latest.results.count; ++i) {
     const bench_result *base;
 
@@ -3396,8 +3642,16 @@ static int bench_gate_command(const char *baseline_path,
       ++missing_count;
       continue;
     }
+    if (bench_is_small_regression(base, &latest.result_storage[i])) {
+      ++small_regression_count;
+      continue;
+    }
     if (bench_is_material_regression(base, &latest.result_storage[i])) {
       ++material_regression_count;
+      continue;
+    }
+    if (bench_is_large_improvement(base, &latest.result_storage[i])) {
+      ++large_improvement_count;
     }
   }
 
@@ -3405,14 +3659,30 @@ static int bench_gate_command(const char *baseline_path,
   printf("  schema mismatch: %s\n", schema_mismatch ? "yes" : "no");
   printf("  config mismatch: %s\n", config_mismatch ? "yes" : "no");
   printf("  missing results: %lu\n", (unsigned long)missing_count);
+  printf("  result mismatches: %lu\n", (unsigned long)mismatch_count);
+  printf("  small regressions: %lu\n", (unsigned long)small_regression_count);
   printf("  material regressions: %lu\n",
          (unsigned long)material_regression_count);
+  printf("  large improvements to review: %lu\n",
+         (unsigned long)large_improvement_count);
 
   if (schema_mismatch || config_mismatch || missing_count != 0u ||
+      mismatch_count != 0u ||
+      small_regression_count != 0u ||
       material_regression_count != 0u) {
-    fprintf(stderr,
-            "benchmark gate failed: refresh the baseline for intentional "
-            "benchmark-schema changes or fix the regressions before landing\n");
+    if (schema_mismatch || config_mismatch || missing_count != 0u) {
+      fprintf(stderr,
+              "benchmark gate failed: fix the regressions, and refresh the "
+              "baseline only if the benchmark schema/config/result set "
+              "intentionally changed\n");
+    } else if (mismatch_count != 0u) {
+      fprintf(stderr,
+              "benchmark gate failed: benchmark case mismatches must be zero "
+              "before landing\n");
+    } else {
+      fprintf(stderr,
+              "benchmark gate failed: fix the regressions before landing\n");
+    }
     return 1;
   }
   return 0;

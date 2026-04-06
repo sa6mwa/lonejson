@@ -386,6 +386,8 @@ extern "C" {
 #define LONEJSON_VERSION_MINOR 1
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
+/** Shared-library ABI / SONAME version for binary compatibility tracking. */
+#define LONEJSON_ABI_VERSION 2
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -569,6 +571,47 @@ typedef struct lonejson_error {
   char message[160];
 } lonejson_error;
 
+/** Optional allocation counters used by custom allocators. lonejson updates
+ * these counters only in debug builds. Release builds leave them untouched.
+ */
+typedef struct lonejson_allocator_stats {
+  /** Number of successful allocate calls performed by lonejson. */
+  size_t alloc_calls;
+  /** Number of successful realloc calls performed by lonejson. */
+  size_t realloc_calls;
+  /** Number of free calls performed by lonejson. */
+  size_t free_calls;
+  /** Current user-visible bytes owned by lonejson through this allocator. */
+  size_t bytes_live;
+  /** Peak user-visible bytes owned by lonejson through this allocator. */
+  size_t peak_bytes_live;
+} lonejson_allocator_stats;
+
+/** Callback signature used for lonejson-owned allocations. */
+typedef void *(*lonejson_malloc_fn)(void *ctx, size_t size);
+/** Callback signature used for lonejson-owned reallocations. */
+typedef void *(*lonejson_realloc_fn)(void *ctx, void *ptr, size_t size);
+/** Callback signature used for lonejson-owned frees. */
+typedef void (*lonejson_free_fn)(void *ctx, void *ptr);
+
+/** Allocator vtable used by parser, spool, stream, and lonejson-owned output
+ * buffers. When all three callbacks are `NULL`, lonejson falls back to
+ * `lonejson_default_allocator()`. Partial callback sets are invalid; callers
+ * must provide either all callbacks or none.
+ */
+typedef struct lonejson_allocator {
+  /** Allocation callback. `NULL` means use the default allocator. */
+  lonejson_malloc_fn malloc_fn;
+  /** Reallocation callback. `NULL` means use the default allocator. */
+  lonejson_realloc_fn realloc_fn;
+  /** Free callback. `NULL` means use the default allocator. */
+  lonejson_free_fn free_fn;
+  /** Opaque allocator context passed to every callback. */
+  void *ctx;
+  /** Optional debug allocation counters updated by lonejson in debug builds. */
+  lonejson_allocator_stats *stats;
+} lonejson_allocator;
+
 /** Configuration used by streamed text/base64 fields backed by
  * `lonejson_spooled`. */
 typedef struct lonejson_spool_options {
@@ -609,6 +652,12 @@ typedef struct lonejson_spooled {
   /** Named temporary path when the configured temp directory path is used.
    * Empty for anonymous temporary files. */
   char temp_path[LONEJSON_SPOOL_TEMP_PATH_CAPACITY];
+  /** Allocator used for lonejson-owned spool metadata and buffers. */
+  lonejson_allocator allocator;
+  /** Internal state marker used by lonejson to distinguish initialized
+   * handles from uninitialized memory. Treat as opaque.
+   */
+  unsigned _lonejson_magic;
 } lonejson_spooled;
 
 /** Serialize-only outbound source used by streamed text/base64 source fields.
@@ -688,6 +737,7 @@ typedef struct lonejson_object_array {
 typedef struct lonejson_field lonejson_field;
 typedef struct lonejson_map lonejson_map;
 typedef struct lonejson_stream lonejson_stream;
+typedef struct lonejson_generator lonejson_generator;
 
 /** Runtime metadata describing one mapped JSON field. Applications normally
  * use the `LONEJSON_FIELD_*` macros instead of writing this struct manually. */
@@ -754,6 +804,10 @@ typedef struct lonejson_parse_options {
   int reject_duplicate_keys;
   /** Maximum allowed nesting depth before parsing fails with overflow. */
   size_t max_depth;
+  /** Optional allocator used for parser-owned runtime state and lonejson-owned
+   * field allocations created while parsing.
+   */
+  const lonejson_allocator *allocator;
 } lonejson_parse_options;
 
 /** Result returned by reader callbacks and `lonejson_spooled_read`. Use
@@ -901,6 +955,12 @@ typedef struct lonejson_json_value {
   void *parse_visitor_user;
   /** Limits applied while parsing through `parse_visitor`. */
   lonejson_value_limits parse_visitor_limits;
+  /** Allocator used for lonejson-owned captured JSON and path state. */
+  lonejson_allocator allocator;
+  /** Internal state marker used by lonejson to distinguish initialized
+   * handles from uninitialized memory. Treat as opaque.
+   */
+  unsigned _lonejson_magic;
 } lonejson_json_value;
 
 /** Options controlling serialization into buffers and sinks. Use
@@ -913,7 +973,44 @@ typedef struct lonejson_write_options {
   /** Non-zero to emit two-space-indented pretty JSON instead of compact JSON.
    */
   int pretty;
+  /** Optional allocator used for serializer-owned output buffers. */
+  const lonejson_allocator *allocator;
 } lonejson_write_options;
+
+/** Owned serializer output buffer returned by alloc-returning APIs.
+ *
+ * Read `data` and `len`, then release the handle with
+ * `lonejson_owned_buffer_free()`. Treat `alloc_size` and `allocator` as
+ * internal cleanup state.
+ */
+typedef struct lonejson_owned_buffer {
+  /** NUL-terminated serialized output bytes owned by this handle. */
+  char *data;
+  /** Logical byte length of `data`, excluding the trailing NUL. */
+  size_t len;
+  /** Internal allocation size used for symmetric cleanup. */
+  size_t alloc_size;
+  /** Allocator that owns `data`. */
+  lonejson_allocator allocator;
+} lonejson_owned_buffer;
+
+/** Pull-style JSON generator for one mapped value.
+ *
+ * Generators are explicit, bounded serializer states meant for transport
+ * adapters and other pull-based consumers. They do not materialize the full
+ * payload. They support the normal mapped serializer surface plus
+ * `lonejson_source`, `lonejson_spooled`, and `lonejson_json_value` fields.
+ * `json_value` fields are streamed through the generator directly instead of
+ * silently falling back to buffered serialization.
+ */
+struct lonejson_generator {
+  /** Opaque generator state owned by lonejson. */
+  void *state;
+  /** Non-zero once the generator has reached end-of-stream. */
+  int eof;
+  /** Last generator error. Cleared by init and cleanup. */
+  lonejson_error error;
+};
 
 /** Defines a static mapping table for a struct type from a separately declared
  * field array. */
@@ -1465,14 +1562,24 @@ typedef struct lonejson_write_options {
 lonejson_spool_options lonejson_default_spool_options(void);
 /** Initializes an error struct to the empty `OK` state. */
 void lonejson_error_init(lonejson_error *error);
+/** Returns lonejson's default allocator backed by the configured allocation
+ * macros.
+ */
+lonejson_allocator lonejson_default_allocator(void);
 /** Returns the empty default read result used by reader callbacks. */
 lonejson_read_result lonejson_default_read_result(void);
 /** Returns the empty visitor with all callbacks set to `NULL`. */
 lonejson_value_visitor lonejson_default_value_visitor(void);
-/** Initializes a spool handle to its default or caller-configured empty state.
+/** Initializes a spool handle to its default or caller-configured empty state
+ * using lonejson's default allocator.
  */
 void lonejson_spooled_init(lonejson_spooled *value,
                            const lonejson_spool_options *options);
+/** Initializes a spool handle with explicit options and allocator selection.
+ */
+void lonejson_spooled_init_with_allocator(
+    lonejson_spooled *value, const lonejson_spool_options *options,
+    const lonejson_allocator *allocator);
 /** Clears a spool handle while preserving its configured thresholds. */
 void lonejson_spooled_reset(lonejson_spooled *value);
 /** Releases all resources owned by a spool handle, including any temporary
@@ -1520,11 +1627,16 @@ lonejson_status lonejson_source_write_to_sink(const lonejson_source *value,
                                               lonejson_sink_fn sink, void *user,
                                               lonejson_error *error);
 /** Initializes an embedded JSON value handle to the empty `null` state with no
- * inbound parse destination configured. This is the required starting state
- * before setting parse sink, parse visitor, parse capture, or outbound source
- * configuration.
+ * inbound parse destination configured, using lonejson's default allocator.
+ * This is the required starting state before setting parse sink, parse
+ * visitor, parse capture, or outbound source configuration.
  */
 void lonejson_json_value_init(lonejson_json_value *value);
+/** Initializes an embedded JSON value handle with an explicit allocator and no
+ * inbound parse destination configured.
+ */
+void lonejson_json_value_init_with_allocator(
+    lonejson_json_value *value, const lonejson_allocator *allocator);
 /** Resets an embedded JSON value handle to the empty `null` state. */
 void lonejson_json_value_reset(lonejson_json_value *value);
 /** Releases any storage or path owned by an embedded JSON value handle and
@@ -1602,6 +1714,10 @@ lonejson_value_limits lonejson_default_value_limits(void);
  * compact output with `LONEJSON_OVERFLOW_FAIL`.
  */
 lonejson_write_options lonejson_default_write_options(void);
+/** Returns an empty owned-buffer handle that uses the default allocator. */
+lonejson_owned_buffer lonejson_default_owned_buffer(void);
+/** Initializes an owned-buffer handle to its empty default state. */
+void lonejson_owned_buffer_init(lonejson_owned_buffer *buffer);
 /** Returns a stable string name for a `lonejson_status` value. */
 const char *lonejson_status_string(lonejson_status status);
 
@@ -1738,17 +1854,57 @@ lonejson_status lonejson_serialize_sink(const lonejson_map *map,
                                         void *user,
                                         const lonejson_write_options *options,
                                         lonejson_error *error);
+/** Initializes a pull-style JSON generator for one mapped struct.
+ *
+ * The generator stays bounded and never materializes the whole payload. Drain
+ * it incrementally through `lonejson_generator_read()` and release it with
+ * `lonejson_generator_cleanup()`. It supports the normal mapped serializer
+ * surface plus `lonejson_source`, `lonejson_spooled`, and `lonejson_json_value`
+ * fields without silently buffering them into one giant payload. The init call
+ * fully establishes the generator state; callers do not need to pre-zero the
+ * struct.
+ */
+lonejson_status lonejson_generator_init(lonejson_generator *generator,
+                                        const lonejson_map *map,
+                                        const void *src,
+                                        const lonejson_write_options *options);
+/** Pulls the next serialized JSON bytes from a generator.
+ *
+ * `out_len` receives the produced byte count and `out_eof` becomes non-zero
+ * once the generator has fully drained.
+ */
+lonejson_status lonejson_generator_read(lonejson_generator *generator,
+                                        unsigned char *buffer,
+                                        size_t capacity, size_t *out_len,
+                                        int *out_eof);
+/** Releases resources owned by a pull-style JSON generator. */
+void lonejson_generator_cleanup(lonejson_generator *generator);
 /** Serializes a mapped struct into a caller-provided output buffer. */
 lonejson_status lonejson_serialize_buffer(const lonejson_map *map,
                                           const void *src, char *buffer,
                                           size_t capacity, size_t *needed,
                                           const lonejson_write_options *options,
                                           lonejson_error *error);
-/** Serializes a mapped struct into a newly allocated JSON string. */
+/** Serializes a mapped struct into a newly allocated JSON string using the
+ * default allocator. Release the returned buffer with `free()` /
+ * `LONEJSON_FREE()`. This convenience API rejects custom allocators; use
+ * `lonejson_serialize_owned()` when you need allocator-aware ownership.
+ */
 char *lonejson_serialize_alloc(const lonejson_map *map, const void *src,
                                size_t *out_len,
                                const lonejson_write_options *options,
                                lonejson_error *error);
+/** Serializes a mapped struct into an owned output buffer. Initialize `out`
+ * with `lonejson_owned_buffer_init()` or `lonejson_default_owned_buffer()`,
+ * then release it with `lonejson_owned_buffer_free()`.
+ */
+lonejson_status lonejson_serialize_owned(const lonejson_map *map,
+                                         const void *src,
+                                         lonejson_owned_buffer *out,
+                                         const lonejson_write_options *options,
+                                         lonejson_error *error);
+/** Releases an owned output buffer produced by `*_owned()` serializers. */
+void lonejson_owned_buffer_free(lonejson_owned_buffer *buffer);
 /** Serializes a mapped struct to an open `FILE *`. */
 lonejson_status lonejson_serialize_filep(const lonejson_map *map,
                                          const void *src, FILE *fp,
@@ -1776,14 +1932,25 @@ lonejson_status lonejson_serialize_jsonl_buffer(
     char *buffer, size_t capacity, size_t *needed,
     const lonejson_write_options *options, lonejson_error *error);
 /** Serializes an array of mapped structs as JSONL records into a newly
- * allocated string. Uses compact output by default, or two-space pretty
- * printing when `options->pretty` is non-zero. `stride` defaults to
- * `map->struct_size` when set to zero. */
+ * allocated string using the default allocator. Release the returned buffer
+ * with `free()` / `LONEJSON_FREE()`. This convenience API rejects custom
+ * allocators; use `lonejson_serialize_jsonl_owned()` when you need
+ * allocator-aware ownership.
+ */
 char *lonejson_serialize_jsonl_alloc(const lonejson_map *map, const void *items,
                                      size_t count, size_t stride,
                                      size_t *out_len,
                                      const lonejson_write_options *options,
                                      lonejson_error *error);
+/** Serializes an array of mapped structs as JSONL records into an owned output
+ * buffer. Release it with `lonejson_owned_buffer_free()`. Uses compact output
+ * by default, or two-space pretty printing when `options->pretty` is
+ * non-zero. `stride` defaults to `map->struct_size` when set to zero.
+ */
+lonejson_status lonejson_serialize_jsonl_owned(
+    const lonejson_map *map, const void *items, size_t count, size_t stride,
+    lonejson_owned_buffer *out, const lonejson_write_options *options,
+    lonejson_error *error);
 /** Serializes an array of mapped structs as JSONL records to an open `FILE *`.
  * Uses compact output by default, or two-space pretty printing when
  * `options->pretty` is non-zero. `stride` defaults to `map->struct_size` when
@@ -1822,10 +1989,8 @@ typedef struct lonejson_curl_parse {
 } lonejson_curl_parse;
 
 typedef struct lonejson_curl_upload {
-  char *json;
-  size_t length;
-  size_t offset;
-  lonejson_error error;
+  /** Underlying pull-style JSON generator used by the curl adapter. */
+  lonejson_generator generator;
 } lonejson_curl_upload;
 
 /** Initializes a curl parse adapter suitable for `CURLOPT_WRITEFUNCTION`. */
@@ -1840,15 +2005,23 @@ lonejson_status lonejson_curl_parse_finish(lonejson_curl_parse *ctx);
 /** Releases resources owned by a curl parse adapter. */
 void lonejson_curl_parse_cleanup(lonejson_curl_parse *ctx);
 
-/** Initializes a curl upload adapter for a mapped struct. */
+/** Initializes a curl upload adapter for a mapped struct.
+ *
+ * This adapter is stream-first: it incrementally serializes through curl's
+ * `CURLOPT_READFUNCTION` callback instead of materializing the whole JSON
+ * payload up front. The reported size is currently always `-1`; lonejson does
+ * not do a hidden prebuffer or pre-count pass just to compute it.
+ */
 lonejson_status
 lonejson_curl_upload_init(lonejson_curl_upload *ctx, const lonejson_map *map,
                           const void *src,
                           const lonejson_write_options *options);
-/** Curl read callback that serves serialized JSON bytes to libcurl. */
+/** Curl read callback that streams serialized JSON bytes to libcurl. */
 size_t lonejson_curl_read_callback(char *ptr, size_t size, size_t nmemb,
                                    void *userdata);
-/** Returns the upload size reported by a curl upload adapter. */
+/** Returns the upload size reported by a curl upload adapter. The value is
+ * `-1` when lonejson is streaming with an unknown total length.
+ */
 curl_off_t lonejson_curl_upload_size(const lonejson_curl_upload *ctx);
 /** Releases resources owned by a curl upload adapter. */
 void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
@@ -1861,6 +2034,7 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_VERSION_MAJOR LONEJSON_VERSION_MAJOR
 #define LJ_VERSION_MINOR LONEJSON_VERSION_MINOR
 #define LJ_VERSION_PATCH LONEJSON_VERSION_PATCH
+#define LJ_ABI_VERSION LONEJSON_ABI_VERSION
 #define LJ_FIELD_REQUIRED LONEJSON_FIELD_REQUIRED
 #define LJ_ARRAY_OWNS_ITEMS LONEJSON_ARRAY_OWNS_ITEMS
 #define LJ_ARRAY_FIXED_CAPACITY LONEJSON_ARRAY_FIXED_CAPACITY
@@ -1993,6 +2167,10 @@ typedef lonejson_storage_kind lj_storage_kind;
 typedef lonejson_overflow_policy lj_overflow_policy;
 /** Detailed error information produced by lonejson APIs. */
 typedef lonejson_error lj_error;
+/** Optional debug allocation counters maintained by lonejson. */
+typedef lonejson_allocator_stats lj_allocator_stats;
+/** Allocator vtable used for lonejson-owned runtime state and buffers. */
+typedef lonejson_allocator lj_allocator;
 /** Configuration for spooled string and base64 storage. */
 typedef lonejson_spool_options lj_spool_options;
 /** Spooled byte container used for streamed string and base64 fields. */
@@ -2040,6 +2218,10 @@ LONEJSON_SHORT_ALIAS_INLINE lj_spool_options lj_default_spool_options(void) {
 LONEJSON_SHORT_ALIAS_INLINE void lj_error_init(lj_error *error) {
   lonejson_error_init(error);
 }
+/** Returns lonejson's default allocator backed by the configured allocation macros. */
+LONEJSON_SHORT_ALIAS_INLINE lj_allocator lj_default_allocator(void) {
+  return lonejson_default_allocator();
+}
 /** Returns the empty default read result used by reader callbacks. */
 LONEJSON_SHORT_ALIAS_INLINE lj_read_result lj_default_read_result(void) {
   return lonejson_default_read_result();
@@ -2052,6 +2234,12 @@ LONEJSON_SHORT_ALIAS_INLINE lj_value_visitor lj_default_value_visitor(void) {
 LONEJSON_SHORT_ALIAS_INLINE void
 lj_spooled_init(lj_spooled *value, const lj_spool_options *options) {
   lonejson_spooled_init(value, options);
+}
+/** Initializes a spooled byte container with an explicit allocator. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_spooled_init_with_allocator(
+    lj_spooled *value, const lj_spool_options *options,
+    const lj_allocator *allocator) {
+  lonejson_spooled_init_with_allocator(value, options, allocator);
 }
 /** Clears a spooled value while keeping its reusable storage. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_spooled_reset(lj_spooled *value) {
@@ -2121,6 +2309,12 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_source_write_to_sink(
 /** Initializes an arbitrary JSON value handle. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_json_value_init(lj_json_value *value) {
   lonejson_json_value_init(value);
+}
+/** Initializes an arbitrary JSON value handle with an explicit allocator. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_json_value_init_with_allocator(lj_json_value *value,
+                                  const lj_allocator *allocator) {
+  lonejson_json_value_init_with_allocator(value, allocator);
 }
 /** Resets an arbitrary JSON value handle to JSON `null`. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_json_value_reset(lj_json_value *value) {
@@ -2208,6 +2402,20 @@ LONEJSON_SHORT_ALIAS_INLINE lj_value_limits lj_default_value_limits(void) {
 /** Returns the default serialization options. */
 LONEJSON_SHORT_ALIAS_INLINE lj_write_options lj_default_write_options(void) {
   return lonejson_default_write_options();
+}
+/** Owned serializer output buffer handle. */
+typedef lonejson_owned_buffer lj_owned_buffer;
+/** Returns an empty owned-buffer handle that uses lonejson's default
+ * allocator.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_owned_buffer lj_default_owned_buffer(void) {
+  return lonejson_default_owned_buffer();
+}
+/** Resets an owned-buffer handle to the empty default state before first use
+ * or reuse.
+ */
+LONEJSON_SHORT_ALIAS_INLINE void lj_owned_buffer_init(lj_owned_buffer *buffer) {
+  lonejson_owned_buffer_init(buffer);
 }
 /** Returns a human-readable string for a status code. */
 LONEJSON_SHORT_ALIAS_INLINE const char *lj_status_string(lj_status status) {
@@ -2360,11 +2568,38 @@ lj_visit_value_fd(int fd, const lj_value_visitor *visitor, void *user,
                   const lj_value_limits *limits, lj_error *error) {
   return lonejson_visit_value_fd(fd, visitor, user, limits, error);
 }
+/** Pull-style JSON generator state. */
+typedef lonejson_generator lj_generator;
 /** Serializes a mapped struct to a generic output sink callback. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_sink(
     const lj_map *map, const void *src, lj_sink_fn sink, void *user,
     const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_sink(map, src, sink, user, options, error);
+}
+/** Initializes a pull-style JSON generator for one mapped struct.
+ *
+ * The generator stays bounded and never materializes the whole payload. Drain
+ * it incrementally through `lj_generator_read()` and release it with
+ * `lj_generator_cleanup()`. It supports the normal mapped serializer surface
+ * plus `lonejson_source`, `lonejson_spooled`, and `lonejson_json_value`
+ * fields. `json_value` fields are streamed through the generator directly
+ * instead of silently falling back to buffered serialization.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_generator_init(lj_generator *generator, const lj_map *map,
+                  const void *src, const lj_write_options *options) {
+  return lonejson_generator_init(generator, map, src, options);
+}
+/** Pulls the next serialized JSON bytes from a generator. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_generator_read(lj_generator *generator, unsigned char *buffer,
+                  size_t capacity, size_t *out_len, int *out_eof) {
+  return lonejson_generator_read(generator, buffer, capacity, out_len, out_eof);
+}
+/** Releases resources owned by a pull-style JSON generator. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_generator_cleanup(lj_generator *generator) {
+  lonejson_generator_cleanup(generator);
 }
 /** Serializes a mapped struct into a caller-provided output buffer. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_buffer(
@@ -2373,11 +2608,30 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_buffer(
   return lonejson_serialize_buffer(map, src, buffer, capacity, needed, options,
                                    error);
 }
-/** Serializes a mapped struct into a newly allocated JSON string. */
+/** Serializes a mapped struct into a newly allocated JSON string using the
+ * default allocator. Release the returned buffer with `free()` / `LJ_FREE()`.
+ * This convenience API rejects custom allocators; use `lj_serialize_owned()`
+ * when you need allocator-aware ownership.
+ */
 LONEJSON_SHORT_ALIAS_INLINE char *
 lj_serialize_alloc(const lj_map *map, const void *src, size_t *out_len,
                    const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_alloc(map, src, out_len, options, error);
+}
+/** Serializes a mapped struct into an owned output buffer. Initialize `out`
+ * with `lj_owned_buffer_init()` or `lj_default_owned_buffer()`, then release
+ * it with `lj_owned_buffer_free()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_serialize_owned(const lj_map *map, const void *src, lj_owned_buffer *out,
+                   const lj_write_options *options, lj_error *error) {
+  return lonejson_serialize_owned(map, src, out, options, error);
+}
+/** Releases an owned output buffer produced by `lj_serialize_owned()` or
+ * `lj_serialize_jsonl_owned()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE void lj_owned_buffer_free(lj_owned_buffer *buffer) {
+  lonejson_owned_buffer_free(buffer);
 }
 /** Serializes a mapped struct to an open `FILE *`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
@@ -2407,13 +2661,29 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_jsonl_buffer(
   return lonejson_serialize_jsonl_buffer(map, items, count, stride, buffer,
                                          capacity, needed, options, error);
 }
-/** Serializes an array of mapped structs as JSONL records into a new string. */
+/** Serializes an array of mapped structs as JSONL records into a newly
+ * allocated string using the default allocator. Release the returned buffer
+ * with `free()` / `LJ_FREE()`. This convenience API rejects custom
+ * allocators; use `lj_serialize_jsonl_owned()` when you need allocator-aware
+ * ownership.
+ */
 LONEJSON_SHORT_ALIAS_INLINE char *
 lj_serialize_jsonl_alloc(const lj_map *map, const void *items, size_t count,
                          size_t stride, size_t *out_len,
                          const lj_write_options *options, lj_error *error) {
   return lonejson_serialize_jsonl_alloc(map, items, count, stride, out_len,
                                         options, error);
+}
+/** Serializes an array of mapped structs as JSONL records into an owned output
+ * buffer. Initialize `out` with `lj_owned_buffer_init()` or
+ * `lj_default_owned_buffer()`, then release it with `lj_owned_buffer_free()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_serialize_jsonl_owned(const lj_map *map, const void *items, size_t count,
+                         size_t stride, lj_owned_buffer *out,
+                         const lj_write_options *options, lj_error *error) {
+  return lonejson_serialize_jsonl_owned(map, items, count, stride, out, options,
+                                        error);
 }
 /** Serializes an array of mapped structs as JSONL records to an open `FILE *`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_serialize_jsonl_filep(
@@ -2467,7 +2737,13 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_curl_parse_finish(lj_curl_parse *ctx) {
 LONEJSON_SHORT_ALIAS_INLINE void lj_curl_parse_cleanup(lj_curl_parse *ctx) {
   lonejson_curl_parse_cleanup(ctx);
 }
-/** Initializes a curl upload adapter for a mapped struct. */
+/** Initializes a curl upload adapter for a mapped struct.
+ *
+ * This adapter is stream-first: it incrementally serializes through curl's
+ * `CURLOPT_READFUNCTION` callback instead of materializing the whole JSON
+ * payload up front. The reported size is currently always `-1`; lonejson does
+ * not do a hidden prebuffer or pre-count pass just to compute it.
+ */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_curl_upload_init(lj_curl_upload *ctx, const lj_map *map, const void *src,
                     const lj_write_options *options) {
@@ -2479,7 +2755,9 @@ LONEJSON_SHORT_ALIAS_INLINE size_t lj_curl_read_callback(char *ptr, size_t size,
                                                          void *userdata) {
   return lonejson_curl_read_callback(ptr, size, nmemb, userdata);
 }
-/** Returns the payload size exposed by a curl upload adapter. */
+/** Returns the payload size exposed by a curl upload adapter. The value is
+ * `-1` when lonejson is streaming with an unknown total length.
+ */
 LONEJSON_SHORT_ALIAS_INLINE curl_off_t
 lj_curl_upload_size(const lj_curl_upload *ctx) {
   return lonejson_curl_upload_size(ctx);

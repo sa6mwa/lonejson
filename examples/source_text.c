@@ -61,7 +61,7 @@ int main(void) {
   printf("source path=%s\n", path);
   printf("json=%s\n", json);
 
-  free(json);
+  LONEJSON_FREE(json);
   lj_cleanup(&outbound_text_doc_map, &doc);
   unlink(path);
   return 0;

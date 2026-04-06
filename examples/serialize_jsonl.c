@@ -34,6 +34,6 @@ int main(void) {
   }
 
   fputs(jsonl, stdout);
-  free(jsonl);
+  LONEJSON_FREE(jsonl);
   return 0;
 }

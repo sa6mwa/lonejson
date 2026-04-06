@@ -1635,7 +1635,6 @@ static int ljlua_compile_field(lua_State *L, int index,
       meta->field.json_key_len != 0u
           ? (unsigned char)meta->name[meta->field.json_key_len - 1u]
           : '\0';
-
   lua_getfield(L, index, "required");
   if (lua_toboolean(L, -1)) {
     meta->field.flags |= LONEJSON_FIELD_REQUIRED;
@@ -2139,20 +2138,33 @@ static int ljlua_schema_compile_count(lua_State *L) {
   return 1;
 }
 
-static int ljlua_parse_write_options(lua_State *L, int index,
-                                     lonejson_write_options *options) {
-  *options = lonejson_default_write_options();
+static const lonejson_write_options *
+ljlua_get_write_options(lua_State *L, int index, lonejson_write_options *options) {
   if (index == 0 || lua_isnoneornil(L, index)) {
-    return 1;
+    return NULL;
   }
   luaL_checktype(L, index, LUA_TTABLE);
-  options->overflow_policy = ljlua_parse_overflow_policy(L, index, "overflow");
+  *options = lonejson_default_write_options();
+  lua_getfield(L, index, "overflow");
+  if (!lua_isnil(L, -1)) {
+    const char *name = luaL_checkstring(L, -1);
+    if (strcmp(name, "fail") == 0) {
+      options->overflow_policy = LONEJSON_OVERFLOW_FAIL;
+    } else if (strcmp(name, "truncate") == 0) {
+      options->overflow_policy = LONEJSON_OVERFLOW_TRUNCATE;
+    } else if (strcmp(name, "truncate_silent") == 0) {
+      options->overflow_policy = LONEJSON_OVERFLOW_TRUNCATE_SILENT;
+    } else {
+      luaL_error(L, "unsupported overflow policy '%s'", name);
+    }
+  }
+  lua_pop(L, 1);
   lua_getfield(L, index, "pretty");
   if (!lua_isnil(L, -1)) {
     options->pretty = lua_toboolean(L, -1) ? 1 : 0;
   }
   lua_pop(L, 1);
-  return 1;
+  return options;
 }
 
 static int ljlua_push_spool(lua_State *L, lonejson_spooled *spool, int kind,
@@ -2318,14 +2330,20 @@ static int ljlua_prepare_record_json_value_capture(lua_State *L,
 
 static int ljlua_record_to_table(lua_State *L, ljlua_schema *schema,
                                  void *record) {
-  return ljlua_record_to_table_with_overrides(L, schema, record, NULL);
+  size_t i;
+
+  lua_createtable(L, 0, (int)schema->field_count);
+  for (i = 0u; i < schema->field_count; ++i) {
+    ljlua_push_value(L, schema, record, &schema->metas[i], 0);
+    lua_setfield(L, -2, schema->metas[i].name);
+  }
+  return 1;
 }
 
 static int ljlua_record_to_table_with_overrides(lua_State *L, ljlua_schema *schema,
                                                 void *record,
                                                 const ljlua_decode_context *ctx) {
   size_t i;
-
   lua_createtable(L, 0, (int)schema->field_count);
   for (i = 0u; i < schema->field_count; ++i) {
     if (ctx != NULL && ctx->json_values != NULL && ctx->json_values[i].active) {
@@ -3270,8 +3288,13 @@ static int ljlua_schema_decode_into(lua_State *L) {
     ljlua_prepare_record_json_value_capture(L, schema_ud->schema,
                                             record_ud->data,
                                             options.clear_destination ? 0 : 1);
-  } else if (!options.clear_destination && record_ud->cleared) {
-    effective_options.clear_destination = 1;
+  } else {
+    if (options.clear_destination) {
+      lonejson_reset(&schema_ud->schema->map, record_ud->data);
+      effective_options.clear_destination = 0;
+    } else if (record_ud->cleared) {
+      effective_options.clear_destination = 0;
+    }
   }
   if (!ljlua_schema_decode_into_buffer(L, schema_ud->schema, record_ud->data,
                                        json, len, &effective_options)) {
@@ -3298,8 +3321,8 @@ static int ljlua_schema_decode_path(lua_State *L) {
     return luaL_error(L, "failed to allocate decode buffer");
   }
   ljlua_prepare_record_storage(schema_ud->schema, record);
+  options.clear_destination = 0;
   if (ljlua_schema_has_json_value(schema_ud->schema)) {
-    options.clear_destination = 0;
     ljlua_decode_context_prepare_table_mode(L, schema_ud->schema, record, &ctx);
   }
   status = lonejson_parse_path(&schema_ud->schema->map, record, path, &options,
@@ -3339,8 +3362,8 @@ static int ljlua_schema_decode_file(lua_State *L) {
     return luaL_error(L, "failed to allocate decode buffer");
   }
   ljlua_prepare_record_storage(schema_ud->schema, record);
+  options.clear_destination = 0;
   if (ljlua_schema_has_json_value(schema_ud->schema)) {
-    options.clear_destination = 0;
     ljlua_decode_context_prepare_table_mode(L, schema_ud->schema, record, &ctx);
   }
   status = lonejson_parse_filep(&schema_ud->schema->map, record, fp, &options,
@@ -3381,8 +3404,8 @@ static int ljlua_schema_decode_fd(lua_State *L) {
     return luaL_error(L, "failed to allocate decode buffer");
   }
   ljlua_prepare_record_storage(schema_ud->schema, record);
+  options.clear_destination = 0;
   if (ljlua_schema_has_json_value(schema_ud->schema)) {
-    options.clear_destination = 0;
     ljlua_decode_context_prepare_table_mode(L, schema_ud->schema, record, &ctx);
   }
   fp = ljlua_dup_fd_to_file(L, fd, "rb");
@@ -3422,9 +3445,9 @@ static int ljlua_schema_decode(lua_State *L) {
   }
   memset(&ctx, 0, sizeof(ctx));
   ljlua_parse_parse_options(L, 3, &options);
+  ljlua_prepare_record_storage(schema_ud->schema, record);
+  options.clear_destination = 0;
   if (ljlua_schema_has_json_value(schema_ud->schema)) {
-    ljlua_prepare_record_storage(schema_ud->schema, record);
-    options.clear_destination = 0;
     ljlua_decode_context_prepare_table_mode(L, schema_ud->schema, record, &ctx);
     {
       lonejson_error error;
@@ -3474,14 +3497,15 @@ static int ljlua_schema_assign(lua_State *L) {
 static char *ljlua_serialize_value(lua_State *L, ljlua_schema *schema,
                                    void *record, int options_index,
                                    size_t *out_len) {
-  lonejson_write_options options;
+  lonejson_write_options local_options;
+  const lonejson_write_options *options;
   lonejson_error error;
   lonejson_status status;
   size_t needed = 0u;
   size_t capacity;
   char *buffer;
 
-  ljlua_parse_write_options(L, options_index, &options);
+  options = ljlua_get_write_options(L, options_index, &local_options);
   capacity = schema->encode_capacity;
   if (capacity == 0u) {
     capacity = 256u;
@@ -3496,7 +3520,7 @@ static char *ljlua_serialize_value(lua_State *L, ljlua_schema *schema,
   for (;;) {
     status = lonejson_serialize_buffer(
         &schema->map, record, schema->encode_buffer, schema->encode_capacity,
-        &needed, &options, &error);
+        &needed, options, &error);
     if (status != LONEJSON_STATUS_OVERFLOW) {
       break;
     }
@@ -3555,15 +3579,16 @@ static int ljlua_schema_encode(lua_State *L) {
 static int ljlua_schema_write_path(lua_State *L) {
   ljlua_schema_ud *schema_ud = ljlua_check_schema(L, 1);
   const char *path = luaL_checkstring(L, 3);
-  lonejson_write_options options;
+  lonejson_write_options local_options;
+  const lonejson_write_options *options;
   lonejson_error error;
   lonejson_status status;
 
-  ljlua_parse_write_options(L, 4, &options);
+  options = ljlua_get_write_options(L, 4, &local_options);
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
     status = lonejson_serialize_path(&schema_ud->schema->map, record_ud->data,
-                                     path, &options, &error);
+                                     path, options, &error);
   } else {
     int owned_record;
     unsigned char *record =
@@ -3574,7 +3599,7 @@ static int ljlua_schema_write_path(lua_State *L) {
     ljlua_prepare_record_storage(schema_ud->schema, record);
     ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
     status = lonejson_serialize_path(&schema_ud->schema->map, record, path,
-                                     &options, &error);
+                                     options, &error);
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
   }
@@ -3588,15 +3613,16 @@ static int ljlua_schema_write_path(lua_State *L) {
 static int ljlua_schema_write_file(lua_State *L) {
   ljlua_schema_ud *schema_ud = ljlua_check_schema(L, 1);
   FILE *fp = ljlua_check_file(L, 3);
-  lonejson_write_options options;
+  lonejson_write_options local_options;
+  const lonejson_write_options *options;
   lonejson_error error;
   lonejson_status status;
 
-  ljlua_parse_write_options(L, 4, &options);
+  options = ljlua_get_write_options(L, 4, &local_options);
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
     status = lonejson_serialize_filep(&schema_ud->schema->map, record_ud->data,
-                                      fp, &options, &error);
+                                      fp, options, &error);
   } else {
     int owned_record;
     unsigned char *record =
@@ -3607,7 +3633,7 @@ static int ljlua_schema_write_file(lua_State *L) {
     ljlua_prepare_record_storage(schema_ud->schema, record);
     ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
     status = lonejson_serialize_filep(&schema_ud->schema->map, record, fp,
-                                      &options, &error);
+                                      options, &error);
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
   }
@@ -3622,16 +3648,17 @@ static int ljlua_schema_write_fd(lua_State *L) {
   ljlua_schema_ud *schema_ud = ljlua_check_schema(L, 1);
   int fd = ljlua_check_fd_like(L, 3);
   FILE *fp = NULL;
-  lonejson_write_options options;
+  lonejson_write_options local_options;
+  const lonejson_write_options *options;
   lonejson_error error;
   lonejson_status status;
 
-  ljlua_parse_write_options(L, 4, &options);
+  options = ljlua_get_write_options(L, 4, &local_options);
   fp = ljlua_dup_fd_to_file(L, fd, "wb");
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
     status = lonejson_serialize_filep(&schema_ud->schema->map, record_ud->data,
-                                      fp, &options, &error);
+                                      fp, options, &error);
   } else {
     int owned_record;
     unsigned char *record =
@@ -3642,7 +3669,7 @@ static int ljlua_schema_write_fd(lua_State *L) {
     ljlua_prepare_record_storage(schema_ud->schema, record);
     ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
     status = lonejson_serialize_filep(&schema_ud->schema->map, record, fp,
-                                      &options, &error);
+                                      options, &error);
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
   }
@@ -3819,9 +3846,6 @@ static int ljlua_stream_next(lua_State *L) {
   ljlua_record_ud *record_ud = ljlua_test_record(L, 2);
 
   if (record_ud != NULL) {
-    int fast_cleared_record =
-        !ud->clear_destination && record_ud->cleared &&
-        !ljlua_schema_has_json_value(ud->schema);
     if (record_ud->schema != ud->schema) {
       return luaL_error(L, "record belongs to a different schema");
     }
@@ -3832,15 +3856,7 @@ static int ljlua_stream_next(lua_State *L) {
       ljlua_prepare_record_json_value_capture(
           L, ud->schema, record_ud->data, ud->clear_destination ? 0 : 1);
     }
-    if (fast_cleared_record) {
-      ud->stream->options.clear_destination = 1;
-      ud->stream->parser->options.clear_destination = 1;
-    }
     result = lonejson_stream_next(ud->stream, record_ud->data, &error);
-    if (fast_cleared_record) {
-      ud->stream->options.clear_destination = 0;
-      ud->stream->parser->options.clear_destination = 0;
-    }
     if (result == LONEJSON_STREAM_OBJECT) {
       record_ud->cleared = 0;
       lua_pushvalue(L, 2);

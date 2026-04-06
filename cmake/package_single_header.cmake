@@ -23,7 +23,23 @@ function(lonejson_read_normalized out_var path)
 endfunction()
 
 lonejson_read_normalized(public_header "${LONEJSON_PUBLIC_HEADER}")
-lonejson_read_normalized(impl_header "${LONEJSON_INTERNAL_IMPL}")
+
+get_filename_component(impl_dir "${LONEJSON_INTERNAL_IMPL}" DIRECTORY)
+set(impl_parts_dir "${impl_dir}/impl")
+if(EXISTS "${impl_parts_dir}")
+  file(GLOB impl_parts RELATIVE "${LONEJSON_ROOT}" "${impl_parts_dir}/*.h")
+  list(SORT impl_parts)
+  set(impl_header "")
+  foreach(part IN LISTS impl_parts)
+    lonejson_read_normalized(part_content "${LONEJSON_ROOT}/${part}")
+    string(APPEND impl_header "${part_content}")
+    if(NOT part_content MATCHES "\n$")
+      string(APPEND impl_header "\n")
+    endif()
+  endforeach()
+else()
+  lonejson_read_normalized(impl_header "${LONEJSON_INTERNAL_IMPL}")
+endif()
 
 string(REGEX REPLACE "\n#endif[ \t]*\n?$" ""
                      public_header_without_final_endif
@@ -35,10 +51,13 @@ get_filename_component(build_dir "${LONEJSON_SINGLE_HEADER_BUILD}" DIRECTORY)
 get_filename_component(build_alias_dir "${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}" DIRECTORY)
 get_filename_component(dist_dir "${LONEJSON_SINGLE_HEADER_DIST_GZ}" DIRECTORY)
 set(dist_header "${dist_dir}/lonejson.h")
+set(build_tmp "${build_dir}/lonejson_single_header.h.tmp")
+set(build_alias_tmp "${build_alias_dir}/lonejson.h.tmp")
+set(dist_header_tmp "${dist_dir}/lonejson.h.tmp")
 file(MAKE_DIRECTORY "${build_dir}" "${build_alias_dir}" "${dist_dir}")
-file(WRITE "${LONEJSON_SINGLE_HEADER_BUILD}" "${single_header}")
-file(WRITE "${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}" "${single_header}")
-file(WRITE "${dist_header}" "${single_header}")
+file(WRITE "${build_tmp}" "${single_header}")
+file(WRITE "${build_alias_tmp}" "${single_header}")
+file(WRITE "${dist_header_tmp}" "${single_header}")
 
 if(NOT DEFINED LONEJSON_CLANG_FORMAT_BIN OR LONEJSON_CLANG_FORMAT_BIN STREQUAL "")
   find_program(LONEJSON_CLANG_FORMAT_BIN NAMES clang-format)
@@ -47,15 +66,41 @@ endif()
 if(DEFINED LONEJSON_CLANG_FORMAT_BIN AND NOT LONEJSON_CLANG_FORMAT_BIN STREQUAL "")
   execute_process(
     COMMAND "${LONEJSON_CLANG_FORMAT_BIN}" -i
-      "${LONEJSON_SINGLE_HEADER_BUILD}"
-      "${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}"
-      "${dist_header}"
+      "${build_tmp}"
+      "${build_alias_tmp}"
+      "${dist_header_tmp}"
     RESULT_VARIABLE clang_format_result
   )
   if(NOT clang_format_result EQUAL 0)
     message(FATAL_ERROR "failed to clang-format single-header artifact")
   endif()
 endif()
+
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${build_tmp}" "${LONEJSON_SINGLE_HEADER_BUILD}"
+  RESULT_VARIABLE copy_build_result
+)
+if(NOT copy_build_result EQUAL 0)
+  message(FATAL_ERROR "failed to update build single-header artifact")
+endif()
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${build_alias_tmp}" "${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}"
+  RESULT_VARIABLE copy_alias_result
+)
+if(NOT copy_alias_result EQUAL 0)
+  message(FATAL_ERROR "failed to update build alias single-header artifact")
+endif()
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${dist_header_tmp}" "${dist_header}"
+  RESULT_VARIABLE copy_dist_result
+)
+if(NOT copy_dist_result EQUAL 0)
+  message(FATAL_ERROR "failed to update dist single-header artifact")
+endif()
+file(REMOVE "${build_tmp}" "${build_alias_tmp}" "${dist_header_tmp}")
 
 find_program(LONEJSON_GZIP_BIN NAMES gzip)
 if(NOT LONEJSON_GZIP_BIN)

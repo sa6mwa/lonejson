@@ -23,12 +23,15 @@ option(LONEJSON_BUILD_BENCHMARKS "Build lonejson benchmarks." OFF)
 option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
+option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
+set(LONEJSON_ABI_VERSION "2" CACHE STRING "Shared-library ABI / SONAME version")
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(LONEJSON_SHARED_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build")
 set(LONEJSON_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(LONEJSON_GENERATED_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/include")
 set(LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/single-header/include")
-set(LONEJSON_GENERATED_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/fixtures")
+set(LONEJSON_GENERATED_FIXTURE_DIR "${LONEJSON_SHARED_BUILD_DIR}/generated/fixtures")
 set(LONEJSON_TEST_BUNDLE_ROOT "" CACHE PATH "Root directory for extracted liblockdc dev bundle content used by tests.")
 set(LONEJSON_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "Artifact architecture name")
 set(LONEJSON_TARGET_OS "${CMAKE_SYSTEM_NAME}" CACHE STRING "Artifact operating system name")
@@ -69,6 +72,11 @@ if(LONEJSON_TARGET_OS_LOWER STREQUAL "linux")
 else()
   set(LONEJSON_TARGET_ID "${LONEJSON_TARGET_ARCH_LOWER}-${LONEJSON_TARGET_OS_LOWER}")
 endif()
+set(LONEJSON_RELEASE_VARIANT_SUFFIX "")
+if(LONEJSON_BUILD_WITH_CURL)
+  set(LONEJSON_RELEASE_VARIANT_SUFFIX "-curl")
+  find_package(CURL REQUIRED)
+endif()
 
 if(LONEJSON_ENABLE_ASAN AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -80,8 +88,10 @@ if(LONEJSON_ENABLE_STACK_USAGE AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 
 add_custom_target(lonejson_generate_fixtures
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${LONEJSON_GENERATED_FIXTURE_DIR}"
-  COMMAND "${LONEJSON_LUA_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_large_fixtures.lua" "${LONEJSON_GENERATED_FIXTURE_DIR}"
+  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ensure_large_fixtures.sh"
+    "${LONEJSON_LUA_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_large_fixtures.lua"
+    "${LONEJSON_GENERATED_FIXTURE_DIR}"
   VERBATIM)
 
 set(LONEJSON_SOURCES
@@ -103,12 +113,16 @@ foreach(target lonejson_shared lonejson_static)
     VISIBILITY_INLINES_HIDDEN NO
   )
   lonejson_configure_c_target(${target})
+  if(LONEJSON_BUILD_WITH_CURL)
+    target_compile_definitions(${target} PRIVATE LONEJSON_WITH_CURL)
+    target_link_libraries(${target} PUBLIC CURL::libcurl)
+  endif()
 endforeach()
 
 set_target_properties(lonejson_shared PROPERTIES
   OUTPUT_NAME lonejson
   VERSION ${PROJECT_VERSION}
-  SOVERSION ${PROJECT_VERSION_MAJOR}
+  SOVERSION ${LONEJSON_ABI_VERSION}
 )
 set_target_properties(lonejson_static PROPERTIES
   OUTPUT_NAME lonejson
@@ -121,6 +135,10 @@ if(LONEJSON_BUILD_TESTS)
   target_compile_definitions(lonejson_tests PRIVATE
     LONEJSON_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     LONEJSON_GENERATED_FIXTURE_DIR="${LONEJSON_GENERATED_FIXTURE_DIR}")
+  if(LONEJSON_BUILD_WITH_CURL)
+    target_compile_definitions(lonejson_tests PRIVATE LONEJSON_WITH_CURL)
+    target_link_libraries(lonejson_tests PRIVATE CURL::libcurl)
+  endif()
   lonejson_configure_c_target(lonejson_tests)
   add_dependencies(lonejson_tests lonejson_generate_fixtures)
   add_test(NAME lonejson_tests COMMAND lonejson_tests)
@@ -159,10 +177,20 @@ if(LONEJSON_BUILD_TESTS)
   lonejson_configure_c_target(lonejson_shared_link_tests)
   add_test(NAME lonejson_shared_link_tests COMMAND lonejson_shared_link_tests)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_shared_link_tests)
+
+  if(UNIX AND NOT APPLE)
+    add_test(
+      NAME lonejson_shared_soversion_tests
+      COMMAND ${CMAKE_COMMAND}
+        -DLONEJSON_SONAME_FILE_NAME=$<TARGET_SONAME_FILE_NAME:lonejson_shared>
+        -DLONEJSON_ABI_VERSION=${LONEJSON_ABI_VERSION}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_soversion.cmake)
+  endif()
 endif()
 
 if(LONEJSON_BUILD_EXAMPLES)
   set(LONEJSON_LINKED_EXAMPLES
+    generator_pull
     parse_file
     parse_reader
     push_parser
@@ -206,6 +234,11 @@ if(LONEJSON_BUILD_BENCHMARKS)
   endif()
   lonejson_configure_c_target(lonejson_bench)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_bench)
+  add_test(
+    NAME lonejson_bench_gate_tests
+    COMMAND ${CMAKE_COMMAND}
+      -DLONEJSON_BENCH_EXE=$<TARGET_FILE:lonejson_bench>
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_bench_gate.cmake)
 endif()
 
 if(LONEJSON_BUILD_FUZZERS)
@@ -260,6 +293,12 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson_impl.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson_internal.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/00_prelude.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/10_json_runtime.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/25_json_pull.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/20_parser.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/30_api.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/35_json_pull_impl.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/bench/lonejson_bench.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_validate.c"
@@ -324,12 +363,25 @@ add_custom_target(package-archive
     -DLONEJSON_SHARED_LINK_NAME=$<TARGET_LINKER_FILE_NAME:lonejson_shared>
     -DLONEJSON_SHARED_LIB_NAME=$<TARGET_FILE_NAME:lonejson_shared>
     -DLONEJSON_SHARED_SONAME=$<TARGET_SONAME_FILE_NAME:lonejson_shared>
+    -DLONEJSON_RELEASE_VARIANT_SUFFIX=${LONEJSON_RELEASE_VARIANT_SUFFIX}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_archive.cmake
   DEPENDS lonejson_shared lonejson_static
   VERBATIM
 )
 
-add_custom_target(package-single-header
+add_custom_target(package-source
+  COMMAND "${CMAKE_COMMAND}"
+    -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_source.cmake
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT
+    ${LONEJSON_SINGLE_HEADER_BUILD}
+    ${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}
+    ${LONEJSON_SINGLE_HEADER_DIST_GZ}
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
     -DLONEJSON_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
@@ -341,7 +393,24 @@ add_custom_target(package-single-header
     -DLONEJSON_SINGLE_HEADER_DIST_GZ=${LONEJSON_SINGLE_HEADER_DIST_GZ}
     -DLONEJSON_CLANG_FORMAT_BIN=${CLANG_FORMAT_BIN}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_single_header.cmake
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/lonejson.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson_impl.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/00_prelude.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/10_json_runtime.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/20_parser.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/25_json_pull.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/30_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/35_json_pull_impl.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_single_header.cmake
   VERBATIM
+)
+
+add_custom_target(package-single-header
+  DEPENDS
+    ${LONEJSON_SINGLE_HEADER_BUILD}
+    ${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}
+    ${LONEJSON_SINGLE_HEADER_DIST_GZ}
 )
 
 add_custom_target(package-checksums

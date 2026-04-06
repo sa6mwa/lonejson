@@ -29,7 +29,10 @@ file(COPY "${LONEJSON_ROOT}/LICENSE" DESTINATION "${package_root}/share/doc/libl
 file(COPY "${LONEJSON_ROOT}/README.md" DESTINATION "${package_root}/share/doc/liblonejson")
 
 file(MAKE_DIRECTORY "${LONEJSON_ROOT}/dist")
-set(archive_base "${LONEJSON_ROOT}/dist/liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}.tar")
+if(NOT DEFINED LONEJSON_RELEASE_VARIANT_SUFFIX)
+  set(LONEJSON_RELEASE_VARIANT_SUFFIX "")
+endif()
+set(archive_base "${LONEJSON_ROOT}/dist/liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}${LONEJSON_RELEASE_VARIANT_SUFFIX}.tar")
 set(archive "${archive_base}.gz")
 
 find_program(LONEJSON_TAR_BIN NAMES tar)

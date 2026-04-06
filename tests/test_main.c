@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 typedef struct alloc_record {
@@ -94,6 +95,35 @@ static void reset_lonejson_alloc_stats(void) {
 #define LONEJSON_TRACK_WORKSPACE_USAGE 1
 #include "../src/lonejson_internal.h"
 
+typedef struct test_allocator_state {
+  lonejson_allocator allocator;
+  lonejson_allocator_stats stats;
+} test_allocator_state;
+
+static void *test_allocator_malloc(void *ctx, size_t size) {
+  (void)ctx;
+  return malloc(size);
+}
+
+static void *test_allocator_realloc(void *ctx, void *ptr, size_t size) {
+  (void)ctx;
+  return realloc(ptr, size);
+}
+
+static void test_allocator_free(void *ctx, void *ptr) {
+  (void)ctx;
+  free(ptr);
+}
+
+static void test_allocator_init(test_allocator_state *state) {
+  memset(state, 0, sizeof(*state));
+  state->allocator = lonejson_default_allocator();
+  state->allocator.malloc_fn = test_allocator_malloc;
+  state->allocator.realloc_fn = test_allocator_realloc;
+  state->allocator.free_fn = test_allocator_free;
+  state->allocator.stats = &state->stats;
+}
+
 typedef struct test_address {
   char city[16];
   lonejson_int64 zip;
@@ -150,6 +180,36 @@ typedef struct test_json_value_doc {
   lonejson_json_value fields;
   lonejson_json_value last_error;
 } test_json_value_doc;
+
+typedef struct test_alloc_parse_doc {
+  char *name;
+  lonejson_spooled body;
+  lonejson_string_array tags;
+} test_alloc_parse_doc;
+
+typedef struct test_alloc_json_value_doc {
+  char id[16];
+  lonejson_json_value selector;
+} test_alloc_json_value_doc;
+
+typedef struct test_fixed_result_row {
+  char name[32];
+  char group[16];
+} test_fixed_result_row;
+
+typedef struct test_fixed_result_run {
+  lonejson_object_array results;
+  test_fixed_result_row result_storage[4];
+} test_fixed_result_run;
+
+typedef struct test_aligned_item {
+  char name[8];
+  long double weight;
+} test_aligned_item;
+
+typedef struct test_aligned_doc {
+  lonejson_object_array items;
+} test_aligned_doc;
 
 typedef struct test_reader_state {
   const char *json;
@@ -294,6 +354,52 @@ static const lonejson_field test_json_value_doc_fields[] = {
     LONEJSON_FIELD_JSON_VALUE(test_json_value_doc, last_error, "last_error")};
 LONEJSON_MAP_DEFINE(test_json_value_doc_map, test_json_value_doc,
                     test_json_value_doc_fields);
+
+static const lonejson_field test_alloc_parse_doc_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC_REQ(test_alloc_parse_doc, name, "name"),
+    LONEJSON_FIELD_STRING_STREAM_OPTS(test_alloc_parse_doc, body, "body",
+                                      &test_spool_small_options),
+    LONEJSON_FIELD_STRING_ARRAY(test_alloc_parse_doc, tags, "tags",
+                                LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_alloc_parse_doc_map, test_alloc_parse_doc,
+                    test_alloc_parse_doc_fields);
+
+static const lonejson_field test_alloc_json_value_doc_fields[] = {
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_alloc_json_value_doc, id, "id",
+                                    LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_JSON_VALUE_REQ(test_alloc_json_value_doc, selector,
+                                  "selector")};
+LONEJSON_MAP_DEFINE(test_alloc_json_value_doc_map, test_alloc_json_value_doc,
+                    test_alloc_json_value_doc_fields);
+
+static const lonejson_field test_fixed_result_row_fields[] = {
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_fixed_result_row, name, "name",
+                                    LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_fixed_result_row, group, "group",
+                                    LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_fixed_result_row_map, test_fixed_result_row,
+                    test_fixed_result_row_fields);
+
+static const lonejson_field test_fixed_result_run_fields[] = {
+    LONEJSON_FIELD_OBJECT_ARRAY(test_fixed_result_run, results, "results",
+                                test_fixed_result_row,
+                                &test_fixed_result_row_map,
+                                LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_fixed_result_run_map, test_fixed_result_run,
+                    test_fixed_result_run_fields);
+
+static const lonejson_field test_aligned_item_fields[] = {
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_aligned_item, name, "name",
+                                    LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_aligned_item_map, test_aligned_item,
+                    test_aligned_item_fields);
+
+static const lonejson_field test_aligned_doc_fields[] = {
+    LONEJSON_FIELD_OBJECT_ARRAY(test_aligned_doc, items, "items",
+                                test_aligned_item, &test_aligned_item_map,
+                                LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_aligned_doc_map, test_aligned_doc,
+                    test_aligned_doc_fields);
 
 static const lonejson_field test_person_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC_REQ(test_person, name, "name"),
@@ -1208,6 +1314,50 @@ static void test_serialize_alloc_balance(void) {
   EXPECT(g_lonejson_free_calls > 0u);
 }
 
+static int test_child_serialize_alloc_free_compatibility(void) {
+  test_fixed_log log;
+  lonejson_int64 codes_storage[2];
+  lonejson_error error;
+  char *json;
+
+  memset(&log, 0, sizeof(log));
+  strcpy(log.name, "evt");
+  codes_storage[0] = 1;
+  codes_storage[1] = 2;
+  log.codes.items = codes_storage;
+  log.codes.count = 2u;
+  log.codes.capacity = 2u;
+  log.codes.flags = LONEJSON_ARRAY_FIXED_CAPACITY;
+
+  reset_lonejson_alloc_stats();
+  json =
+      lonejson_serialize_alloc(&test_fixed_log_map, &log, NULL, NULL, &error);
+  if (json == NULL) {
+    return 2;
+  }
+  LONEJSON_FREE(json);
+  return (g_alloc_record_count == 0u) ? 0 : 3;
+}
+
+static void test_serialize_alloc_default_free_compatibility(void) {
+  pid_t pid;
+  int status;
+
+  pid = fork();
+  EXPECT(pid >= 0);
+  if (pid == 0) {
+    _exit(test_child_serialize_alloc_free_compatibility());
+  }
+  if (pid < 0) {
+    return;
+  }
+  EXPECT(waitpid(pid, &status, 0) == pid);
+  EXPECT(WIFEXITED(status));
+  if (WIFEXITED(status)) {
+    EXPECT(WEXITSTATUS(status) == 0);
+  }
+}
+
 static void test_serialize_jsonl_alloc_balance(void) {
   test_event events[2];
   lonejson_error error;
@@ -1230,6 +1380,75 @@ static void test_serialize_jsonl_alloc_balance(void) {
   }
   EXPECT(g_alloc_record_count == 0u);
   EXPECT(g_lonejson_free_calls > 0u);
+}
+
+static int test_child_serialize_jsonl_alloc_free_compatibility(void) {
+  test_event events[2];
+  lonejson_error error;
+  char *jsonl;
+
+  memset(events, 0, sizeof(events));
+  strcpy(events[0].id, "evt-1");
+  events[0].ok = true;
+  strcpy(events[1].id, "evt-2");
+  events[1].ok = false;
+
+  reset_lonejson_alloc_stats();
+  jsonl = lonejson_serialize_jsonl_alloc(&test_event_map, events, 2u, 0u, NULL,
+                                         NULL, &error);
+  if (jsonl == NULL) {
+    return 2;
+  }
+  LONEJSON_FREE(jsonl);
+  return (g_alloc_record_count == 0u) ? 0 : 3;
+}
+
+static void test_serialize_jsonl_alloc_default_free_compatibility(void) {
+  pid_t pid;
+  int status;
+
+  pid = fork();
+  EXPECT(pid >= 0);
+  if (pid == 0) {
+    _exit(test_child_serialize_jsonl_alloc_free_compatibility());
+  }
+  if (pid < 0) {
+    return;
+  }
+  EXPECT(waitpid(pid, &status, 0) == pid);
+  EXPECT(WIFEXITED(status));
+  if (WIFEXITED(status)) {
+    EXPECT(WEXITSTATUS(status) == 0);
+  }
+}
+
+static void test_dynamic_object_array_alignment(void) {
+  static const char json[] =
+      "{\"items\":[{\"name\":\"a\"},{\"name\":\"b\"},{\"name\":\"c\"}]}";
+  test_aligned_doc doc;
+  lonejson_error error;
+  lonejson_status status;
+  struct align_probe {
+    char c;
+    test_aligned_item value;
+  };
+  size_t alignment;
+  uintptr_t bits;
+
+  memset(&doc, 0, sizeof(doc));
+  status = lonejson_parse_cstr(&test_aligned_doc_map, &doc, json, NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.items.count == 3u);
+  EXPECT(doc.items.items != NULL);
+  if (doc.items.items != NULL) {
+    alignment = offsetof(struct align_probe, value);
+    bits = (uintptr_t)doc.items.items;
+    EXPECT((bits % alignment) == 0u);
+    EXPECT(strcmp(((test_aligned_item *)doc.items.items)[0].name, "a") == 0);
+    ((test_aligned_item *)doc.items.items)[2].weight = (long double)3.75;
+    EXPECT(((test_aligned_item *)doc.items.items)[2].weight > 3.7);
+  }
+  lonejson_cleanup(&test_aligned_doc_map, &doc);
 }
 
 static void test_dynamic_allocation_reset_reparse_balance(void) {
@@ -1569,7 +1788,7 @@ static void test_jsonl_helpers(void) {
   EXPECT(jsonl != NULL);
   if (jsonl != NULL) {
     EXPECT(strcmp(jsonl, buffer) == 0);
-    free(jsonl);
+    LONEJSON_FREE(jsonl);
   }
 
   status =
@@ -1681,7 +1900,7 @@ static void test_formatting_variants_and_roundtrip(void) {
     EXPECT(status == LONEJSON_STATUS_OK);
     EXPECT(strcmp(roundtrip.name, "Emma") == 0);
     EXPECT(strcmp(roundtrip.address.city, "Göteborg") == 0);
-    free(serialized);
+    LONEJSON_FREE(serialized);
   }
 
   lonejson_cleanup(&test_person_map, &person);
@@ -2159,7 +2378,7 @@ static void test_spooled_fields_roundtrip(void) {
     EXPECT(lonejson_spooled_size(&roundtrip.text) == strlen(text));
     EXPECT(lonejson_spooled_size(&roundtrip.bytes) == sizeof(raw_bytes));
     lonejson_cleanup(&test_spool_doc_map, &roundtrip);
-    free(serialized);
+    LONEJSON_FREE(serialized);
   }
 
   lonejson_cleanup(&test_spool_doc_map, &doc);
@@ -2179,6 +2398,7 @@ static void test_spooled_fields_small_and_null(void) {
   unsigned char read_back[16];
   size_t read_len;
 
+  reset_lonejson_alloc_stats();
   status = lonejson_parse_cstr(&test_spool_doc_map, &doc, json, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(lonejson_spooled_spilled(&doc.text) == 0);
@@ -2195,6 +2415,7 @@ static void test_spooled_fields_small_and_null(void) {
   EXPECT(lonejson_spooled_size(&doc.text) == 0u);
   EXPECT(lonejson_spooled_size(&doc.bytes) == 0u);
   lonejson_cleanup(&test_spool_doc_map, &doc);
+  EXPECT(g_alloc_record_count == 0u);
 }
 
 static void test_spooled_field_failures(void) {
@@ -3508,6 +3729,679 @@ static void test_value_visitor_chunking_unicode_and_failures(void) {
   }
 }
 
+static void test_custom_allocator_parse_cleanup_and_stream(void) {
+  static const char json[] =
+      "{\"name\":\"alpha\",\"body\":\"hello world\",\"tags\":[\"x\",\"y\"]}";
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_alloc_parse_doc doc;
+  lonejson_stream *stream;
+  test_reader_state reader;
+
+  test_allocator_init(&alloc);
+  memset(&doc, 0, sizeof(doc));
+  options.allocator = &alloc.allocator;
+  status = lonejson_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(alloc.stats.alloc_calls > 0u);
+  EXPECT(alloc.stats.bytes_live > 0u);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
+  EXPECT(alloc.stats.bytes_live == 0u);
+  EXPECT(alloc.stats.free_calls > 0u);
+
+  test_allocator_init(&alloc);
+  options = lonejson_default_parse_options();
+  options.allocator = &alloc.allocator;
+  reader.json = json;
+  reader.offset = 0u;
+  reader.chunk_size = 7u;
+  stream = lonejson_stream_open_reader(&test_alloc_parse_doc_map,
+                                       test_state_reader, &reader, &options,
+                                       &error);
+  EXPECT(stream != NULL);
+  EXPECT(alloc.stats.alloc_calls > 0u);
+  if (stream != NULL) {
+    memset(&doc, 0, sizeof(doc));
+    EXPECT(lonejson_stream_next(stream, &doc, &error) == LONEJSON_STREAM_OBJECT);
+    lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
+    lonejson_stream_close(stream);
+  }
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_custom_allocator_json_value_capture_and_serialize_alloc(void) {
+  static const char json[] = "{\"id\":\"q1\",\"selector\":{\"a\":[1,true,null]}}";
+  test_allocator_state parse_alloc;
+  test_allocator_state write_alloc;
+  lonejson_parse_options parse_options = lonejson_default_parse_options();
+  lonejson_write_options write_options = lonejson_default_write_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_alloc_json_value_doc doc;
+  test_event event;
+  lonejson_owned_buffer serialized;
+
+  test_allocator_init(&parse_alloc);
+  test_allocator_init(&write_alloc);
+  lonejson_json_value_init_with_allocator(&doc.selector, &parse_alloc.allocator);
+  status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  memset(doc.id, 0, sizeof(doc.id));
+  parse_options.clear_destination = 0;
+  parse_options.allocator = &parse_alloc.allocator;
+  status = lonejson_parse_cstr(&test_alloc_json_value_doc_map, &doc, json,
+                               &parse_options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(parse_alloc.stats.alloc_calls > 0u);
+  EXPECT(parse_alloc.stats.bytes_live > 0u);
+  EXPECT(strcmp(doc.selector.json, "{\"a\":[1,true,null]}") == 0);
+  lonejson_cleanup(&test_alloc_json_value_doc_map, &doc);
+  EXPECT(parse_alloc.stats.bytes_live == 0u);
+
+  write_options.allocator = &write_alloc.allocator;
+  memset(&event, 0, sizeof(event));
+  memcpy(event.id, "evt-1", 6u);
+  event.ok = true;
+  lonejson_owned_buffer_init(&serialized);
+  status = lonejson_serialize_owned(&test_event_map, &event, &serialized,
+                                    &write_options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(serialized.data != NULL);
+  EXPECT(write_alloc.stats.alloc_calls > 0u);
+  EXPECT(write_alloc.stats.bytes_live > 0u);
+  if (serialized.data != NULL) {
+    EXPECT(strcmp(serialized.data, "{\"id\":\"evt-1\",\"ok\":true}") == 0);
+    lonejson_owned_buffer_free(&serialized);
+  }
+  EXPECT(write_alloc.stats.bytes_live == 0u);
+}
+
+static void test_custom_allocator_raw_serialize_alloc_is_rejected(void) {
+  test_allocator_state write_alloc;
+  lonejson_write_options write_options = lonejson_default_write_options();
+  lonejson_error error;
+  test_event event;
+  char *serialized;
+
+  test_allocator_init(&write_alloc);
+  write_options.allocator = &write_alloc.allocator;
+  memset(&event, 0, sizeof(event));
+  memcpy(event.id, "evt-raw", 8u);
+  event.ok = true;
+  serialized = lonejson_serialize_alloc(&test_event_map, &event, NULL,
+                                        &write_options, &error);
+  EXPECT(serialized == NULL);
+  EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(strstr(error.message,
+                "serialize_alloc uses the default allocator only") != NULL);
+  EXPECT(write_alloc.stats.alloc_calls == 0u);
+  EXPECT(write_alloc.stats.realloc_calls == 0u);
+  EXPECT(write_alloc.stats.free_calls == 0u);
+  EXPECT(write_alloc.stats.bytes_live == 0u);
+}
+
+static void test_explicit_default_allocator_raw_serialize_alloc_is_allowed(void) {
+  lonejson_write_options options = lonejson_default_write_options();
+  lonejson_allocator allocator = lonejson_default_allocator();
+  lonejson_error error;
+  test_event event;
+  char *serialized;
+
+  options.allocator = &allocator;
+  memset(&event, 0, sizeof(event));
+  memcpy(event.id, "evt-def", 8u);
+  event.ok = true;
+  serialized = lonejson_serialize_alloc(&test_event_map, &event, NULL, &options,
+                                        &error);
+  EXPECT(serialized != NULL);
+  if (serialized != NULL) {
+    EXPECT(strcmp(serialized, "{\"id\":\"evt-def\",\"ok\":true}") == 0);
+    LONEJSON_FREE(serialized);
+  }
+}
+
+static void test_explicit_default_allocator_raw_serialize_jsonl_alloc_is_allowed(
+    void) {
+  lonejson_write_options options = lonejson_default_write_options();
+  lonejson_allocator allocator = lonejson_default_allocator();
+  lonejson_error error;
+  test_event events[2];
+  char *serialized;
+
+  options.allocator = &allocator;
+  memset(events, 0, sizeof(events));
+  memcpy(events[0].id, "evt-1", 6u);
+  events[0].ok = true;
+  memcpy(events[1].id, "evt-2", 6u);
+  events[1].ok = false;
+  serialized = lonejson_serialize_jsonl_alloc(&test_event_map, events, 2u, 0u,
+                                              NULL, &options, &error);
+  EXPECT(serialized != NULL);
+  if (serialized != NULL) {
+    EXPECT(strcmp(serialized,
+                  "{\"id\":\"evt-1\",\"ok\":true}\n"
+                  "{\"id\":\"evt-2\",\"ok\":false}\n") == 0);
+    LONEJSON_FREE(serialized);
+  }
+}
+
+static void test_custom_allocator_json_value_capture_preserves_handle_allocator(
+    void) {
+  static const char json[] = "{\"id\":\"q2\",\"selector\":{\"k\":[1,2,3]}}";
+  test_allocator_state parse_alloc;
+  lonejson_parse_options parse_options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_alloc_json_value_doc doc;
+
+  memset(&doc, 0, sizeof(doc));
+  test_allocator_init(&parse_alloc);
+  lonejson_json_value_init_with_allocator(&doc.selector, &parse_alloc.allocator);
+  status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  parse_options.clear_destination = 0;
+  parse_options.allocator = NULL;
+  status = lonejson_parse_cstr(&test_alloc_json_value_doc_map, &doc, json,
+                               &parse_options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(parse_alloc.stats.alloc_calls > 0u);
+  EXPECT(parse_alloc.stats.bytes_live > 0u);
+  EXPECT(strcmp(doc.selector.json, "{\"k\":[1,2,3]}") == 0);
+  lonejson_cleanup(&test_alloc_json_value_doc_map, &doc);
+  EXPECT(parse_alloc.stats.bytes_live == 0u);
+}
+
+static void test_partial_allocator_parse_is_rejected(void) {
+  static const char json[] = "{\"name\":\"alpha\",\"body\":\"hello\"}";
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_alloc_parse_doc doc;
+
+  memset(&doc, 0, sizeof(doc));
+  test_allocator_init(&alloc);
+  alloc.allocator.realloc_fn = NULL;
+  alloc.allocator.free_fn = NULL;
+  options.allocator = &alloc.allocator;
+  status = lonejson_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(strstr(error.message, "allocator must provide either all callbacks or none") !=
+         NULL);
+  EXPECT(alloc.stats.alloc_calls == 0u);
+  EXPECT(alloc.stats.realloc_calls == 0u);
+  EXPECT(alloc.stats.free_calls == 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_partial_allocator_parse_reader_is_rejected(void) {
+  static const char json[] = "{\"name\":\"alpha\",\"body\":\"hello\"}";
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_alloc_parse_doc doc;
+  test_reader_state reader;
+
+  memset(&doc, 0, sizeof(doc));
+  test_allocator_init(&alloc);
+  alloc.allocator.realloc_fn = NULL;
+  alloc.allocator.free_fn = NULL;
+  options.allocator = &alloc.allocator;
+  reader.json = json;
+  reader.offset = 0u;
+  reader.chunk_size = 5u;
+  status = lonejson_parse_reader(&test_alloc_parse_doc_map, &doc,
+                                 test_state_reader, &reader, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(strstr(error.message, "allocator must provide either all callbacks or none") !=
+         NULL);
+  EXPECT(alloc.stats.alloc_calls == 0u);
+  EXPECT(alloc.stats.realloc_calls == 0u);
+  EXPECT(alloc.stats.free_calls == 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_partial_allocator_serialize_alloc_is_rejected(void) {
+  test_allocator_state alloc;
+  lonejson_write_options options = lonejson_default_write_options();
+  lonejson_error error;
+  test_event event;
+  char *serialized;
+
+  memset(&event, 0, sizeof(event));
+  memcpy(event.id, "evt-2", 6u);
+  event.ok = true;
+  test_allocator_init(&alloc);
+  alloc.allocator.realloc_fn = NULL;
+  alloc.allocator.free_fn = NULL;
+  options.allocator = &alloc.allocator;
+  serialized = lonejson_serialize_alloc(&test_event_map, &event, NULL, &options,
+                                        &error);
+  EXPECT(serialized == NULL);
+  EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(strstr(error.message, "allocator must provide either all callbacks or none") !=
+         NULL);
+  EXPECT(alloc.stats.alloc_calls == 0u);
+  EXPECT(alloc.stats.realloc_calls == 0u);
+  EXPECT(alloc.stats.free_calls == 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_partial_allocator_generator_init_is_rejected(void) {
+  test_allocator_state alloc;
+  lonejson_write_options options = lonejson_default_write_options();
+  lonejson_generator generator;
+  test_event event;
+  lonejson_status status;
+
+  memset(&event, 0, sizeof(event));
+  memcpy(event.id, "evt-3", 6u);
+  event.ok = true;
+  test_allocator_init(&alloc);
+  alloc.allocator.realloc_fn = NULL;
+  alloc.allocator.free_fn = NULL;
+  options.allocator = &alloc.allocator;
+  status = lonejson_generator_init(&generator, &test_event_map, &event,
+                                   &options);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(generator.state == NULL);
+  EXPECT(generator.error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(strstr(generator.error.message,
+                "allocator must provide either all callbacks or none") !=
+         NULL);
+  EXPECT(alloc.stats.alloc_calls == 0u);
+  EXPECT(alloc.stats.realloc_calls == 0u);
+  EXPECT(alloc.stats.free_calls == 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_generator_compact_streams_event_map(void) {
+  test_event event;
+  lonejson_generator generator;
+  unsigned char chunk[7];
+  char output[128];
+  size_t out_len;
+  size_t total;
+  int eof;
+
+  memset(&event, 0, sizeof(event));
+  memset(&generator, 0, sizeof(generator));
+  memset(output, 0, sizeof(output));
+  strcpy(event.id, "evt-1");
+  event.ok = true;
+
+  EXPECT(lonejson_generator_init(&generator, &test_event_map, &event, NULL) ==
+         LONEJSON_STATUS_OK);
+  total = 0u;
+  eof = 0;
+  while (!eof) {
+    EXPECT(lonejson_generator_read(&generator, chunk, sizeof(chunk), &out_len,
+                                   &eof) == LONEJSON_STATUS_OK);
+    EXPECT(total + out_len < sizeof(output));
+    memcpy(output + total, chunk, out_len);
+    total += out_len;
+  }
+  output[total] = '\0';
+  EXPECT(strcmp(output, "{\"id\":\"evt-1\",\"ok\":true}") == 0);
+  lonejson_generator_cleanup(&generator);
+}
+
+static void test_generator_pretty_streams_source_field(void) {
+  test_source_doc doc;
+  lonejson_generator generator;
+  lonejson_write_options options = lonejson_default_write_options();
+  char path[] = "/tmp/lonejson-generator-XXXXXX";
+  unsigned char chunk[64];
+  char output[512];
+  size_t out_len;
+  size_t total;
+  int eof;
+  int fd;
+  FILE *fp;
+
+  memset(&doc, 0, sizeof(doc));
+  memset(&generator, 0, sizeof(generator));
+  memset(output, 0, sizeof(output));
+  strcpy(doc.id, "evt-1");
+  lonejson_source_init(&doc.text);
+  lonejson_source_init(&doc.bytes);
+  options.pretty = 1;
+
+  fd = mkstemp(path);
+  EXPECT(fd >= 0);
+  if (fd < 0) {
+    return;
+  }
+  fp = fdopen(fd, "wb");
+  EXPECT(fp != NULL);
+  if (fp == NULL) {
+    close(fd);
+    unlink(path);
+    return;
+  }
+  fputs("hello", fp);
+  fclose(fp);
+
+  EXPECT(lonejson_source_set_path(&doc.text, path, NULL) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_generator_init(&generator, &test_source_doc_map, &doc,
+                                 &options) == LONEJSON_STATUS_OK);
+  total = 0u;
+  eof = 0;
+  while (!eof) {
+    EXPECT(lonejson_generator_read(&generator, chunk, sizeof(chunk), &out_len,
+                                   &eof) == LONEJSON_STATUS_OK);
+    EXPECT(total + out_len < sizeof(output));
+    memcpy(output + total, chunk, out_len);
+    total += out_len;
+  }
+  output[total] = '\0';
+  EXPECT(strstr(output, "\n") != NULL);
+  EXPECT(strstr(output, "\"text\": \"hello\"") != NULL);
+  lonejson_generator_cleanup(&generator);
+  lonejson_cleanup(&test_source_doc_map, &doc);
+  unlink(path);
+}
+
+static void test_generator_streams_json_value_fields(void) {
+  test_json_value_doc doc;
+  lonejson_generator generator;
+  unsigned char chunk[11];
+  char output[512];
+  size_t out_len;
+  size_t total;
+  int eof;
+
+  memset(&doc, 0, sizeof(doc));
+  memset(&generator, 0, sizeof(generator));
+  memset(output, 0, sizeof(output));
+  strcpy(doc.id, "evt-1");
+  lonejson_json_value_init(&doc.selector);
+  lonejson_json_value_init(&doc.fields);
+  lonejson_json_value_init(&doc.last_error);
+  EXPECT(lonejson_json_value_set_buffer(
+             &doc.selector, "{\"op\":\"and\",\"clauses\":[1,true]}",
+             strlen("{\"op\":\"and\",\"clauses\":[1,true]}"), NULL) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_json_value_set_buffer(
+             &doc.fields, "[\"id\",{\"metrics\":[null,3.14]}]",
+             strlen("[\"id\",{\"metrics\":[null,3.14]}]"), NULL) ==
+         LONEJSON_STATUS_OK);
+
+  EXPECT(lonejson_generator_init(&generator, &test_json_value_doc_map, &doc,
+                                 NULL) == LONEJSON_STATUS_OK);
+  total = 0u;
+  eof = 0;
+  while (!eof) {
+    EXPECT(lonejson_generator_read(&generator, chunk, sizeof(chunk), &out_len,
+                                   &eof) == LONEJSON_STATUS_OK);
+    EXPECT(total + out_len < sizeof(output));
+    memcpy(output + total, chunk, out_len);
+    total += out_len;
+  }
+  output[total] = '\0';
+  EXPECT(strcmp(output,
+                "{\"id\":\"evt-1\",\"selector\":{\"op\":\"and\",\"clauses\":[1,"
+                "true]},\"fields\":[\"id\",{\"metrics\":[null,3.14]}],"
+                "\"last_error\":null}") == 0);
+  lonejson_generator_cleanup(&generator);
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
+}
+
+static void test_generator_pretty_streams_json_value_reader(void) {
+  test_json_value_doc doc;
+  lonejson_generator generator;
+  lonejson_write_options options = lonejson_default_write_options();
+  test_reader_state selector_reader = {
+      "{\"filters\":[{\"op\":\"eq\",\"field\":\"kind\",\"value\":\"event\"},"
+      "{\"op\":\"gt\",\"field\":\"score\",\"value\":3.5}],\"ok\":true}",
+      0u, 5u};
+  unsigned char chunk[17];
+  char output[1024];
+  size_t out_len;
+  size_t total;
+  int eof;
+
+  memset(&doc, 0, sizeof(doc));
+  memset(&generator, 0, sizeof(generator));
+  memset(output, 0, sizeof(output));
+  strcpy(doc.id, "evt-1");
+  lonejson_json_value_init(&doc.selector);
+  lonejson_json_value_init(&doc.fields);
+  lonejson_json_value_init(&doc.last_error);
+  options.pretty = 1;
+
+  EXPECT(lonejson_json_value_set_reader(&doc.selector, test_state_reader,
+                                        &selector_reader, NULL) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_json_value_set_buffer(
+             &doc.fields, "[\"id\",\"kind\",{\"nested\":[1,null,false]}]",
+             strlen("[\"id\",\"kind\",{\"nested\":[1,null,false]}]"), NULL) ==
+         LONEJSON_STATUS_OK);
+
+  EXPECT(lonejson_generator_init(&generator, &test_json_value_doc_map, &doc,
+                                 &options) == LONEJSON_STATUS_OK);
+  total = 0u;
+  eof = 0;
+  while (!eof) {
+    EXPECT(lonejson_generator_read(&generator, chunk, sizeof(chunk), &out_len,
+                                   &eof) == LONEJSON_STATUS_OK);
+    EXPECT(total + out_len < sizeof(output));
+    memcpy(output + total, chunk, out_len);
+    total += out_len;
+  }
+  output[total] = '\0';
+  EXPECT(strstr(output, "\n") != NULL);
+  EXPECT(strstr(output, "\"selector\": {\n") != NULL);
+  EXPECT(strstr(output, "\"filters\": [\n") != NULL);
+  EXPECT(strstr(output, "\"fields\": [\n") != NULL);
+  EXPECT(strstr(output, "\"nested\": [\n") != NULL);
+  lonejson_generator_cleanup(&generator);
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
+}
+
+#ifdef LONEJSON_WITH_CURL
+static int test_child_curl_upload_cleanup_default_allocator(void) {
+  test_event event;
+  lonejson_curl_upload upload;
+
+  memset(&event, 0, sizeof(event));
+  strcpy(event.id, "evt-1");
+  event.ok = true;
+
+  if (lonejson_curl_upload_init(&upload, &test_event_map, &event, NULL) !=
+      LONEJSON_STATUS_OK) {
+    return 2;
+  }
+  lonejson_curl_upload_cleanup(&upload);
+  return 0;
+}
+
+static void test_curl_upload_cleanup_default_allocator(void) {
+  pid_t pid;
+  int status;
+
+  pid = fork();
+  EXPECT(pid >= 0);
+  if (pid == 0) {
+    _exit(test_child_curl_upload_cleanup_default_allocator());
+  }
+  if (pid < 0) {
+    return;
+  }
+  EXPECT(waitpid(pid, &status, 0) == pid);
+  EXPECT(WIFEXITED(status));
+  if (WIFEXITED(status)) {
+    EXPECT(WEXITSTATUS(status) == 0);
+  }
+}
+
+static void test_curl_upload_custom_allocator_balance(void) {
+  test_event event;
+  test_allocator_state write_alloc;
+  lonejson_write_options options = lonejson_default_write_options();
+  lonejson_curl_upload upload;
+  char buffer[128];
+  size_t total;
+
+  memset(&event, 0, sizeof(event));
+  strcpy(event.id, "evt-1");
+  event.ok = true;
+  test_allocator_init(&write_alloc);
+  options.allocator = &write_alloc.allocator;
+
+  EXPECT(lonejson_curl_upload_init(&upload, &test_event_map, &event, &options) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(write_alloc.stats.alloc_calls > 0u);
+  EXPECT(write_alloc.stats.bytes_live > 0u);
+  total = lonejson_curl_read_callback(buffer, 1u, sizeof(buffer) - 1u, &upload);
+  EXPECT(total != 0u);
+  EXPECT(total != CURL_READFUNC_ABORT);
+  buffer[total] = '\0';
+  EXPECT(strstr(buffer, "\"id\":\"evt-1\"") != NULL);
+  lonejson_curl_upload_cleanup(&upload);
+  EXPECT(write_alloc.stats.bytes_live == 0u);
+  EXPECT(write_alloc.stats.free_calls > 0u);
+}
+
+static void test_curl_upload_streaming_does_not_buffer_payload(void) {
+  test_source_doc doc;
+  test_allocator_state write_alloc;
+  lonejson_write_options options = lonejson_default_write_options();
+  lonejson_curl_upload upload;
+  char path[] = "/tmp/lonejson-curl-upload-XXXXXX";
+  char chunk[4096];
+  int fd;
+  FILE *fp;
+  size_t total;
+  size_t i;
+
+  memset(&doc, 0, sizeof(doc));
+  strcpy(doc.id, "evt-1");
+  lonejson_source_init(&doc.text);
+  lonejson_source_init(&doc.bytes);
+  test_allocator_init(&write_alloc);
+  options.allocator = &write_alloc.allocator;
+
+  fd = mkstemp(path);
+  EXPECT(fd >= 0);
+  if (fd < 0) {
+    return;
+  }
+  fp = fdopen(fd, "wb");
+  EXPECT(fp != NULL);
+  if (fp == NULL) {
+    close(fd);
+    unlink(path);
+    return;
+  }
+  for (i = 0u; i < 262144u; ++i) {
+    fputc('a', fp);
+  }
+  fclose(fp);
+
+  EXPECT(lonejson_source_set_path(&doc.text, path, NULL) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_upload_init(&upload, &test_source_doc_map, &doc, &options) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_upload_size(&upload) == (curl_off_t)-1);
+  EXPECT(write_alloc.stats.peak_bytes_live < 65536u);
+
+  total = 0u;
+  for (;;) {
+    size_t got =
+        lonejson_curl_read_callback(chunk, 1u, sizeof(chunk), &upload);
+    if (got == 0u) {
+      break;
+    }
+    EXPECT(got != CURL_READFUNC_ABORT);
+    total += got;
+  }
+  EXPECT(upload.generator.error.code == LONEJSON_STATUS_OK ||
+         upload.generator.error.code == LONEJSON_STATUS_TRUNCATED);
+  EXPECT(total > 262144u);
+  EXPECT(write_alloc.stats.peak_bytes_live < 65536u);
+  lonejson_curl_upload_cleanup(&upload);
+  EXPECT(write_alloc.stats.bytes_live == 0u);
+  lonejson_cleanup(&test_source_doc_map, &doc);
+  unlink(path);
+}
+#endif
+
+static int test_child_parse_poisoned_stream_and_json_value_fields(void) {
+  test_alloc_parse_doc stream_doc;
+  test_alloc_json_value_doc json_doc;
+
+  memset(&stream_doc, 0xA5, sizeof(stream_doc));
+  stream_doc.body._lonejson_magic = LONEJSON__SPOOLED_MAGIC;
+  stream_doc.body.memory = (unsigned char *)1;
+  stream_doc.body.spill_fp = (FILE *)1;
+  lonejson__init_map(&test_alloc_parse_doc_map, &stream_doc);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &stream_doc);
+
+  memset(&json_doc, 0xA5, sizeof(json_doc));
+  json_doc.selector._lonejson_magic = LONEJSON__JSON_VALUE_MAGIC;
+  json_doc.selector.json = (char *)1;
+  json_doc.selector.path = (char *)1;
+  lonejson__init_map(&test_alloc_json_value_doc_map, &json_doc);
+  lonejson_cleanup(&test_alloc_json_value_doc_map, &json_doc);
+  return 0;
+}
+
+static void test_clear_destination_ignores_poisoned_stream_and_json_value_state(
+    void) {
+  pid_t pid;
+  int status;
+
+  pid = fork();
+  EXPECT(pid >= 0);
+  if (pid == 0) {
+    _exit(test_child_parse_poisoned_stream_and_json_value_fields());
+  }
+  if (pid < 0) {
+    return;
+  }
+  EXPECT(waitpid(pid, &status, 0) == pid);
+  EXPECT(WIFEXITED(status));
+  EXPECT(WEXITSTATUS(status) == 0);
+}
+
+static void test_prepared_fixed_object_array_parse_preserves_storage(void) {
+  static const char json[] =
+      "{\"results\":["
+      "{\"name\":\"parse/buffer_fixed/lonejson\",\"group\":\"parse\"},"
+      "{\"name\":\"serialize/sink/lonejson\",\"group\":\"serialize\"}]}";
+  test_fixed_result_run run;
+  lonejson_parse_options options;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&run, 0, sizeof(run));
+  run.results.items = run.result_storage;
+  run.results.capacity =
+      sizeof(run.result_storage) / sizeof(run.result_storage[0]);
+  run.results.elem_size = sizeof(run.result_storage[0]);
+  run.results.flags = LONEJSON_ARRAY_FIXED_CAPACITY;
+
+  options = lonejson_default_parse_options();
+  options.clear_destination = 0;
+  status = lonejson_parse_cstr(&test_fixed_result_run_map, &run, json, &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(run.results.items == run.result_storage);
+  EXPECT(run.results.count == 2u);
+  EXPECT(strcmp(run.result_storage[0].name, "parse/buffer_fixed/lonejson") == 0);
+  EXPECT(strcmp(run.result_storage[0].group, "parse") == 0);
+  EXPECT(strcmp(run.result_storage[1].name, "serialize/sink/lonejson") == 0);
+  EXPECT(strcmp(run.result_storage[1].group, "serialize") == 0);
+  lonejson_cleanup(&test_fixed_result_run_map, &run);
+}
+
 int main(void) {
   test_parse_implicit_destination_reset();
   test_dynamic_allocation_cleanup_balance();
@@ -3520,7 +4414,9 @@ int main(void) {
   test_zero_alloc_fixed_storage_serialize();
   test_zero_alloc_jsonl_serialize();
   test_serialize_alloc_balance();
+  test_serialize_alloc_default_free_compatibility();
   test_serialize_jsonl_alloc_balance();
+  test_serialize_jsonl_alloc_default_free_compatibility();
   test_parse_buffer_basic();
   test_parse_fixed_strings_with_escapes_and_truncation();
   test_chunked_parser_and_missing_required();
@@ -3529,6 +4425,7 @@ int main(void) {
   test_file_and_buffer_helpers();
   test_jsonl_helpers();
   test_fixed_capacity_object_array();
+  test_dynamic_object_array_alignment();
   test_formatting_variants_and_roundtrip();
   test_duplicate_key_policy();
   test_public_api_argument_and_serialization_guards();
@@ -3560,6 +4457,27 @@ int main(void) {
   test_json_value_nested_failure_matrix();
   test_value_visitor_success_and_limits();
   test_value_visitor_chunking_unicode_and_failures();
+  test_custom_allocator_parse_cleanup_and_stream();
+  test_custom_allocator_json_value_capture_and_serialize_alloc();
+  test_custom_allocator_raw_serialize_alloc_is_rejected();
+  test_explicit_default_allocator_raw_serialize_alloc_is_allowed();
+  test_explicit_default_allocator_raw_serialize_jsonl_alloc_is_allowed();
+  test_custom_allocator_json_value_capture_preserves_handle_allocator();
+  test_partial_allocator_parse_is_rejected();
+  test_partial_allocator_parse_reader_is_rejected();
+  test_partial_allocator_serialize_alloc_is_rejected();
+  test_partial_allocator_generator_init_is_rejected();
+  test_generator_compact_streams_event_map();
+  test_generator_pretty_streams_source_field();
+  test_generator_streams_json_value_fields();
+  test_generator_pretty_streams_json_value_reader();
+#ifdef LONEJSON_WITH_CURL
+  test_curl_upload_cleanup_default_allocator();
+  test_curl_upload_custom_allocator_balance();
+  test_curl_upload_streaming_does_not_buffer_payload();
+#endif
+  test_clear_destination_ignores_poisoned_stream_and_json_value_state();
+  test_prepared_fixed_object_array_parse_preserves_storage();
 
   if (g_failures != 0) {
     fprintf(stderr, "test failures: %d\n", g_failures);

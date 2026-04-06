@@ -125,7 +125,7 @@ int main(void) {
   printf("pretty size=%lu bytes\n", (unsigned long)strlen(pretty));
   printf("%.200s...\n", pretty);
 
-  free(pretty);
+  LONEJSON_FREE(pretty);
   lj_cleanup(&streamed_query_request_map, &req);
   unlink(selector_path);
   unlink(fields_path);

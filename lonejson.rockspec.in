@@ -17,18 +17,14 @@ dependencies = {
   "lua >= 5.5, < 5.6",
 }
 build = {
-  type = "builtin",
-  modules = {
-    ["lonejson.core"] = {
-      sources = { "src/lua/lonejson_lua.c" },
-      incdirs = { "include" },
-      libraries = {},
-      platforms = {
-        linux = {
-          linkflags = { "-Wl,--allow-shlib-undefined" },
-        },
-      },
+  type = "command",
+  build_command = "sh scripts/build_lua_rock.sh \"$(CC)\" \"$(CFLAGS)\" \"$(LIBFLAG)\" \"$(OBJ_EXTENSION)\" \"$(LIB_EXTENSION)\" \"$(LUA_INCDIR)\"",
+  install = {
+    lua = {
+      ["lonejson.init"] = "lua/lonejson/init.lua",
     },
-    ["lonejson"] = "lua/lonejson/init.lua",
+    lib = {
+      ["lonejson.core"] = ".luarocks-build/lonejson/core.@LIB_EXTENSION@",
+    },
   },
 }

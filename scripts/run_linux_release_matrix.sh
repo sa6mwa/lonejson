@@ -20,13 +20,11 @@ require_file() {
 
 run_target() {
     preset="$1"
-    archive_preset="$2"
 
     printf '\n== %s ==\n' "$preset"
     cmake --preset "$preset"
     cmake --build --preset "$preset"
     ctest --preset "$preset"
-    cmake --build --preset "$archive_preset"
 }
 
 require_command cmake
@@ -49,14 +47,15 @@ cd "$repo_root"
 cmake --preset host
 cmake --build --preset package-clean-dist
 
-run_target linux-gnu-release package-archive-linux-gnu
-run_target linux-musl-release package-archive-linux-musl
-run_target aarch64-linux-gnu-release package-archive-aarch64-linux-gnu
-run_target aarch64-linux-musl-release package-archive-aarch64-linux-musl
-run_target armhf-linux-gnu-release package-archive-armhf-linux-gnu
-run_target armhf-linux-musl-release package-archive-armhf-linux-musl
+run_target linux-gnu-release
+run_target linux-musl-release
+run_target aarch64-linux-gnu-release
+run_target aarch64-linux-musl-release
+run_target armhf-linux-gnu-release
+run_target armhf-linux-musl-release
 
 cmake --build --preset package-single-header
+cmake --build --preset package-source
 make release-lua-artifacts
 cmake --build --preset package-checksums
 

@@ -4,7 +4,7 @@ set(checksums_path "${dist_dir}/${checksums_name}")
 
 file(MAKE_DIRECTORY "${dist_dir}")
 file(GLOB release_entries RELATIVE "${dist_dir}"
-  "${dist_dir}/liblonejson-${LONEJSON_VERSION}-*.tar.gz"
+  "${dist_dir}/lonejson-${LONEJSON_VERSION}.tar.gz"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}.h.gz"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}-*.rockspec"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}-*.src.rock"

@@ -55,7 +55,7 @@ int main(void) {
 
   printf("json=%s\n", json);
 
-  free(json);
+  LONEJSON_FREE(json);
   lj_cleanup(&query_request_map, &req);
   return 0;
 }

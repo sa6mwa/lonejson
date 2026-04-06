@@ -69,7 +69,7 @@ int main(void) {
   printf("fd-backed bytes source serialized as base64 JSON\n");
   printf("json=%s\n", json);
 
-  free(json);
+  LONEJSON_FREE(json);
   lonejson_cleanup(&outbound_bytes_doc_map, &doc);
   close(fd);
   unlink(path);

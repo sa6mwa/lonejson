@@ -33,6 +33,6 @@ int main(void) {
   }
 
   puts(json);
-  free(json);
+  LONEJSON_FREE(json);
   return 0;
 }

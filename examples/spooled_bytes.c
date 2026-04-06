@@ -105,7 +105,7 @@ int main(void) {
       LONEJSON_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
     free(base64_text);
-    free(json);
+    LONEJSON_FREE(json);
     return 1;
   }
 
@@ -113,7 +113,7 @@ int main(void) {
     fprintf(stderr, "expected the example to spill to disk\n");
     lonejson_cleanup(&binary_blob_map, &blob);
     free(base64_text);
-    free(json);
+    LONEJSON_FREE(json);
     return 1;
   }
 
@@ -126,7 +126,7 @@ int main(void) {
     fprintf(stderr, "rewind failed: %s\n", error.message);
     lonejson_cleanup(&binary_blob_map, &blob);
     free(base64_text);
-    free(json);
+    LONEJSON_FREE(json);
     return 1;
   }
   chunk = lonejson_spooled_read(&blob.payload, preview, sizeof(preview));
@@ -151,6 +151,6 @@ int main(void) {
   printf("exists_after_cleanup=%s\n", after_cleanup_missing ? "no" : "yes");
 
   free(base64_text);
-  free(json);
+  LONEJSON_FREE(json);
   return after_cleanup_missing ? 0 : 1;
 }

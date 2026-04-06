@@ -54,11 +54,33 @@ Run the Lua benchmark harness with:
 make lua-bench
 ```
 
+The Lua benchmark targets are Lua-only. The C benchmark gate remains separate:
+
+```sh
+make bench-gate
+make lua-bench-gate
+```
+
+The Lua benchmark harness is currently noisy enough that its compare output
+should not be treated as a stable baseline contract yet. I will revisit the
+harness before using Lua benchmark deltas as a release gate or as an
+implementation signal.
+
 To use the locally built rock in a shell session:
 
 ```sh
 eval "$(luarocks path --tree build/luarocks)"
 ```
+
+Release packaging ships one Lua source package:
+
+- `lonejson-<version>-1.rockspec` and `lonejson-<version>-1.src.rock`
+
+That source package prefers a curl-enabled native build when the build
+environment provides curl headers and libraries. If the curl probe fails, it
+falls back automatically to a curl-free build of the same Lua module names.
+Set `LONEJSON_LUA_FORCE_CURL=1` to require curl support, or
+`LONEJSON_LUA_DISABLE_CURL=1` to force the curl-free build.
 
 The example program in [`examples/lua_binding.lua`](../examples/lua_binding.lua)
 is a good companion to this document.

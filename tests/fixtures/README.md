@@ -11,13 +11,13 @@ for Japanese, Hebrew, and Arabic text. See that directory's `README.md` for
 source URLs and license/provenance notes.
 
 Large payloads are not checked in.
-They are generated deterministically by `scripts/generate_large_fixtures.lua` into the build tree and the local nginx test tree.
+They are generated deterministically by `scripts/generate_large_fixtures.lua` into the shared `build/generated/fixtures/` cache and the local nginx test tree.
 The generated set is approximately `100 MiB` in total and includes large objects, large arrays of objects, large base64-heavy documents, and a large JSONL stream.
 
 Generation entry points:
 
 - `cmake --build --preset debug`
-- `make generate-fixtures`
+- any normal build or test path that depends on the generated fixtures
 
 Reference corpus used for shaping the checked-in cases:
 

@@ -2,11 +2,12 @@ local lj = require("lonejson")
 local core = lj.core
 local HAVE_CJSON, cjson = pcall(require, "cjson")
 
-local BENCH_SAMPLE_COUNT = 5
-local BENCH_MIN_SAMPLE_NS = 100000000
-local BENCH_SCHEMA_VERSION = 6
+local BENCH_SAMPLE_COUNT = 3
+local BENCH_MIN_SAMPLE_NS = 200000000
+local BENCH_SCHEMA_VERSION = 27
 local BENCH_NOISE_DELTA_PCT = 3.0
 local BENCH_MATERIAL_DELTA_PCT = 5.0
+local BENCH_REVIEW_IMPROVEMENT_PCT = 10.0
 
 local PARSE_JSON = table.concat({
   '{"name":"Alice","nickname":"Wonderland","age":34,',
@@ -131,14 +132,36 @@ local function shallow_copy(tbl)
 end
 
 local function classify_delta(delta_pct)
-  local abs_delta = math.abs(delta_pct)
-  if abs_delta < BENCH_NOISE_DELTA_PCT then
-    return "noise"
+  if delta_pct <= -BENCH_MATERIAL_DELTA_PCT then
+    return "material-reg"
   end
-  if abs_delta < BENCH_MATERIAL_DELTA_PCT then
-    return "small"
+  if delta_pct <= -BENCH_NOISE_DELTA_PCT then
+    return "small-reg"
   end
-  return "material"
+  if delta_pct >= BENCH_REVIEW_IMPROVEMENT_PCT then
+    return "review-imp"
+  end
+  if delta_pct >= BENCH_MATERIAL_DELTA_PCT then
+    return "material-imp"
+  end
+  if delta_pct >= BENCH_NOISE_DELTA_PCT then
+    return "small-imp"
+  end
+  return "noise"
+end
+
+local function format_sibling_mib(value)
+  if type(value) == "number" and value > 0.0 then
+    return string.format("%.3f", value)
+  end
+  return "-"
+end
+
+local function format_sibling_ratio(value)
+  if type(value) == "number" and value > 0.0 then
+    return string.format("%.3fx", value)
+  end
+  return "-"
 end
 
 local Address = lj.object {
@@ -552,11 +575,28 @@ end
 local function measure_case(case, iterations)
   local samples = {}
   local sample_index
+  local sample_min_ns = case.min_sample_ns or BENCH_MIN_SAMPLE_NS
+
+  collectgarbage("collect")
+  collectgarbage("stop")
+  if not case.run_once() then
+    collectgarbage("restart")
+    return {
+      elapsed_ns = 1,
+      total_bytes = case.bytes_per_call,
+      total_documents = case.docs_per_call,
+      mismatch_count = 1,
+      ns_per_byte = 0,
+    }
+  end
+  collectgarbage("restart")
 
   for sample_index = 1, BENCH_SAMPLE_COUNT do
     local total_bytes = 0
     local total_documents = 0
     local mismatch_count = 0
+    collectgarbage("collect")
+    collectgarbage("stop")
     local start_ns = core.monotonic_ns()
     local elapsed_ns = 0
 
@@ -571,7 +611,8 @@ local function measure_case(case, iterations)
         total_documents = total_documents + case.docs_per_call
       end
       elapsed_ns = core.monotonic_ns() - start_ns
-    until elapsed_ns >= BENCH_MIN_SAMPLE_NS
+    until elapsed_ns >= sample_min_ns
+    collectgarbage("restart")
 
     samples[sample_index] = {
       elapsed_ns = elapsed_ns,
@@ -589,6 +630,7 @@ local function bench_cases()
   local cases = {}
 
   do
+    local rec = VendorLong:new_record()
     cases[#cases + 1] = {
       name = "decode/table_dynamic/lua",
       group = "decode",
@@ -602,6 +644,7 @@ local function bench_cases()
   end
 
   do
+    local rec = VendorLong:new_record()
     cases[#cases + 1] = {
       name = "decode/doc_long_strings/lua",
       group = "decode",
@@ -835,6 +878,7 @@ local function bench_cases()
       name = "decode/record_fixed_prepared/lua",
       group = "decode",
       sibling_name = "parse/buffer_fixed_prepared/lonejson",
+      min_sample_ns = 250000000,
       bytes_per_call = #PARSE_JSON,
       docs_per_call = 1,
       run_once = function()
@@ -846,6 +890,7 @@ local function bench_cases()
   end
 
   do
+    local rec = VendorLong:new_record()
     cases[#cases + 1] = {
       name = "stream/record_fixed/lua",
       group = "stream",
@@ -920,6 +965,7 @@ local function bench_cases()
       docs_per_call = 1,
       run_once = function()
         local stream = VendorLong:stream_string(VENDOR_LONG_STRINGS_JSON)
+        rec:clear()
         local obj, err, status = stream:next(rec)
         stream:close()
         return status == "object" and obj.id == "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
@@ -937,6 +983,7 @@ local function bench_cases()
       docs_per_call = 1,
       run_once = function()
         local stream = VendorNumbers:stream_string(VENDOR_EXTREME_NUMBERS_JSON)
+        rec:clear()
         local obj, err, status = stream:next(rec)
         stream:close()
         return status == "object" and obj.min == -1.0e+28 and obj.max == 1.0e+28
@@ -954,6 +1001,7 @@ local function bench_cases()
       docs_per_call = 1,
       run_once = function()
         local stream = VendorUnicode:stream_string(VENDOR_STRING_UNICODE_JSON)
+        rec:clear()
         local obj, err, status = stream:next(rec)
         stream:close()
         return status == "object" and obj.title ~= nil and #obj.title > 0
@@ -971,6 +1019,7 @@ local function bench_cases()
       docs_per_call = 1,
       run_once = function()
         local stream = VendorLanguage:stream_string(JAPANESE_UTF8_JSON)
+        rec:clear()
         local obj, err, status = stream:next(rec)
         stream:close()
         return status == "object" and assert_vendor_language_table(obj, JAPANESE_UTF8_PREFIX)
@@ -984,10 +1033,12 @@ local function bench_cases()
       name = "stream/doc_japanese_wide/lua",
       group = "stream",
       sibling_name = "stream/doc_japanese_wide/lonejson",
+      min_sample_ns = 250000000,
       bytes_per_call = #JAPANESE_UTF8_WIDE_JSON,
       docs_per_call = 1,
       run_once = function()
         local stream = VendorLanguageWide:stream_string(JAPANESE_UTF8_WIDE_JSON)
+        rec:clear()
         local obj, err, status = stream:next(rec)
         stream:close()
         return status == "object" and assert_vendor_language_wide_table(obj,
@@ -1006,6 +1057,7 @@ local function bench_cases()
       docs_per_call = 1,
       run_once = function()
         local stream = VendorLanguageWide:stream_string(HEBREW_UTF8_WIDE_JSON)
+        rec:clear()
         local obj, err, status = stream:next(rec)
         stream:close()
         return status == "object" and assert_vendor_language_wide_table(obj,
@@ -1024,6 +1076,7 @@ local function bench_cases()
       docs_per_call = 1,
       run_once = function()
         local stream = VendorLanguageWide:stream_string(ARABIC_UTF8_WIDE_JSON)
+        rec:clear()
         local obj, err, status = stream:next(rec)
         stream:close()
         return status == "object" and assert_vendor_language_wide_table(obj,
@@ -1042,6 +1095,7 @@ local function bench_cases()
       docs_per_call = 1,
       run_once = function()
         local stream = VendorLanguage:stream_string(HEBREW_UTF8_JSON)
+        rec:clear()
         local obj, err, status = stream:next(rec)
         stream:close()
         return status == "object" and assert_vendor_language_table(obj, HEBREW_UTF8_PREFIX)
@@ -1059,6 +1113,7 @@ local function bench_cases()
       docs_per_call = 1,
       run_once = function()
         local stream = VendorLanguage:stream_string(ARABIC_UTF8_JSON)
+        rec:clear()
         local obj, err, status = stream:next(rec)
         stream:close()
         return status == "object" and assert_vendor_language_table(obj, ARABIC_UTF8_PREFIX)
@@ -1210,8 +1265,8 @@ local function run_single_case(case_name, iterations, c_latest_path)
         result.mib_per_sec,
         result.docs_per_sec,
         result.mismatch_count,
-        result.sibling_mib_per_sec and string.format("%.3f", result.sibling_mib_per_sec) or "-",
-        result.sibling_ratio and string.format("%.3fx", result.sibling_ratio) or "-"))
+        format_sibling_mib(result.sibling_mib_per_sec),
+        format_sibling_ratio(result.sibling_ratio)))
       return
     end
   end
@@ -1230,8 +1285,8 @@ local function print_run(run)
       r.group,
       r.mib_per_sec,
       r.docs_per_sec,
-      r.sibling_mib_per_sec and string.format("%.3f", r.sibling_mib_per_sec) or "-",
-      r.sibling_ratio and string.format("%.3fx", r.sibling_ratio) or "-"))
+      format_sibling_mib(r.sibling_mib_per_sec),
+      format_sibling_ratio(r.sibling_ratio)))
   end
 end
 
@@ -1280,7 +1335,7 @@ local function compare_runs(baseline_path, latest_path)
   local i
 
   print(string.format("lua compare baseline=%s latest=%s", baseline_path, latest_path))
-  print(string.format("%-34s %12s %12s %10s %-10s %12s %12s",
+  print(string.format("%-34s %12s %12s %10s %-12s %12s %12s",
     "name", "latest", "baseline", "delta", "class", "C sib", "L/C"))
   for i = 1, #latest.results do
     local current = latest.results[i]
@@ -1289,19 +1344,27 @@ local function compare_runs(baseline_path, latest_path)
     local cls
     if prior ~= nil and prior.mib_per_sec ~= 0.0 then
       delta_pct = ((current.mib_per_sec - prior.mib_per_sec) / prior.mib_per_sec) * 100.0
-      cls = classify_delta(delta_pct)
+      if (prior.mismatch_count or 0) ~= 0 or (current.mismatch_count or 0) ~= 0 then
+        cls = "broken"
+      else
+        cls = classify_delta(delta_pct)
+      end
     else
       delta_pct = 0.0
-      cls = "new"
+      if (current.mismatch_count or 0) ~= 0 then
+        cls = "broken"
+      else
+        cls = "new"
+      end
     end
-    print(string.format("%-34s %12.3f %12s %9.2f%% %-10s %12s %12s",
+    print(string.format("%-34s %12.3f %12s %9.2f%% %-12s %12s %12s",
       current.name,
       current.mib_per_sec,
       prior and string.format("%.3f", prior.mib_per_sec) or "-",
       delta_pct,
       cls,
-      current.sibling_mib_per_sec and string.format("%.3f", current.sibling_mib_per_sec) or "-",
-      current.sibling_ratio and string.format("%.3fx", current.sibling_ratio) or "-"))
+      format_sibling_mib(current.sibling_mib_per_sec),
+      format_sibling_ratio(current.sibling_ratio)))
   end
 end
 
@@ -1314,7 +1377,31 @@ local function is_material_regression(prior, current)
     return false
   end
   delta_pct = ((current.mib_per_sec - prior.mib_per_sec) / prior.mib_per_sec) * 100.0
-  return classify_delta(delta_pct) == "material"
+  return classify_delta(delta_pct) == "material-reg"
+end
+
+local function is_small_regression(prior, current)
+  local delta_pct
+  if prior == nil or prior.mib_per_sec == 0.0 then
+    return false
+  end
+  if current.mib_per_sec >= prior.mib_per_sec then
+    return false
+  end
+  delta_pct = ((current.mib_per_sec - prior.mib_per_sec) / prior.mib_per_sec) * 100.0
+  return classify_delta(delta_pct) == "small-reg"
+end
+
+local function is_large_improvement(prior, current)
+  local delta_pct
+  if prior == nil or prior.mib_per_sec == 0.0 then
+    return false
+  end
+  if current.mib_per_sec <= prior.mib_per_sec then
+    return false
+  end
+  delta_pct = ((current.mib_per_sec - prior.mib_per_sec) / prior.mib_per_sec) * 100.0
+  return classify_delta(delta_pct) == "review-imp"
 end
 
 local function gate_tracked_result(current)
@@ -1327,7 +1414,10 @@ local function gate_runs(baseline_path, latest_path)
   local baseline_index = index_results(baseline)
   local schema_mismatch = baseline.schema_version ~= latest.schema_version
   local missing = 0
+  local mismatches = 0
+  local small = 0
   local material = 0
+  local review = 0
   local i
 
   for i = 1, #latest.results do
@@ -1335,20 +1425,35 @@ local function gate_runs(baseline_path, latest_path)
     local prior = baseline_index[current.name]
     if not gate_tracked_result(current) then
       -- Ignore non-lonejson sibling/reference lanes in the hard gate.
+    elseif (current.mismatch_count or 0) ~= 0 then
+      mismatches = mismatches + 1
     elseif prior == nil then
       missing = missing + 1
+    elseif is_small_regression(prior, current) then
+      small = small + 1
     elseif is_material_regression(prior, current) then
       material = material + 1
+    elseif is_large_improvement(prior, current) then
+      review = review + 1
     end
   end
 
   print(string.format("lua gate baseline=%s latest=%s", baseline_path, latest_path))
   print(string.format("  schema mismatch: %s", schema_mismatch and "yes" or "no"))
   print(string.format("  missing results: %d", missing))
+  print(string.format("  result mismatches: %d", mismatches))
+  print(string.format("  small regressions: %d", small))
   print(string.format("  material regressions: %d", material))
+  print(string.format("  large improvements to review: %d", review))
 
-  if schema_mismatch or missing ~= 0 or material ~= 0 then
-    io.stderr:write("lua benchmark gate failed: refresh the baseline for intentional benchmark-schema changes or fix the regressions before landing\n")
+  if schema_mismatch or missing ~= 0 or mismatches ~= 0 or small ~= 0 or material ~= 0 then
+    if schema_mismatch or missing ~= 0 then
+      io.stderr:write("lua benchmark gate failed: fix the regressions, and refresh the baseline only if the benchmark schema/result set intentionally changed\n")
+    elseif mismatches ~= 0 then
+      io.stderr:write("lua benchmark gate failed: benchmark case mismatches must be zero before landing\n")
+    else
+      io.stderr:write("lua benchmark gate failed: fix the regressions before landing\n")
+    end
     os.exit(1)
   end
 end

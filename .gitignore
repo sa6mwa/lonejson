@@ -2,6 +2,7 @@
 /build/
 /.deps/
 /lonejson/
+/.luarocks-build/
 /src/lua/*.o
 /examples/bin/
 /examples/lua_binding.out

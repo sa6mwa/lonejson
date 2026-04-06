@@ -74,7 +74,7 @@ int main(void) {
       LJ_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
     free(body);
-    free(json);
+    LONEJSON_FREE(json);
     return 1;
   }
 
@@ -82,7 +82,7 @@ int main(void) {
     fprintf(stderr, "expected the example to spill to disk\n");
     lj_cleanup(&large_message_map, &message);
     free(body);
-    free(json);
+    LONEJSON_FREE(json);
     return 1;
   }
 
@@ -95,7 +95,7 @@ int main(void) {
     fprintf(stderr, "rewind failed: %s\n", error.message);
     lj_cleanup(&large_message_map, &message);
     free(body);
-    free(json);
+    LONEJSON_FREE(json);
     return 1;
   }
   chunk = lj_spooled_read(&message.body, preview, sizeof(preview) - 1u);
@@ -116,6 +116,6 @@ int main(void) {
   printf("exists_after_cleanup=%s\n", after_cleanup_missing ? "no" : "yes");
 
   free(body);
-  free(json);
+  LONEJSON_FREE(json);
   return after_cleanup_missing ? 0 : 1;
 }
