@@ -1,6 +1,7 @@
-lonejson_status lonejson_json_value_write_to_sink(
-    const lonejson_json_value *value, lonejson_sink_fn sink, void *user,
-    lonejson_error *error) {
+lonejson_status
+lonejson_json_value_write_to_sink(const lonejson_json_value *value,
+                                  lonejson_sink_fn sink, void *user,
+                                  lonejson_error *error) {
   if (sink == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "sink is required");
@@ -68,9 +69,8 @@ static void lonejson__parser_init_state(lonejson_parser *parser,
 #define lonejson__parser_peak_workspace_used(parser_ptr)                       \
   ((parser_ptr) != NULL ? (parser_ptr)->workspace_peak : 0u)
 static LONEJSON__HOT lonejson_status
-lonejson__parser_feed_bytes(lonejson_parser *parser,
-                            const unsigned char *bytes, size_t len,
-                            size_t *consumed, int stop_at_root);
+lonejson__parser_feed_bytes(lonejson_parser *parser, const unsigned char *bytes,
+                            size_t len, size_t *consumed, int stop_at_root);
 
 static void lonejson__scratch_reset(lonejson_scratch *scratch) {
   scratch->len = 0;
@@ -227,7 +227,8 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
   parser->unicode_digits_needed = 0;
   if ((field == NULL || field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) &&
       lonejson__json_value_parse_visitor_active(parser)) {
-    lonejson_status visitor_status = lonejson__json_value_string_begin(parser, 0);
+    lonejson_status visitor_status =
+        lonejson__json_value_string_begin(parser, 0);
     if (visitor_status != LONEJSON_STATUS_OK) {
       return visitor_status;
     }
@@ -422,7 +423,8 @@ static lonejson_status lonejson__stream_value_append(lonejson_parser *parser,
 static lonejson_status lonejson__stream_value_begin(lonejson_parser *parser,
                                                     const lonejson_field *field,
                                                     void *ptr) {
-  lonejson__spooled_apply_allocator((lonejson_spooled *)ptr, &parser->allocator);
+  lonejson__spooled_apply_allocator((lonejson_spooled *)ptr,
+                                    &parser->allocator);
   lonejson_spooled_reset((lonejson_spooled *)ptr);
   parser->stream_value_active = 1;
   parser->stream_field = field;
@@ -453,9 +455,8 @@ static lonejson_status lonejson__stream_value_finish(lonejson_parser *parser) {
   return status;
 }
 
-static LONEJSON__INLINE lonejson_status
-lonejson__direct_string_append_bytes(lonejson_parser *parser,
-                                     const unsigned char *data, size_t len) {
+static LONEJSON__INLINE lonejson_status lonejson__direct_string_append_bytes(
+    lonejson_parser *parser, const unsigned char *data, size_t len) {
   size_t limit;
   size_t remaining;
   size_t copy_len;
@@ -473,19 +474,21 @@ lonejson__direct_string_append_bytes(lonejson_parser *parser,
                   : 0u;
   copy_len = len < remaining ? len : remaining;
   if (copy_len != 0u) {
-    memcpy(parser->direct_string_ptr + parser->direct_string_len, data, copy_len);
+    memcpy(parser->direct_string_ptr + parser->direct_string_len, data,
+           copy_len);
     parser->direct_string_len += copy_len;
   }
   if (copy_len == len) {
     return LONEJSON_STATUS_OK;
   }
   if (parser->direct_string_overflow_policy == LONEJSON_OVERFLOW_FAIL) {
-    return lonejson__set_error(
-        &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
-        parser->error.line, parser->error.column,
-        "string field '%s' exceeds fixed capacity",
-        parser->direct_string_field != NULL ? parser->direct_string_field->json_key
-                                            : "<unknown>");
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "string field '%s' exceeds fixed capacity",
+                               parser->direct_string_field != NULL
+                                   ? parser->direct_string_field->json_key
+                                   : "<unknown>");
   }
   parser->direct_string_truncated = 1;
   parser->error.truncated = 1;
@@ -534,13 +537,13 @@ lonejson__direct_string_finish(lonejson_parser *parser) {
   }
   {
     lonejson_status complete = lonejson__complete_parent_after_value(parser);
-    if (complete != LONEJSON_STATUS_OK && complete != LONEJSON_STATUS_TRUNCATED) {
+    if (complete != LONEJSON_STATUS_OK &&
+        complete != LONEJSON_STATUS_TRUNCATED) {
       return complete;
     }
   }
   return status;
 }
-
 
 static lonejson_uint64
 lonejson__required_mask_for_map(lonejson_parser *parser,
@@ -885,9 +888,8 @@ static size_t lonejson__field_storage_size(const lonejson_field *field) {
   }
   switch (field->kind) {
   case LONEJSON_FIELD_KIND_STRING:
-    return (field->storage == LONEJSON_STORAGE_DYNAMIC)
-               ? sizeof(char *)
-               : field->fixed_capacity;
+    return (field->storage == LONEJSON_STORAGE_DYNAMIC) ? sizeof(char *)
+                                                        : field->fixed_capacity;
   case LONEJSON_FIELD_KIND_STRING_STREAM:
   case LONEJSON_FIELD_KIND_BASE64_STREAM:
     return sizeof(lonejson_spooled);
@@ -1029,9 +1031,9 @@ static int lonejson__array_ensure_bytes(void **items_ptr, size_t *cap_ptr,
 
 static void lonejson__cleanup_value(const lonejson_field *field, void *ptr);
 static void lonejson__reset_map(const lonejson_map *map, void *value);
-static void lonejson__init_map_with_allocator(const lonejson_map *map,
-                                              void *value,
-                                              const lonejson_allocator *allocator);
+static void
+lonejson__init_map_with_allocator(const lonejson_map *map, void *value,
+                                  const lonejson_allocator *allocator);
 static void lonejson__init_map(const lonejson_map *map, void *value);
 static void lonejson__cleanup_map_checked(const lonejson_map *map, void *value);
 
@@ -1048,7 +1050,8 @@ static int lonejson__map_layout_is_valid(const lonejson_map *map) {
     }
     if ((field->kind == LONEJSON_FIELD_KIND_OBJECT ||
          field->kind == LONEJSON_FIELD_KIND_OBJECT_ARRAY) &&
-        field->submap != NULL && !lonejson__map_layout_is_valid(field->submap)) {
+        field->submap != NULL &&
+        !lonejson__map_layout_is_valid(field->submap)) {
       return 0;
     }
   }
@@ -1328,9 +1331,9 @@ static void lonejson__init_value(const lonejson_field *field, void *ptr,
   }
 }
 
-static void lonejson__init_map_with_allocator(const lonejson_map *map,
-                                              void *value,
-                                              const lonejson_allocator *allocator) {
+static void
+lonejson__init_map_with_allocator(const lonejson_map *map, void *value,
+                                  const lonejson_allocator *allocator) {
   size_t i;
 
   if (map == NULL || value == NULL) {
@@ -1796,9 +1799,9 @@ static lonejson_status lonejson__assign_bool(lonejson_parser *parser,
   return LONEJSON_STATUS_OK;
 }
 
-static LONEJSON__INLINE int lonejson__mark_field_seen(
-    lonejson_parser *parser, lonejson_frame *frame,
-    const lonejson_field *field) {
+static LONEJSON__INLINE int
+lonejson__mark_field_seen(lonejson_parser *parser, lonejson_frame *frame,
+                          const lonejson_field *field) {
   size_t idx;
   lonejson_uint64 bit;
   if (frame == NULL || frame->map == NULL || field == NULL) {
@@ -1906,8 +1909,7 @@ static lonejson_status lonejson__assign_null(lonejson_parser *parser,
 }
 
 static lonejson_status lonejson__json_value_emit(lonejson_parser *parser,
-                                                 const void *data,
-                                                 size_t len) {
+                                                 const void *data, size_t len) {
   lonejson_json_value *value;
 
   value = parser->json_stream_value;
@@ -1941,11 +1943,10 @@ static lonejson_status lonejson__json_value_emit(lonejson_parser *parser,
       next = (char *)lonejson__owned_realloc(&value->allocator, value->json,
                                              next_cap);
       if (next == NULL) {
-        return lonejson__set_error(&parser->error,
-                                   LONEJSON_STATUS_ALLOCATION_FAILED,
-                                   parser->error.offset, parser->error.line,
-                                   parser->error.column,
-                                   "failed to grow captured JSON value");
+        return lonejson__set_error(
+            &parser->error, LONEJSON_STATUS_ALLOCATION_FAILED,
+            parser->error.offset, parser->error.line, parser->error.column,
+            "failed to grow captured JSON value");
       }
       value->json = next;
     }
@@ -1975,8 +1976,7 @@ lonejson__parser_set_json_stream_value(lonejson_parser *parser,
   parser->json_stream_value = value;
   parser->json_stream_active = (value != NULL);
   parser->json_stream_visit_active =
-      value != NULL &&
-      value->parse_mode == LONEJSON_JSON_VALUE_PARSE_VISITOR &&
+      value != NULL && value->parse_mode == LONEJSON_JSON_VALUE_PARSE_VISITOR &&
       value->parse_visitor != NULL;
   parser->json_stream_sink_active =
       value != NULL && value->parse_mode == LONEJSON_JSON_VALUE_PARSE_SINK;
@@ -1993,8 +1993,9 @@ lonejson__parser_clear_json_stream_value(lonejson_parser *parser) {
   parser->json_stream_sink_active = 0;
 }
 
-static lonejson_status lonejson__json_value_visit_event(
-    lonejson_parser *parser, lonejson_value_event_fn fn) {
+static lonejson_status
+lonejson__json_value_visit_event(lonejson_parser *parser,
+                                 lonejson_value_event_fn fn) {
   lonejson_json_value *value = parser->json_stream_value;
 
   if (!lonejson__json_value_parse_visitor_active(parser) || fn == NULL) {
@@ -2003,15 +2004,18 @@ static lonejson_status lonejson__json_value_visit_event(
   return fn(value->parse_visitor_user, &parser->error);
 }
 
-static lonejson_status lonejson__json_value_visit_chunk(
-    lonejson_parser *parser, lonejson_value_chunk_fn fn, const char *data,
-    size_t len, size_t *token_bytes, size_t token_limit, const char *limit_msg) {
+static lonejson_status
+lonejson__json_value_visit_chunk(lonejson_parser *parser,
+                                 lonejson_value_chunk_fn fn, const char *data,
+                                 size_t len, size_t *token_bytes,
+                                 size_t token_limit, const char *limit_msg) {
   lonejson_json_value *value = parser->json_stream_value;
 
   if (!lonejson__json_value_parse_visitor_active(parser) || len == 0u) {
     return LONEJSON_STATUS_OK;
   }
-  if (token_limit != 0u && token_bytes != NULL && *token_bytes + len > token_limit) {
+  if (token_limit != 0u && token_bytes != NULL &&
+      *token_bytes + len > token_limit) {
     return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
                                parser->error.offset, parser->error.line,
                                parser->error.column, "%s", limit_msg);
@@ -2048,8 +2052,8 @@ static lonejson_status lonejson__json_value_visit_bool(lonejson_parser *parser,
                                              boolean_value, &parser->error);
 }
 
-static lonejson_status lonejson__json_value_string_begin(lonejson_parser *parser,
-                                                         int is_key) {
+static lonejson_status
+lonejson__json_value_string_begin(lonejson_parser *parser, int is_key) {
   lonejson_json_value *value = parser->json_stream_value;
 
   if (!lonejson__json_value_parse_visitor_active(parser)) {
@@ -2062,8 +2066,9 @@ static lonejson_status lonejson__json_value_string_begin(lonejson_parser *parser
                      : value->parse_visitor->string_begin);
 }
 
-static lonejson_status lonejson__json_value_string_chunk(
-    lonejson_parser *parser, const char *data, size_t len) {
+static lonejson_status
+lonejson__json_value_string_chunk(lonejson_parser *parser, const char *data,
+                                  size_t len) {
   lonejson_json_value *value = parser->json_stream_value;
   size_t limit;
   const char *msg;
@@ -2071,8 +2076,9 @@ static lonejson_status lonejson__json_value_string_chunk(
   if (!lonejson__json_value_parse_visitor_active(parser)) {
     return LONEJSON_STATUS_OK;
   }
-  limit = parser->json_stream_text_is_key ? value->parse_visitor_limits.max_key_bytes
-                                          : value->parse_visitor_limits.max_string_bytes;
+  limit = parser->json_stream_text_is_key
+              ? value->parse_visitor_limits.max_key_bytes
+              : value->parse_visitor_limits.max_string_bytes;
   msg = parser->json_stream_text_is_key
             ? "JSON object key exceeds maximum decoded byte limit"
             : "JSON string exceeds maximum decoded byte limit";
@@ -2083,7 +2089,8 @@ static lonejson_status lonejson__json_value_string_chunk(
       data, len, &parser->json_stream_text_bytes, limit, msg);
 }
 
-static lonejson_status lonejson__json_value_string_end(lonejson_parser *parser) {
+static lonejson_status
+lonejson__json_value_string_end(lonejson_parser *parser) {
   lonejson_json_value *value = parser->json_stream_value;
   int is_key = parser->json_stream_text_is_key;
 
@@ -2097,8 +2104,9 @@ static lonejson_status lonejson__json_value_string_end(lonejson_parser *parser) 
                      : value->parse_visitor->string_end);
 }
 
-static lonejson_status lonejson__json_value_number(
-    lonejson_parser *parser, const char *text, size_t len) {
+static lonejson_status lonejson__json_value_number(lonejson_parser *parser,
+                                                   const char *text,
+                                                   size_t len) {
   lonejson_json_value *value = parser->json_stream_value;
   lonejson_status status;
   size_t count = 0u;
@@ -2106,8 +2114,8 @@ static lonejson_status lonejson__json_value_number(
   if (!lonejson__json_value_parse_visitor_active(parser)) {
     return LONEJSON_STATUS_OK;
   }
-  status =
-      lonejson__json_value_visit_event(parser, value->parse_visitor->number_begin);
+  status = lonejson__json_value_visit_event(parser,
+                                            value->parse_visitor->number_begin);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return status;
   }
@@ -2118,11 +2126,13 @@ static lonejson_status lonejson__json_value_number(
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return status;
   }
-  return lonejson__json_value_visit_event(parser, value->parse_visitor->number_end);
+  return lonejson__json_value_visit_event(parser,
+                                          value->parse_visitor->number_end);
 }
 
-static lonejson_status lonejson__json_value_emit_string(
-    lonejson_parser *parser, const char *value, size_t len) {
+static lonejson_status lonejson__json_value_emit_string(lonejson_parser *parser,
+                                                        const char *value,
+                                                        size_t len) {
   lonejson_status status;
 
   status = lonejson__json_value_emit(parser, "\"", 1u);
@@ -2142,9 +2152,11 @@ static lonejson_status lonejson__json_value_emit_string(
   return lonejson__json_value_emit(parser, "\"", 1u);
 }
 
-static lonejson_status lonejson__assign_json_scalar(
-    lonejson_parser *parser, lonejson_json_value *value, const char *text,
-    size_t len, lonejson_lex_mode mode) {
+static lonejson_status lonejson__assign_json_scalar(lonejson_parser *parser,
+                                                    lonejson_json_value *value,
+                                                    const char *text,
+                                                    size_t len,
+                                                    lonejson_lex_mode mode) {
   lonejson_status status;
 
   status = lonejson__json_value_prepare_parse(parser, value, &parser->error);
@@ -2177,13 +2189,14 @@ static lonejson_status lonejson__assign_json_scalar(
       status = lonejson__json_value_visit_bool(parser, 0);
       break;
     case LONEJSON_LEX_NULL:
-      status = lonejson__json_value_visit_event(parser, value->parse_visitor->null_value);
+      status = lonejson__json_value_visit_event(
+          parser, value->parse_visitor->null_value);
       break;
     default:
-      status = lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
-                                   parser->error.offset, parser->error.line,
-                                   parser->error.column,
-                                   "unexpected JSON scalar mode");
+      status = lonejson__set_error(
+          &parser->error, LONEJSON_STATUS_INTERNAL_ERROR, parser->error.offset,
+          parser->error.line, parser->error.column,
+          "unexpected JSON scalar mode");
       break;
     }
     lonejson__parser_clear_json_stream_value(parser);
@@ -2225,10 +2238,10 @@ static lonejson_status lonejson__array_append_string(
         "array '%s' contains embedded NUL unsupported by C strings",
         field->json_key);
   }
-  if (!lonejson__array_ensure_bytes(
-          (void **)&arr->items, &arr->capacity, sizeof(char *), &arr->flags,
-          arr->count + 1u, &parser->allocator, field->overflow_policy,
-          &parser->error)) {
+  if (!lonejson__array_ensure_bytes((void **)&arr->items, &arr->capacity,
+                                    sizeof(char *), &arr->flags,
+                                    arr->count + 1u, &parser->allocator,
+                                    field->overflow_policy, &parser->error)) {
     return (field->overflow_policy == LONEJSON_OVERFLOW_FAIL)
                ? parser->error.code
                : LONEJSON_STATUS_OK;
@@ -2256,10 +2269,10 @@ static lonejson_status lonejson__array_append_string(
   static lonejson_status name(lonejson_parser *parser,                         \
                               const lonejson_field *field, array_type *arr,    \
                               elem_type value) {                               \
-    if (!lonejson__array_ensure_bytes((void **)&arr->items, &arr->capacity,    \
-                                      sizeof(elem_type), &arr->flags,          \
-                                      arr->count + 1u, &parser->allocator,     \
-                                      field->overflow_policy, &parser->error)) { \
+    if (!lonejson__array_ensure_bytes(                                         \
+            (void **)&arr->items, &arr->capacity, sizeof(elem_type),           \
+            &arr->flags, arr->count + 1u, &parser->allocator,                  \
+            field->overflow_policy, &parser->error)) {                         \
       return (field->overflow_policy == LONEJSON_OVERFLOW_FAIL)                \
                  ? parser->error.code                                          \
                  : LONEJSON_STATUS_OK;                                         \
@@ -2293,8 +2306,8 @@ static void *lonejson__object_array_append_slot(lonejson_parser *parser,
   }
   if (!lonejson__array_ensure_bytes(&arr->items, &arr->capacity, arr->elem_size,
                                     &arr->flags, arr->count + 1u,
-                                    &parser->allocator,
-                                    field->overflow_policy, &parser->error)) {
+                                    &parser->allocator, field->overflow_policy,
+                                    &parser->error)) {
     return NULL;
   }
   if (arr->count >= arr->capacity) {
@@ -2345,8 +2358,8 @@ static lonejson_status lonejson__handle_scalar_for_field(
   switch (mode) {
   case LONEJSON_LEX_STRING:
     if (field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
-      return lonejson__assign_json_scalar(
-          parser, (lonejson_json_value *)ptr, value, len, mode);
+      return lonejson__assign_json_scalar(parser, (lonejson_json_value *)ptr,
+                                          value, len, mode);
     }
     if (field->kind == LONEJSON_FIELD_KIND_STRING_STREAM ||
         field->kind == LONEJSON_FIELD_KIND_BASE64_STREAM) {
@@ -2369,8 +2382,8 @@ static lonejson_status lonejson__handle_scalar_for_field(
     return lonejson__assign_string(parser, field, ptr, value, len);
   case LONEJSON_LEX_NUMBER:
     if (field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
-      return lonejson__assign_json_scalar(
-          parser, (lonejson_json_value *)ptr, value, len, mode);
+      return lonejson__assign_json_scalar(parser, (lonejson_json_value *)ptr,
+                                          value, len, mode);
     }
     if (field->kind == LONEJSON_FIELD_KIND_I64) {
       return lonejson__assign_i64(parser, field, ptr, value);
@@ -2388,8 +2401,8 @@ static lonejson_status lonejson__handle_scalar_for_field(
   case LONEJSON_LEX_TRUE:
   case LONEJSON_LEX_FALSE:
     if (field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
-      return lonejson__assign_json_scalar(
-          parser, (lonejson_json_value *)ptr, value, len, mode);
+      return lonejson__assign_json_scalar(parser, (lonejson_json_value *)ptr,
+                                          value, len, mode);
     }
     if (field->kind != LONEJSON_FIELD_KIND_BOOL) {
       return lonejson__set_error(
@@ -2400,8 +2413,8 @@ static lonejson_status lonejson__handle_scalar_for_field(
     return lonejson__assign_bool(parser, field, ptr, mode == LONEJSON_LEX_TRUE);
   case LONEJSON_LEX_NULL:
     if (field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
-      return lonejson__assign_json_scalar(
-          parser, (lonejson_json_value *)ptr, value, len, mode);
+      return lonejson__assign_json_scalar(parser, (lonejson_json_value *)ptr,
+                                          value, len, mode);
     }
     return lonejson__assign_null(parser, field, ptr);
   default:
@@ -2524,8 +2537,8 @@ lonejson__begin_object_value(lonejson_parser *parser) {
         return parser->error.code;
       }
       if (field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
-        lonejson_json_value *value =
-            (lonejson_json_value *)lonejson__field_ptr(parent->object_ptr, field);
+        lonejson_json_value *value = (lonejson_json_value *)lonejson__field_ptr(
+            parent->object_ptr, field);
         if (lonejson__json_value_prepare_parse(parser, value, &parser->error) !=
             LONEJSON_STATUS_OK) {
           return parser->error.code;
@@ -2537,16 +2550,17 @@ lonejson__begin_object_value(lonejson_parser *parser) {
         parser->json_stream_text_is_key = 0;
         if (value->parse_mode == LONEJSON_JSON_VALUE_PARSE_VISITOR) {
           if (value->parse_visitor_limits.max_depth != 0u &&
-              parser->json_stream_depth > value->parse_visitor_limits.max_depth) {
+              parser->json_stream_depth >
+                  value->parse_visitor_limits.max_depth) {
             lonejson__parser_clear_json_stream_value(parser);
             parser->json_stream_depth = 0u;
-            return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
-                                       parser->error.offset, parser->error.line,
-                                       parser->error.column,
-                                       "JSON value nesting exceeds maximum depth");
+            return lonejson__set_error(
+                &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
+                parser->error.line, parser->error.column,
+                "JSON value nesting exceeds maximum depth");
           }
-          if (lonejson__json_value_visit_event(parser,
-                                              value->parse_visitor->object_begin) !=
+          if (lonejson__json_value_visit_event(
+                  parser, value->parse_visitor->object_begin) !=
               LONEJSON_STATUS_OK) {
             lonejson__parser_clear_json_stream_value(parser);
             parser->json_stream_depth = 0u;
@@ -2562,15 +2576,15 @@ lonejson__begin_object_value(lonejson_parser *parser) {
         object_ptr = NULL;
         started_capture = 1;
       } else {
-      if (field->kind != LONEJSON_FIELD_KIND_OBJECT) {
-        return lonejson__set_error(
-            &parser->error, LONEJSON_STATUS_TYPE_MISMATCH, parser->error.offset,
-            parser->error.line, parser->error.column,
-            "field '%s' expects non-object value", field->json_key);
-      }
-      map = field->submap;
-      object_ptr = lonejson__field_ptr(parent->object_ptr, field);
-      lonejson__init_map_with_allocator(map, object_ptr, &parser->allocator);
+        if (field->kind != LONEJSON_FIELD_KIND_OBJECT) {
+          return lonejson__set_error(
+              &parser->error, LONEJSON_STATUS_TYPE_MISMATCH,
+              parser->error.offset, parser->error.line, parser->error.column,
+              "field '%s' expects non-object value", field->json_key);
+        }
+        map = field->submap;
+        object_ptr = lonejson__field_ptr(parent->object_ptr, field);
+        lonejson__init_map_with_allocator(map, object_ptr, &parser->allocator);
       }
     }
   } else if (parent != NULL && parent->kind == LONEJSON_CONTAINER_ARRAY) {
@@ -2611,8 +2625,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
   frame->field = field;
   frame->required_remaining = lonejson__required_count_for_map(parser, map);
   if (!started_capture && parser->json_stream_active && map == NULL &&
-      field == NULL &&
-      parent != NULL) {
+      field == NULL && parent != NULL) {
     parser->json_stream_depth++;
     if (lonejson__json_value_parse_visitor_active(parser)) {
       if (parser->json_stream_value->parse_visitor_limits.max_depth != 0u &&
@@ -2672,16 +2685,17 @@ lonejson__begin_array_value(lonejson_parser *parser) {
         parser->json_stream_text_is_key = 0;
         if (value->parse_mode == LONEJSON_JSON_VALUE_PARSE_VISITOR) {
           if (value->parse_visitor_limits.max_depth != 0u &&
-              parser->json_stream_depth > value->parse_visitor_limits.max_depth) {
+              parser->json_stream_depth >
+                  value->parse_visitor_limits.max_depth) {
             lonejson__parser_clear_json_stream_value(parser);
             parser->json_stream_depth = 0u;
-            return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
-                                       parser->error.offset, parser->error.line,
-                                       parser->error.column,
-                                       "JSON value nesting exceeds maximum depth");
+            return lonejson__set_error(
+                &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
+                parser->error.line, parser->error.column,
+                "JSON value nesting exceeds maximum depth");
           }
-          if (lonejson__json_value_visit_event(parser,
-                                              value->parse_visitor->array_begin) !=
+          if (lonejson__json_value_visit_event(
+                  parser, value->parse_visitor->array_begin) !=
               LONEJSON_STATUS_OK) {
             lonejson__parser_clear_json_stream_value(parser);
             parser->json_stream_depth = 0u;
@@ -2697,20 +2711,20 @@ lonejson__begin_array_value(lonejson_parser *parser) {
         object_ptr = NULL;
         started_capture = 1;
       } else {
-      switch (field->kind) {
-      case LONEJSON_FIELD_KIND_STRING_ARRAY:
-      case LONEJSON_FIELD_KIND_I64_ARRAY:
-      case LONEJSON_FIELD_KIND_U64_ARRAY:
-      case LONEJSON_FIELD_KIND_F64_ARRAY:
-      case LONEJSON_FIELD_KIND_BOOL_ARRAY:
-      case LONEJSON_FIELD_KIND_OBJECT_ARRAY:
-        break;
-      default:
-        return lonejson__set_error(
-            &parser->error, LONEJSON_STATUS_TYPE_MISMATCH, parser->error.offset,
-            parser->error.line, parser->error.column,
-            "field '%s' is not an array", field->json_key);
-      }
+        switch (field->kind) {
+        case LONEJSON_FIELD_KIND_STRING_ARRAY:
+        case LONEJSON_FIELD_KIND_I64_ARRAY:
+        case LONEJSON_FIELD_KIND_U64_ARRAY:
+        case LONEJSON_FIELD_KIND_F64_ARRAY:
+        case LONEJSON_FIELD_KIND_BOOL_ARRAY:
+        case LONEJSON_FIELD_KIND_OBJECT_ARRAY:
+          break;
+        default:
+          return lonejson__set_error(
+              &parser->error, LONEJSON_STATUS_TYPE_MISMATCH,
+              parser->error.offset, parser->error.line, parser->error.column,
+              "field '%s' is not an array", field->json_key);
+        }
       }
     }
   } else if (parent != NULL && parent->kind == LONEJSON_CONTAINER_ARRAY) {
@@ -2886,8 +2900,8 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
     frame->pending_field =
         lonejson__find_field(frame->map, frame, token_text, parser->token.len);
     if (parser->json_stream_active) {
-      lonejson_status status =
-          lonejson__json_value_emit_string(parser, token_text, parser->token.len);
+      lonejson_status status = lonejson__json_value_emit_string(
+          parser, token_text, parser->token.len);
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
@@ -2926,7 +2940,8 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
     if (lonejson__json_value_parse_visitor_active(parser) &&
         frame->pending_field == NULL) {
       if (mode == LONEJSON_LEX_NUMBER) {
-        status = lonejson__json_value_number(parser, token_text, parser->token.len);
+        status =
+            lonejson__json_value_number(parser, token_text, parser->token.len);
       } else if (mode == LONEJSON_LEX_TRUE) {
         status = lonejson__json_value_visit_bool(parser, 1);
       } else if (mode == LONEJSON_LEX_FALSE) {
@@ -2970,9 +2985,9 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
       }
       return lonejson__complete_parent_after_value(parser);
     }
-    status = lonejson__handle_scalar_for_field(parser, frame, frame->pending_field,
-                                               token_text, parser->token.len,
-                                               mode);
+    status =
+        lonejson__handle_scalar_for_field(parser, frame, frame->pending_field,
+                                          token_text, parser->token.len, mode);
     if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
       return lonejson__complete_parent_after_value(parser);
     }
@@ -2984,7 +2999,8 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
     if (frame->field == NULL) {
       if (lonejson__json_value_parse_visitor_active(parser)) {
         if (mode == LONEJSON_LEX_NUMBER) {
-          status = lonejson__json_value_number(parser, token_text, parser->token.len);
+          status = lonejson__json_value_number(parser, token_text,
+                                               parser->token.len);
         } else if (mode == LONEJSON_LEX_TRUE) {
           status = lonejson__json_value_visit_bool(parser, 1);
         } else if (mode == LONEJSON_LEX_FALSE) {
@@ -3116,10 +3132,9 @@ static LONEJSON__INLINE lonejson_status lonejson__append_unicode_codepoint(
     utf8[3] = (unsigned char)(0x80u | (cp & 0x3Fu));
     utf8_len = 4u;
   } else {
-    return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
-                               parser->error.offset, parser->error.line,
-                               parser->error.column,
-                               "invalid unicode codepoint");
+    return lonejson__set_error(
+        &parser->error, LONEJSON_STATUS_INVALID_JSON, parser->error.offset,
+        parser->error.line, parser->error.column, "invalid unicode codepoint");
   }
   if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_DIRECT) {
     return lonejson__direct_string_append_bytes(parser, utf8, utf8_len);
@@ -3137,10 +3152,9 @@ static LONEJSON__INLINE lonejson_status lonejson__append_unicode_codepoint(
     }
     return LONEJSON_STATUS_OK;
   }
-  return lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
-                             parser->error.offset, parser->error.line,
-                             parser->error.column,
-                             "invalid unicode append mode");
+  return lonejson__set_error(
+      &parser->error, LONEJSON_STATUS_INTERNAL_ERROR, parser->error.offset,
+      parser->error.line, parser->error.column, "invalid unicode append mode");
 }
 
 static LONEJSON__INLINE lonejson_status
@@ -3162,10 +3176,9 @@ lonejson__append_string_byte(lonejson_parser *parser, unsigned char ch) {
   if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_STREAM) {
     return lonejson__stream_value_append(parser, &ch, 1u);
   }
-  return lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
-                             parser->error.offset, parser->error.line,
-                             parser->error.column,
-                             "invalid string append mode");
+  return lonejson__set_error(
+      &parser->error, LONEJSON_STATUS_INTERNAL_ERROR, parser->error.offset,
+      parser->error.line, parser->error.column, "invalid string append mode");
 }
 
 static LONEJSON__INLINE lonejson_status lonejson__consume_simple_escape_fast(
@@ -3273,9 +3286,10 @@ static LONEJSON__INLINE lonejson_status lonejson__consume_unicode_escape_fast(
   return lonejson__append_unicode_codepoint(parser, cp);
 }
 
-static LONEJSON__INLINE LONEJSON__HOT lonejson_status lonejson__consume_string_fast(
-    lonejson_parser *parser, const unsigned char *bytes, size_t avail,
-    size_t *used) {
+static LONEJSON__INLINE LONEJSON__HOT lonejson_status
+lonejson__consume_string_fast(lonejson_parser *parser,
+                              const unsigned char *bytes, size_t avail,
+                              size_t *used) {
   size_t pos;
 
   if (used != NULL) {
@@ -3304,8 +3318,8 @@ static LONEJSON__INLINE LONEJSON__HOT lonejson_status lonejson__consume_string_f
         }
       } else if (parser->string_capture_mode ==
                  LONEJSON_STRING_CAPTURE_DIRECT) {
-        lonejson_status status =
-            lonejson__direct_string_append_bytes(parser, bytes + start, pos - start);
+        lonejson_status status = lonejson__direct_string_append_bytes(
+            parser, bytes + start, pos - start);
         if (status != LONEJSON_STATUS_OK) {
           return status;
         }
@@ -3324,10 +3338,10 @@ static LONEJSON__INLINE LONEJSON__HOT lonejson_status lonejson__consume_string_f
           return status;
         }
       } else {
-        return lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
-                                   parser->error.offset, parser->error.line,
-                                   parser->error.column,
-                                   "invalid string capture mode");
+        return lonejson__set_error(
+            &parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
+            parser->error.offset, parser->error.line, parser->error.column,
+            "invalid string capture mode");
       }
       parser->error.offset += pos - start;
       parser->error.column += pos - start;
@@ -3517,7 +3531,8 @@ static lonejson_status lonejson__parser_consume_char(lonejson_parser *parser,
               parser->error.offset, parser->error.line, parser->error.column,
               "unexpected low surrogate");
         } else {
-          lonejson_status status = lonejson__append_unicode_codepoint(parser, cp);
+          lonejson_status status =
+              lonejson__append_unicode_codepoint(parser, cp);
           if (status != LONEJSON_STATUS_OK) {
             return status;
           }
@@ -4059,9 +4074,8 @@ static int lonejson__parser_root_complete(const lonejson_parser *parser) {
 }
 
 static LONEJSON__HOT lonejson_status
-lonejson__parser_feed_bytes(lonejson_parser *parser,
-                            const unsigned char *bytes, size_t len,
-                            size_t *consumed, int stop_at_root) {
+lonejson__parser_feed_bytes(lonejson_parser *parser, const unsigned char *bytes,
+                            size_t len, size_t *consumed, int stop_at_root) {
   size_t i;
 
   if (parser == NULL || (bytes == NULL && len != 0u)) {
@@ -4306,8 +4320,7 @@ lonejson__parser_feed_bytes(lonejson_parser *parser,
       } else if (active->kind == LONEJSON_CONTAINER_ARRAY &&
                  active->state == LONEJSON_FRAME_ARRAY_COMMA_OR_END) {
         if (bytes[i] == ',') {
-          if (parser->json_stream_active &&
-              !parser->json_stream_visit_active) {
+          if (parser->json_stream_active && !parser->json_stream_visit_active) {
             status = lonejson__json_value_emit(parser, ",", 1u);
             if (status != LONEJSON_STATUS_OK) {
               parser->failed = 1;
@@ -4360,9 +4373,8 @@ lonejson__parser_feed_bytes(lonejson_parser *parser,
                                  : LONEJSON_STATUS_OK;
 }
 
-static LONEJSON__INLINE lonejson_status
-lonejson__sink_buffer(void *user, const void *data, size_t len,
-                      lonejson_error *error) {
+static LONEJSON__INLINE lonejson_status lonejson__sink_buffer(
+    void *user, const void *data, size_t len, lonejson_error *error) {
   lonejson_buffer_sink *sink = (lonejson_buffer_sink *)user;
   size_t available =
       (sink->capacity > sink->length) ? (sink->capacity - sink->length) : 0u;
@@ -4391,9 +4403,8 @@ lonejson__sink_buffer(void *user, const void *data, size_t len,
   return LONEJSON_STATUS_OK;
 }
 
-static LONEJSON__INLINE lonejson_status
-lonejson__sink_buffer_exact(void *user, const void *data, size_t len,
-                            lonejson_error *error) {
+static LONEJSON__INLINE lonejson_status lonejson__sink_buffer_exact(
+    void *user, const void *data, size_t len, lonejson_error *error) {
   lonejson_buffer_sink *sink = (lonejson_buffer_sink *)user;
   size_t writable = (sink->capacity > sink->length + 1u)
                         ? (sink->capacity - sink->length - 1u)
@@ -4414,9 +4425,8 @@ lonejson__sink_buffer_exact(void *user, const void *data, size_t len,
   return LONEJSON_STATUS_OK;
 }
 
-static LONEJSON__INLINE lonejson_status
-lonejson__sink_grow(void *user, const void *data, size_t len,
-                    lonejson_error *error) {
+static LONEJSON__INLINE lonejson_status lonejson__sink_grow(
+    void *user, const void *data, size_t len, lonejson_error *error) {
   lonejson_buffer_sink *sink = (lonejson_buffer_sink *)user;
   char *next;
   size_t next_cap;
@@ -4465,9 +4475,11 @@ static lonejson_status lonejson__sink_file(void *user, const void *data,
   return LONEJSON_STATUS_OK;
 }
 
-static LONEJSON__INLINE lonejson_status
-lonejson__emit(lonejson_sink_fn sink, void *user, lonejson_error *error,
-               const char *data, size_t len) {
+static LONEJSON__INLINE lonejson_status lonejson__emit(lonejson_sink_fn sink,
+                                                       void *user,
+                                                       lonejson_error *error,
+                                                       const char *data,
+                                                       size_t len) {
   if (len == 0u) {
     return LONEJSON_STATUS_OK;
   }
@@ -4580,10 +4592,9 @@ static lonejson_status lonejson__emit_escaped_string(lonejson_sink_fn sink,
       sink, user, error, (const unsigned char *)text, LONEJSON__TEXT_LEN(text));
 }
 
-static LONEJSON__INLINE lonejson_status
-lonejson__emit_escaped_len(lonejson_sink_fn sink, void *user,
-                           lonejson_error *error, const char *text,
-                           size_t len) {
+static LONEJSON__INLINE lonejson_status lonejson__emit_escaped_len(
+    lonejson_sink_fn sink, void *user, lonejson_error *error, const char *text,
+    size_t len) {
   return lonejson__emit_escaped_bytes(sink, user, error,
                                       (const unsigned char *)text, len);
 }
@@ -5368,9 +5379,9 @@ static lonejson_status lonejson__serialize_map_compact(const lonejson_map *map,
         return status;
       }
     }
-    status = lonejson__emit_escaped_len(sink, user, error,
-                                        map->fields[i].json_key,
-                                        map->fields[i].json_key_len);
+    status =
+        lonejson__emit_escaped_len(sink, user, error, map->fields[i].json_key,
+                                   map->fields[i].json_key_len);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }

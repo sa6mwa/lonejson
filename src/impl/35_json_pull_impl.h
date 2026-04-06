@@ -1,4 +1,5 @@
-static void lonejson__json_pull_clear_pending(lonejson__json_pull_state *state) {
+static void
+lonejson__json_pull_clear_pending(lonejson__json_pull_state *state) {
   state->pending_kind = LONEJSON__JSON_PULL_PENDING_NONE;
   state->pending_ptr = NULL;
   state->pending_len = 0u;
@@ -6,8 +7,9 @@ static void lonejson__json_pull_clear_pending(lonejson__json_pull_state *state) 
   state->pending_repeat_count = 0u;
 }
 
-static lonejson_status lonejson__json_pull_set_pending_bytes(
-    lonejson__json_pull_state *state, const void *data, size_t len) {
+static lonejson_status
+lonejson__json_pull_set_pending_bytes(lonejson__json_pull_state *state,
+                                      const void *data, size_t len) {
   if (len == 0u) {
     return LONEJSON_STATUS_OK;
   }
@@ -18,8 +20,9 @@ static lonejson_status lonejson__json_pull_set_pending_bytes(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__json_pull_set_pending_repeat(
-    lonejson__json_pull_state *state, unsigned char byte, size_t count) {
+static lonejson_status
+lonejson__json_pull_set_pending_repeat(lonejson__json_pull_state *state,
+                                       unsigned char byte, size_t count) {
   if (count == 0u) {
     return LONEJSON_STATUS_OK;
   }
@@ -29,14 +32,15 @@ static lonejson_status lonejson__json_pull_set_pending_repeat(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__json_pull_set_pending_char(
-    lonejson__json_pull_state *state, unsigned char ch) {
+static lonejson_status
+lonejson__json_pull_set_pending_char(lonejson__json_pull_state *state,
+                                     unsigned char ch) {
   state->scratch[0] = ch;
   return lonejson__json_pull_set_pending_bytes(state, state->scratch, 1u);
 }
 
-static lonejson_status lonejson__json_pull_flush_pending(
-    lonejson__json_pull_state *state) {
+static lonejson_status
+lonejson__json_pull_flush_pending(lonejson__json_pull_state *state) {
   size_t writable;
   size_t take;
 
@@ -50,8 +54,8 @@ static lonejson_status lonejson__json_pull_flush_pending(
     if (take > writable) {
       take = writable;
     }
-    memcpy(state->out + state->out_length, state->pending_ptr + state->pending_off,
-           take);
+    memcpy(state->out + state->out_length,
+           state->pending_ptr + state->pending_off, take);
     state->out_length += take;
     state->pending_off += take;
     if (state->pending_off == state->pending_len) {
@@ -72,21 +76,25 @@ static lonejson_status lonejson__json_pull_flush_pending(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__json_pull_push_frame(
-    lonejson__json_pull_state *state, lonejson__json_pull_frame_kind kind,
-    lonejson__json_pull_frame_phase phase, size_t depth, lonejson_error *error) {
+static lonejson_status
+lonejson__json_pull_push_frame(lonejson__json_pull_state *state,
+                               lonejson__json_pull_frame_kind kind,
+                               lonejson__json_pull_frame_phase phase,
+                               size_t depth, lonejson_error *error) {
   lonejson__json_pull_frame *next;
   size_t next_cap;
 
   if (state->frame_count == state->frame_capacity) {
-    next_cap = (state->frame_capacity == 0u) ? 8u : (state->frame_capacity * 2u);
+    next_cap =
+        (state->frame_capacity == 0u) ? 8u : (state->frame_capacity * 2u);
     next = (lonejson__json_pull_frame *)lonejson__buffer_realloc(
         &state->allocator, state->frames,
         state->frame_capacity * sizeof(*state->frames),
         next_cap * sizeof(*state->frames));
     if (next == NULL) {
-      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                                 0u, "failed to grow JSON pull frame stack");
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to grow JSON pull frame stack");
     }
     state->frames = next;
     state->frame_capacity = next_cap;
@@ -215,11 +223,12 @@ lonejson__json_pull_peek_nonspace(lonejson__json_pull_state *state) {
 static lonejson_status
 lonejson__json_pull_schedule_indent(lonejson__json_pull_state *state,
                                     size_t depth) {
-  return lonejson__json_pull_set_pending_repeat(state, ' ',
-                                                (state->base_depth + depth) * 2u);
+  return lonejson__json_pull_set_pending_repeat(
+      state, ' ', (state->base_depth + depth) * 2u);
 }
 
-static void lonejson__json_pull_value_complete(lonejson__json_pull_state *state) {
+static void
+lonejson__json_pull_value_complete(lonejson__json_pull_state *state) {
   lonejson__json_pull_frame *frame;
 
   if (state->frame_count == 0u) {
@@ -252,7 +261,7 @@ lonejson__json_pull_begin_number(lonejson__json_pull_state *state, int first) {
 static lonejson_status
 lonejson__json_pull_begin_literal(lonejson__json_pull_state *state, int first,
                                   const char *rest) {
-  state->lex_mode = (first == 't') ? LONEJSON_LEX_TRUE
+  state->lex_mode = (first == 't')   ? LONEJSON_LEX_TRUE
                     : (first == 'f') ? LONEJSON_LEX_FALSE
                                      : LONEJSON_LEX_NULL;
   state->literal_buf[0] = (char)first;
@@ -277,7 +286,8 @@ lonejson__json_pull_begin_string(lonejson__json_pull_state *state, int is_key) {
 }
 
 static lonejson_status
-lonejson__json_pull_start_value(lonejson__json_pull_state *state, size_t depth) {
+lonejson__json_pull_start_value(lonejson__json_pull_state *state,
+                                size_t depth) {
   int ch;
 
   state->root_started = 1;
@@ -294,18 +304,18 @@ lonejson__json_pull_start_value(lonejson__json_pull_state *state, size_t depth) 
   case '"':
     return lonejson__json_pull_begin_string(state, 0);
   case '{':
-    if (lonejson__json_pull_push_frame(
-            state, LONEJSON__JSON_PULL_FRAME_OBJECT,
-            LONEJSON__JSON_PULL_OBJECT_KEY_OR_END, depth, &state->error) !=
-        LONEJSON_STATUS_OK) {
+    if (lonejson__json_pull_push_frame(state, LONEJSON__JSON_PULL_FRAME_OBJECT,
+                                       LONEJSON__JSON_PULL_OBJECT_KEY_OR_END,
+                                       depth,
+                                       &state->error) != LONEJSON_STATUS_OK) {
       return state->error.code;
     }
     return lonejson__json_pull_set_pending_bytes(state, "{", 1u);
   case '[':
-    if (lonejson__json_pull_push_frame(
-            state, LONEJSON__JSON_PULL_FRAME_ARRAY,
-            LONEJSON__JSON_PULL_ARRAY_VALUE_OR_END, depth, &state->error) !=
-        LONEJSON_STATUS_OK) {
+    if (lonejson__json_pull_push_frame(state, LONEJSON__JSON_PULL_FRAME_ARRAY,
+                                       LONEJSON__JSON_PULL_ARRAY_VALUE_OR_END,
+                                       depth,
+                                       &state->error) != LONEJSON_STATUS_OK) {
       return state->error.code;
     }
     return lonejson__json_pull_set_pending_bytes(state, "[", 1u);
@@ -338,7 +348,8 @@ lonejson__json_pull_step_number(lonejson__json_pull_state *state) {
       if (ch >= 0) {
         lonejson__json_pull_ungetc(state, ch);
       }
-      if (!lonejson__is_valid_json_number(state->number_buf, state->number_len)) {
+      if (!lonejson__is_valid_json_number(state->number_buf,
+                                          state->number_len)) {
         return lonejson__set_error(&state->error, LONEJSON_STATUS_INVALID_JSON,
                                    0u, 0u, 0u, "invalid JSON number");
       }
@@ -422,16 +433,15 @@ lonejson__json_pull_step_string(lonejson__json_pull_state *state) {
         return lonejson__set_error(&state->error, LONEJSON_STATUS_INVALID_JSON,
                                    0u, 0u, 0u, "invalid unicode escape");
       }
-      state->unicode_accum =
-          (state->unicode_accum << 4u) | (lonejson_uint32)hv;
+      state->unicode_accum = (state->unicode_accum << 4u) | (lonejson_uint32)hv;
       state->unicode_digits_needed--;
       if (state->unicode_digits_needed == 0) {
         if (state->unicode_parsing_low) {
           if (state->unicode_accum < 0xDC00u ||
               state->unicode_accum > 0xDFFFu) {
-            return lonejson__set_error(
-                &state->error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
-                "invalid unicode surrogate pair");
+            return lonejson__set_error(&state->error,
+                                       LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                                       "invalid unicode surrogate pair");
           }
           state->unicode_pending_high = 0u;
           state->unicode_parsing_low = 0;
@@ -455,8 +465,7 @@ lonejson__json_pull_step_string(lonejson__json_pull_state *state) {
       }
       if (ch == EOF) {
         return lonejson__set_error(&state->error, LONEJSON_STATUS_INVALID_JSON,
-                                   0u, 0u, 0u,
-                                   "unterminated escape sequence");
+                                   0u, 0u, 0u, "unterminated escape sequence");
       }
       switch (ch) {
       case '"':
@@ -495,8 +504,8 @@ lonejson__json_pull_step_string(lonejson__json_pull_state *state) {
             state->frames[state->frame_count - 1u].kind !=
                 LONEJSON__JSON_PULL_FRAME_OBJECT) {
           return lonejson__set_error(&state->error,
-                                     LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
-                                     0u, "object key outside object frame");
+                                     LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u, 0u,
+                                     "object key outside object frame");
         }
         state->frames[state->frame_count - 1u].phase =
             LONEJSON__JSON_PULL_OBJECT_COLON;
@@ -685,9 +694,10 @@ lonejson__json_pull_step_frame(lonejson__json_pull_state *state) {
   }
 }
 
-static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status lonejson__json_pull_init(
-    lonejson__json_pull_state *state, const lonejson_json_value *value,
-    int pretty, size_t base_depth, lonejson_error *error) {
+static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status
+lonejson__json_pull_init(lonejson__json_pull_state *state,
+                         const lonejson_json_value *value, int pretty,
+                         size_t base_depth, lonejson_error *error) {
   lonejson_status status;
   lonejson_value_limits defaults;
 
@@ -729,9 +739,10 @@ static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status lonejson__json_pull_ini
   return LONEJSON_STATUS_OK;
 }
 
-static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status lonejson__json_pull_read(
-    lonejson__json_pull_state *state, unsigned char *buffer, size_t capacity,
-    size_t *out_len, int *out_eof, lonejson_error *error) {
+static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status
+lonejson__json_pull_read(lonejson__json_pull_state *state,
+                         unsigned char *buffer, size_t capacity,
+                         size_t *out_len, int *out_eof, lonejson_error *error) {
   lonejson_status status = LONEJSON_STATUS_OK;
   int ch;
 

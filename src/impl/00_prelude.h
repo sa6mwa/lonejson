@@ -3,9 +3,9 @@
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -75,9 +75,9 @@ typedef struct lonejson__parser_workspace_align_probe {
   lonejson__parser_workspace_align_union value;
 } lonejson__parser_workspace_align_probe;
 
-#define LONEJSON__PARSER_WORKSPACE_ALIGNMENT                                \
+#define LONEJSON__PARSER_WORKSPACE_ALIGNMENT                                   \
   offsetof(lonejson__parser_workspace_align_probe, value)
-#define LONEJSON__PARSER_WORKSPACE_SLACK                                    \
+#define LONEJSON__PARSER_WORKSPACE_SLACK                                       \
   (LONEJSON__PARSER_WORKSPACE_ALIGNMENT - 1u)
 
 #define LONEJSON__MAP_MASK_CACHE_SIZE 8u
@@ -89,7 +89,7 @@ typedef struct lonejson__parser_workspace_align_probe {
 #define LONEJSON__NOINLINE __attribute__((noinline))
 #define LONEJSON__COLD __attribute__((cold))
 #define LONEJSON__HOT __attribute__((hot))
-#define LONEJSON__TEXT_LEN(text)                                            \
+#define LONEJSON__TEXT_LEN(text)                                               \
   (__builtin_constant_p(text) ? (sizeof(text) - 1u) : strlen(text))
 #else
 #define LONEJSON__INLINE
@@ -99,8 +99,8 @@ typedef struct lonejson__parser_workspace_align_probe {
 #define LONEJSON__TEXT_LEN(text) strlen(text)
 #endif
 
-static LONEJSON__INLINE unsigned
-lonejson__init_cookie(const void *ptr, unsigned base_magic) {
+static LONEJSON__INLINE unsigned lonejson__init_cookie(const void *ptr,
+                                                       unsigned base_magic) {
   uintptr_t bits = (uintptr_t)ptr;
   return base_magic ^ (unsigned)(bits >> 4u) ^ (unsigned)(bits >> 9u);
 }
@@ -218,10 +218,11 @@ lonejson__parser_set_json_stream_value(lonejson_parser *parser,
                                        lonejson_json_value *value);
 static LONEJSON__INLINE void
 lonejson__parser_clear_json_stream_value(lonejson_parser *parser);
-static lonejson_status lonejson__json_value_string_begin(lonejson_parser *parser,
-                                                         int is_key);
-static lonejson_status lonejson__json_value_string_chunk(
-    lonejson_parser *parser, const char *data, size_t len);
+static lonejson_status
+lonejson__json_value_string_begin(lonejson_parser *parser, int is_key);
+static lonejson_status
+lonejson__json_value_string_chunk(lonejson_parser *parser, const char *data,
+                                  size_t len);
 static lonejson_status lonejson__json_value_string_end(lonejson_parser *parser);
 
 static lonejson_status lonejson__set_error(lonejson_error *error,
@@ -282,15 +283,14 @@ lonejson_allocator lonejson_default_allocator(void) {
   return allocator;
 }
 
-#define LONEJSON__ALLOCATOR_MISSING_CALLBACKS(allocator)                         \
-  ((allocator) == NULL                                                           \
-       ? 3                                                                       \
-       : (((allocator)->malloc_fn == NULL ? 1 : 0) +                            \
-          ((allocator)->realloc_fn == NULL ? 1 : 0) +                           \
-          ((allocator)->free_fn == NULL ? 1 : 0)))
+#define LONEJSON__ALLOCATOR_MISSING_CALLBACKS(allocator)                       \
+  ((allocator) == NULL ? 3                                                     \
+                       : (((allocator)->malloc_fn == NULL ? 1 : 0) +           \
+                          ((allocator)->realloc_fn == NULL ? 1 : 0) +          \
+                          ((allocator)->free_fn == NULL ? 1 : 0)))
 
-#define LONEJSON__ALLOCATOR_IS_VALID_CONFIG(allocator)                           \
-  (LONEJSON__ALLOCATOR_MISSING_CALLBACKS(allocator) == 0 ||                     \
+#define LONEJSON__ALLOCATOR_IS_VALID_CONFIG(allocator)                         \
+  (LONEJSON__ALLOCATOR_MISSING_CALLBACKS(allocator) == 0 ||                    \
    LONEJSON__ALLOCATOR_MISSING_CALLBACKS(allocator) == 3)
 
 static LONEJSON__INLINE lonejson_allocator
@@ -301,8 +301,8 @@ lonejson__allocator_resolve(const lonejson_allocator *allocator) {
   return *allocator;
 }
 
-static int lonejson__allocator_is_default_family(
-    const lonejson_allocator *allocator) {
+static int
+lonejson__allocator_is_default_family(const lonejson_allocator *allocator) {
   lonejson_allocator def;
 
   if (LONEJSON__ALLOCATOR_MISSING_CALLBACKS(allocator) == 3) {
@@ -330,8 +330,7 @@ static void lonejson__allocator_note_alloc(lonejson_allocator_stats *stats,
 }
 
 static void lonejson__allocator_note_realloc(lonejson_allocator_stats *stats,
-                                             size_t old_size,
-                                             size_t new_size) {
+                                             size_t old_size, size_t new_size) {
   if (stats == NULL) {
     return;
   }
@@ -408,8 +407,8 @@ static void *lonejson__owned_malloc(const lonejson_allocator *allocator,
   lonejson__alloc_header *header;
 
   resolved = lonejson__allocator_resolve(allocator);
-  header = (lonejson__alloc_header *)resolved.malloc_fn(
-      resolved.ctx, sizeof(*header) + size);
+  header = (lonejson__alloc_header *)resolved.malloc_fn(resolved.ctx,
+                                                        sizeof(*header) + size);
   if (header == NULL) {
     return NULL;
   }
@@ -433,8 +432,8 @@ static void *lonejson__owned_realloc(const lonejson_allocator *allocator,
   }
   header = ((lonejson__alloc_header *)ptr) - 1u;
   resolved = header->meta.allocator;
-  next = (lonejson__alloc_header *)resolved.realloc_fn(
-      resolved.ctx, header, sizeof(*header) + size);
+  next = (lonejson__alloc_header *)resolved.realloc_fn(resolved.ctx, header,
+                                                       sizeof(*header) + size);
   if (next == NULL) {
     return NULL;
   }
@@ -461,7 +460,8 @@ static void lonejson__owned_free(void *ptr) {
     return;
   }
   header = ((lonejson__alloc_header *)ptr) - 1u;
-  lonejson__allocator_note_free(header->meta.allocator.stats, header->meta.size);
+  lonejson__allocator_note_free(header->meta.allocator.stats,
+                                header->meta.size);
   header->meta.allocator.free_fn(header->meta.allocator.ctx, header);
 }
 
@@ -502,8 +502,9 @@ lonejson__spooled_apply_options(lonejson_spooled *value,
   value->temp_dir = local.temp_dir;
 }
 
-static void lonejson__spooled_apply_allocator(
-    lonejson_spooled *value, const lonejson_allocator *allocator) {
+static void
+lonejson__spooled_apply_allocator(lonejson_spooled *value,
+                                  const lonejson_allocator *allocator) {
   if (value == NULL) {
     return;
   }
@@ -519,8 +520,9 @@ lonejson__spooled_is_initialized(const lonejson_spooled *value) {
              lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
 }
 
-static void lonejson__json_value_apply_allocator(
-    lonejson_json_value *value, const lonejson_allocator *allocator) {
+static void
+lonejson__json_value_apply_allocator(lonejson_json_value *value,
+                                     const lonejson_allocator *allocator) {
   if (value == NULL) {
     return;
   }
@@ -613,8 +615,7 @@ void lonejson_json_value_reset(lonejson_json_value *value) {
   lonejson_json_value_cleanup(value);
 }
 
-static void
-lonejson__json_value_clear_runtime(lonejson_json_value *value) {
+static void lonejson__json_value_clear_runtime(lonejson_json_value *value) {
   if (value == NULL) {
     return;
   }
@@ -640,9 +641,10 @@ lonejson__json_value_prepare_parse(lonejson_parser *parser,
                                0u, "JSON value handle is required");
   }
   if (value->parse_mode == LONEJSON_JSON_VALUE_PARSE_NONE) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "JSON value parse requires a configured parse sink, parse visitor, or parse capture");
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "JSON value parse requires a configured parse "
+                               "sink, parse visitor, or parse capture");
   }
   lonejson__json_value_clear_runtime(value);
   return LONEJSON_STATUS_OK;
@@ -704,16 +706,17 @@ void lonejson_spooled_init(lonejson_spooled *value,
   lonejson_spooled_init_with_allocator(value, options, NULL);
 }
 
-void lonejson_spooled_init_with_allocator(
-    lonejson_spooled *value, const lonejson_spool_options *options,
-    const lonejson_allocator *allocator) {
+void lonejson_spooled_init_with_allocator(lonejson_spooled *value,
+                                          const lonejson_spool_options *options,
+                                          const lonejson_allocator *allocator) {
   if (value == NULL) {
     return;
   }
   memset(value, 0, sizeof(*value));
   lonejson__spooled_apply_options(value, options);
   lonejson__spooled_apply_allocator(value, allocator);
-  value->_lonejson_magic = lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
+  value->_lonejson_magic =
+      lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
 }
 
 static void lonejson__spooled_close_temp(lonejson_spooled *value) {
@@ -741,7 +744,8 @@ void lonejson_spooled_cleanup(lonejson_spooled *value) {
   value->read_offset = 0u;
   value->spilled = 0;
   lonejson__spooled_close_temp(value);
-  value->_lonejson_magic = lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
+  value->_lonejson_magic =
+      lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
 }
 
 void lonejson_spooled_reset(lonejson_spooled *value) {

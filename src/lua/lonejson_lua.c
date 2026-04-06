@@ -207,9 +207,10 @@ static int ljlua_path_get(lua_State *L);
 static int ljlua_path_count(lua_State *L);
 static int ljlua_getter_call(lua_State *L);
 static int ljlua_counter_call(lua_State *L);
-static int ljlua_record_to_table_with_overrides(lua_State *L, ljlua_schema *schema,
-                                                void *record,
-                                                const ljlua_decode_context *ctx);
+static int
+ljlua_record_to_table_with_overrides(lua_State *L, ljlua_schema *schema,
+                                     void *record,
+                                     const ljlua_decode_context *ctx);
 
 static int ljlua_push_error(lua_State *L, const lonejson_error *error) {
   lua_newtable(L);
@@ -525,7 +526,8 @@ static int ljlua_json_parse_string(lua_State *L, ljlua_json_parser *parser) {
         if (codepoint >= 0xD800u && codepoint <= 0xDBFFu) {
           lonejson_uint32 low;
 
-          if (parser->off + 6u > parser->len || parser->data[parser->off] != '\\' ||
+          if (parser->off + 6u > parser->len ||
+              parser->data[parser->off] != '\\' ||
               parser->data[parser->off + 1u] != 'u' ||
               !lonejson__decode_unicode_quad(parser->data + parser->off + 2u,
                                              &low) ||
@@ -575,8 +577,8 @@ static int ljlua_json_parse_number(lua_State *L, ljlua_json_parser *parser) {
     parser->off++;
   }
   len = parser->off - start;
-  text =
-      (len + 1u <= sizeof(stack_buf)) ? stack_buf : (char *)ljlua_xmalloc(len + 1u);
+  text = (len + 1u <= sizeof(stack_buf)) ? stack_buf
+                                         : (char *)ljlua_xmalloc(len + 1u);
   memcpy(text, parser->data + start, len);
   text[len] = '\0';
   for (i = 0u; i < len; ++i) {
@@ -737,7 +739,8 @@ static int ljlua_json_parse_value(lua_State *L, ljlua_json_parser *parser,
   }
 }
 
-static int ljlua_push_json_from_text(lua_State *L, const char *json, size_t len) {
+static int ljlua_push_json_from_text(lua_State *L, const char *json,
+                                     size_t len) {
   ljlua_json_parser parser;
 
   parser.data = (const unsigned char *)json;
@@ -751,7 +754,8 @@ static int ljlua_push_json_from_text(lua_State *L, const char *json, size_t len)
   return 1;
 }
 
-static void ljlua_json_builder_cleanup(lua_State *L, ljlua_json_builder *builder) {
+static void ljlua_json_builder_cleanup(lua_State *L,
+                                       ljlua_json_builder *builder) {
   size_t i;
 
   if (builder == NULL) {
@@ -869,7 +873,8 @@ static int ljlua_json_builder_finish_string(lua_State *L,
     if (copy == NULL) {
       return luaL_error(L, "failed to allocate JSON object key");
     }
-    memcpy(copy, builder->token.data ? builder->token.data : "", builder->token.len);
+    memcpy(copy, builder->token.data ? builder->token.data : "",
+           builder->token.len);
     copy[builder->token.len] = '\0';
     builder->token.len = 0u;
     builder->token_is_key = 0;
@@ -905,8 +910,8 @@ static int ljlua_json_builder_close_container(lua_State *L,
   return ljlua_json_builder_attach_value(L, builder);
 }
 
-static lonejson_status ljlua_json_builder_callback_failed(
-    lua_State *L, lonejson_error *error) {
+static lonejson_status
+ljlua_json_builder_callback_failed(lua_State *L, lonejson_error *error) {
   const char *msg = lua_tostring(L, -1);
   lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u, 0u,
                       msg ? msg : "Lua JSON visitor callback failed");
@@ -954,9 +959,9 @@ static int ljlua_json_builder_append_chunk(ljlua_json_builder *builder,
   return ljlua_json_buf_append(&builder->token, data, len);
 }
 
-static int ljlua_json_builder_push_container(lua_State *L,
-                                             ljlua_json_builder *builder,
-                                             ljlua_json_builder_frame_kind kind) {
+static int
+ljlua_json_builder_push_container(lua_State *L, ljlua_json_builder *builder,
+                                  ljlua_json_builder_frame_kind kind) {
   ljlua_json_builder_prepare_value(builder);
   lua_createtable(L, kind == LJLUA_JSON_FRAME_ARRAY ? 4 : 0,
                   kind == LJLUA_JSON_FRAME_OBJECT ? 4 : 0);
@@ -1017,7 +1022,8 @@ static lonejson_status ljlua_json_value_object_end(void *user,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "Lua JSON builder state is required");
   }
-  if (ljlua_json_builder_close_container(state->builder.L, &state->builder) != 1) {
+  if (ljlua_json_builder_close_container(state->builder.L, &state->builder) !=
+      1) {
     return ljlua_json_builder_callback_failed(state->builder.L, error);
   }
   state->complete = state->builder.finished;
@@ -1077,7 +1083,8 @@ static lonejson_status ljlua_json_value_key_end(void *user,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "Lua JSON builder state is required");
   }
-  if (ljlua_json_builder_finish_string(state->builder.L, &state->builder) != 1) {
+  if (ljlua_json_builder_finish_string(state->builder.L, &state->builder) !=
+      1) {
     return ljlua_json_builder_callback_failed(state->builder.L, error);
   }
   return LONEJSON_STATUS_OK;
@@ -1110,7 +1117,8 @@ static lonejson_status ljlua_json_value_string_end(void *user,
                                0u, "Lua JSON builder state is required");
   }
   state->builder.token_is_key = 0;
-  if (ljlua_json_builder_finish_string(state->builder.L, &state->builder) != 1) {
+  if (ljlua_json_builder_finish_string(state->builder.L, &state->builder) !=
+      1) {
     return ljlua_json_builder_callback_failed(state->builder.L, error);
   }
   state->complete = state->builder.finished;
@@ -1143,7 +1151,8 @@ static lonejson_status ljlua_json_value_number_end(void *user,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "Lua JSON builder state is required");
   }
-  if (ljlua_json_builder_finish_number(state->builder.L, &state->builder) != 1) {
+  if (ljlua_json_builder_finish_number(state->builder.L, &state->builder) !=
+      1) {
     return ljlua_json_builder_callback_failed(state->builder.L, error);
   }
   state->complete = state->builder.finished;
@@ -1346,8 +1355,8 @@ static int ljlua_encode_json_value(lua_State *L, int index, ljlua_json_buf *buf,
   case LUA_TNIL:
     return ljlua_json_buf_append_cstr(buf, "null");
   case LUA_TBOOLEAN:
-    return ljlua_json_buf_append_cstr(buf,
-                                      lua_toboolean(L, index) ? "true" : "false");
+    return ljlua_json_buf_append_cstr(buf, lua_toboolean(L, index) ? "true"
+                                                                   : "false");
   case LUA_TNUMBER:
 #if defined(LUA_MAXINTEGER)
     if (lua_isinteger(L, index)) {
@@ -1383,7 +1392,8 @@ static int ljlua_encode_json_value(lua_State *L, int index, ljlua_json_buf *buf,
   }
 }
 
-static int ljlua_push_json_value(lua_State *L, const lonejson_json_value *value) {
+static int ljlua_push_json_value(lua_State *L,
+                                 const lonejson_json_value *value) {
   ljlua_json_buf buf;
   lonejson_error error;
   lonejson_status status;
@@ -2139,7 +2149,8 @@ static int ljlua_schema_compile_count(lua_State *L) {
 }
 
 static const lonejson_write_options *
-ljlua_get_write_options(lua_State *L, int index, lonejson_write_options *options) {
+ljlua_get_write_options(lua_State *L, int index,
+                        lonejson_write_options *options) {
   if (index == 0 || lua_isnoneornil(L, index)) {
     return NULL;
   }
@@ -2262,7 +2273,8 @@ static int ljlua_decode_context_prepare_table_mode(lua_State *L,
           (lonejson_json_value *)((unsigned char *)record +
                                   schema->metas[i].field.struct_offset);
       ljlua_json_builder_init(&ctx->json_values[i].builder, L);
-      memset(&ctx->json_values[i].visitor, 0, sizeof(ctx->json_values[i].visitor));
+      memset(&ctx->json_values[i].visitor, 0,
+             sizeof(ctx->json_values[i].visitor));
       ctx->json_values[i].visitor.object_begin = ljlua_json_value_object_begin;
       ctx->json_values[i].visitor.object_end = ljlua_json_value_object_end;
       ctx->json_values[i].visitor.object_key_begin = ljlua_json_value_key_begin;
@@ -2279,11 +2291,9 @@ static int ljlua_decode_context_prepare_table_mode(lua_State *L,
       ctx->json_values[i].visitor.boolean_value = ljlua_json_value_boolean;
       ctx->json_values[i].visitor.null_value = ljlua_json_value_null;
       ctx->json_values[i].active = 1;
-      if (lonejson_json_value_set_parse_visitor(value,
-                                                &ctx->json_values[i].visitor,
-                                                &ctx->json_values[i], NULL,
-                                                NULL) !=
-          LONEJSON_STATUS_OK) {
+      if (lonejson_json_value_set_parse_visitor(
+              value, &ctx->json_values[i].visitor, &ctx->json_values[i], NULL,
+              NULL) != LONEJSON_STATUS_OK) {
         return luaL_error(L, "failed to configure Lua JSON parse visitor");
       }
     }
@@ -2291,8 +2301,8 @@ static int ljlua_decode_context_prepare_table_mode(lua_State *L,
   return 1;
 }
 
-static void
-ljlua_json_value_enable_parse_capture_preserving_runtime(lonejson_json_value *value) {
+static void ljlua_json_value_enable_parse_capture_preserving_runtime(
+    lonejson_json_value *value) {
   if (value == NULL) {
     return;
   }
@@ -2340,9 +2350,10 @@ static int ljlua_record_to_table(lua_State *L, ljlua_schema *schema,
   return 1;
 }
 
-static int ljlua_record_to_table_with_overrides(lua_State *L, ljlua_schema *schema,
-                                                void *record,
-                                                const ljlua_decode_context *ctx) {
+static int
+ljlua_record_to_table_with_overrides(lua_State *L, ljlua_schema *schema,
+                                     void *record,
+                                     const ljlua_decode_context *ctx) {
   size_t i;
   lua_createtable(L, 0, (int)schema->field_count);
   for (i = 0u; i < schema->field_count; ++i) {
@@ -3247,10 +3258,10 @@ static int ljlua_counter_call(lua_State *L) {
   }
 }
 
-static int ljlua_schema_decode_into_buffer(lua_State *L, ljlua_schema *schema,
-                                           void *record, const char *json,
-                                           size_t len,
-                                           const lonejson_parse_options *input_options) {
+static int
+ljlua_schema_decode_into_buffer(lua_State *L, ljlua_schema *schema,
+                                void *record, const char *json, size_t len,
+                                const lonejson_parse_options *input_options) {
   lonejson_parse_options options;
   lonejson_error error;
   lonejson_status status;
@@ -3451,8 +3462,8 @@ static int ljlua_schema_decode(lua_State *L) {
     ljlua_decode_context_prepare_table_mode(L, schema_ud->schema, record, &ctx);
     {
       lonejson_error error;
-      lonejson_status status = lonejson_parse_buffer(&schema_ud->schema->map, record,
-                                                     json, len, &options, &error);
+      lonejson_status status = lonejson_parse_buffer(
+          &schema_ud->schema->map, record, json, len, &options, &error);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         ljlua_decode_context_cleanup(&ctx);
         ljlua_cleanup_record_storage(schema_ud->schema, record);
@@ -3462,8 +3473,8 @@ static int ljlua_schema_decode(lua_State *L) {
         return 2;
       }
     }
-  } else if (!ljlua_schema_decode_into_buffer(L, schema_ud->schema, record, json,
-                                              len, &options)) {
+  } else if (!ljlua_schema_decode_into_buffer(L, schema_ud->schema, record,
+                                              json, len, &options)) {
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
     return 2;
@@ -3853,8 +3864,8 @@ static int ljlua_stream_next(lua_State *L) {
       if (ud->clear_destination) {
         lonejson_reset(&ud->schema->map, record_ud->data);
       }
-      ljlua_prepare_record_json_value_capture(
-          L, ud->schema, record_ud->data, ud->clear_destination ? 0 : 1);
+      ljlua_prepare_record_json_value_capture(L, ud->schema, record_ud->data,
+                                              ud->clear_destination ? 0 : 1);
     }
     result = lonejson_stream_next(ud->stream, record_ud->data, &error);
     if (result == LONEJSON_STREAM_OBJECT) {

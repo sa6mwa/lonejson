@@ -83,14 +83,18 @@ typedef struct lonejson__json_pull_state {
   lonejson_error error;
 } lonejson__json_pull_state;
 
-static lonejson_status lonejson__json_pull_set_pending_bytes(
-    lonejson__json_pull_state *state, const void *data, size_t len);
-static lonejson_status lonejson__json_pull_set_pending_repeat(
-    lonejson__json_pull_state *state, unsigned char byte, size_t count);
-static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status lonejson__json_pull_init(
-    lonejson__json_pull_state *state, const lonejson_json_value *value,
-    int pretty, size_t base_depth, lonejson_error *error);
-static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status lonejson__json_pull_read(
-    lonejson__json_pull_state *state, unsigned char *buffer, size_t capacity,
-    size_t *out_len, int *out_eof, lonejson_error *error);
+static lonejson_status
+lonejson__json_pull_set_pending_bytes(lonejson__json_pull_state *state,
+                                      const void *data, size_t len);
+static lonejson_status
+lonejson__json_pull_set_pending_repeat(lonejson__json_pull_state *state,
+                                       unsigned char byte, size_t count);
+static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status
+lonejson__json_pull_init(lonejson__json_pull_state *state,
+                         const lonejson_json_value *value, int pretty,
+                         size_t base_depth, lonejson_error *error);
+static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status
+lonejson__json_pull_read(lonejson__json_pull_state *state,
+                         unsigned char *buffer, size_t capacity,
+                         size_t *out_len, int *out_eof, lonejson_error *error);
 static void lonejson__json_pull_cleanup(lonejson__json_pull_state *state);

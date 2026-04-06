@@ -47,6 +47,36 @@ string(REGEX REPLACE "\n#endif[ \t]*\n?$" ""
 set(single_header
     "${public_header_without_final_endif}\n\n#ifdef LONEJSON_IMPLEMENTATION\n${impl_header}#endif\n\n#endif\n")
 
+if(NOT LONEJSON_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+  message(FATAL_ERROR "LONEJSON_VERSION must be in X.Y.Z form")
+endif()
+set(release_version_major "${CMAKE_MATCH_1}")
+set(release_version_minor "${CMAKE_MATCH_2}")
+set(release_version_patch "${CMAKE_MATCH_3}")
+set(dist_header_release "${single_header}")
+foreach(version_macro IN ITEMS
+    LONEJSON_VERSION_MAJOR
+    LONEJSON_VERSION_MINOR
+    LONEJSON_VERSION_PATCH
+    LJ_VERSION_MAJOR
+    LJ_VERSION_MINOR
+    LJ_VERSION_PATCH)
+  if(version_macro STREQUAL "LONEJSON_VERSION_MAJOR" OR
+     version_macro STREQUAL "LJ_VERSION_MAJOR")
+    set(version_value "${release_version_major}")
+  elseif(version_macro STREQUAL "LONEJSON_VERSION_MINOR" OR
+         version_macro STREQUAL "LJ_VERSION_MINOR")
+    set(version_value "${release_version_minor}")
+  else()
+    set(version_value "${release_version_patch}")
+  endif()
+  string(REGEX REPLACE
+    "#define[ \t]+${version_macro}[ \t]+[^ \t\r\n]+"
+    "#define ${version_macro} ${version_value}"
+    dist_header_release
+    "${dist_header_release}")
+endforeach()
+
 get_filename_component(build_dir "${LONEJSON_SINGLE_HEADER_BUILD}" DIRECTORY)
 get_filename_component(build_alias_dir "${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}" DIRECTORY)
 get_filename_component(dist_dir "${LONEJSON_SINGLE_HEADER_DIST_GZ}" DIRECTORY)
@@ -57,7 +87,7 @@ set(dist_header_tmp "${dist_dir}/lonejson.h.tmp")
 file(MAKE_DIRECTORY "${build_dir}" "${build_alias_dir}" "${dist_dir}")
 file(WRITE "${build_tmp}" "${single_header}")
 file(WRITE "${build_alias_tmp}" "${single_header}")
-file(WRITE "${dist_header_tmp}" "${single_header}")
+file(WRITE "${dist_header_tmp}" "${dist_header_release}")
 
 if(NOT DEFINED LONEJSON_CLANG_FORMAT_BIN OR LONEJSON_CLANG_FORMAT_BIN STREQUAL "")
   find_program(LONEJSON_CLANG_FORMAT_BIN NAMES clang-format)
@@ -100,6 +130,30 @@ execute_process(
 if(NOT copy_dist_result EQUAL 0)
   message(FATAL_ERROR "failed to update dist single-header artifact")
 endif()
+file(READ "${dist_header}" dist_header_release_content)
+foreach(version_macro IN ITEMS
+    LONEJSON_VERSION_MAJOR
+    LONEJSON_VERSION_MINOR
+    LONEJSON_VERSION_PATCH
+    LJ_VERSION_MAJOR
+    LJ_VERSION_MINOR
+    LJ_VERSION_PATCH)
+  if(version_macro STREQUAL "LONEJSON_VERSION_MAJOR" OR
+     version_macro STREQUAL "LJ_VERSION_MAJOR")
+    set(version_value "${release_version_major}")
+  elseif(version_macro STREQUAL "LONEJSON_VERSION_MINOR" OR
+         version_macro STREQUAL "LJ_VERSION_MINOR")
+    set(version_value "${release_version_minor}")
+  else()
+    set(version_value "${release_version_patch}")
+  endif()
+  string(REGEX REPLACE
+    "#define[ \t]+${version_macro}[ \t]+[^ \t\r\n]+"
+    "#define ${version_macro} ${version_value}"
+    dist_header_release_content
+    "${dist_header_release_content}")
+endforeach()
+file(WRITE "${dist_header}" "${dist_header_release_content}")
 file(REMOVE "${build_tmp}" "${build_alias_tmp}" "${dist_header_tmp}")
 
 find_program(LONEJSON_GZIP_BIN NAMES gzip)

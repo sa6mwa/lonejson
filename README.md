@@ -585,13 +585,15 @@ That command produces:
 - a SHA-256 manifest under `dist/`
 
 The compressed header artifact is the standalone embedded form for
-single-header integration. The source-only archive contains the repository
-source tree without generated build output or local stash material. The Lua
-source package prefers a curl-enabled native build when curl is available in
-the build environment and falls back automatically to a curl-free build
-otherwise. The release version comes from `VERSION` when present in the source
-tree, otherwise from an exact `vX.Y.Z` tag on `HEAD`, and otherwise falls back
-to `0.0.0`.
+single-header integration. Its version macros are regenerated to match the
+resolved release version, from `VERSION` when present in a source package,
+otherwise from an exact `vX.Y.Z` tag on `HEAD`, and otherwise `0.0.0`. The
+source-only archive contains the repository source tree
+without generated build output or local stash material. The Lua source package
+prefers a curl-enabled native build when curl is available in the build
+environment and falls back automatically to a curl-free build otherwise. The
+same release version source of truth is used for the source-only archive and
+the generated standalone header artifact.
 
 ## Verification
 

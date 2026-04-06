@@ -35,8 +35,7 @@ static lonejson_status fuzz_visit_array_begin(void *user,
 }
 
 static lonejson_status fuzz_visit_key_chunk(void *user, const char *data,
-                                            size_t len,
-                                            lonejson_error *error) {
+                                            size_t len, lonejson_error *error) {
   fuzz_visit_state *state = (fuzz_visit_state *)user;
   (void)data;
   (void)error;

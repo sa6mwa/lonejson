@@ -186,6 +186,22 @@ if(LONEJSON_BUILD_TESTS)
         -DLONEJSON_ABI_VERSION=${LONEJSON_ABI_VERSION}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_soversion.cmake)
   endif()
+
+  add_test(
+    NAME lonejson_single_header_version_tests
+    COMMAND ${CMAKE_COMMAND}
+      -DLONEJSON_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+      -DLONEJSON_PUBLIC_HEADER=${CMAKE_CURRENT_SOURCE_DIR}/include/lonejson.h
+      -DLONEJSON_SINGLE_HEADER_BUILD=${LONEJSON_SINGLE_HEADER_BUILD}
+      -DLONEJSON_SINGLE_HEADER_BUILD_ALIAS=${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_single_header_version.cmake)
+  add_test(
+    NAME lonejson_single_header_release_version_tests
+    COMMAND ${CMAKE_COMMAND}
+      -DLONEJSON_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+      -DLONEJSON_RELEASE_VERSION=${LONEJSON_RESOLVED_VERSION}
+      -DLONEJSON_SINGLE_HEADER_DIST_GZ=${LONEJSON_SINGLE_HEADER_DIST_GZ}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_single_header_release_version.cmake)
 endif()
 
 if(LONEJSON_BUILD_EXAMPLES)

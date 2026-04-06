@@ -381,10 +381,9 @@ LONEJSON_MAP_DEFINE(test_fixed_result_row_map, test_fixed_result_row,
                     test_fixed_result_row_fields);
 
 static const lonejson_field test_fixed_result_run_fields[] = {
-    LONEJSON_FIELD_OBJECT_ARRAY(test_fixed_result_run, results, "results",
-                                test_fixed_result_row,
-                                &test_fixed_result_row_map,
-                                LONEJSON_OVERFLOW_FAIL)};
+    LONEJSON_FIELD_OBJECT_ARRAY(
+        test_fixed_result_run, results, "results", test_fixed_result_row,
+        &test_fixed_result_row_map, LONEJSON_OVERFLOW_FAIL)};
 LONEJSON_MAP_DEFINE(test_fixed_result_run_map, test_fixed_result_run,
                     test_fixed_result_run_fields);
 
@@ -616,12 +615,14 @@ static lonejson_status test_visit_object_begin(void *user,
   return test_visit_append((test_visit_state *)user, "{");
 }
 
-static lonejson_status test_visit_object_end(void *user, lonejson_error *error) {
+static lonejson_status test_visit_object_end(void *user,
+                                             lonejson_error *error) {
   (void)error;
   return test_visit_append((test_visit_state *)user, "}");
 }
 
-static lonejson_status test_visit_array_begin(void *user, lonejson_error *error) {
+static lonejson_status test_visit_array_begin(void *user,
+                                              lonejson_error *error) {
   (void)error;
   return test_visit_append((test_visit_state *)user, "[");
 }
@@ -637,8 +638,7 @@ static lonejson_status test_visit_key_begin(void *user, lonejson_error *error) {
 }
 
 static lonejson_status test_visit_key_chunk(void *user, const char *data,
-                                            size_t len,
-                                            lonejson_error *error) {
+                                            size_t len, lonejson_error *error) {
   test_visit_state *state = (test_visit_state *)user;
   (void)error;
   if (state->len + len + 1u >= sizeof(state->log)) {
@@ -661,7 +661,8 @@ static lonejson_status test_visit_string_begin(void *user,
   return test_visit_append((test_visit_state *)user, "S(");
 }
 
-static lonejson_status test_visit_string_end(void *user, lonejson_error *error) {
+static lonejson_status test_visit_string_end(void *user,
+                                             lonejson_error *error) {
   (void)error;
   return test_visit_append((test_visit_state *)user, ")");
 }
@@ -672,7 +673,8 @@ static lonejson_status test_visit_number_begin(void *user,
   return test_visit_append((test_visit_state *)user, "N(");
 }
 
-static lonejson_status test_visit_number_end(void *user, lonejson_error *error) {
+static lonejson_status test_visit_number_end(void *user,
+                                             lonejson_error *error) {
   (void)error;
   return test_visit_append((test_visit_state *)user, ")");
 }
@@ -708,8 +710,9 @@ static lonejson_value_visitor test_value_visitor(void) {
   return visitor;
 }
 
-static lonejson_status test_visit_counter_maybe_fail(
-    test_visit_chunk_state *state, lonejson_error *error) {
+static lonejson_status
+test_visit_counter_maybe_fail(test_visit_chunk_state *state,
+                              lonejson_error *error) {
   ++state->callback_count;
   if (state->fail_after != 0u && state->callback_count >= state->fail_after) {
     return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
@@ -856,7 +859,8 @@ static lonejson_status test_visit_count_bool(void *user, int value,
   return test_visit_counter_maybe_fail(state, error);
 }
 
-static lonejson_status test_visit_count_null(void *user, lonejson_error *error) {
+static lonejson_status test_visit_count_null(void *user,
+                                             lonejson_error *error) {
   test_visit_chunk_state *state = (test_visit_chunk_state *)user;
   ++state->null_count;
   return test_visit_counter_maybe_fail(state, error);
@@ -1074,8 +1078,7 @@ static void test_parser_workspace_alignment_regression(void) {
                               LONEJSON_PARSER_BUFFER_SIZE);
   EXPECT(parser_storage.workspace != misaligned_workspace);
   EXPECT(parser_storage.workspace_size <= LONEJSON_PARSER_BUFFER_SIZE);
-  alignment_offset =
-      (size_t)(parser_storage.workspace - misaligned_workspace);
+  alignment_offset = (size_t)(parser_storage.workspace - misaligned_workspace);
   EXPECT(alignment_offset < LONEJSON__PARSER_WORKSPACE_ALIGNMENT);
   EXPECT(parser_storage.frames == (lonejson_frame *)parser_storage.workspace);
   EXPECT(parser_storage.workspace ==
@@ -1133,8 +1136,8 @@ static void test_zero_alloc_fixed_storage_parse(void) {
   options.clear_destination = 0;
 
   reset_lonejson_alloc_stats();
-  status = lonejson_parse_cstr(&test_fixed_log_map, &log, json, &options,
-                               &error);
+  status =
+      lonejson_parse_cstr(&test_fixed_log_map, &log, json, &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED);
   EXPECT(strcmp(log.name, "long-ev") == 0);
   EXPECT(log.codes.count == 3u);
@@ -2721,12 +2724,14 @@ static void test_json_value_parse_and_roundtrip(void) {
       "\"id\":\"lql-1\","
       "\"selector\":{\"kind\":\"term\",\"field\":\"name\",\"value\":\"alice\"},"
       "\"fields\":[\"id\",\"name\",\"created_at\"],"
-      "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/name\"}}"
+      "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/"
+      "name\"}}"
       "}";
   const char *expected_compact =
       "{\"id\":\"lql-1\",\"selector\":{\"kind\":\"term\",\"field\":\"name\","
       "\"value\":\"alice\"},\"fields\":[\"id\",\"name\",\"created_at\"],"
-      "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/name\"}}}";
+      "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/"
+      "name\"}}}";
   test_json_value_doc doc;
   test_json_value_doc streamed;
   test_reader_state stream_state;
@@ -2755,9 +2760,10 @@ static void test_json_value_parse_and_roundtrip(void) {
                 "{\"kind\":\"term\",\"field\":\"name\",\"value\":\"alice\"}") ==
          0);
   EXPECT(strcmp(doc.fields.json, "[\"id\",\"name\",\"created_at\"]") == 0);
-  EXPECT(strcmp(doc.last_error.json,
-                "{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/name\"}}") ==
-         0);
+  EXPECT(
+      strcmp(doc.last_error.json,
+             "{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/name\"}}") ==
+      0);
 
   serialized = lonejson_serialize_alloc(&test_json_value_doc_map, &doc, NULL,
                                         NULL, &error);
@@ -2784,13 +2790,15 @@ static void test_json_value_parse_and_roundtrip(void) {
   stream_state.json = json;
   stream_state.offset = 0u;
   stream_state.chunk_size = 5u;
-  stream = lonejson_stream_open_reader(&test_json_value_doc_map, test_state_reader,
-                                       &stream_state, &parse_options, &error);
+  stream =
+      lonejson_stream_open_reader(&test_json_value_doc_map, test_state_reader,
+                                  &stream_state, &parse_options, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     poison_bytes(&streamed, sizeof(streamed), 0x5Au);
     lonejson__init_map(&test_json_value_doc_map, &streamed);
-    status = lonejson_json_value_enable_parse_capture(&streamed.selector, &error);
+    status =
+        lonejson_json_value_enable_parse_capture(&streamed.selector, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
     status = lonejson_json_value_enable_parse_capture(&streamed.fields, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
@@ -2815,7 +2823,8 @@ static void test_json_value_parse_stream_sink(void) {
       "\"id\":\"sink-1\","
       "\"selector\":{\"kind\":\"term\",\"field\":\"name\",\"value\":\"alice\"},"
       "\"fields\":[\"id\",\"name\",\"created_at\"],"
-      "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/name\"}}"
+      "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/"
+      "name\"}}"
       "}";
   test_json_value_doc doc;
   lonejson_parse_options options = lonejson_default_parse_options();
@@ -2840,28 +2849,28 @@ static void test_json_value_parse_stream_sink(void) {
 
   poison_bytes(&doc, sizeof(doc), 0xCCu);
   lonejson__init_map(&test_json_value_doc_map, &doc);
-  status = lonejson_json_value_set_parse_sink(&doc.selector,
-                                              test_buffer_sink_write,
-                                              &selector_sink, &error);
+  status = lonejson_json_value_set_parse_sink(
+      &doc.selector, test_buffer_sink_write, &selector_sink, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_json_value_set_parse_sink(&doc.fields, test_buffer_sink_write,
-                                              &fields_sink, &error);
+  status = lonejson_json_value_set_parse_sink(
+      &doc.fields, test_buffer_sink_write, &fields_sink, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   status = lonejson_json_value_set_parse_sink(
       &doc.last_error, test_buffer_sink_write, &error_sink, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   options.clear_destination = 0;
-  status =
-      lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options, &error);
+  status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                               &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)selector_buf,
                 "{\"kind\":\"term\",\"field\":\"name\",\"value\":\"alice\"}") ==
          0);
   EXPECT(strcmp((const char *)fields_buf, "[\"id\",\"name\",\"created_at\"]") ==
          0);
-  EXPECT(strcmp((const char *)error_buf,
-                "{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/name\"}}") ==
-         0);
+  EXPECT(
+      strcmp((const char *)error_buf,
+             "{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/name\"}}") ==
+      0);
   EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_NULL);
   EXPECT(doc.fields.kind == LONEJSON_JSON_VALUE_NULL);
   EXPECT(doc.last_error.kind == LONEJSON_JSON_VALUE_NULL);
@@ -2892,26 +2901,22 @@ static void test_json_value_parse_visitor(void) {
   memset(&error_state, 0, sizeof(error_state));
   poison_bytes(&doc, sizeof(doc), 0xCCu);
   lonejson__init_map(&test_json_value_doc_map, &doc);
-  status = lonejson_json_value_set_parse_visitor(&doc.selector, &visitor,
-                                                 &selector_state, &limits,
-                                                 &error);
+  status = lonejson_json_value_set_parse_visitor(
+      &doc.selector, &visitor, &selector_state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_json_value_set_parse_visitor(&doc.fields, &visitor,
-                                                 &fields_state, &limits,
-                                                 &error);
+  status = lonejson_json_value_set_parse_visitor(
+      &doc.fields, &visitor, &fields_state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   status = lonejson_json_value_set_parse_visitor(&doc.last_error, &visitor,
-                                                 &error_state, &limits,
-                                                 &error);
+                                                 &error_state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   options.clear_destination = 0;
-  status =
-      lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options, &error);
+  status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                               &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(selector_state.log,
                 "{K(kind)S(term)K(field)S(name)K(value)S(alice)}") == 0);
-  EXPECT(strcmp(fields_state.log,
-                "[S(id)S(name){K(nested)[TZN(3.5)]}]") == 0);
+  EXPECT(strcmp(fields_state.log, "[S(id)S(name){K(nested)[TZN(3.5)]}]") == 0);
   EXPECT(strcmp(error_state.log, "Z") == 0);
   EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_NULL);
   EXPECT(doc.fields.kind == LONEJSON_JSON_VALUE_NULL);
@@ -2922,9 +2927,8 @@ static void test_json_value_parse_visitor(void) {
   poison_bytes(&doc, sizeof(doc), 0xCCu);
   lonejson__init_map(&test_json_value_doc_map, &doc);
   memset(&selector_state, 0, sizeof(selector_state));
-  status = lonejson_json_value_set_parse_visitor(&doc.selector, &visitor,
-                                                 &selector_state, &limits,
-                                                 &error);
+  status = lonejson_json_value_set_parse_visitor(
+      &doc.selector, &visitor, &selector_state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   options.clear_destination = 0;
   status = lonejson_parse_cstr(
@@ -2932,8 +2936,8 @@ static void test_json_value_parse_visitor(void) {
       "{\"id\":\"visit-2\",\"selector\":{\"value\":\"alice\"}}", &options,
       &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
-  EXPECT(strstr(error.message, "JSON string exceeds maximum decoded byte limit") !=
-         NULL);
+  EXPECT(strstr(error.message,
+                "JSON string exceeds maximum decoded byte limit") != NULL);
 
   lonejson_cleanup(&test_json_value_doc_map, &doc);
 }
@@ -2956,12 +2960,12 @@ static void test_json_value_parse_visitor_fast_path_regressions(void) {
   memset(&state, 0, sizeof(state));
   poison_bytes(&doc, sizeof(doc), 0xCCu);
   lonejson__init_map(&test_json_value_doc_map, &doc);
-  status = lonejson_json_value_set_parse_visitor(&doc.selector, &visitor, &state,
-                                                 NULL, &error);
+  status = lonejson_json_value_set_parse_visitor(&doc.selector, &visitor,
+                                                 &state, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   options.clear_destination = 0;
-  status =
-      lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options, &error);
+  status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                               &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(state.object_count == 3u);
   EXPECT(state.array_count == 1u);
@@ -2976,19 +2980,19 @@ static void test_json_value_parse_visitor_fast_path_regressions(void) {
 }
 
 static void test_json_value_setters_and_failures(void) {
-  const char *selector_pretty =
-      "{\n"
-      "  \"kind\": \"term\",\n"
-      "  \"field\": \"name\",\n"
-      "  \"value\": \"alice\"\n"
-      "}";
+  const char *selector_pretty = "{\n"
+                                "  \"kind\": \"term\",\n"
+                                "  \"field\": \"name\",\n"
+                                "  \"value\": \"alice\"\n"
+                                "}";
   const char *fields_pretty = "[\"id\", \"name\", \"created_at\"]";
   const char *error_pretty =
       "{ \"code\": \"bad_selector\", \"detail\": { \"path\": \"/name\" } }";
   const char *expected_compact =
       "{\"id\":\"emit-1\",\"selector\":{\"kind\":\"term\",\"field\":\"name\","
       "\"value\":\"alice\"},\"fields\":[\"id\",\"name\",\"created_at\"],"
-      "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/name\"}}}";
+      "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/"
+      "name\"}}}";
   char selector_path[] = "/tmp/lonejson-json-value-selector-XXXXXX";
   char error_path[] = "/tmp/lonejson-json-value-error-XXXXXX";
   test_json_value_doc doc;
@@ -3035,8 +3039,7 @@ static void test_json_value_setters_and_failures(void) {
   fields_reader.json = fields_pretty;
   fields_reader.offset = 0u;
   fields_reader.chunk_size = 4u;
-  status =
-      lonejson_json_value_set_path(&doc.selector, selector_path, &error);
+  status = lonejson_json_value_set_path(&doc.selector, selector_path, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   status = lonejson_json_value_set_reader(&doc.fields, test_state_reader,
                                           &fields_reader, &error);
@@ -3106,7 +3109,8 @@ static void test_json_value_scalars_null_and_reset(void) {
   }
 
   reset_lonejson_alloc_stats();
-  status = lonejson_json_value_set_buffer(&doc.selector, "{\"a\":1}", 7u, &error);
+  status =
+      lonejson_json_value_set_buffer(&doc.selector, "{\"a\":1}", 7u, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(g_alloc_record_count == 1u);
   lonejson_json_value_reset(&doc.selector);
@@ -3147,9 +3151,8 @@ static void test_json_value_reuse_and_cleanup_ownership(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(g_alloc_record_count == 1u);
 
-  status = lonejson_json_value_set_buffer(&value, "{\"from\":\"buffer\"}",
-                                          strlen("{\"from\":\"buffer\"}"),
-                                          &error);
+  status = lonejson_json_value_set_buffer(
+      &value, "{\"from\":\"buffer\"}", strlen("{\"from\":\"buffer\"}"), &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(value.kind == LONEJSON_JSON_VALUE_BUFFER);
   EXPECT(g_alloc_record_count == 1u);
@@ -3159,9 +3162,8 @@ static void test_json_value_reuse_and_cleanup_ownership(void) {
   strcpy(doc.id, "reuse");
   doc.selector = value;
   lonejson_json_value_init(&value);
-  serialized =
-      lonejson_serialize_alloc(&test_json_value_doc_map, &doc, NULL, NULL,
-                               &error);
+  serialized = lonejson_serialize_alloc(&test_json_value_doc_map, &doc, NULL,
+                                        NULL, &error);
   EXPECT(serialized != NULL);
   if (serialized != NULL) {
     EXPECT(strstr(serialized, "\"selector\":{\"from\":\"buffer\"}") != NULL);
@@ -3252,8 +3254,8 @@ static void test_json_value_source_validation_failures(void) {
       status = lonejson_json_value_set_file(&value, fp, &error);
       EXPECT(status == LONEJSON_STATUS_OK);
       memset(&sink, 0, sizeof(sink));
-      status = lonejson_json_value_write_to_sink(&value, test_counting_sink_write,
-                                                 &sink, &error);
+      status = lonejson_json_value_write_to_sink(
+          &value, test_counting_sink_write, &sink, &error);
       EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
       fclose(fp);
     } else {
@@ -3278,8 +3280,10 @@ static void test_json_value_source_validation_failures(void) {
   lonejson_json_value_cleanup(&value);
 }
 
-static void test_json_value_parse_requires_destination_and_partial_failure(void) {
-  const char *missing_config_json = "{\"id\":\"missing\",\"selector\":{\"a\":1}}";
+static void
+test_json_value_parse_requires_destination_and_partial_failure(void) {
+  const char *missing_config_json =
+      "{\"id\":\"missing\",\"selector\":{\"a\":1}}";
   const char *broken_json =
       "{\"id\":\"broken\",\"selector\":{\"a\":[1,2,},\"fields\":null}";
   test_json_value_doc doc;
@@ -3291,8 +3295,8 @@ static void test_json_value_parse_requires_destination_and_partial_failure(void)
 
   poison_bytes(&doc, sizeof(doc), 0xD3u);
   lonejson__init_map(&test_json_value_doc_map, &doc);
-  status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, missing_config_json,
-                               NULL, &error);
+  status = lonejson_parse_cstr(&test_json_value_doc_map, &doc,
+                               missing_config_json, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   lonejson_cleanup(&test_json_value_doc_map, &doc);
 
@@ -3301,16 +3305,14 @@ static void test_json_value_parse_requires_destination_and_partial_failure(void)
   selector_sink.capacity = sizeof(selector_buf);
   poison_bytes(&doc, sizeof(doc), 0xD4u);
   lonejson__init_map(&test_json_value_doc_map, &doc);
-  status = lonejson_json_value_set_parse_sink(&doc.selector,
-                                              test_buffer_sink_write,
-                                              &selector_sink, &error);
+  status = lonejson_json_value_set_parse_sink(
+      &doc.selector, test_buffer_sink_write, &selector_sink, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   status = lonejson_json_value_enable_parse_capture(&doc.fields, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   options.clear_destination = 0;
-  status =
-      lonejson_parse_cstr(&test_json_value_doc_map, &doc, broken_json, &options,
-                          &error);
+  status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, broken_json,
+                               &options, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(strstr((const char *)selector_buf, "{\"a\":[1,2") != NULL);
   lonejson_cleanup(&test_json_value_doc_map, &doc);
@@ -3350,8 +3352,8 @@ static void test_json_value_nonseekable_and_sink_failures(void) {
       status = lonejson_json_value_set_file(&value, fp, &error);
       EXPECT(status == LONEJSON_STATUS_OK);
       memset(&sink, 0, sizeof(sink));
-      status = lonejson_json_value_write_to_sink(&value, test_counting_sink_write,
-                                                 &sink, &error);
+      status = lonejson_json_value_write_to_sink(
+          &value, test_counting_sink_write, &sink, &error);
       EXPECT(status == LONEJSON_STATUS_IO_ERROR);
       fclose(fp);
     } else {
@@ -3361,10 +3363,9 @@ static void test_json_value_nonseekable_and_sink_failures(void) {
     EXPECT(0);
   }
 
-  status = lonejson_json_value_set_buffer(&value,
-                                          "{\"kind\":\"term\",\"field\":\"name\"}",
-                                          strlen("{\"kind\":\"term\",\"field\":\"name\"}"),
-                                          &error);
+  status = lonejson_json_value_set_buffer(
+      &value, "{\"kind\":\"term\",\"field\":\"name\"}",
+      strlen("{\"kind\":\"term\",\"field\":\"name\"}"), &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   failing_sink.fail_after = 8u;
   failing_sink.total = 0u;
@@ -3423,9 +3424,9 @@ static void test_json_value_large_source_backed_serialization(void) {
 
   reset_lonejson_alloc_stats();
   memset(&sink, 0, sizeof(sink));
-  status = lonejson_serialize_sink(&test_json_value_doc_map, &doc,
-                                   test_counting_sink_write, &sink, NULL,
-                                   &error);
+  status =
+      lonejson_serialize_sink(&test_json_value_doc_map, &doc,
+                              test_counting_sink_write, &sink, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(sink.total > payload_len);
   EXPECT(g_lonejson_alloc_calls == 0u);
@@ -3504,9 +3505,8 @@ static void test_json_value_nested_failure_matrix(void) {
       status = lonejson_json_value_set_path(&value, path_template, &error);
       EXPECT(status == LONEJSON_STATUS_OK);
       memset(&sink, 0, sizeof(sink));
-      status = lonejson_json_value_write_to_sink(&value,
-                                                 test_counting_sink_write,
-                                                 &sink, &error);
+      status = lonejson_json_value_write_to_sink(
+          &value, test_counting_sink_write, &sink, &error);
       EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
       unlink(path_template);
     }
@@ -3521,9 +3521,8 @@ static void test_json_value_nested_failure_matrix(void) {
         status = lonejson_json_value_set_file(&value, fp, &error);
         EXPECT(status == LONEJSON_STATUS_OK);
         memset(&sink, 0, sizeof(sink));
-        status = lonejson_json_value_write_to_sink(&value,
-                                                   test_counting_sink_write,
-                                                   &sink, &error);
+        status = lonejson_json_value_write_to_sink(
+            &value, test_counting_sink_write, &sink, &error);
         EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
         fclose(fp);
       } else {
@@ -3539,9 +3538,8 @@ static void test_json_value_nested_failure_matrix(void) {
       status = lonejson_json_value_set_fd(&value, fd, &error);
       EXPECT(status == LONEJSON_STATUS_OK);
       memset(&sink, 0, sizeof(sink));
-      status = lonejson_json_value_write_to_sink(&value,
-                                                 test_counting_sink_write,
-                                                 &sink, &error);
+      status = lonejson_json_value_write_to_sink(
+          &value, test_counting_sink_write, &sink, &error);
       EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
       close(fd);
       unlink(path_template);
@@ -3551,8 +3549,8 @@ static void test_json_value_nested_failure_matrix(void) {
 }
 
 static void test_value_visitor_success_and_limits(void) {
-  const char *json =
-      "{\"name\":\"a\\n\\u20ac\",\"items\":[1,-2.5e3,true,false,null,{\"x\":[]}]}";
+  const char *json = "{\"name\":\"a\\n\\u20ac\",\"items\":[1,-2.5e3,true,false,"
+                     "null,{\"x\":[]}]}";
   lonejson_value_visitor visitor = test_value_visitor();
   lonejson_value_limits limits = lonejson_default_value_limits();
   lonejson_error error;
@@ -3564,8 +3562,7 @@ static void test_value_visitor_success_and_limits(void) {
   FILE *fp;
 
   memset(&state, 0, sizeof(state));
-  status =
-      lonejson_visit_value_cstr(json, &visitor, &state, &limits, &error);
+  status = lonejson_visit_value_cstr(json, &visitor, &state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strstr(state.log, "{K(name)S(a\n") != NULL);
   EXPECT(strstr(state.log, "K(items)[N(1)N(-2.5e3)TFZ{K(x)[]}]") != NULL);
@@ -3577,9 +3574,10 @@ static void test_value_visitor_success_and_limits(void) {
   status = lonejson_visit_value_reader(test_state_reader, &reader, &visitor,
                                        &state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  EXPECT(strcmp(state.log,
-                "{K(name)S(a\n\xE2\x82\xAC)K(items)[N(1)N(-2.5e3)TFZ{K(x)[]}]}")
-         == 0);
+  EXPECT(
+      strcmp(state.log,
+             "{K(name)S(a\n\xE2\x82\xAC)K(items)[N(1)N(-2.5e3)TFZ{K(x)[]}]}") ==
+      0);
 
   strcpy(path, "/tmp/lonejson-value-visitor-XXXXXX");
   fd = write_temp_text_file(path, json);
@@ -3587,8 +3585,7 @@ static void test_value_visitor_success_and_limits(void) {
   if (fd >= 0) {
     close(fd);
     memset(&state, 0, sizeof(state));
-    status =
-        lonejson_visit_value_path(path, &visitor, &state, &limits, &error);
+    status = lonejson_visit_value_path(path, &visitor, &state, &limits, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
     unlink(path);
   }
@@ -3610,22 +3607,22 @@ static void test_value_visitor_success_and_limits(void) {
 
   limits = lonejson_default_value_limits();
   limits.max_number_bytes = 3u;
-  status = lonejson_visit_value_cstr("12345", &visitor, &state, &limits,
-                                     &error);
+  status =
+      lonejson_visit_value_cstr("12345", &visitor, &state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
 
   limits = lonejson_default_value_limits();
   limits.max_total_bytes = 5u;
-  status = lonejson_visit_value_cstr("{\"k\":1}", &visitor, &state, &limits,
-                                     &error);
+  status =
+      lonejson_visit_value_cstr("{\"k\":1}", &visitor, &state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
 
   status = lonejson_visit_value_cstr("{\"k\":1} trailing", &visitor, &state,
                                      NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
 
-  status = lonejson_visit_value_cstr("{\"k\":tru}", &visitor, &state, NULL,
-                                     &error);
+  status =
+      lonejson_visit_value_cstr("{\"k\":tru}", &visitor, &state, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
 
   strcpy(path, "/tmp/lonejson-value-visitor-XXXXXX");
@@ -3637,8 +3634,7 @@ static void test_value_visitor_success_and_limits(void) {
     if (fp != NULL) {
       EXPECT(fseek(fp, 0L, SEEK_SET) == 0);
       memset(&state, 0, sizeof(state));
-      status =
-          lonejson_visit_value_filep(fp, &visitor, &state, NULL, &error);
+      status = lonejson_visit_value_filep(fp, &visitor, &state, NULL, &error);
       EXPECT(status == LONEJSON_STATUS_OK);
       fclose(fp);
     } else {
@@ -3665,12 +3661,9 @@ static void test_value_visitor_chunking_unicode_and_failures(void) {
       "{\"\\u20acuro_key\":\"line\\n\\uD834\\uDD1E\","
       "\"items\":[\"alpha\",\"beta\",-12345.678e-9,true,false,null]}";
   static const char *invalid_cases[] = {
-      "{\"bad\":\"\\uD834x\"}",
-      "{\"bad\":\"\\uD834\\u0000\"}",
-      "{\"bad\":\"\\uDD1E\"}",
-      "{\"bad\":\"\\u12\"}",
-      "{\"bad\":\"\\x41\"}",
-      "{\"bad\":[1,2,}",
+      "{\"bad\":\"\\uD834x\"}", "{\"bad\":\"\\uD834\\u0000\"}",
+      "{\"bad\":\"\\uDD1E\"}",  "{\"bad\":\"\\u12\"}",
+      "{\"bad\":\"\\x41\"}",    "{\"bad\":[1,2,}",
       "{\"bad\":1} trailing"};
   lonejson_value_visitor visitor = test_counting_value_visitor();
   lonejson_error error;
@@ -3702,14 +3695,12 @@ static void test_value_visitor_chunking_unicode_and_failures(void) {
   memset(&state, 0, sizeof(state));
   limits = lonejson_default_value_limits();
   limits.max_total_bytes = strlen(json);
-  status =
-      lonejson_visit_value_cstr(json, &visitor, &state, &limits, &error);
+  status = lonejson_visit_value_cstr(json, &visitor, &state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
 
   memset(&state, 0, sizeof(state));
   state.fail_after = 6u;
-  status =
-      lonejson_visit_value_cstr(json, &visitor, &state, NULL, &error);
+  status = lonejson_visit_value_cstr(json, &visitor, &state, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(state.callback_count == 6u);
   EXPECT(state.key_begin_count > 0u);
@@ -3723,8 +3714,8 @@ static void test_value_visitor_chunking_unicode_and_failures(void) {
 
   for (i = 0u; i < sizeof(invalid_cases) / sizeof(invalid_cases[0]); ++i) {
     memset(&state, 0, sizeof(state));
-    status = lonejson_visit_value_cstr(invalid_cases[i], &visitor, &state,
-                                       NULL, &error);
+    status = lonejson_visit_value_cstr(invalid_cases[i], &visitor, &state, NULL,
+                                       &error);
     EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
   }
 }
@@ -3758,14 +3749,14 @@ static void test_custom_allocator_parse_cleanup_and_stream(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 7u;
-  stream = lonejson_stream_open_reader(&test_alloc_parse_doc_map,
-                                       test_state_reader, &reader, &options,
-                                       &error);
+  stream = lonejson_stream_open_reader(
+      &test_alloc_parse_doc_map, test_state_reader, &reader, &options, &error);
   EXPECT(stream != NULL);
   EXPECT(alloc.stats.alloc_calls > 0u);
   if (stream != NULL) {
     memset(&doc, 0, sizeof(doc));
-    EXPECT(lonejson_stream_next(stream, &doc, &error) == LONEJSON_STREAM_OBJECT);
+    EXPECT(lonejson_stream_next(stream, &doc, &error) ==
+           LONEJSON_STREAM_OBJECT);
     lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
     lonejson_stream_close(stream);
   }
@@ -3773,7 +3764,8 @@ static void test_custom_allocator_parse_cleanup_and_stream(void) {
 }
 
 static void test_custom_allocator_json_value_capture_and_serialize_alloc(void) {
-  static const char json[] = "{\"id\":\"q1\",\"selector\":{\"a\":[1,true,null]}}";
+  static const char json[] =
+      "{\"id\":\"q1\",\"selector\":{\"a\":[1,true,null]}}";
   test_allocator_state parse_alloc;
   test_allocator_state write_alloc;
   lonejson_parse_options parse_options = lonejson_default_parse_options();
@@ -3786,7 +3778,8 @@ static void test_custom_allocator_json_value_capture_and_serialize_alloc(void) {
 
   test_allocator_init(&parse_alloc);
   test_allocator_init(&write_alloc);
-  lonejson_json_value_init_with_allocator(&doc.selector, &parse_alloc.allocator);
+  lonejson_json_value_init_with_allocator(&doc.selector,
+                                          &parse_alloc.allocator);
   status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   memset(doc.id, 0, sizeof(doc.id));
@@ -3843,7 +3836,8 @@ static void test_custom_allocator_raw_serialize_alloc_is_rejected(void) {
   EXPECT(write_alloc.stats.bytes_live == 0u);
 }
 
-static void test_explicit_default_allocator_raw_serialize_alloc_is_allowed(void) {
+static void
+test_explicit_default_allocator_raw_serialize_alloc_is_allowed(void) {
   lonejson_write_options options = lonejson_default_write_options();
   lonejson_allocator allocator = lonejson_default_allocator();
   lonejson_error error;
@@ -3854,8 +3848,8 @@ static void test_explicit_default_allocator_raw_serialize_alloc_is_allowed(void)
   memset(&event, 0, sizeof(event));
   memcpy(event.id, "evt-def", 8u);
   event.ok = true;
-  serialized = lonejson_serialize_alloc(&test_event_map, &event, NULL, &options,
-                                        &error);
+  serialized =
+      lonejson_serialize_alloc(&test_event_map, &event, NULL, &options, &error);
   EXPECT(serialized != NULL);
   if (serialized != NULL) {
     EXPECT(strcmp(serialized, "{\"id\":\"evt-def\",\"ok\":true}") == 0);
@@ -3863,8 +3857,8 @@ static void test_explicit_default_allocator_raw_serialize_alloc_is_allowed(void)
   }
 }
 
-static void test_explicit_default_allocator_raw_serialize_jsonl_alloc_is_allowed(
-    void) {
+static void
+test_explicit_default_allocator_raw_serialize_jsonl_alloc_is_allowed(void) {
   lonejson_write_options options = lonejson_default_write_options();
   lonejson_allocator allocator = lonejson_default_allocator();
   lonejson_error error;
@@ -3881,15 +3875,14 @@ static void test_explicit_default_allocator_raw_serialize_jsonl_alloc_is_allowed
                                               NULL, &options, &error);
   EXPECT(serialized != NULL);
   if (serialized != NULL) {
-    EXPECT(strcmp(serialized,
-                  "{\"id\":\"evt-1\",\"ok\":true}\n"
-                  "{\"id\":\"evt-2\",\"ok\":false}\n") == 0);
+    EXPECT(strcmp(serialized, "{\"id\":\"evt-1\",\"ok\":true}\n"
+                              "{\"id\":\"evt-2\",\"ok\":false}\n") == 0);
     LONEJSON_FREE(serialized);
   }
 }
 
-static void test_custom_allocator_json_value_capture_preserves_handle_allocator(
-    void) {
+static void
+test_custom_allocator_json_value_capture_preserves_handle_allocator(void) {
   static const char json[] = "{\"id\":\"q2\",\"selector\":{\"k\":[1,2,3]}}";
   test_allocator_state parse_alloc;
   lonejson_parse_options parse_options = lonejson_default_parse_options();
@@ -3899,7 +3892,8 @@ static void test_custom_allocator_json_value_capture_preserves_handle_allocator(
 
   memset(&doc, 0, sizeof(doc));
   test_allocator_init(&parse_alloc);
-  lonejson_json_value_init_with_allocator(&doc.selector, &parse_alloc.allocator);
+  lonejson_json_value_init_with_allocator(&doc.selector,
+                                          &parse_alloc.allocator);
   status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   parse_options.clear_destination = 0;
@@ -3931,8 +3925,8 @@ static void test_partial_allocator_parse_is_rejected(void) {
                                &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(strstr(error.message, "allocator must provide either all callbacks or none") !=
-         NULL);
+  EXPECT(strstr(error.message,
+                "allocator must provide either all callbacks or none") != NULL);
   EXPECT(alloc.stats.alloc_calls == 0u);
   EXPECT(alloc.stats.realloc_calls == 0u);
   EXPECT(alloc.stats.free_calls == 0u);
@@ -3960,8 +3954,8 @@ static void test_partial_allocator_parse_reader_is_rejected(void) {
                                  test_state_reader, &reader, &options, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(strstr(error.message, "allocator must provide either all callbacks or none") !=
-         NULL);
+  EXPECT(strstr(error.message,
+                "allocator must provide either all callbacks or none") != NULL);
   EXPECT(alloc.stats.alloc_calls == 0u);
   EXPECT(alloc.stats.realloc_calls == 0u);
   EXPECT(alloc.stats.free_calls == 0u);
@@ -3982,12 +3976,12 @@ static void test_partial_allocator_serialize_alloc_is_rejected(void) {
   alloc.allocator.realloc_fn = NULL;
   alloc.allocator.free_fn = NULL;
   options.allocator = &alloc.allocator;
-  serialized = lonejson_serialize_alloc(&test_event_map, &event, NULL, &options,
-                                        &error);
+  serialized =
+      lonejson_serialize_alloc(&test_event_map, &event, NULL, &options, &error);
   EXPECT(serialized == NULL);
   EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(strstr(error.message, "allocator must provide either all callbacks or none") !=
-         NULL);
+  EXPECT(strstr(error.message,
+                "allocator must provide either all callbacks or none") != NULL);
   EXPECT(alloc.stats.alloc_calls == 0u);
   EXPECT(alloc.stats.realloc_calls == 0u);
   EXPECT(alloc.stats.free_calls == 0u);
@@ -4008,14 +4002,13 @@ static void test_partial_allocator_generator_init_is_rejected(void) {
   alloc.allocator.realloc_fn = NULL;
   alloc.allocator.free_fn = NULL;
   options.allocator = &alloc.allocator;
-  status = lonejson_generator_init(&generator, &test_event_map, &event,
-                                   &options);
+  status =
+      lonejson_generator_init(&generator, &test_event_map, &event, &options);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(generator.state == NULL);
   EXPECT(generator.error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(strstr(generator.error.message,
-                "allocator must provide either all callbacks or none") !=
-         NULL);
+                "allocator must provide either all callbacks or none") != NULL);
   EXPECT(alloc.stats.alloc_calls == 0u);
   EXPECT(alloc.stats.realloc_calls == 0u);
   EXPECT(alloc.stats.free_calls == 0u);
@@ -4127,12 +4120,12 @@ static void test_generator_streams_json_value_fields(void) {
   lonejson_json_value_init(&doc.last_error);
   EXPECT(lonejson_json_value_set_buffer(
              &doc.selector, "{\"op\":\"and\",\"clauses\":[1,true]}",
-             strlen("{\"op\":\"and\",\"clauses\":[1,true]}"), NULL) ==
-         LONEJSON_STATUS_OK);
+             strlen("{\"op\":\"and\",\"clauses\":[1,true]}"),
+             NULL) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_json_value_set_buffer(
              &doc.fields, "[\"id\",{\"metrics\":[null,3.14]}]",
-             strlen("[\"id\",{\"metrics\":[null,3.14]}]"), NULL) ==
-         LONEJSON_STATUS_OK);
+             strlen("[\"id\",{\"metrics\":[null,3.14]}]"),
+             NULL) == LONEJSON_STATUS_OK);
 
   EXPECT(lonejson_generator_init(&generator, &test_json_value_doc_map, &doc,
                                  NULL) == LONEJSON_STATUS_OK);
@@ -4178,12 +4171,12 @@ static void test_generator_pretty_streams_json_value_reader(void) {
   options.pretty = 1;
 
   EXPECT(lonejson_json_value_set_reader(&doc.selector, test_state_reader,
-                                        &selector_reader, NULL) ==
-         LONEJSON_STATUS_OK);
+                                        &selector_reader,
+                                        NULL) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_json_value_set_buffer(
              &doc.fields, "[\"id\",\"kind\",{\"nested\":[1,null,false]}]",
-             strlen("[\"id\",\"kind\",{\"nested\":[1,null,false]}]"), NULL) ==
-         LONEJSON_STATUS_OK);
+             strlen("[\"id\",\"kind\",{\"nested\":[1,null,false]}]"),
+             NULL) == LONEJSON_STATUS_OK);
 
   EXPECT(lonejson_generator_init(&generator, &test_json_value_doc_map, &doc,
                                  &options) == LONEJSON_STATUS_OK);
@@ -4256,8 +4249,8 @@ static void test_curl_upload_custom_allocator_balance(void) {
   test_allocator_init(&write_alloc);
   options.allocator = &write_alloc.allocator;
 
-  EXPECT(lonejson_curl_upload_init(&upload, &test_event_map, &event, &options) ==
-         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_upload_init(&upload, &test_event_map, &event,
+                                   &options) == LONEJSON_STATUS_OK);
   EXPECT(write_alloc.stats.alloc_calls > 0u);
   EXPECT(write_alloc.stats.bytes_live > 0u);
   total = lonejson_curl_read_callback(buffer, 1u, sizeof(buffer) - 1u, &upload);
@@ -4307,15 +4300,14 @@ static void test_curl_upload_streaming_does_not_buffer_payload(void) {
   fclose(fp);
 
   EXPECT(lonejson_source_set_path(&doc.text, path, NULL) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_curl_upload_init(&upload, &test_source_doc_map, &doc, &options) ==
-         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_upload_init(&upload, &test_source_doc_map, &doc,
+                                   &options) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_curl_upload_size(&upload) == (curl_off_t)-1);
   EXPECT(write_alloc.stats.peak_bytes_live < 65536u);
 
   total = 0u;
   for (;;) {
-    size_t got =
-        lonejson_curl_read_callback(chunk, 1u, sizeof(chunk), &upload);
+    size_t got = lonejson_curl_read_callback(chunk, 1u, sizeof(chunk), &upload);
     if (got == 0u) {
       break;
     }
@@ -4353,8 +4345,8 @@ static int test_child_parse_poisoned_stream_and_json_value_fields(void) {
   return 0;
 }
 
-static void test_clear_destination_ignores_poisoned_stream_and_json_value_state(
-    void) {
+static void
+test_clear_destination_ignores_poisoned_stream_and_json_value_state(void) {
   pid_t pid;
   int status;
 
@@ -4395,7 +4387,8 @@ static void test_prepared_fixed_object_array_parse_preserves_storage(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(run.results.items == run.result_storage);
   EXPECT(run.results.count == 2u);
-  EXPECT(strcmp(run.result_storage[0].name, "parse/buffer_fixed/lonejson") == 0);
+  EXPECT(strcmp(run.result_storage[0].name, "parse/buffer_fixed/lonejson") ==
+         0);
   EXPECT(strcmp(run.result_storage[0].group, "parse") == 0);
   EXPECT(strcmp(run.result_storage[1].name, "serialize/sink/lonejson") == 0);
   EXPECT(strcmp(run.result_storage[1].group, "serialize") == 0);

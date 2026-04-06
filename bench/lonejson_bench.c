@@ -358,10 +358,10 @@ static int bench_prepare_benchmark_cases(
     bench_jsonl_serialize_case *jsonl_pretty_case,
     bench_record_fixed *serialize_record, bench_record_fixed *jsonl_records,
     bench_json_value_doc *json_value_record,
-    bench_json_value_doc *json_value_source_record,
-    char *expected_json, size_t expected_json_capacity,
-    char *expected_pretty_json, size_t expected_pretty_json_capacity,
-    char *jsonl_buffer, size_t jsonl_buffer_capacity, char *pretty_jsonl_buffer,
+    bench_json_value_doc *json_value_source_record, char *expected_json,
+    size_t expected_json_capacity, char *expected_pretty_json,
+    size_t expected_pretty_json_capacity, char *jsonl_buffer,
+    size_t jsonl_buffer_capacity, char *pretty_jsonl_buffer,
     size_t pretty_jsonl_buffer_capacity, char *stream_buffer,
     size_t stream_buffer_capacity, char *json_value_path,
     size_t json_value_path_capacity);
@@ -1105,7 +1105,8 @@ static int bench_prepare_json_value_doc(bench_json_value_doc *doc) {
 
   bench_init_json_value_doc(doc);
   memcpy(doc->id, "q-42", 5u);
-  if (lonejson_json_value_set_buffer(&doc->selector, bench_json_value_selector_json,
+  if (lonejson_json_value_set_buffer(&doc->selector,
+                                     bench_json_value_selector_json,
                                      strlen(bench_json_value_selector_json),
                                      &error) != LONEJSON_STATUS_OK ||
       lonejson_json_value_set_buffer(&doc->fields, bench_json_value_fields_json,
@@ -2083,14 +2084,15 @@ static int bench_prepare_benchmark_cases(
     bench_jsonl_serialize_case *jsonl_pretty_case,
     bench_record_fixed *serialize_record, bench_record_fixed *jsonl_records,
     bench_json_value_doc *json_value_record,
-    bench_json_value_doc *json_value_source_record,
-    char *expected_json, size_t expected_json_capacity,
-    char *expected_pretty_json, size_t expected_pretty_json_capacity,
-    char *jsonl_buffer, size_t jsonl_buffer_capacity, char *pretty_jsonl_buffer,
+    bench_json_value_doc *json_value_source_record, char *expected_json,
+    size_t expected_json_capacity, char *expected_pretty_json,
+    size_t expected_pretty_json_capacity, char *jsonl_buffer,
+    size_t jsonl_buffer_capacity, char *pretty_jsonl_buffer,
     size_t pretty_jsonl_buffer_capacity, char *stream_buffer,
     size_t stream_buffer_capacity, char *json_value_path,
     size_t json_value_path_capacity) {
-  const char *json_value_source_file = "tests/fixtures/languages/japanese_hojoki_wide.json";
+  const char *json_value_source_file =
+      "tests/fixtures/languages/japanese_hojoki_wide.json";
   char *json_value_expected = NULL;
   char *json_value_pretty_expected = NULL;
   char *json_value_source_expected = NULL;
@@ -2198,18 +2200,16 @@ static int bench_prepare_benchmark_cases(
     bench_cleanup_json_value_doc(json_value_record);
     return 1;
   }
-  json_value_expected = lonejson_serialize_alloc(&bench_json_value_doc_map,
-                                                 json_value_record, NULL, NULL,
-                                                 NULL);
+  json_value_expected = lonejson_serialize_alloc(
+      &bench_json_value_doc_map, json_value_record, NULL, NULL, NULL);
   json_value_pretty_expected =
       lonejson_serialize_alloc(&bench_json_value_doc_map, json_value_record,
                                NULL, &pretty_options, NULL);
-  json_value_source_expected =
-      lonejson_serialize_alloc(&bench_json_value_doc_map, json_value_source_record,
-                               NULL, NULL, NULL);
+  json_value_source_expected = lonejson_serialize_alloc(
+      &bench_json_value_doc_map, json_value_source_record, NULL, NULL, NULL);
   json_value_source_pretty_expected = lonejson_serialize_alloc(
-      &bench_json_value_doc_map, json_value_source_record, NULL, &pretty_options,
-      NULL);
+      &bench_json_value_doc_map, json_value_source_record, NULL,
+      &pretty_options, NULL);
   if (json_value_expected == NULL || json_value_pretty_expected == NULL ||
       json_value_source_expected == NULL ||
       json_value_source_pretty_expected == NULL) {
@@ -2397,8 +2397,8 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
           sizeof(expected_json), expected_pretty_json,
           sizeof(expected_pretty_json), jsonl_buffer, sizeof(jsonl_buffer),
           pretty_jsonl_buffer, sizeof(pretty_jsonl_buffer), stream_buffer,
-          sizeof(stream_buffer), json_value_path, sizeof(json_value_path)) !=
-      0) {
+          sizeof(stream_buffer), json_value_path,
+          sizeof(json_value_path)) != 0) {
     free(lockd_jsonl_data);
     free(japanese_json_data);
     free(hebrew_json_data);
@@ -2453,7 +2453,8 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   vendor_arabic_wide_case.json = arabic_wide_json_data;
   vendor_arabic_wide_case.json_len = arabic_wide_json_len;
   memset(&visit_selector_case, 0, sizeof(visit_selector_case));
-  visit_selector_case.json = (const unsigned char *)bench_json_value_selector_json;
+  visit_selector_case.json =
+      (const unsigned char *)bench_json_value_selector_json;
   visit_selector_case.json_len = strlen(bench_json_value_selector_json);
   visit_selector_case.reader_chunk_size = 0u;
   visit_selector_case.min_key_bytes = 20u;
@@ -2491,10 +2492,9 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   {
     size_t result_index = 0u;
 
-    bench_run_validation_case(&run.result_storage[result_index++],
-                              "validate/corpus/lonejson",
-                              bench_lonejson_validate, docs, doc_count,
-                              iterations, total_bytes);
+    bench_run_validation_case(
+        &run.result_storage[result_index++], "validate/corpus/lonejson",
+        bench_lonejson_validate, docs, doc_count, iterations, total_bytes);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "parse/buffer_fixed/lonejson", "parse",
                           bench_parse_fixed_buffer_case, &parse_fixed_case,
@@ -2503,11 +2503,10 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           "parse/buffer_dynamic/lonejson", "parse",
                           bench_parse_dynamic_buffer_case, &parse_dynamic_case,
                           iterations, parse_dynamic_case.json_len, 1u);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "parse/buffer_fixed/lj", "parse",
-                          bench_parse_fixed_buffer_short_case,
-                          &parse_fixed_short_case, iterations,
-                          parse_fixed_short_case.json_len, 1u);
+    bench_run_simple_case(
+        &run.result_storage[result_index++], "parse/buffer_fixed/lj", "parse",
+        bench_parse_fixed_buffer_short_case, &parse_fixed_short_case,
+        iterations, parse_fixed_short_case.json_len, 1u);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "parse/buffer_fixed_prepared/lonejson", "parse",
                           bench_parse_fixed_buffer_case,
@@ -2564,16 +2563,14 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           bench_stream_vendor_doc_case,
                           &vendor_japanese_wide_case, iterations,
                           vendor_japanese_wide_case.json_len, 1u);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "stream/doc_hebrew_wide/lonejson", "stream",
-                          bench_stream_vendor_doc_case,
-                          &vendor_hebrew_wide_case, iterations,
-                          vendor_hebrew_wide_case.json_len, 1u);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "stream/doc_arabic_wide/lonejson", "stream",
-                          bench_stream_vendor_doc_case,
-                          &vendor_arabic_wide_case, iterations,
-                          vendor_arabic_wide_case.json_len, 1u);
+    bench_run_simple_case(
+        &run.result_storage[result_index++], "stream/doc_hebrew_wide/lonejson",
+        "stream", bench_stream_vendor_doc_case, &vendor_hebrew_wide_case,
+        iterations, vendor_hebrew_wide_case.json_len, 1u);
+    bench_run_simple_case(
+        &run.result_storage[result_index++], "stream/doc_arabic_wide/lonejson",
+        "stream", bench_stream_vendor_doc_case, &vendor_arabic_wide_case,
+        iterations, vendor_arabic_wide_case.json_len, 1u);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "serialize/sink/lonejson", "serialize",
                           bench_serialize_sink_case, &serialize_case,
@@ -2586,21 +2583,18 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           "serialize/alloc/lonejson", "serialize",
                           bench_serialize_alloc_case, &serialize_case,
                           iterations, serialize_case.expected_len, 1u);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "serialize/jsonl_sink/lonejson", "serialize",
-                          bench_serialize_jsonl_sink_case, &jsonl_case,
-                          iterations, jsonl_case.expected_len,
-                          BENCH_JSONL_RECORDS);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "serialize/jsonl_buffer/lonejson", "serialize",
-                          bench_serialize_jsonl_buffer_case, &jsonl_case,
-                          iterations, jsonl_case.expected_len,
-                          BENCH_JSONL_RECORDS);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "serialize/jsonl_alloc/lonejson", "serialize",
-                          bench_serialize_jsonl_alloc_case, &jsonl_case,
-                          iterations, jsonl_case.expected_len,
-                          BENCH_JSONL_RECORDS);
+    bench_run_simple_case(
+        &run.result_storage[result_index++], "serialize/jsonl_sink/lonejson",
+        "serialize", bench_serialize_jsonl_sink_case, &jsonl_case, iterations,
+        jsonl_case.expected_len, BENCH_JSONL_RECORDS);
+    bench_run_simple_case(
+        &run.result_storage[result_index++], "serialize/jsonl_buffer/lonejson",
+        "serialize", bench_serialize_jsonl_buffer_case, &jsonl_case, iterations,
+        jsonl_case.expected_len, BENCH_JSONL_RECORDS);
+    bench_run_simple_case(
+        &run.result_storage[result_index++], "serialize/jsonl_alloc/lonejson",
+        "serialize", bench_serialize_jsonl_alloc_case, &jsonl_case, iterations,
+        jsonl_case.expected_len, BENCH_JSONL_RECORDS);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "serialize/sink_pretty/lonejson", "serialize",
                           bench_serialize_sink_case, &serialize_pretty_case,
@@ -2618,22 +2612,20 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           bench_serialize_jsonl_sink_case, &jsonl_pretty_case,
                           iterations, jsonl_pretty_case.expected_len,
                           BENCH_JSONL_RECORDS);
-    bench_run_simple_case(
-        &run.result_storage[result_index++],
-        "serialize/jsonl_buffer_pretty/lonejson", "serialize",
-        bench_serialize_jsonl_buffer_case, &jsonl_pretty_case, iterations,
-        jsonl_pretty_case.expected_len, BENCH_JSONL_RECORDS);
     bench_run_simple_case(&run.result_storage[result_index++],
-                          "serialize/jsonl_alloc_pretty/lonejson",
-                          "serialize", bench_serialize_jsonl_alloc_case,
-                          &jsonl_pretty_case, iterations,
-                          jsonl_pretty_case.expected_len,
+                          "serialize/jsonl_buffer_pretty/lonejson", "serialize",
+                          bench_serialize_jsonl_buffer_case, &jsonl_pretty_case,
+                          iterations, jsonl_pretty_case.expected_len,
                           BENCH_JSONL_RECORDS);
     bench_run_simple_case(&run.result_storage[result_index++],
-                          "parse/buffer_json_value/lonejson", "parse",
-                          bench_parse_json_value_buffer_case,
-                          &parse_json_value_case, iterations,
-                          parse_json_value_case.json_len, 1u);
+                          "serialize/jsonl_alloc_pretty/lonejson", "serialize",
+                          bench_serialize_jsonl_alloc_case, &jsonl_pretty_case,
+                          iterations, jsonl_pretty_case.expected_len,
+                          BENCH_JSONL_RECORDS);
+    bench_run_simple_case(
+        &run.result_storage[result_index++], "parse/buffer_json_value/lonejson",
+        "parse", bench_parse_json_value_buffer_case, &parse_json_value_case,
+        iterations, parse_json_value_case.json_len, 1u);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "serialize/json_value_sink/lonejson", "serialize",
                           bench_serialize_sink_case, &json_value_serialize_case,
@@ -2644,21 +2636,21 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           bench_serialize_alloc_case,
                           &json_value_serialize_case, iterations,
                           json_value_serialize_case.expected_len, 1u);
-    bench_run_simple_case(
-        &run.result_storage[result_index++],
-        "serialize/json_value_sink_pretty/lonejson", "serialize",
-        bench_serialize_sink_case, &json_value_serialize_pretty_case,
-        iterations, json_value_serialize_pretty_case.expected_len, 1u);
-    bench_run_simple_case(
-        &run.result_storage[result_index++],
-        "serialize/json_value_alloc_pretty/lonejson", "serialize",
-        bench_serialize_alloc_case, &json_value_serialize_pretty_case,
-        iterations, json_value_serialize_pretty_case.expected_len, 1u);
-    bench_run_simple_case(
-        &run.result_storage[result_index++],
-        "serialize/json_value_source_alloc/lonejson", "serialize",
-        bench_serialize_alloc_case, &json_value_source_serialize_case,
-        iterations, json_value_source_serialize_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/json_value_sink_pretty/lonejson",
+                          "serialize", bench_serialize_sink_case,
+                          &json_value_serialize_pretty_case, iterations,
+                          json_value_serialize_pretty_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/json_value_alloc_pretty/lonejson",
+                          "serialize", bench_serialize_alloc_case,
+                          &json_value_serialize_pretty_case, iterations,
+                          json_value_serialize_pretty_case.expected_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "serialize/json_value_source_alloc/lonejson",
+                          "serialize", bench_serialize_alloc_case,
+                          &json_value_source_serialize_case, iterations,
+                          json_value_source_serialize_case.expected_len, 1u);
     bench_run_simple_case(
         &run.result_storage[result_index++],
         "serialize/json_value_source_alloc_pretty/lonejson", "serialize",
@@ -2674,8 +2666,8 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           iterations, visit_selector_reader_case.json_len, 1u);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "visit/value_mixed/lonejson", "visit",
-                          bench_visit_value_case, &visit_mixed_case,
-                          iterations, visit_mixed_case.json_len, 1u);
+                          bench_visit_value_case, &visit_mixed_case, iterations,
+                          visit_mixed_case.json_len, 1u);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "visit/value_japanese_wide/lonejson", "visit",
                           bench_visit_value_case, &visit_japanese_wide_case,
@@ -2683,15 +2675,15 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
     run.results.count = result_index;
   }
   if (!bench_validate_loaded_run(&run)) {
-    fprintf(stderr,
-            "benchmark run failed: generated run data is incomplete or "
-            "corrupted\n");
+    fprintf(stderr, "benchmark run failed: generated run data is incomplete or "
+                    "corrupted\n");
     bench_cleanup_json_value_doc(&json_value_record);
     bench_cleanup_json_value_doc(&json_value_source_record);
     LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
     LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
     LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
-    LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
+    LONEJSON_FREE(
+        (void *)json_value_source_serialize_pretty_case.expected_json);
     free(lockd_jsonl_data);
     free(japanese_json_data);
     free(hebrew_json_data);
@@ -2715,7 +2707,8 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
     LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
     LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
     LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
-    LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
+    LONEJSON_FREE(
+        (void *)json_value_source_serialize_pretty_case.expected_json);
     free(lockd_jsonl_data);
     free(japanese_json_data);
     free(hebrew_json_data);
@@ -2732,7 +2725,8 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
     LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
     LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
     LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
-    LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
+    LONEJSON_FREE(
+        (void *)json_value_source_serialize_pretty_case.expected_json);
     free(lockd_jsonl_data);
     free(japanese_json_data);
     free(hebrew_json_data);
@@ -2846,8 +2840,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
           sizeof(expected_json), expected_pretty_json,
           sizeof(expected_pretty_json), jsonl_buffer, sizeof(jsonl_buffer),
           pretty_jsonl_buffer, sizeof(pretty_jsonl_buffer), stream_buffer,
-          sizeof(stream_buffer), json_value_path, sizeof(json_value_path)) !=
-      0) {
+          sizeof(stream_buffer), json_value_path,
+          sizeof(json_value_path)) != 0) {
     return 1;
   }
   if (bench_read_file("tests/fixtures/lockdbench.jsonl", &lockd_jsonl_data,
@@ -2919,7 +2913,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   vendor_arabic_wide_case.json = arabic_wide_json_data;
   vendor_arabic_wide_case.json_len = arabic_wide_json_len;
   memset(&visit_selector_case, 0, sizeof(visit_selector_case));
-  visit_selector_case.json = (const unsigned char *)bench_json_value_selector_json;
+  visit_selector_case.json =
+      (const unsigned char *)bench_json_value_selector_json;
   visit_selector_case.json_len = strlen(bench_json_value_selector_json);
   visit_selector_case.min_key_bytes = 20u;
   visit_selector_case.min_string_bytes = 18u;
@@ -3209,7 +3204,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
     LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
     LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
-    LONEJSON_FREE((void *)json_value_source_serialize_pretty_case.expected_json);
+    LONEJSON_FREE(
+        (void *)json_value_source_serialize_pretty_case.expected_json);
     free(lockd_jsonl_data);
     free(japanese_json_data);
     free(hebrew_json_data);
@@ -3256,8 +3252,8 @@ static int bench_read_run(const char *path, bench_run *run) {
   return 0;
 }
 
-static int bench_read_last_history_line(const char *history_path, char **line_out,
-                                        size_t *len_out) {
+static int bench_read_last_history_line(const char *history_path,
+                                        char **line_out, size_t *len_out) {
   FILE *fp;
   char *line;
   char *last_valid;
@@ -3301,8 +3297,7 @@ static int bench_read_last_history_line(const char *history_path, char **line_ou
     }
     line[len++] = (char)ch;
     if (ch == '\n') {
-      while (len != 0u &&
-             (line[len - 1u] == '\n' || line[len - 1u] == '\r')) {
+      while (len != 0u && (line[len - 1u] == '\n' || line[len - 1u] == '\r')) {
         --len;
       }
       if (len != 0u) {
@@ -3501,9 +3496,9 @@ static int bench_is_small_regression(const bench_result *baseline,
       latest->mib_per_sec >= baseline->mib_per_sec) {
     return 0;
   }
-  mib_delta_pct = ((latest->mib_per_sec - baseline->mib_per_sec) /
-                   baseline->mib_per_sec) *
-                  100.0;
+  mib_delta_pct =
+      ((latest->mib_per_sec - baseline->mib_per_sec) / baseline->mib_per_sec) *
+      100.0;
   return strcmp(bench_delta_classification(mib_delta_pct), "small-reg") == 0;
 }
 
@@ -3515,9 +3510,9 @@ static int bench_is_material_regression(const bench_result *baseline,
       latest->mib_per_sec >= baseline->mib_per_sec) {
     return 0;
   }
-  mib_delta_pct = ((latest->mib_per_sec - baseline->mib_per_sec) /
-                   baseline->mib_per_sec) *
-                  100.0;
+  mib_delta_pct =
+      ((latest->mib_per_sec - baseline->mib_per_sec) / baseline->mib_per_sec) *
+      100.0;
   return strcmp(bench_delta_classification(mib_delta_pct), "material-reg") == 0;
 }
 
@@ -3529,9 +3524,9 @@ static int bench_is_large_improvement(const bench_result *baseline,
       latest->mib_per_sec <= baseline->mib_per_sec) {
     return 0;
   }
-  mib_delta_pct = ((latest->mib_per_sec - baseline->mib_per_sec) /
-                   baseline->mib_per_sec) *
-                  100.0;
+  mib_delta_pct =
+      ((latest->mib_per_sec - baseline->mib_per_sec) / baseline->mib_per_sec) *
+      100.0;
   return strcmp(bench_delta_classification(mib_delta_pct), "review-imp") == 0;
 }
 
@@ -3555,9 +3550,8 @@ static int bench_compare_command(const char *baseline_path,
   }
 
   printf("compare baseline=%s latest=%s\n", baseline_path, latest_path);
-  printf("%-40s %11s %11s %10s %-12s %11s %10s\n", "benchmark",
-         "latest MiB/s", "base MiB/s", "delta", "class", "docs delta",
-         "mismatch");
+  printf("%-40s %11s %11s %10s %-12s %11s %10s\n", "benchmark", "latest MiB/s",
+         "base MiB/s", "delta", "class", "docs delta", "mismatch");
   printf("%-40s %11s %11s %10s %-12s %11s %10s\n",
          "----------------------------------------", "-----------",
          "-----------", "----------", "------------", "-----------",
@@ -3667,8 +3661,7 @@ static int bench_gate_command(const char *baseline_path,
          (unsigned long)large_improvement_count);
 
   if (schema_mismatch || config_mismatch || missing_count != 0u ||
-      mismatch_count != 0u ||
-      small_regression_count != 0u ||
+      mismatch_count != 0u || small_regression_count != 0u ||
       material_regression_count != 0u) {
     if (schema_mismatch || config_mismatch || missing_count != 0u) {
       fprintf(stderr,
