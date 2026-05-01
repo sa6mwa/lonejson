@@ -873,10 +873,21 @@ static lonejson_status lonejson__spooled_append(lonejson_spooled *value,
   }
   if (memory_copy < len) {
     size_t spill_len = len - memory_copy;
+    long spill_read_pos;
 
     status = lonejson__spooled_open_temp(value, error);
     if (status != LONEJSON_STATUS_OK) {
       return status;
+    }
+    spill_read_pos = (value->read_offset > value->memory_len)
+                         ? (long)(value->read_offset - value->memory_len)
+                         : 0L;
+    if (fseek(value->spill_fp, 0L, SEEK_END) != 0) {
+      if (error != NULL) {
+        error->system_errno = errno;
+      }
+      return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
+                                 "failed to seek spool file for append");
     }
     if (fwrite(data + memory_copy, 1u, spill_len, value->spill_fp) !=
         spill_len) {
@@ -886,9 +897,23 @@ static lonejson_status lonejson__spooled_append(lonejson_spooled *value,
       return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
                                  "failed to write spool file");
     }
+    if (fseek(value->spill_fp, spill_read_pos, SEEK_SET) != 0) {
+      if (error != NULL) {
+        error->system_errno = errno;
+      }
+      return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
+                                 "failed to restore spool file read cursor");
+    }
   }
   value->size += len;
   return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_spooled_append(lonejson_spooled *value,
+                                        const void *data, size_t len,
+                                        lonejson_error *error) {
+  return lonejson__spooled_append(value, (const unsigned char *)data, len,
+                                  error);
 }
 
 lonejson_status lonejson_spooled_rewind(lonejson_spooled *value,

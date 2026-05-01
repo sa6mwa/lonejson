@@ -88,16 +88,25 @@ typedef int bool;
 #endif
 
 #if defined(_MSC_VER)
+/** Unsigned 32-bit integer type used by lonejson public structs and APIs. */
 typedef unsigned __int32 lonejson_uint32;
+/** Signed 64-bit integer type used by lonejson public structs and APIs. */
 typedef __int64 lonejson_int64;
+/** Unsigned 64-bit integer type used by lonejson public structs and APIs. */
 typedef unsigned __int64 lonejson_uint64;
 #elif defined(__GNUC__) || defined(__clang__)
+/** Unsigned 32-bit integer type used by lonejson public structs and APIs. */
 __extension__ typedef unsigned long lonejson_uint32;
+/** Signed 64-bit integer type used by lonejson public structs and APIs. */
 __extension__ typedef signed long long lonejson_int64;
+/** Unsigned 64-bit integer type used by lonejson public structs and APIs. */
 __extension__ typedef unsigned long long lonejson_uint64;
 #else
+/** Unsigned 32-bit integer type used by lonejson public structs and APIs. */
 typedef unsigned long lonejson_uint32;
+/** Signed 64-bit integer type used by lonejson public structs and APIs. */
 typedef signed long long lonejson_int64;
+/** Unsigned 64-bit integer type used by lonejson public structs and APIs. */
 typedef unsigned long long lonejson_uint64;
 #endif
 
@@ -387,10 +396,18 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 2
+#define LONEJSON_ABI_VERSION 3
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
+/** Omits an optional field during serialization when its value is JSON `null`.
+ */
+#define LONEJSON_FIELD_OMIT_NULL (1u << 1)
+/** Omits an optional field during serialization when its value is empty. This
+ * also implies `LONEJSON_FIELD_OMIT_NULL` behavior. */
+#define LONEJSON_FIELD_OMIT_EMPTY (1u << 2)
+/** Internal flag used by presence-gated primitive field macros. */
+#define LONEJSON_FIELD_HAS_PRESENCE (1u << 3)
 
 /** Internal/runtime flag indicating that an array container owns its backing
  * allocation. */
@@ -449,6 +466,7 @@ extern "C" {
 #endif
 
 #ifndef LONEJSON_TRACK_WORKSPACE_USAGE
+/** Enables parser workspace high-water tracking when non-zero. */
 #define LONEJSON_TRACK_WORKSPACE_USAGE 0
 #endif
 
@@ -484,22 +502,41 @@ typedef enum lonejson_status {
 /** Internal field categories understood by `lonejson_field` maps. Most users
  * select these indirectly through the `LONEJSON_FIELD_*` macros. */
 typedef enum lonejson_field_kind {
+  /** JSON string stored in a fixed buffer or allocated `char *`. */
   LONEJSON_FIELD_KIND_STRING,
+  /** JSON string streamed into a `lonejson_spooled` handle. */
   LONEJSON_FIELD_KIND_STRING_STREAM,
+  /** Base64 JSON string decoded into a `lonejson_spooled` handle. */
   LONEJSON_FIELD_KIND_BASE64_STREAM,
+  /** Serialize-only JSON string streamed from a `lonejson_source` handle. */
   LONEJSON_FIELD_KIND_STRING_SOURCE,
+  /** Serialize-only Base64 JSON string streamed from a `lonejson_source`
+   * handle. */
   LONEJSON_FIELD_KIND_BASE64_SOURCE,
+  /** Arbitrary embedded JSON value stored or streamed through
+   * `lonejson_json_value`. */
   LONEJSON_FIELD_KIND_JSON_VALUE,
+  /** JSON integer stored in a `lonejson_int64`. */
   LONEJSON_FIELD_KIND_I64,
+  /** JSON unsigned integer stored in a `lonejson_uint64`. */
   LONEJSON_FIELD_KIND_U64,
+  /** JSON number stored in a `double`. */
   LONEJSON_FIELD_KIND_F64,
+  /** JSON boolean stored in a `bool`. */
   LONEJSON_FIELD_KIND_BOOL,
+  /** Nested JSON object mapped by a nested `lonejson_map`. */
   LONEJSON_FIELD_KIND_OBJECT,
+  /** JSON array of strings stored in `lonejson_string_array`. */
   LONEJSON_FIELD_KIND_STRING_ARRAY,
+  /** JSON array of integers stored in `lonejson_i64_array`. */
   LONEJSON_FIELD_KIND_I64_ARRAY,
+  /** JSON array of unsigned integers stored in `lonejson_u64_array`. */
   LONEJSON_FIELD_KIND_U64_ARRAY,
+  /** JSON array of numbers stored in `lonejson_f64_array`. */
   LONEJSON_FIELD_KIND_F64_ARRAY,
+  /** JSON array of booleans stored in `lonejson_bool_array`. */
   LONEJSON_FIELD_KIND_BOOL_ARRAY,
+  /** JSON array of nested objects stored in `lonejson_object_array`. */
   LONEJSON_FIELD_KIND_OBJECT_ARRAY
 } lonejson_field_kind;
 
@@ -690,33 +727,53 @@ typedef struct lonejson_string_array {
 
 /** Dynamically sized array of `lonejson_int64` values. */
 typedef struct lonejson_i64_array {
+  /** Element storage. lonejson owns this buffer when `flags` contains
+   * `LONEJSON_ARRAY_OWNS_ITEMS`. */
   lonejson_int64 *items;
+  /** Number of populated elements. */
   size_t count;
+  /** Allocated or caller-supplied element capacity. */
   size_t capacity;
+  /** Ownership and fixed-capacity flags maintained by lonejson. */
   unsigned flags;
 } lonejson_i64_array;
 
 /** Dynamically sized array of `lonejson_uint64` values. */
 typedef struct lonejson_u64_array {
+  /** Element storage. lonejson owns this buffer when `flags` contains
+   * `LONEJSON_ARRAY_OWNS_ITEMS`. */
   lonejson_uint64 *items;
+  /** Number of populated elements. */
   size_t count;
+  /** Allocated or caller-supplied element capacity. */
   size_t capacity;
+  /** Ownership and fixed-capacity flags maintained by lonejson. */
   unsigned flags;
 } lonejson_u64_array;
 
 /** Dynamically sized array of `double` values. */
 typedef struct lonejson_f64_array {
+  /** Element storage. lonejson owns this buffer when `flags` contains
+   * `LONEJSON_ARRAY_OWNS_ITEMS`. */
   double *items;
+  /** Number of populated elements. */
   size_t count;
+  /** Allocated or caller-supplied element capacity. */
   size_t capacity;
+  /** Ownership and fixed-capacity flags maintained by lonejson. */
   unsigned flags;
 } lonejson_f64_array;
 
 /** Dynamically sized array of boolean values. */
 typedef struct lonejson_bool_array {
+  /** Element storage. lonejson owns this buffer when `flags` contains
+   * `LONEJSON_ARRAY_OWNS_ITEMS`. */
   bool *items;
+  /** Number of populated elements. */
   size_t count;
+  /** Allocated or caller-supplied element capacity. */
   size_t capacity;
+  /** Ownership and fixed-capacity flags maintained by lonejson. */
   unsigned flags;
 } lonejson_bool_array;
 
@@ -734,9 +791,13 @@ typedef struct lonejson_object_array {
   unsigned flags;
 } lonejson_object_array;
 
+/** Forward declaration for one mapped JSON field descriptor. */
 typedef struct lonejson_field lonejson_field;
+/** Forward declaration for one schema map describing a C struct. */
 typedef struct lonejson_map lonejson_map;
+/** Opaque object-framed JSON stream parser state. */
 typedef struct lonejson_stream lonejson_stream;
+/** Pull-style JSON generator state. */
 typedef struct lonejson_generator lonejson_generator;
 
 /** Runtime metadata describing one mapped JSON field. Applications normally
@@ -768,6 +829,10 @@ struct lonejson_field {
   const lonejson_map *submap;
   /** Optional spool settings for streamed text and base64 fields. */
   const lonejson_spool_options *spool_options;
+  /** Optional `int` presence flag offset for presence-gated primitive fields.
+   * Meaningful only when `flags` contains `LONEJSON_FIELD_HAS_PRESENCE`.
+   */
+  size_t presence_offset;
 };
 
 #define LONEJSON__KEY_LEN(key) (sizeof(key) - 1u)
@@ -898,20 +963,36 @@ typedef lonejson_status (*lonejson_value_bool_fn)(void *user, int value,
  * begin/chunk/end triplets for keys, strings, and numbers.
  */
 typedef struct lonejson_value_visitor {
+  /** Called when an object begins. */
   lonejson_value_event_fn object_begin;
+  /** Called when an object ends. */
   lonejson_value_event_fn object_end;
+  /** Called before chunks for an object key are delivered. */
   lonejson_value_event_fn object_key_begin;
+  /** Delivers one decoded UTF-8 object-key chunk. */
   lonejson_value_chunk_fn object_key_chunk;
+  /** Called after all chunks for an object key have been delivered. */
   lonejson_value_event_fn object_key_end;
+  /** Called when an array begins. */
   lonejson_value_event_fn array_begin;
+  /** Called when an array ends. */
   lonejson_value_event_fn array_end;
+  /** Called before chunks for a string value are delivered. */
   lonejson_value_event_fn string_begin;
+  /** Delivers one decoded UTF-8 string chunk. */
   lonejson_value_chunk_fn string_chunk;
+  /** Called after all chunks for a string value have been delivered. */
   lonejson_value_event_fn string_end;
+  /** Called before chunks for a number token are delivered. */
   lonejson_value_event_fn number_begin;
+  /** Delivers one raw JSON number-token chunk. */
   lonejson_value_chunk_fn number_chunk;
+  /** Called after all chunks for a number token have been delivered. */
   lonejson_value_event_fn number_end;
+  /** Delivers one JSON boolean value as non-zero for `true` and zero for
+   * `false`. */
   lonejson_value_bool_fn boolean_value;
+  /** Called for a JSON `null` value. */
   lonejson_value_event_fn null_value;
 } lonejson_value_visitor;
 
@@ -1033,7 +1114,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required JSON string field into a dynamically allocated `char *`
  * member. */
@@ -1050,7 +1132,27 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps an optional JSON string field into a dynamically allocated `char *`
+ * member and omits the field when the pointer is `NULL` during serialization.
+ */
+#define LONEJSON_FIELD_STRING_ALLOC_OMIT_NULL(type, member, key)               \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_STRING,                                                 \
+   LONEJSON_STORAGE_DYNAMIC,                                                   \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_OMIT_NULL,                                                   \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON string field into a fixed-size character array member. */
 #define LONEJSON_FIELD_STRING_FIXED(type, member, key, policy)                 \
@@ -1066,7 +1168,8 @@ struct lonejson_generator {
    sizeof(((type *)0)->member),                                                \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required JSON string field into a fixed-size character array member.
  */
@@ -1083,7 +1186,8 @@ struct lonejson_generator {
    sizeof(((type *)0)->member),                                                \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON string field into a `lonejson_spooled` member that keeps an
  * in-memory prefix and spills excess data to a temporary file using default
@@ -1101,7 +1205,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required JSON string field into a `lonejson_spooled` member using
  * default spool options. */
@@ -1118,7 +1223,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON string field into a `lonejson_spooled` member that decodes
  * Base64 incrementally and stores the decoded bytes using default spool
@@ -1136,7 +1242,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required Base64-decoded JSON string field into a `lonejson_spooled`
  * member using default spool options. */
@@ -1153,7 +1260,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON string field into a `lonejson_spooled` member using explicit
  * spool options. */
@@ -1170,7 +1278,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   options_ptr}
+   options_ptr,                                                                \
+   0u}
 
 /** Maps a serialize-only JSON string field into a `lonejson_source` member
  * that streams raw text bytes from a file, fd, or path at write time. */
@@ -1187,7 +1296,26 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps a serialize-only JSON string source and omits it when no source is
+ * configured. */
+#define LONEJSON_FIELD_STRING_SOURCE_OMIT_NULL(type, member, key)              \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_STRING_SOURCE,                                          \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_OMIT_NULL,                                                   \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required serialize-only JSON string field into a `lonejson_source`
  * member that streams raw text bytes at write time. */
@@ -1204,7 +1332,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a serialize-only JSON string field into a `lonejson_source` member
  * that base64-encodes raw bytes from a file, fd, or path at write time. */
@@ -1221,7 +1350,26 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps a serialize-only Base64 source and omits it when no source is
+ * configured. */
+#define LONEJSON_FIELD_BASE64_SOURCE_OMIT_NULL(type, member, key)              \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_BASE64_SOURCE,                                          \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_OMIT_NULL,                                                   \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required serialize-only Base64 JSON string field into a
  * `lonejson_source` member that streams raw bytes at write time. */
@@ -1238,7 +1386,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps an arbitrary embedded JSON value into a `lonejson_json_value` member.
  * The field accepts any JSON value on parse and emits that value directly on
@@ -1258,7 +1407,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required arbitrary embedded JSON value into a `lonejson_json_value`
  * member. Before parsing into this field, configure the destination handle
@@ -1277,7 +1427,26 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps an arbitrary embedded JSON value and omits it when the handle is in
+ * the `LONEJSON_JSON_VALUE_NULL` state during serialization. */
+#define LONEJSON_FIELD_JSON_VALUE_OMIT_NULL(type, member, key)                 \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_JSON_VALUE,                                             \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_OMIT_NULL,                                                   \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   0u}
 
 /** Maps a Base64-decoded JSON string field into a `lonejson_spooled` member
  * using explicit spool options. */
@@ -1294,7 +1463,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   options_ptr}
+   options_ptr,                                                                \
+   0u}
 
 /** Maps a JSON integer field into a `lonejson_int64` member. */
 #define LONEJSON_FIELD_I64(type, member, key)                                  \
@@ -1310,7 +1480,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required JSON integer field into a `lonejson_int64` member. */
 #define LONEJSON_FIELD_I64_REQ(type, member, key)                              \
@@ -1326,7 +1497,26 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps a JSON integer field that serializes only when an `int` presence
+ * member is non-zero. */
+#define LONEJSON_FIELD_I64_PRESENT(type, member, present_member, key)          \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_I64,                                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_HAS_PRESENCE,                                                \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   offsetof(type, present_member)}
 
 /** Maps a JSON unsigned integer field into a `lonejson_uint64` member. */
 #define LONEJSON_FIELD_U64(type, member, key)                                  \
@@ -1342,7 +1532,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required JSON unsigned integer field into a `lonejson_uint64` member.
  */
@@ -1359,7 +1550,26 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps a JSON unsigned integer field that serializes only when an `int`
+ * presence member is non-zero. */
+#define LONEJSON_FIELD_U64_PRESENT(type, member, present_member, key)          \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_U64,                                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_HAS_PRESENCE,                                                \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   offsetof(type, present_member)}
 
 /** Maps a JSON number field into a `double` member. */
 #define LONEJSON_FIELD_F64(type, member, key)                                  \
@@ -1375,7 +1585,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required JSON number field into a `double` member. */
 #define LONEJSON_FIELD_F64_REQ(type, member, key)                              \
@@ -1391,7 +1602,26 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps a JSON number field that serializes only when an `int` presence member
+ * is non-zero. */
+#define LONEJSON_FIELD_F64_PRESENT(type, member, present_member, key)          \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_F64,                                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_HAS_PRESENCE,                                                \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   offsetof(type, present_member)}
 
 /** Maps a JSON boolean field into a `bool` member. */
 #define LONEJSON_FIELD_BOOL(type, member, key)                                 \
@@ -1407,7 +1637,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required JSON boolean field into a `bool` member. */
 #define LONEJSON_FIELD_BOOL_REQ(type, member, key)                             \
@@ -1423,7 +1654,26 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps a JSON boolean field that serializes only when an `int` presence
+ * member is non-zero. */
+#define LONEJSON_FIELD_BOOL_PRESENT(type, member, present_member, key)         \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_BOOL,                                                   \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_HAS_PRESENCE,                                                \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   offsetof(type, present_member)}
 
 /** Maps a nested JSON object into a nested struct member using another mapping
  * table. */
@@ -1440,7 +1690,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    submap_ptr,                                                                 \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a required nested JSON object into a nested struct member using another
  * mapping table. */
@@ -1457,7 +1708,26 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    submap_ptr,                                                                 \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps a nested JSON object and omits it when none of its nested fields would
+ * be serialized. */
+#define LONEJSON_FIELD_OBJECT_OMIT_EMPTY(type, member, key, submap_ptr)        \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_OBJECT,                                                 \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_OMIT_EMPTY,                                                  \
+   0u,                                                                         \
+   0u,                                                                         \
+   submap_ptr,                                                                 \
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON array of strings into a `lonejson_string_array` member. */
 #define LONEJSON_FIELD_STRING_ARRAY(type, member, key, policy)                 \
@@ -1473,7 +1743,8 @@ struct lonejson_generator {
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON array of integers into a `lonejson_i64_array` member. */
 #define LONEJSON_FIELD_I64_ARRAY(type, member, key, policy)                    \
@@ -1489,7 +1760,8 @@ struct lonejson_generator {
    0u,                                                                         \
    sizeof(lonejson_int64),                                                     \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON array of unsigned integers into a `lonejson_u64_array` member.
  */
@@ -1506,7 +1778,8 @@ struct lonejson_generator {
    0u,                                                                         \
    sizeof(lonejson_uint64),                                                    \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON array of numbers into a `lonejson_f64_array` member. */
 #define LONEJSON_FIELD_F64_ARRAY(type, member, key, policy)                    \
@@ -1522,7 +1795,8 @@ struct lonejson_generator {
    0u,                                                                         \
    sizeof(double),                                                             \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON array of booleans into a `lonejson_bool_array` member. */
 #define LONEJSON_FIELD_BOOL_ARRAY(type, member, key, policy)                   \
@@ -1538,7 +1812,8 @@ struct lonejson_generator {
    0u,                                                                         \
    sizeof(bool),                                                               \
    NULL,                                                                       \
-   NULL}
+   NULL,                                                                       \
+   0u}
 
 /** Maps a JSON array of nested objects into a `lonejson_object_array` member.
  */
@@ -1556,7 +1831,45 @@ struct lonejson_generator {
    0u,                                                                         \
    sizeof(elem_type),                                                          \
    submap_ptr,                                                                 \
-   NULL}
+   NULL,                                                                       \
+   0u}
+
+/** Maps a JSON array of strings and omits it when `count == 0` during
+ * serialization. */
+#define LONEJSON_FIELD_STRING_ARRAY_OMIT_EMPTY(type, member, key, policy)      \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_STRING_ARRAY,                                           \
+   LONEJSON_STORAGE_DYNAMIC,                                                   \
+   policy,                                                                     \
+   LONEJSON_FIELD_OMIT_EMPTY,                                                  \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   0u}
+
+/** Maps a JSON array of nested objects and omits it when `count == 0` during
+ * serialization. */
+#define LONEJSON_FIELD_OBJECT_ARRAY_OMIT_EMPTY(type, member, key, elem_type,   \
+                                               submap_ptr, policy)             \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_OBJECT_ARRAY,                                           \
+   LONEJSON_STORAGE_DYNAMIC,                                                   \
+   policy,                                                                     \
+   LONEJSON_FIELD_OMIT_EMPTY,                                                  \
+   0u,                                                                         \
+   sizeof(elem_type),                                                          \
+   submap_ptr,                                                                 \
+   NULL,                                                                       \
+   0u}
 
 /** Returns the library's default spool options. */
 lonejson_spool_options lonejson_default_spool_options(void);
@@ -1590,6 +1903,17 @@ size_t lonejson_spooled_size(const lonejson_spooled *value);
 /** Returns non-zero when a spooled value has spilled beyond memory into a
  * temporary file. */
 int lonejson_spooled_spilled(const lonejson_spooled *value);
+/** Appends raw bytes to an initialized spooled value, spilling according to
+ * the value's configured spool options.
+ *
+ * `value` must have been initialized with `lonejson_spooled_init()` or
+ * `lonejson_spooled_init_with_allocator()`. The call preserves the current
+ * read cursor; it does not implicitly rewind. Use `lonejson_spooled_rewind()`
+ * before reading from the beginning.
+ */
+lonejson_status lonejson_spooled_append(lonejson_spooled *value,
+                                        const void *data, size_t len,
+                                        lonejson_error *error);
 /** Rewinds a spooled value's raw read cursor to the beginning. */
 lonejson_status lonejson_spooled_rewind(lonejson_spooled *value,
                                         lonejson_error *error);
@@ -1626,6 +1950,9 @@ lonejson_status lonejson_source_set_path(lonejson_source *value,
 lonejson_status lonejson_source_write_to_sink(const lonejson_source *value,
                                               lonejson_sink_fn sink, void *user,
                                               lonejson_error *error);
+/** Returns non-zero when a source can be reopened or rewound for another
+ * serialization pass. */
+int lonejson_source_is_rewindable(const lonejson_source *value);
 /** Initializes an embedded JSON value handle to the empty `null` state with no
  * inbound parse destination configured, using lonejson's default allocator.
  * This is the required starting state before setting parse sink, parse
@@ -1701,6 +2028,9 @@ lonejson_status
 lonejson_json_value_write_to_sink(const lonejson_json_value *value,
                                   lonejson_sink_fn sink, void *user,
                                   lonejson_error *error);
+/** Returns non-zero when an embedded JSON value can be replayed for another
+ * serialization pass. Reader-backed values are not rewindable. */
+int lonejson_json_value_is_rewindable(const lonejson_json_value *value);
 
 /** Returns the library's default parse options. The current defaults clear the
  * destination, reject duplicate keys, and cap nesting depth at `64`.
@@ -1877,6 +2207,16 @@ lonejson_status lonejson_generator_init(lonejson_generator *generator,
                                         const lonejson_map *map,
                                         const void *src,
                                         const lonejson_write_options *options);
+/** Measures the serialized byte length of one mapped struct without retaining
+ * the generated JSON.
+ *
+ * The document must be replayable: path, buffer, spool, and seekable file or
+ * file-descriptor sources are accepted, while reader-backed JSON values are
+ * rejected because measuring would consume them.
+ */
+lonejson_status lonejson_generator_measure(
+    const lonejson_map *map, const void *src, size_t *out_len,
+    const lonejson_write_options *options, lonejson_error *error);
 /** Pulls the next serialized JSON bytes from a generator.
  *
  * `out_len` receives the produced byte count and `out_eof` becomes non-zero
@@ -1991,11 +2331,16 @@ void lonejson_reset(const lonejson_map *map, void *value);
 #ifdef LONEJSON_WITH_CURL
 #include <curl/curl.h>
 
+/** Curl response parse adapter state for incremental `CURLOPT_WRITEFUNCTION`
+ * parsing. */
 typedef struct lonejson_curl_parse {
+  /** Opaque push-parser state owned by the curl parse adapter. */
   void *parser;
+  /** Last parse error captured by the curl parse adapter. */
   lonejson_error error;
 } lonejson_curl_parse;
 
+/** Curl upload adapter state for streaming generated JSON to libcurl. */
 typedef struct lonejson_curl_upload {
   /** Underlying pull-style JSON generator used by the curl adapter. */
   lonejson_generator generator;
@@ -2044,6 +2389,9 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_VERSION_PATCH LONEJSON_VERSION_PATCH
 #define LJ_ABI_VERSION LONEJSON_ABI_VERSION
 #define LJ_FIELD_REQUIRED LONEJSON_FIELD_REQUIRED
+#define LJ_FIELD_OMIT_NULL LONEJSON_FIELD_OMIT_NULL
+#define LJ_FIELD_OMIT_EMPTY LONEJSON_FIELD_OMIT_EMPTY
+#define LJ_FIELD_HAS_PRESENCE LONEJSON_FIELD_HAS_PRESENCE
 #define LJ_ARRAY_OWNS_ITEMS LONEJSON_ARRAY_OWNS_ITEMS
 #define LJ_ARRAY_FIXED_CAPACITY LONEJSON_ARRAY_FIXED_CAPACITY
 #define LJ_MALLOC LONEJSON_MALLOC
@@ -2116,6 +2464,7 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_MAP_DEFINE LONEJSON_MAP_DEFINE
 #define LJ_FIELD_STRING_ALLOC LONEJSON_FIELD_STRING_ALLOC
 #define LJ_FIELD_STRING_ALLOC_REQ LONEJSON_FIELD_STRING_ALLOC_REQ
+#define LJ_FIELD_STRING_ALLOC_OMIT_NULL LONEJSON_FIELD_STRING_ALLOC_OMIT_NULL
 #define LJ_FIELD_STRING_FIXED LONEJSON_FIELD_STRING_FIXED
 #define LJ_FIELD_STRING_FIXED_REQ LONEJSON_FIELD_STRING_FIXED_REQ
 #define LJ_FIELD_STRING_STREAM LONEJSON_FIELD_STRING_STREAM
@@ -2125,27 +2474,37 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_STRING_STREAM_OPTS LONEJSON_FIELD_STRING_STREAM_OPTS
 #define LJ_FIELD_STRING_SOURCE LONEJSON_FIELD_STRING_SOURCE
 #define LJ_FIELD_STRING_SOURCE_REQ LONEJSON_FIELD_STRING_SOURCE_REQ
+#define LJ_FIELD_STRING_SOURCE_OMIT_NULL LONEJSON_FIELD_STRING_SOURCE_OMIT_NULL
 #define LJ_FIELD_BASE64_SOURCE LONEJSON_FIELD_BASE64_SOURCE
 #define LJ_FIELD_BASE64_SOURCE_REQ LONEJSON_FIELD_BASE64_SOURCE_REQ
+#define LJ_FIELD_BASE64_SOURCE_OMIT_NULL LONEJSON_FIELD_BASE64_SOURCE_OMIT_NULL
 #define LJ_FIELD_JSON_VALUE LONEJSON_FIELD_JSON_VALUE
 #define LJ_FIELD_JSON_VALUE_REQ LONEJSON_FIELD_JSON_VALUE_REQ
+#define LJ_FIELD_JSON_VALUE_OMIT_NULL LONEJSON_FIELD_JSON_VALUE_OMIT_NULL
 #define LJ_FIELD_BASE64_STREAM_OPTS LONEJSON_FIELD_BASE64_STREAM_OPTS
 #define LJ_FIELD_I64 LONEJSON_FIELD_I64
 #define LJ_FIELD_I64_REQ LONEJSON_FIELD_I64_REQ
+#define LJ_FIELD_I64_PRESENT LONEJSON_FIELD_I64_PRESENT
 #define LJ_FIELD_U64 LONEJSON_FIELD_U64
 #define LJ_FIELD_U64_REQ LONEJSON_FIELD_U64_REQ
+#define LJ_FIELD_U64_PRESENT LONEJSON_FIELD_U64_PRESENT
 #define LJ_FIELD_F64 LONEJSON_FIELD_F64
 #define LJ_FIELD_F64_REQ LONEJSON_FIELD_F64_REQ
+#define LJ_FIELD_F64_PRESENT LONEJSON_FIELD_F64_PRESENT
 #define LJ_FIELD_BOOL LONEJSON_FIELD_BOOL
 #define LJ_FIELD_BOOL_REQ LONEJSON_FIELD_BOOL_REQ
+#define LJ_FIELD_BOOL_PRESENT LONEJSON_FIELD_BOOL_PRESENT
 #define LJ_FIELD_OBJECT LONEJSON_FIELD_OBJECT
 #define LJ_FIELD_OBJECT_REQ LONEJSON_FIELD_OBJECT_REQ
+#define LJ_FIELD_OBJECT_OMIT_EMPTY LONEJSON_FIELD_OBJECT_OMIT_EMPTY
 #define LJ_FIELD_STRING_ARRAY LONEJSON_FIELD_STRING_ARRAY
+#define LJ_FIELD_STRING_ARRAY_OMIT_EMPTY LONEJSON_FIELD_STRING_ARRAY_OMIT_EMPTY
 #define LJ_FIELD_I64_ARRAY LONEJSON_FIELD_I64_ARRAY
 #define LJ_FIELD_U64_ARRAY LONEJSON_FIELD_U64_ARRAY
 #define LJ_FIELD_F64_ARRAY LONEJSON_FIELD_F64_ARRAY
 #define LJ_FIELD_BOOL_ARRAY LONEJSON_FIELD_BOOL_ARRAY
 #define LJ_FIELD_OBJECT_ARRAY LONEJSON_FIELD_OBJECT_ARRAY
+#define LJ_FIELD_OBJECT_ARRAY_OMIT_EMPTY LONEJSON_FIELD_OBJECT_ARRAY_OMIT_EMPTY
 
 /** 32-bit unsigned integer type used by lonejson. */
 typedef lonejson_uint32 lj_uint32;
@@ -2269,6 +2628,13 @@ LONEJSON_SHORT_ALIAS_INLINE size_t lj_spooled_size(const lj_spooled *value) {
 LONEJSON_SHORT_ALIAS_INLINE int lj_spooled_spilled(const lj_spooled *value) {
   return lonejson_spooled_spilled(value);
 }
+/** Appends bytes to an initialized spooled value without rewinding it. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_spooled_append(lj_spooled *value,
+                                                        const void *data,
+                                                        size_t len,
+                                                        lj_error *error) {
+  return lonejson_spooled_append(value, data, len, error);
+}
 /** Rewinds a spooled value so it can be read again from the beginning. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_spooled_rewind(lj_spooled *value,
                                                         lj_error *error) {
@@ -2317,6 +2683,11 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_source_set_path(lj_source *value,
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_source_write_to_sink(
     const lj_source *value, lj_sink_fn sink, void *user, lj_error *error) {
   return lonejson_source_write_to_sink(value, sink, user, error);
+}
+/** Returns non-zero when a source handle can be replayed. */
+LONEJSON_SHORT_ALIAS_INLINE int
+lj_source_is_rewindable(const lj_source *value) {
+  return lonejson_source_is_rewindable(value);
 }
 /** Initializes an arbitrary JSON value handle. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_json_value_init(lj_json_value *value) {
@@ -2394,6 +2765,11 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_path(
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_write_to_sink(
     const lj_json_value *value, lj_sink_fn sink, void *user, lj_error *error) {
   return lonejson_json_value_write_to_sink(value, sink, user, error);
+}
+/** Returns non-zero when an arbitrary JSON value can be replayed. */
+LONEJSON_SHORT_ALIAS_INLINE int
+lj_json_value_is_rewindable(const lj_json_value *value) {
+  return lonejson_json_value_is_rewindable(value);
 }
 /** Returns the default parsing options. */
 LONEJSON_SHORT_ALIAS_INLINE lj_parse_options lj_default_parse_options(void) {
@@ -2594,6 +2970,12 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_generator_init(lj_generator *generator, const lj_map *map, const void *src,
                   const lj_write_options *options) {
   return lonejson_generator_init(generator, map, src, options);
+}
+/** Measures the serialized byte length of one replayable mapped struct. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_generator_measure(const lj_map *map, const void *src, size_t *out_len,
+                     const lj_write_options *options, lj_error *error) {
+  return lonejson_generator_measure(map, src, out_len, options, error);
 }
 /** Pulls the next serialized JSON bytes from a generator. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_generator_read(lj_generator *generator,

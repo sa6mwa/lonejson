@@ -165,6 +165,41 @@ lonejson_status lonejson_source_write_to_sink(const lonejson_source *value,
   return LONEJSON_STATUS_OK;
 }
 
+int lonejson_source_is_rewindable(const lonejson_source *value) {
+  if (value == NULL) {
+    return 0;
+  }
+  switch (value->kind) {
+  case LONEJSON_SOURCE_NONE:
+  case LONEJSON_SOURCE_PATH:
+    return 1;
+  case LONEJSON_SOURCE_FILE: {
+    long pos;
+    if (value->fp == NULL) {
+      return 0;
+    }
+    pos = ftell(value->fp);
+    if (pos < 0L || fseek(value->fp, 0L, SEEK_SET) != 0) {
+      return 0;
+    }
+    return fseek(value->fp, pos, SEEK_SET) == 0;
+  }
+  case LONEJSON_SOURCE_FD: {
+    off_t pos;
+    if (value->fd < 0) {
+      return 0;
+    }
+    pos = lseek(value->fd, 0, SEEK_CUR);
+    if (pos < 0 || lseek(value->fd, 0, SEEK_SET) < 0) {
+      return 0;
+    }
+    return lseek(value->fd, pos, SEEK_SET) >= 0;
+  }
+  default:
+    return 0;
+  }
+}
+
 static int lonejson__is_valid_json_number(const char *value, size_t len);
 static int lonejson__is_json_space(int ch);
 static int lonejson__is_digit(int ch);
@@ -1384,29 +1419,25 @@ lonejson__json_visit_value(lonejson__json_io *io) {
   }
 }
 
-static lonejson_status lonejson__json_visit(
-    const lonejson_json_value *value, const lonejson_value_visitor *visitor,
-    void *user, const lonejson_value_limits *limits, lonejson_error *error) {
-  lonejson__json_cursor cursor;
+static lonejson_status lonejson__json_visit_cursor(
+    lonejson__json_cursor *cursor, const lonejson_allocator *allocator,
+    const lonejson_value_visitor *visitor, void *user,
+    const lonejson_value_limits *limits, lonejson_error *error) {
   lonejson__json_io io;
   lonejson_status status;
   int ch;
 
-  if (value == NULL || visitor == NULL) {
+  if (cursor == NULL || visitor == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u,
                                "JSON value source and visitor are required");
   }
-  status = lonejson__json_cursor_open(value, &cursor, error);
-  if (status != LONEJSON_STATUS_OK) {
-    return status;
-  }
   memset(&io, 0, sizeof(io));
-  io.cursor = &cursor;
+  io.cursor = cursor;
   io.visitor = visitor;
   io.visitor_user = user;
   io.error = error;
-  io.allocator = &value->allocator;
+  io.allocator = allocator;
   io.limits = limits ? *limits : lonejson_default_value_limits();
   if (io.limits.max_depth == 0u) {
     io.limits.max_depth = lonejson_default_value_limits().max_depth;
@@ -1431,7 +1462,59 @@ static lonejson_status lonejson__json_visit(
                               "visited JSON must contain exactly one value");
     }
   }
+  return status;
+}
+
+static lonejson_status lonejson__json_visit(
+    const lonejson_json_value *value, const lonejson_value_visitor *visitor,
+    void *user, const lonejson_value_limits *limits, lonejson_error *error) {
+  lonejson__json_cursor cursor;
+  lonejson_status status;
+
+  if (value == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "JSON value source and visitor are required");
+  }
+  status = lonejson__json_cursor_open(value, &cursor, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__json_visit_cursor(&cursor, &value->allocator, visitor,
+                                       user, limits, error);
   lonejson__json_cursor_close(&cursor);
+  return status;
+}
+
+static lonejson_status lonejson__json_transcode_cursor(
+    lonejson__json_cursor *cursor, const lonejson_allocator *allocator,
+    lonejson_sink_fn sink, void *user, lonejson_error *error, int pretty,
+    size_t base_depth) {
+  lonejson__json_io io;
+  lonejson_status status;
+  int ch;
+
+  if (cursor == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JSON value handle is required");
+  }
+  memset(&io, 0, sizeof(io));
+  io.cursor = cursor;
+  io.sink = sink;
+  io.sink_user = user;
+  io.error = error;
+  io.pretty = pretty;
+  io.base_depth = base_depth;
+  io.allocator = allocator;
+  status = lonejson__json_parse_value(&io);
+  if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
+    ch = lonejson__json_peek_nonspace(&io);
+    if (ch != EOF) {
+      status =
+          lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                              "embedded JSON must contain exactly one value");
+    }
+  }
   return status;
 }
 
@@ -1440,9 +1523,7 @@ lonejson__json_transcode(const lonejson_json_value *value,
                          lonejson_sink_fn sink, void *user,
                          lonejson_error *error, int pretty, size_t base_depth) {
   lonejson__json_cursor cursor;
-  lonejson__json_io io;
   lonejson_status status;
-  int ch;
 
   if (value == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -1455,25 +1536,48 @@ lonejson__json_transcode(const lonejson_json_value *value,
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  memset(&io, 0, sizeof(io));
-  io.cursor = &cursor;
-  io.sink = sink;
-  io.sink_user = user;
-  io.error = error;
-  io.pretty = pretty;
-  io.base_depth = base_depth;
-  io.allocator = &value->allocator;
-  status = lonejson__json_parse_value(&io);
-  if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
-    ch = lonejson__json_peek_nonspace(&io);
-    if (ch != EOF) {
-      status =
-          lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
-                              "embedded JSON must contain exactly one value");
-    }
-  }
+  status = lonejson__json_transcode_cursor(&cursor, &value->allocator, sink,
+                                           user, error, pretty, base_depth);
   lonejson__json_cursor_close(&cursor);
   return status;
+}
+
+int lonejson_json_value_is_rewindable(const lonejson_json_value *value) {
+  if (value == NULL) {
+    return 0;
+  }
+  switch (value->kind) {
+  case LONEJSON_JSON_VALUE_NULL:
+  case LONEJSON_JSON_VALUE_BUFFER:
+  case LONEJSON_JSON_VALUE_PATH:
+    return 1;
+  case LONEJSON_JSON_VALUE_READER:
+    return 0;
+  case LONEJSON_JSON_VALUE_FILE: {
+    long pos;
+    if (value->fp == NULL) {
+      return 0;
+    }
+    pos = ftell(value->fp);
+    if (pos < 0L || fseek(value->fp, 0L, SEEK_SET) != 0) {
+      return 0;
+    }
+    return fseek(value->fp, pos, SEEK_SET) == 0;
+  }
+  case LONEJSON_JSON_VALUE_FD: {
+    off_t pos;
+    if (value->fd < 0) {
+      return 0;
+    }
+    pos = lseek(value->fd, 0, SEEK_CUR);
+    if (pos < 0 || lseek(value->fd, 0, SEEK_SET) < 0) {
+      return 0;
+    }
+    return lseek(value->fd, pos, SEEK_SET) >= 0;
+  }
+  default:
+    return 0;
+  }
 }
 
 lonejson_status lonejson_json_value_set_buffer(lonejson_json_value *value,
@@ -1490,10 +1594,18 @@ lonejson_status lonejson_json_value_set_buffer(lonejson_json_value *value,
   lonejson_json_value_init(&input);
   lonejson_json_value_init_with_allocator(&compact, &value->allocator);
   input.kind = LONEJSON_JSON_VALUE_BUFFER;
-  input.json = (char *)data;
+  input.json = NULL;
   input.len = len;
-  status = lonejson__json_transcode(&input, lonejson__json_buffer_sink,
-                                    &compact, error, 0, 0u);
+  {
+    lonejson__json_cursor cursor;
+    memset(&cursor, 0, sizeof(cursor));
+    cursor.value = &input;
+    cursor.buffer = (const unsigned char *)data;
+    cursor.buffer_len = len;
+    status = lonejson__json_transcode_cursor(&cursor, &value->allocator,
+                                             lonejson__json_buffer_sink,
+                                             &compact, error, 0, 0u);
+  }
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     lonejson_json_value_cleanup(&compact);
     return status;

@@ -16,6 +16,7 @@ find_program(LONEJSON_LUA_EXECUTABLE
   NAMES lua lua5.5 lua5.4 lua5.3 luajit
   REQUIRED)
 find_program(CLANG_FORMAT_BIN NAMES clang-format)
+find_program(LONEJSON_CLANG_EXECUTABLE NAMES clang)
 
 option(LONEJSON_BUILD_TESTS "Build lonejson tests." ON)
 option(LONEJSON_BUILD_EXAMPLES "Build lonejson examples." OFF)
@@ -24,7 +25,8 @@ option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "2" CACHE STRING "Shared-library ABI / SONAME version")
+set(LONEJSON_ABI_VERSION "3" CACHE STRING "Shared-library ABI / SONAME version"
+    FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LONEJSON_SHARED_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build")
@@ -53,6 +55,31 @@ function(lonejson_configure_c_target target)
       -Wpedantic
       -pedantic-errors
     )
+  endif()
+endfunction()
+
+set(LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS
+  -std=c89
+  -Wall
+  -Wextra
+  -Werror
+  -Wpedantic
+  -Wno-long-long
+  -Wstrict-prototypes
+  -Wmissing-prototypes
+  -Wshadow
+  -Wpointer-arith
+  -Wcast-qual
+  -Wwrite-strings
+  -Wdeclaration-after-statement)
+
+function(lonejson_configure_strict_downstream_target target)
+  if(UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    target_compile_definitions(${target} PRIVATE _POSIX_C_SOURCE=200809L)
+  endif()
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(${target} PRIVATE
+      ${LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS})
   endif()
 endfunction()
 
@@ -161,6 +188,40 @@ if(LONEJSON_BUILD_TESTS)
   add_test(NAME lonejson_short_names_disabled_tests
     COMMAND lonejson_short_names_disabled_tests)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_short_names_disabled_tests)
+
+  add_executable(lonejson_single_header_strict_warning_tests
+    tests/test_single_header_strict_warnings.c)
+  target_include_directories(lonejson_single_header_strict_warning_tests PRIVATE
+    "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}")
+  add_dependencies(lonejson_single_header_strict_warning_tests
+    package-single-header)
+  lonejson_configure_strict_downstream_target(
+    lonejson_single_header_strict_warning_tests)
+  add_test(NAME lonejson_single_header_strict_warning_tests
+    COMMAND lonejson_single_header_strict_warning_tests)
+  list(APPEND LONEJSON_STACK_USAGE_TARGETS
+    lonejson_single_header_strict_warning_tests)
+
+  if(LONEJSON_CLANG_EXECUTABLE)
+    set(LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT
+      "${CMAKE_CURRENT_BINARY_DIR}/generated/lonejson_single_header_strict_clang.o")
+    add_custom_command(
+      OUTPUT "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "${CMAKE_CURRENT_BINARY_DIR}/generated"
+      COMMAND "${LONEJSON_CLANG_EXECUTABLE}"
+        ${LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS}
+        -D_POSIX_C_SOURCE=200809L
+        -I "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}"
+        -c "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
+        -o "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}"
+      DEPENDS
+        package-single-header
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
+      VERBATIM)
+    add_custom_target(lonejson_single_header_strict_clang ALL
+      DEPENDS "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}")
+  endif()
 
   add_executable(lonejson_static_link_tests tests/test_link_consumer.c)
   target_include_directories(lonejson_static_link_tests PRIVATE
@@ -325,6 +386,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_link_consumer.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_short_names.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_short_names_disabled.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/parse_string.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/parse_file.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/parse_reader.c"

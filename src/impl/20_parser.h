@@ -580,13 +580,13 @@ static size_t lonejson__required_count_for_map(lonejson_parser *parser,
   }
   if (map->field_count <= 64u) {
     lonejson_uint64 mask = lonejson__required_mask_for_map(parser, map);
-    size_t count = 0u;
+    size_t required_count = 0u;
 
     while (mask != 0u) {
-      count += (size_t)(mask & 1u);
+      required_count += (size_t)(mask & 1u);
       mask >>= 1u;
     }
-    return count;
+    return required_count;
   }
   count = 0u;
   for (i = 0u; i < map->field_count; ++i) {
@@ -882,6 +882,32 @@ lonejson__field_cptr(const void *base, const lonejson_field *field) {
   return (const unsigned char *)base + field->struct_offset;
 }
 
+static LONEJSON__INLINE const void *
+lonejson__field_presence_cptr(const void *base, const lonejson_field *field) {
+  return (const unsigned char *)base + field->presence_offset;
+}
+
+static int lonejson__field_has_presence(const lonejson_field *field) {
+  return (field->flags & LONEJSON_FIELD_HAS_PRESENCE) != 0u;
+}
+
+static int lonejson__field_presence_is_set(const void *base,
+                                           const lonejson_field *field) {
+  if (!lonejson__field_has_presence(field)) {
+    return 1;
+  }
+  return *(const int *)lonejson__field_presence_cptr(base, field) != 0;
+}
+
+static void lonejson__field_set_presence(void *base,
+                                         const lonejson_field *field,
+                                         int present) {
+  if (!lonejson__field_has_presence(field)) {
+    return;
+  }
+  *(int *)((unsigned char *)base + field->presence_offset) = present ? 1 : 0;
+}
+
 static size_t lonejson__field_storage_size(const lonejson_field *field) {
   if (field == NULL) {
     return 0u;
@@ -940,6 +966,176 @@ static int lonejson__field_fits_map(const lonejson_map *map,
     return 0;
   }
   return size <= (map->struct_size - field->struct_offset);
+}
+
+static int lonejson__field_presence_fits_map(const lonejson_map *map,
+                                             const lonejson_field *field) {
+  if (!lonejson__field_has_presence(field)) {
+    return 1;
+  }
+  if (field->presence_offset > map->struct_size) {
+    return 0;
+  }
+  return sizeof(int) <= (map->struct_size - field->presence_offset);
+}
+
+static int lonejson__field_kind_accepts_presence(const lonejson_field *field) {
+  switch (field->kind) {
+  case LONEJSON_FIELD_KIND_I64:
+  case LONEJSON_FIELD_KIND_U64:
+  case LONEJSON_FIELD_KIND_F64:
+  case LONEJSON_FIELD_KIND_BOOL:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+static int lonejson__field_is_empty_for_omit(const lonejson_field *field,
+                                             const void *ptr);
+
+static int lonejson__map_has_serialized_fields(const lonejson_map *map,
+                                               const void *src) {
+  size_t i;
+
+  if (map == NULL || src == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < map->field_count; ++i) {
+    const lonejson_field *field = &map->fields[i];
+    if (!lonejson__field_is_empty_for_omit(field,
+                                           lonejson__field_cptr(src, field))) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int lonejson__field_is_empty_for_omit(const lonejson_field *field,
+                                             const void *ptr) {
+  if (!lonejson__field_has_presence(field) ||
+      lonejson__field_presence_is_set(
+          (const unsigned char *)ptr - field->struct_offset, field)) {
+    unsigned omit_flags = field->flags;
+
+    if ((omit_flags & LONEJSON_FIELD_OMIT_EMPTY) != 0u) {
+      omit_flags |= LONEJSON_FIELD_OMIT_NULL;
+    }
+    if ((omit_flags & (LONEJSON_FIELD_OMIT_NULL | LONEJSON_FIELD_OMIT_EMPTY)) ==
+        0u) {
+      return 0;
+    }
+    if ((omit_flags & LONEJSON_FIELD_OMIT_NULL) != 0u) {
+      switch (field->kind) {
+      case LONEJSON_FIELD_KIND_STRING:
+        if (field->storage == LONEJSON_STORAGE_DYNAMIC &&
+            *(const char *const *)ptr == NULL) {
+          return 1;
+        }
+        break;
+      case LONEJSON_FIELD_KIND_STRING_SOURCE:
+      case LONEJSON_FIELD_KIND_BASE64_SOURCE:
+        if (((const lonejson_source *)ptr)->kind == LONEJSON_SOURCE_NONE) {
+          return 1;
+        }
+        break;
+      case LONEJSON_FIELD_KIND_JSON_VALUE:
+        if (((const lonejson_json_value *)ptr)->kind ==
+            LONEJSON_JSON_VALUE_NULL) {
+          return 1;
+        }
+        break;
+      default:
+        break;
+      }
+    }
+    if ((omit_flags & LONEJSON_FIELD_OMIT_EMPTY) != 0u) {
+      switch (field->kind) {
+      case LONEJSON_FIELD_KIND_STRING_STREAM:
+      case LONEJSON_FIELD_KIND_BASE64_STREAM:
+        return lonejson_spooled_size((const lonejson_spooled *)ptr) == 0u;
+      case LONEJSON_FIELD_KIND_OBJECT:
+        return !lonejson__map_has_serialized_fields(field->submap, ptr);
+      case LONEJSON_FIELD_KIND_STRING_ARRAY:
+        return ((const lonejson_string_array *)ptr)->count == 0u;
+      case LONEJSON_FIELD_KIND_I64_ARRAY:
+        return ((const lonejson_i64_array *)ptr)->count == 0u;
+      case LONEJSON_FIELD_KIND_U64_ARRAY:
+        return ((const lonejson_u64_array *)ptr)->count == 0u;
+      case LONEJSON_FIELD_KIND_F64_ARRAY:
+        return ((const lonejson_f64_array *)ptr)->count == 0u;
+      case LONEJSON_FIELD_KIND_BOOL_ARRAY:
+        return ((const lonejson_bool_array *)ptr)->count == 0u;
+      case LONEJSON_FIELD_KIND_OBJECT_ARRAY:
+        return ((const lonejson_object_array *)ptr)->count == 0u;
+      default:
+        break;
+      }
+    }
+    return 0;
+  }
+  return 1;
+}
+
+static int lonejson__field_should_omit(const void *base,
+                                       const lonejson_field *field) {
+  if ((field->flags & LONEJSON_FIELD_REQUIRED) != 0u) {
+    return 0;
+  }
+  return lonejson__field_is_empty_for_omit(field,
+                                           lonejson__field_cptr(base, field));
+}
+
+static int lonejson__map_is_rewindable_for_serialize(const lonejson_map *map,
+                                                     const void *src);
+
+static int
+lonejson__field_is_rewindable_for_serialize(const lonejson_field *field,
+                                            const void *ptr) {
+  size_t i;
+
+  switch (field->kind) {
+  case LONEJSON_FIELD_KIND_STRING_SOURCE:
+  case LONEJSON_FIELD_KIND_BASE64_SOURCE:
+    return lonejson_source_is_rewindable((const lonejson_source *)ptr);
+  case LONEJSON_FIELD_KIND_JSON_VALUE:
+    return lonejson_json_value_is_rewindable((const lonejson_json_value *)ptr);
+  case LONEJSON_FIELD_KIND_OBJECT:
+    return lonejson__map_is_rewindable_for_serialize(field->submap, ptr);
+  case LONEJSON_FIELD_KIND_OBJECT_ARRAY: {
+    const lonejson_object_array *arr = (const lonejson_object_array *)ptr;
+    for (i = 0u; i < arr->count; ++i) {
+      const void *elem =
+          (const unsigned char *)arr->items + (i * field->elem_size);
+      if (!lonejson__map_is_rewindable_for_serialize(field->submap, elem)) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+  default:
+    return 1;
+  }
+}
+
+static int lonejson__map_is_rewindable_for_serialize(const lonejson_map *map,
+                                                     const void *src) {
+  size_t i;
+
+  if (map == NULL || src == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < map->field_count; ++i) {
+    const lonejson_field *field = &map->fields[i];
+    if (lonejson__field_should_omit(src, field)) {
+      continue;
+    }
+    if (!lonejson__field_is_rewindable_for_serialize(
+            field, lonejson__field_cptr(src, field))) {
+      return 0;
+    }
+  }
+  return 1;
 }
 
 static lonejson_frame *lonejson__push_frame(lonejson_parser *parser,
@@ -1048,6 +1244,18 @@ static int lonejson__map_layout_is_valid(const lonejson_map *map) {
     if (!lonejson__field_fits_map(map, field)) {
       return 0;
     }
+    if (!lonejson__field_presence_fits_map(map, field)) {
+      return 0;
+    }
+    if (lonejson__field_has_presence(field) &&
+        !lonejson__field_kind_accepts_presence(field)) {
+      return 0;
+    }
+    if ((field->flags & LONEJSON_FIELD_REQUIRED) != 0u &&
+        (field->flags & (LONEJSON_FIELD_OMIT_NULL | LONEJSON_FIELD_OMIT_EMPTY |
+                         LONEJSON_FIELD_HAS_PRESENCE)) != 0u) {
+      return 0;
+    }
     if ((field->kind == LONEJSON_FIELD_KIND_OBJECT ||
          field->kind == LONEJSON_FIELD_KIND_OBJECT_ARRAY) &&
         field->submap != NULL &&
@@ -1142,6 +1350,7 @@ static void lonejson__cleanup_map(const lonejson_map *map, void *value) {
   for (i = 0; i < map->field_count; ++i) {
     const lonejson_field *field = &map->fields[i];
     lonejson__cleanup_value(field, lonejson__field_ptr(value, field));
+    lonejson__field_set_presence(value, field, 0);
   }
 }
 
@@ -1189,6 +1398,7 @@ static void lonejson__reset_map(const lonejson_map *map, void *value) {
     case LONEJSON_FIELD_KIND_F64:
     case LONEJSON_FIELD_KIND_BOOL:
       lonejson__reset_scalar_field(field, ptr);
+      lonejson__field_set_presence(value, field, 0);
       break;
     case LONEJSON_FIELD_KIND_STRING:
       if (field->storage == LONEJSON_STORAGE_FIXED &&
@@ -1345,6 +1555,7 @@ lonejson__init_map_with_allocator(const lonejson_map *map, void *value,
       continue;
     }
     lonejson__init_value(field, lonejson__field_ptr(value, field), allocator);
+    lonejson__field_set_presence(value, field, 0);
   }
 }
 
@@ -2345,7 +2556,9 @@ lonejson__complete_parent_after_value(lonejson_parser *parser) {
 static lonejson_status lonejson__handle_scalar_for_field(
     lonejson_parser *parser, lonejson_frame *frame, const lonejson_field *field,
     const char *value, size_t len, lonejson_lex_mode mode) {
+  void *base;
   void *ptr;
+  lonejson_status status;
 
   if (field == NULL) {
     return lonejson__complete_parent_after_value(parser);
@@ -2353,8 +2566,8 @@ static lonejson_status lonejson__handle_scalar_for_field(
   if (frame != NULL && !lonejson__mark_field_seen(parser, frame, field)) {
     return parser->error.code;
   }
-  ptr =
-      lonejson__field_ptr(frame ? frame->object_ptr : parser->root_dst, field);
+  base = frame ? frame->object_ptr : parser->root_dst;
+  ptr = lonejson__field_ptr(base, field);
   switch (mode) {
   case LONEJSON_LEX_STRING:
     if (field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
@@ -2386,13 +2599,25 @@ static lonejson_status lonejson__handle_scalar_for_field(
                                           value, len, mode);
     }
     if (field->kind == LONEJSON_FIELD_KIND_I64) {
-      return lonejson__assign_i64(parser, field, ptr, value);
+      status = lonejson__assign_i64(parser, field, ptr, value);
+      if (status == LONEJSON_STATUS_OK) {
+        lonejson__field_set_presence(base, field, 1);
+      }
+      return status;
     }
     if (field->kind == LONEJSON_FIELD_KIND_U64) {
-      return lonejson__assign_u64(parser, field, ptr, value);
+      status = lonejson__assign_u64(parser, field, ptr, value);
+      if (status == LONEJSON_STATUS_OK) {
+        lonejson__field_set_presence(base, field, 1);
+      }
+      return status;
     }
     if (field->kind == LONEJSON_FIELD_KIND_F64) {
-      return lonejson__assign_f64(parser, field, ptr, value, len);
+      status = lonejson__assign_f64(parser, field, ptr, value, len);
+      if (status == LONEJSON_STATUS_OK) {
+        lonejson__field_set_presence(base, field, 1);
+      }
+      return status;
     }
     return lonejson__set_error(
         &parser->error, LONEJSON_STATUS_TYPE_MISMATCH, parser->error.offset,
@@ -2410,7 +2635,12 @@ static lonejson_status lonejson__handle_scalar_for_field(
           parser->error.line, parser->error.column,
           "boolean value does not match field '%s'", field->json_key);
     }
-    return lonejson__assign_bool(parser, field, ptr, mode == LONEJSON_LEX_TRUE);
+    status =
+        lonejson__assign_bool(parser, field, ptr, mode == LONEJSON_LEX_TRUE);
+    if (status == LONEJSON_STATUS_OK) {
+      lonejson__field_set_presence(base, field, 1);
+    }
+    return status;
   case LONEJSON_LEX_NULL:
     if (field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
       return lonejson__assign_json_scalar(parser, (lonejson_json_value *)ptr,
@@ -4647,17 +4877,19 @@ static lonejson_status
 lonejson__serialize_map_pretty(const lonejson_map *map, const void *src,
                                lonejson__write_state *state) {
   size_t i;
+  size_t emitted;
   lonejson_status status;
 
+  emitted = 0u;
   status = lonejson__emit_cstr(state->sink, state->user, state->error, "{");
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return status;
   }
-  if (map->field_count == 0u) {
-    return lonejson__emit_cstr(state->sink, state->user, state->error, "}");
-  }
   for (i = 0; i < map->field_count; ++i) {
-    if (i != 0u) {
+    if (lonejson__field_should_omit(src, &map->fields[i])) {
+      continue;
+    }
+    if (emitted != 0u) {
       status = lonejson__emit_cstr(state->sink, state->user, state->error, ",");
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
@@ -4687,8 +4919,9 @@ lonejson__serialize_map_pretty(const lonejson_map *map, const void *src,
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
+    emitted++;
   }
-  if (state->pretty) {
+  if (state->pretty && emitted != 0u) {
     status = lonejson__emit_pretty_indent(state, state->depth);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
@@ -5366,14 +5599,19 @@ static lonejson_status lonejson__serialize_map_compact(const lonejson_map *map,
                                                        void *user,
                                                        lonejson_error *error) {
   size_t i;
+  size_t emitted;
   lonejson_status status;
 
+  emitted = 0u;
   status = lonejson__emit_cstr(sink, user, error, "{");
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return status;
   }
   for (i = 0; i < map->field_count; ++i) {
-    if (i != 0u) {
+    if (lonejson__field_should_omit(src, &map->fields[i])) {
+      continue;
+    }
+    if (emitted != 0u) {
       status = lonejson__emit_cstr(sink, user, error, ",");
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
@@ -5395,6 +5633,7 @@ static lonejson_status lonejson__serialize_map_compact(const lonejson_map *map,
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
+    emitted++;
   }
   return lonejson__emit_cstr(sink, user, error, "}");
 }

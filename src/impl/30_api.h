@@ -806,17 +806,17 @@ lonejson__fd_reader(void *user, unsigned char *buffer, size_t capacity) {
 lonejson_status lonejson_visit_value_buffer(
     const void *data, size_t len, const lonejson_value_visitor *visitor,
     void *user, const lonejson_value_limits *limits, lonejson_error *error) {
-  lonejson_json_value value;
+  lonejson__json_cursor cursor;
 
   if (data == NULL || visitor == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "buffer and visitor are required");
   }
-  lonejson_json_value_init(&value);
-  value.kind = LONEJSON_JSON_VALUE_BUFFER;
-  value.json = (char *)data;
-  value.len = len;
-  return lonejson__json_visit(&value, visitor, user, limits, error);
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.buffer = (const unsigned char *)data;
+  cursor.buffer_len = len;
+  return lonejson__json_visit_cursor(&cursor, NULL, visitor, user, limits,
+                                     error);
 }
 
 lonejson_status lonejson_visit_value_cstr(const char *json,
@@ -911,6 +911,10 @@ lonejson_status lonejson_serialize_sink(const lonejson_map *map,
   if (map == NULL || src == NULL || sink == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "map, source, and sink are required");
+  }
+  if (!lonejson__map_layout_is_valid(map)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "invalid map layout");
   }
   lonejson__clear_error(error);
   if (options != NULL && options->pretty) {
@@ -1312,6 +1316,7 @@ typedef struct lonejson__generator_frame {
   size_t depth;
   size_t index;
   size_t aux;
+  size_t emitted;
   union {
     struct {
       const lonejson_map *map;
@@ -1976,15 +1981,20 @@ lonejson__generator_step_map(lonejson__generator_state *state,
     frame->phase = 1u;
     return lonejson__generator_set_pending_bytes(state, "{", 1u);
   case 1u:
+    while (frame->index < map->field_count &&
+           lonejson__field_should_omit(frame->u.map.src,
+                                       &map->fields[frame->index])) {
+      frame->index++;
+    }
     if (frame->index >= map->field_count) {
-      if (state->options.pretty && map->field_count != 0u) {
+      if (state->options.pretty && frame->emitted != 0u) {
         frame->phase = 9u;
       } else {
         frame->phase = 11u;
       }
       return LONEJSON_STATUS_OK;
     }
-    if (frame->index != 0u) {
+    if (frame->emitted != 0u) {
       frame->phase = 2u;
       return LONEJSON_STATUS_OK;
     }
@@ -2026,6 +2036,7 @@ lonejson__generator_step_map(lonejson__generator_state *state,
         frame->depth + 1u, error);
   case 8u:
     frame->index++;
+    frame->emitted++;
     frame->phase = 1u;
     return LONEJSON_STATUS_OK;
   case 9u:
@@ -2413,6 +2424,11 @@ lonejson_status lonejson_generator_init(lonejson_generator *generator,
         &generator->error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
         "map and source are required for generator init");
   }
+  if (!lonejson__map_layout_is_valid(map)) {
+    return lonejson__set_error(&generator->error,
+                               LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+                               "invalid map layout");
+  }
   if (options != NULL &&
       !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->allocator)) {
     return lonejson__set_error(
@@ -2443,6 +2459,53 @@ lonejson_status lonejson_generator_init(lonejson_generator *generator,
   generator->eof = 0;
   lonejson__clear_error(&generator->error);
   return LONEJSON_STATUS_OK;
+}
+
+typedef struct lonejson__measure_sink_state {
+  size_t total;
+} lonejson__measure_sink_state;
+
+static lonejson_status lonejson__measure_sink(void *user, const void *data,
+                                              size_t len,
+                                              lonejson_error *error) {
+  lonejson__measure_sink_state *state = (lonejson__measure_sink_state *)user;
+
+  (void)data;
+  if (SIZE_MAX - state->total < len) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "serialized output is too large to measure");
+  }
+  state->total += len;
+  return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_generator_measure(
+    const lonejson_map *map, const void *src, size_t *out_len,
+    const lonejson_write_options *options, lonejson_error *error) {
+  lonejson__measure_sink_state state;
+  lonejson_status status;
+
+  if (map == NULL || src == NULL || out_len == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "map, source, and output length are required");
+  }
+  if (!lonejson__map_layout_is_valid(map)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "invalid map layout");
+  }
+  if (!lonejson__map_is_rewindable_for_serialize(map, src)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "cannot measure non-rewindable JSON document");
+  }
+  state.total = 0u;
+  status = lonejson_serialize_sink(map, src, lonejson__measure_sink, &state,
+                                   options, error);
+  if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
+    *out_len = state.total;
+  }
+  return status;
 }
 
 lonejson_status lonejson_generator_read(lonejson_generator *generator,
