@@ -634,7 +634,13 @@ typedef void (*lonejson_free_fn)(void *ctx, void *ptr);
 /** Allocator vtable used by parser, spool, stream, and lonejson-owned output
  * buffers. When all three callbacks are `NULL`, lonejson falls back to
  * `lonejson_default_allocator()`. Partial callback sets are invalid; callers
- * must provide either all callbacks or none.
+ * must provide either all callbacks or none. `malloc_fn` and `realloc_fn` must
+ * return pointers aligned at least as strictly as standard `malloc`; returning
+ * weaker-aligned storage is undefined behavior because lonejson may place
+ * internal owned-allocation headers at those addresses. Custom allocators that
+ * prepend private headers must over-align the returned payload pointer, for
+ * example by using a header union containing `void *`, integer, `double`, and
+ * `long double` members.
  */
 typedef struct lonejson_allocator {
   /** Allocation callback. `NULL` means use the default allocator. */

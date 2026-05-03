@@ -8,6 +8,7 @@ file(GLOB release_entries RELATIVE "${dist_dir}"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}.h.gz"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}-*.rockspec"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}-*.src.rock"
+  "${dist_dir}/liblonejson-${LONEJSON_VERSION}-*.tar.gz"
 )
 
 set(checksum_inputs "")

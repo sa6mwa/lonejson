@@ -211,6 +211,23 @@ typedef union lonejson__alloc_header {
   lonejson__alloc_header_align_union _align;
 } lonejson__alloc_header;
 
+typedef struct lonejson__alloc_header_align_probe {
+  char c;
+  lonejson__alloc_header value;
+} lonejson__alloc_header_align_probe;
+
+#define LONEJSON__ALLOC_HEADER_ALIGNMENT                                       \
+  offsetof(lonejson__alloc_header_align_probe, value)
+
+#ifndef NDEBUG
+static int lonejson__is_aligned(const void *ptr, size_t alignment) {
+  if (alignment == 0u) {
+    return 1;
+  }
+  return ((uintptr_t)ptr % (uintptr_t)alignment) == 0u;
+}
+#endif
+
 static LONEJSON__INLINE int
 lonejson__json_value_parse_visitor_active(const lonejson_parser *parser);
 static LONEJSON__INLINE void
@@ -405,13 +422,20 @@ static void *lonejson__owned_malloc(const lonejson_allocator *allocator,
                                     size_t size) {
   lonejson_allocator resolved;
   lonejson__alloc_header *header;
+  void *raw;
 
   resolved = lonejson__allocator_resolve(allocator);
-  header = (lonejson__alloc_header *)resolved.malloc_fn(resolved.ctx,
-                                                        sizeof(*header) + size);
-  if (header == NULL) {
+  raw = resolved.malloc_fn(resolved.ctx, sizeof(*header) + size);
+  if (raw == NULL) {
     return NULL;
   }
+#ifndef NDEBUG
+  if (!lonejson__is_aligned(raw, LONEJSON__ALLOC_HEADER_ALIGNMENT)) {
+    resolved.free_fn(resolved.ctx, raw);
+    return NULL;
+  }
+#endif
+  header = (lonejson__alloc_header *)raw;
   header->meta.allocator = resolved;
   header->meta.size = size;
   lonejson__allocator_note_alloc(resolved.stats, size);

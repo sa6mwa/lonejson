@@ -22,8 +22,11 @@ workflow now is "measure lonejson, compare to the frozen lonejson baseline".
 
 Methodology:
 
-* Each benchmark lane records the median of `5` samples.
-* Each sample repeats the lane until at least `100 ms` of wall time has elapsed.
+* Each C and Lua benchmark lane records the median of `5` samples.
+* Each C benchmark sample repeats the lane until at least `250 ms` of wall time
+  has elapsed.
+* Each Lua benchmark sample repeats the lane until at least `250 ms` of wall
+  time has elapsed, with longer lanes where the Lua harness configures them.
 * The C benchmark target compiles lonejson inline from the packaged single-header artifact (`LONEJSON_IMPLEMENTATION`) so the frozen C baseline stays comparable across single-header-focused releases.
 * Fixed parse and stream lanes are reported in two modes:
   * default lanes use lonejson's normal `clear_destination=1` behavior
@@ -39,4 +42,8 @@ Methodology:
   * it fails if the benchmark configuration differs from the baseline
   * it fails if the baseline is missing any current benchmark lanes
   * it fails on any material negative throughput regression
+* `bench-check`, as used by `test-all`, reruns a failed C or Lua benchmark gate
+  once into a separate result file before failing. This keeps transient host
+  scheduling noise from breaking the full test suite while still requiring
+  reproducible material regressions to fail.
 * Freeze a new `baseline.json` whenever the benchmark schema, benchmark case set, or measurement method changes.

@@ -15,11 +15,11 @@
 #define BENCH_PARSE_ITEM_CAPACITY 8u
 #define BENCH_JSONL_RECORDS 8u
 #define BENCH_SAMPLE_COUNT 5u
-#define BENCH_MIN_SAMPLE_NS 100000000u
+#define BENCH_MIN_SAMPLE_NS 250000000u
 #define BENCH_NOISE_DELTA_PCT 3.0
 #define BENCH_MATERIAL_DELTA_PCT 5.0
 #define BENCH_REVIEW_IMPROVEMENT_PCT 10.0
-#define BENCH_SCHEMA_VERSION 17u
+#define BENCH_SCHEMA_VERSION 18u
 
 typedef enum bench_doc_kind {
   BENCH_DOC_VALID = 1,
@@ -3661,8 +3661,7 @@ static int bench_gate_command(const char *baseline_path,
          (unsigned long)large_improvement_count);
 
   if (schema_mismatch || config_mismatch || missing_count != 0u ||
-      mismatch_count != 0u || small_regression_count != 0u ||
-      material_regression_count != 0u) {
+      mismatch_count != 0u || material_regression_count != 0u) {
     if (schema_mismatch || config_mismatch || missing_count != 0u) {
       fprintf(stderr,
               "benchmark gate failed: fix the regressions, and refresh the "

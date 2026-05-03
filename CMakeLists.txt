@@ -146,6 +146,15 @@ foreach(target lonejson_shared lonejson_static)
   endif()
 endforeach()
 
+if(LONEJSON_BUILD_FUZZERS)
+  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "LONEJSON_BUILD_FUZZERS requires Clang/libFuzzer.")
+  endif()
+  target_compile_options(lonejson_static PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+endif()
+
 set_target_properties(lonejson_shared PROPERTIES
   OUTPUT_NAME lonejson
   VERSION ${PROJECT_VERSION}
@@ -319,9 +328,6 @@ if(LONEJSON_BUILD_BENCHMARKS)
 endif()
 
 if(LONEJSON_BUILD_FUZZERS)
-  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "LONEJSON_BUILD_FUZZERS requires Clang/libFuzzer.")
-  endif()
   add_executable(lonejson_fuzz_validate fuzz/fuzz_validate.c)
   target_include_directories(lonejson_fuzz_validate PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_link_libraries(lonejson_fuzz_validate PRIVATE lonejson)
@@ -361,6 +367,19 @@ if(LONEJSON_BUILD_FUZZERS)
   target_link_options(lonejson_fuzz_value_visitor PRIVATE
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_value_visitor)
+
+  add_executable(lonejson_fuzz_reader_stream_generator
+    fuzz/fuzz_reader_stream_generator.c)
+  target_include_directories(lonejson_fuzz_reader_stream_generator
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_reader_stream_generator
+    PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_reader_stream_generator PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_reader_stream_generator PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_reader_stream_generator)
 endif()
 
 if(CLANG_FORMAT_BIN)
@@ -382,6 +401,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_mapped_parse.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_main.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_link_consumer.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_short_names.c"
@@ -442,6 +462,7 @@ add_custom_target(package-archive
     -DLONEJSON_SHARED_LIB_NAME=$<TARGET_FILE_NAME:lonejson_shared>
     -DLONEJSON_SHARED_SONAME=$<TARGET_SONAME_FILE_NAME:lonejson_shared>
     -DLONEJSON_RELEASE_VARIANT_SUFFIX=${LONEJSON_RELEASE_VARIANT_SUFFIX}
+    -DLONEJSON_STRIP=${CMAKE_STRIP}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_archive.cmake
   DEPENDS lonejson_shared lonejson_static
   VERBATIM

@@ -2,9 +2,9 @@ local lj = require("lonejson")
 local core = lj.core
 local HAVE_CJSON, cjson = pcall(require, "cjson")
 
-local BENCH_SAMPLE_COUNT = 3
-local BENCH_MIN_SAMPLE_NS = 200000000
-local BENCH_SCHEMA_VERSION = 27
+local BENCH_SAMPLE_COUNT = 5
+local BENCH_MIN_SAMPLE_NS = 250000000
+local BENCH_SCHEMA_VERSION = 29
 local BENCH_NOISE_DELTA_PCT = 3.0
 local BENCH_MATERIAL_DELTA_PCT = 5.0
 local BENCH_REVIEW_IMPROVEMENT_PCT = 10.0
@@ -1446,7 +1446,7 @@ local function gate_runs(baseline_path, latest_path)
   print(string.format("  material regressions: %d", material))
   print(string.format("  large improvements to review: %d", review))
 
-  if schema_mismatch or missing ~= 0 or mismatches ~= 0 or small ~= 0 or material ~= 0 then
+  if schema_mismatch or missing ~= 0 or mismatches ~= 0 or material ~= 0 then
     if schema_mismatch or missing ~= 0 then
       io.stderr:write("lua benchmark gate failed: fix the regressions, and refresh the baseline only if the benchmark schema/result set intentionally changed\n")
     elseif mismatches ~= 0 then

@@ -115,6 +115,41 @@ static void test_allocator_free(void *ctx, void *ptr) {
   free(ptr);
 }
 
+#ifndef NDEBUG
+static void *test_misaligned_allocator_malloc(void *ctx, size_t size) {
+  unsigned char *raw;
+
+  (void)ctx;
+  raw = (unsigned char *)malloc(size + 1u);
+  if (raw == NULL) {
+    return NULL;
+  }
+  return raw + 1u;
+}
+
+static void *test_misaligned_allocator_realloc(void *ctx, void *ptr,
+                                               size_t size) {
+  unsigned char *raw;
+
+  (void)ctx;
+  if (ptr != NULL) {
+    free(((unsigned char *)ptr) - 1u);
+  }
+  raw = (unsigned char *)malloc(size + 1u);
+  if (raw == NULL) {
+    return NULL;
+  }
+  return raw + 1u;
+}
+
+static void test_misaligned_allocator_free(void *ctx, void *ptr) {
+  (void)ctx;
+  if (ptr != NULL) {
+    free(((unsigned char *)ptr) - 1u);
+  }
+}
+#endif
+
 static void test_allocator_init(test_allocator_state *state) {
   memset(state, 0, sizeof(*state));
   state->allocator = lonejson_default_allocator();
@@ -3999,6 +4034,29 @@ static void test_custom_allocator_parse_cleanup_and_stream(void) {
   EXPECT(alloc.stats.bytes_live == 0u);
 }
 
+#ifndef NDEBUG
+static void test_custom_allocator_misaligned_owned_alloc_is_rejected(void) {
+  static const char json[] = "{\"name\":\"alpha\"}";
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_allocator allocator = lonejson_default_allocator();
+  lonejson_error error;
+  lonejson_status status;
+  test_alloc_parse_doc doc;
+
+  memset(&doc, 0, sizeof(doc));
+  allocator.malloc_fn = test_misaligned_allocator_malloc;
+  allocator.realloc_fn = test_misaligned_allocator_realloc;
+  allocator.free_fn = test_misaligned_allocator_free;
+  options.allocator = &allocator;
+  status = lonejson_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_ALLOCATION_FAILED);
+  EXPECT(error.code == LONEJSON_STATUS_ALLOCATION_FAILED);
+  EXPECT(strstr(error.message, "failed to allocate string") != NULL);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
+}
+#endif
+
 static void test_custom_allocator_json_value_capture_and_serialize_alloc(void) {
   static const char json[] =
       "{\"id\":\"q1\",\"selector\":{\"a\":[1,true,null]}}";
@@ -5163,6 +5221,9 @@ int main(void) {
   test_value_visitor_success_and_limits();
   test_value_visitor_chunking_unicode_and_failures();
   test_custom_allocator_parse_cleanup_and_stream();
+#ifndef NDEBUG
+  test_custom_allocator_misaligned_owned_alloc_is_rejected();
+#endif
   test_custom_allocator_json_value_capture_and_serialize_alloc();
   test_custom_allocator_raw_serialize_alloc_is_rejected();
   test_explicit_default_allocator_raw_serialize_alloc_is_allowed();

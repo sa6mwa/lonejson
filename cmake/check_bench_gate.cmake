@@ -8,6 +8,7 @@ file(MAKE_DIRECTORY "${_tmp_dir}")
 
 set(_baseline "${_tmp_dir}/baseline.json")
 set(_latest_mixed "${_tmp_dir}/latest-mixed.json")
+set(_latest_small "${_tmp_dir}/latest-small.json")
 set(_latest_improve "${_tmp_dir}/latest-improve.json")
 set(_latest_broken "${_tmp_dir}/latest-broken.json")
 
@@ -30,6 +31,14 @@ file(WRITE "${_latest_mixed}"
   "{\"name\":\"bench/b\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":94.0,\"docs_per_sec\":94.0,\"ns_per_byte\":1.0},"
   "{\"name\":\"bench/c\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":106.0,\"docs_per_sec\":106.0,\"ns_per_byte\":1.0},"
   "{\"name\":\"bench/d\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":112.0,\"docs_per_sec\":112.0,\"ns_per_byte\":1.0}"
+  "${_common_suffix}")
+
+file(WRITE "${_latest_small}"
+  "${_common_prefix}"
+  "{\"name\":\"bench/a\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":96.0,\"docs_per_sec\":96.0,\"ns_per_byte\":1.0},"
+  "{\"name\":\"bench/b\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":100.0,\"docs_per_sec\":100.0,\"ns_per_byte\":1.0},"
+  "{\"name\":\"bench/c\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":100.0,\"docs_per_sec\":100.0,\"ns_per_byte\":1.0},"
+  "{\"name\":\"bench/d\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":100.0,\"docs_per_sec\":100.0,\"ns_per_byte\":1.0}"
   "${_common_suffix}")
 
 file(WRITE "${_latest_improve}"
@@ -78,6 +87,18 @@ foreach(_needle
     message(FATAL_ERROR "bench gate output missing ${_needle}:\n${_gate_out}\n${_gate_err}")
   endif()
 endforeach()
+
+execute_process(
+  COMMAND "${LONEJSON_BENCH_EXE}" gate "${_baseline}" "${_latest_small}"
+  RESULT_VARIABLE _small_status
+  OUTPUT_VARIABLE _small_out
+  ERROR_VARIABLE _small_err)
+if(NOT _small_status EQUAL 0)
+  message(FATAL_ERROR "bench gate unexpectedly failed on small-only regressions:\n${_small_out}\n${_small_err}")
+endif()
+if(NOT _small_out MATCHES "small regressions: 1")
+  message(FATAL_ERROR "bench gate output missing small regression review count:\n${_small_out}")
+endif()
 
 execute_process(
   COMMAND "${LONEJSON_BENCH_EXE}" gate "${_baseline}" "${_latest_improve}"

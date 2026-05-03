@@ -25,6 +25,7 @@ run_target() {
     cmake --preset "$preset"
     cmake --build --preset "$preset"
     ctest --preset "$preset"
+    cmake --build --preset "$preset" --target package-archive
 }
 
 require_command cmake
