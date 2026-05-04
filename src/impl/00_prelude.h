@@ -196,6 +196,71 @@ struct lonejson_stream {
   lonejson_allocator allocator;
 };
 
+typedef struct lonejson__byte_buffer {
+  char *data;
+  size_t len;
+  size_t cap;
+} lonejson__byte_buffer;
+
+struct lonejson_sse {
+  lonejson_sse_options options;
+  lonejson_allocator allocator;
+  lonejson__byte_buffer line;
+  lonejson__byte_buffer event;
+  lonejson__byte_buffer id;
+  lonejson_parser json_parser;
+  unsigned char json_workspace[LONEJSON_PUSH_PARSER_BUFFER_SIZE +
+                               LONEJSON__PARSER_WORKSPACE_SLACK];
+  const lonejson_map *json_map;
+  void *json_dst;
+  const lonejson_parse_options *json_parse_options;
+  size_t event_data_len;
+  size_t json_data_len;
+  unsigned long retry_ms;
+  int has_retry;
+  int saw_cr;
+  int closed;
+  int event_pending;
+  int event_started;
+  int data_seen;
+  int json_parser_active;
+  int json_data_seen;
+  int json_selection_locked;
+  int json_selected;
+};
+
+typedef enum lonejson__multipart_phase {
+  LONEJSON__MULTIPART_EXPECT_BOUNDARY = 1,
+  LONEJSON__MULTIPART_HEADERS = 2,
+  LONEJSON__MULTIPART_BODY_LENGTH = 3,
+  LONEJSON__MULTIPART_BODY_SCAN = 4,
+  LONEJSON__MULTIPART_DONE = 5
+} lonejson__multipart_phase;
+
+struct lonejson_multipart {
+  lonejson_multipart_options options;
+  lonejson_allocator allocator;
+  lonejson__byte_buffer boundary;
+  lonejson__byte_buffer boundary_line;
+  lonejson__byte_buffer closing_boundary_line;
+  lonejson__byte_buffer line;
+  lonejson__byte_buffer body;
+  lonejson_header *headers;
+  size_t header_count;
+  size_t header_cap;
+  size_t headers_alloc_size;
+  char *part_name;
+  size_t part_name_alloc_size;
+  char *content_type;
+  size_t content_type_alloc_size;
+  lonejson_int64 content_length;
+  lonejson_int64 remaining;
+  int saw_cr;
+  int in_part;
+  int closed;
+  lonejson__multipart_phase phase;
+};
+
 typedef union lonejson__alloc_header_align_union {
   void *ptr;
   lonejson_uint64 u64;

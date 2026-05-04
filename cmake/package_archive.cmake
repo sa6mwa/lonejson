@@ -1,5 +1,10 @@
-set(package_root "${LONEJSON_BINARY_DIR}/package/archive")
-file(REMOVE_RECURSE "${package_root}")
+if(NOT DEFINED LONEJSON_RELEASE_VARIANT_SUFFIX)
+  set(LONEJSON_RELEASE_VARIANT_SUFFIX "")
+endif()
+set(archive_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}${LONEJSON_RELEASE_VARIANT_SUFFIX}")
+set(package_stage_root "${LONEJSON_BINARY_DIR}/package/archive")
+set(package_root "${package_stage_root}/${archive_name}")
+file(REMOVE_RECURSE "${package_stage_root}")
 file(MAKE_DIRECTORY "${package_root}/include")
 file(MAKE_DIRECTORY "${package_root}/lib")
 file(MAKE_DIRECTORY "${package_root}/share/doc/liblonejson")
@@ -48,10 +53,7 @@ file(COPY "${LONEJSON_ROOT}/LICENSE" DESTINATION "${package_root}/share/doc/libl
 file(COPY "${LONEJSON_ROOT}/README.md" DESTINATION "${package_root}/share/doc/liblonejson")
 
 file(MAKE_DIRECTORY "${LONEJSON_ROOT}/dist")
-if(NOT DEFINED LONEJSON_RELEASE_VARIANT_SUFFIX)
-  set(LONEJSON_RELEASE_VARIANT_SUFFIX "")
-endif()
-set(archive_base "${LONEJSON_ROOT}/dist/liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}${LONEJSON_RELEASE_VARIANT_SUFFIX}.tar")
+set(archive_base "${LONEJSON_ROOT}/dist/${archive_name}.tar")
 set(archive "${archive_base}.gz")
 
 find_program(LONEJSON_TAR_BIN NAMES tar)
@@ -65,8 +67,8 @@ endif()
 
 file(REMOVE "${archive_base}" "${archive}")
 execute_process(
-  COMMAND "${LONEJSON_TAR_BIN}" -cf "${archive_base}" --format=gnu --owner=0 --group=0 .
-  WORKING_DIRECTORY "${package_root}"
+  COMMAND "${LONEJSON_TAR_BIN}" -cf "${archive_base}" --format=gnu --owner=0 --group=0 "${archive_name}"
+  WORKING_DIRECTORY "${package_stage_root}"
   RESULT_VARIABLE tar_result
 )
 if(NOT tar_result EQUAL 0)

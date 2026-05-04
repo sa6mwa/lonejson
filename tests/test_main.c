@@ -304,6 +304,47 @@ typedef struct test_failing_sink {
   size_t total;
 } test_failing_sink;
 
+typedef struct test_sse_state {
+  size_t count;
+  size_t begin_count;
+  size_t data_count;
+  char event[32];
+  char id[32];
+  char data[256];
+  size_t data_len;
+  unsigned long retry_ms;
+  int has_retry;
+  int fail;
+} test_sse_state;
+
+typedef struct test_sse_json_state {
+  size_t count;
+  char event[32];
+  char id[32];
+  size_t data_len;
+  int invalid;
+} test_sse_json_state;
+
+typedef struct test_multipart_state {
+  size_t begin_count;
+  size_t data_count;
+  size_t end_count;
+  size_t data_chunks[8];
+  char names[4][32];
+  char content_types[4][64];
+  lonejson_int64 lengths[4];
+  char data[512];
+  size_t data_len;
+  const lonejson_allocator_stats *stats;
+  size_t alloc_calls_after_headers;
+  size_t realloc_calls_after_headers;
+  int check_no_body_alloc;
+  int saw_body_alloc;
+  int fail_begin;
+  int fail_data;
+  int fail_end;
+} test_multipart_state;
+
 typedef struct test_visit_state {
   char log[4096];
   size_t len;
@@ -785,6 +826,172 @@ static lonejson_status test_failing_sink_write(void *user, const void *data,
   return LONEJSON_STATUS_OK;
 }
 
+static void test_copy_cstr(char *dst, size_t capacity, const char *src) {
+  size_t len;
+
+  if (capacity == 0u) {
+    return;
+  }
+  if (src == NULL) {
+    dst[0] = '\0';
+    return;
+  }
+  len = strlen(src);
+  if (len >= capacity) {
+    len = capacity - 1u;
+  }
+  memcpy(dst, src, len);
+  dst[len] = '\0';
+}
+
+static lonejson_status test_sse_begin_cb(void *user,
+                                         const lonejson_sse_event *event,
+                                         lonejson_error *error) {
+  test_sse_state *state;
+
+  (void)error;
+  state = (test_sse_state *)user;
+  ++state->begin_count;
+  test_copy_cstr(state->event, sizeof(state->event), event->event);
+  test_copy_cstr(state->id, sizeof(state->id), event->id);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_sse_data_cb(void *user, const void *bytes,
+                                        size_t len, lonejson_error *error) {
+  test_sse_state *state;
+  size_t copy_len;
+
+  state = (test_sse_state *)user;
+  if (state->fail) {
+    (void)error;
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  ++state->data_count;
+  if (state->data_len < sizeof(state->data) - 1u) {
+    copy_len = len;
+    if (copy_len > sizeof(state->data) - 1u - state->data_len) {
+      copy_len = sizeof(state->data) - 1u - state->data_len;
+    }
+    memcpy(state->data + state->data_len, bytes, copy_len);
+    state->data_len += copy_len;
+    state->data[state->data_len] = '\0';
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_sse_end_cb(void *user,
+                                       const lonejson_sse_event *event,
+                                       lonejson_error *error) {
+  test_sse_state *state;
+
+  (void)error;
+  state = (test_sse_state *)user;
+  ++state->count;
+  test_copy_cstr(state->event, sizeof(state->event), event->event);
+  test_copy_cstr(state->id, sizeof(state->id), event->id);
+  state->data_len = event->data_len;
+  state->retry_ms = event->retry_ms;
+  state->has_retry = event->has_retry;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_sse_handler test_sse_handler(void) {
+  lonejson_sse_handler handler;
+  memset(&handler, 0, sizeof(handler));
+  handler.begin_event = test_sse_begin_cb;
+  handler.data_chunk = test_sse_data_cb;
+  handler.end_event = test_sse_end_cb;
+  return handler;
+}
+
+static lonejson_status test_sse_json_event_cb(void *user,
+                                              const lonejson_sse_event *event,
+                                              void *dst,
+                                              lonejson_error *error) {
+  test_sse_json_state *state;
+  test_event *record;
+
+  (void)error;
+  state = (test_sse_json_state *)user;
+  record = (test_event *)dst;
+  if (strcmp(record->id, "evtjsn") != 0 || record->ok != true) {
+    state->invalid = 1;
+  }
+  ++state->count;
+  test_copy_cstr(state->event, sizeof(state->event), event->event);
+  test_copy_cstr(state->id, sizeof(state->id), event->id);
+  state->data_len = event->data_len;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+test_multipart_begin_cb(void *user, const lonejson_multipart_part *part,
+                        lonejson_error *error) {
+  test_multipart_state *state;
+  size_t index;
+
+  (void)error;
+  state = (test_multipart_state *)user;
+  if (state->fail_begin) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  index = state->begin_count;
+  if (index < 4u) {
+    test_copy_cstr(state->names[index], sizeof(state->names[index]),
+                   part->name);
+    test_copy_cstr(state->content_types[index],
+                   sizeof(state->content_types[index]), part->content_type);
+    state->lengths[index] = part->content_length;
+  }
+  ++state->begin_count;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_multipart_data_cb(void *user, const void *bytes,
+                                              size_t len,
+                                              lonejson_error *error) {
+  test_multipart_state *state;
+
+  state = (test_multipart_state *)user;
+  if (state->check_no_body_alloc && state->stats != NULL) {
+    if (state->stats->alloc_calls != state->alloc_calls_after_headers ||
+        state->stats->realloc_calls != state->realloc_calls_after_headers) {
+      state->saw_body_alloc = 1;
+    }
+  }
+  if (state->fail_data) {
+    (void)error;
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (state->data_len + len < sizeof(state->data)) {
+    memcpy(state->data + state->data_len, bytes, len);
+    state->data_len += len;
+    state->data[state->data_len] = '\0';
+  }
+  if (state->data_count < sizeof(state->data_chunks) /
+                              sizeof(state->data_chunks[0])) {
+    state->data_chunks[state->data_count] = len;
+  }
+  ++state->data_count;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+test_multipart_end_cb(void *user, const lonejson_multipart_part *part,
+                      lonejson_error *error) {
+  test_multipart_state *state;
+
+  (void)part;
+  (void)error;
+  state = (test_multipart_state *)user;
+  if (state->fail_end) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  ++state->end_count;
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status test_visit_append(test_visit_state *state,
                                          const char *text) {
   size_t len = strlen(text);
@@ -1150,6 +1357,693 @@ static void poison_bytes(void *ptr, size_t len, unsigned char value) {
   for (i = 0; i < len; ++i) {
     bytes[i] = value;
   }
+}
+
+static void test_sse_incremental_events_and_json_selection(void) {
+  const char *chunks[] = {
+      "id: abc\r",     "event: update\r\n", ": ignored\n", "retry: 1500\n",
+      "data: first\r", "data: second\n",    "\n"};
+  const char *json_chunks[] = {
+      "event: keep\nid: j1\ndata: {\"id\":\"evtjsn\",\"ok\":true}\n\n",
+      "event: skip\ndata: {\"id\":\"bad\",\"ok\":false}\n\n"};
+  const char *selected[] = {"keep"};
+  lonejson_sse_json_options json_options;
+  test_sse_state state;
+  test_sse_json_state json_state;
+  lonejson_sse_handler handler;
+  lonejson_sse *sse;
+  test_event event;
+  lonejson_error error;
+  lonejson_status status;
+  size_t i;
+
+  memset(&state, 0, sizeof(state));
+  handler = test_sse_handler();
+  sse = lonejson_sse_open(NULL, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  for (i = 0u; i < sizeof(chunks) / sizeof(chunks[0]); ++i) {
+    status = lonejson_sse_push(sse, chunks[i], strlen(chunks[i]), &handler,
+                               &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+  }
+  status = lonejson_sse_finish(sse, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.count == 1u);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.data_count == 3u);
+  EXPECT(strcmp(state.event, "update") == 0);
+  EXPECT(strcmp(state.id, "abc") == 0);
+  EXPECT(strcmp(state.data, "first\nsecond") == 0);
+  EXPECT(state.data_len == strlen("first\nsecond"));
+  EXPECT(state.has_retry);
+  EXPECT(state.retry_ms == 1500u);
+  lonejson_sse_close(sse);
+
+  memset(&json_state, 0, sizeof(json_state));
+  memset(&event, 0, sizeof(event));
+  json_options.event_names = selected;
+  json_options.event_name_count = 1u;
+  json_options.parse_options = NULL;
+  sse = lonejson_sse_open(NULL, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  for (i = 0u; i < sizeof(json_chunks) / sizeof(json_chunks[0]); ++i) {
+    status = lonejson_sse_push_json(
+        sse, &test_event_map, &event, json_chunks[i], strlen(json_chunks[i]),
+        &json_options, test_sse_json_event_cb, &json_state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+  }
+  status =
+      lonejson_sse_finish_json(sse, &test_event_map, &event, &json_options,
+                               test_sse_json_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(json_state.count == 1u);
+  EXPECT(json_state.invalid == 0);
+  EXPECT(strcmp(json_state.event, "keep") == 0);
+  EXPECT(strcmp(json_state.id, "j1") == 0);
+  EXPECT(json_state.data_len == strlen("{\"id\":\"evtjsn\",\"ok\":true}"));
+  lonejson_sse_close(sse);
+}
+
+static void test_sse_json_streams_data_without_event_buffering(void) {
+  static const char chunk0[] = "event: keep\nid: j2\ndata: {\"id\":\"";
+  static const char chunk1[] = "evtjsn\",\n";
+  static const char chunk2[] = "data: \"ok\":true}\n\n";
+  static const char late_event[] =
+      "data: {\"id\":\"evtjsn\",\"ok\":true}\nevent: keep\n\n";
+  const char *empty_selected[] = {""};
+  const char *selected[] = {"keep"};
+  lonejson_sse_options sse_options;
+  lonejson_sse_json_options json_options;
+  test_sse_json_state json_state;
+  test_event event;
+  lonejson_sse *sse;
+  lonejson_error error;
+  lonejson_status status;
+
+  json_options.event_names = selected;
+  json_options.event_name_count = 1u;
+  json_options.parse_options = NULL;
+  sse_options = lonejson_default_sse_options();
+  sse_options.max_event_data_bytes = 4u;
+
+  memset(&json_state, 0, sizeof(json_state));
+  memset(&event, 0, sizeof(event));
+  sse = lonejson_sse_open(&sse_options, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, chunk0, sizeof(chunk0) - 1u,
+      &json_options, test_sse_json_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, chunk1, sizeof(chunk1) - 1u,
+      &json_options, test_sse_json_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, chunk2, sizeof(chunk2) - 1u,
+      &json_options, test_sse_json_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status =
+      lonejson_sse_finish_json(sse, &test_event_map, &event, &json_options,
+                               test_sse_json_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(json_state.count == 1u);
+  EXPECT(json_state.invalid == 0);
+  EXPECT(strcmp(json_state.event, "keep") == 0);
+  EXPECT(strcmp(json_state.id, "j2") == 0);
+  EXPECT(json_state.data_len == strlen("{\"id\":\"evtjsn\",\n\"ok\":true}"));
+  lonejson_sse_close(sse);
+
+  memset(&json_state, 0, sizeof(json_state));
+  memset(&event, 0, sizeof(event));
+  json_options.event_names = empty_selected;
+  sse = lonejson_sse_open(NULL, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, late_event, sizeof(late_event) - 1u,
+      &json_options, test_sse_json_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  lonejson_sse_close(sse);
+}
+
+static void test_sse_callback_failure_status(void) {
+  test_sse_state state;
+  lonejson_sse_handler handler;
+  lonejson_sse *sse;
+  lonejson_error error;
+  lonejson_status status;
+  static const char event[] = "data: x\n\n";
+
+  memset(&state, 0, sizeof(state));
+  handler = test_sse_handler();
+  state.fail = 1;
+  sse = lonejson_sse_open(NULL, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push(sse, event, sizeof(event) - 1u, &handler, &state,
+                             &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  lonejson_sse_close(sse);
+}
+
+static void test_sse_limits_and_allocation_contract(void) {
+  static const char event[] = "data: hello\n\n";
+  lonejson_sse_options options;
+  lonejson_allocator partial_allocator;
+  test_allocator_state alloc;
+  test_sse_state state;
+  lonejson_sse_handler handler;
+  lonejson_sse *sse;
+  lonejson_error error;
+  lonejson_status status;
+  size_t alloc_calls_after_open;
+  size_t realloc_calls_after_open;
+
+  memset(&partial_allocator, 0, sizeof(partial_allocator));
+  partial_allocator.malloc_fn = test_allocator_malloc;
+  options = lonejson_default_sse_options();
+  options.allocator = &partial_allocator;
+  sse = lonejson_sse_open(&options, &error);
+  EXPECT(sse == NULL);
+  EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  test_allocator_init(&alloc);
+  options = lonejson_default_sse_options();
+  options.allocator = &alloc.allocator;
+  sse = lonejson_sse_open(&options, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push(sse, ": warmup\n", strlen(": warmup\n"), NULL,
+                             NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  alloc_calls_after_open = alloc.stats.alloc_calls;
+  realloc_calls_after_open = alloc.stats.realloc_calls;
+  memset(&state, 0, sizeof(state));
+  handler = test_sse_handler();
+  status = lonejson_sse_push(sse, event, sizeof(event) - 1u, &handler, &state,
+                             &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.count == 1u);
+  EXPECT(alloc.stats.alloc_calls == alloc_calls_after_open);
+  EXPECT(alloc.stats.realloc_calls == realloc_calls_after_open);
+  status = lonejson_sse_finish(sse, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push(sse, event, sizeof(event) - 1u, &handler, &state,
+                             &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  lonejson_sse_close(sse);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_sse_limits_and_invalid_usage(void) {
+  lonejson_sse_options options;
+  lonejson_sse *sse;
+  test_sse_state state;
+  lonejson_sse_handler handler;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&state, 0, sizeof(state));
+  handler = test_sse_handler();
+  options = lonejson_default_sse_options();
+  options.max_line_bytes = 4u;
+  sse = lonejson_sse_open(&options, &error);
+  EXPECT(sse != NULL);
+  if (sse != NULL) {
+    status = lonejson_sse_push(sse, "data: abc\n", strlen("data: abc\n"),
+                               &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    EXPECT(error.code == LONEJSON_STATUS_OVERFLOW);
+    lonejson_sse_close(sse);
+  }
+
+  options = lonejson_default_sse_options();
+  options.max_event_data_bytes = 3u;
+  sse = lonejson_sse_open(&options, &error);
+  EXPECT(sse != NULL);
+  if (sse != NULL) {
+    status = lonejson_sse_push(sse, "data: abcd\n\n", strlen("data: abcd\n\n"),
+                               &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    EXPECT(error.code == LONEJSON_STATUS_OVERFLOW);
+    lonejson_sse_close(sse);
+  }
+
+  status = lonejson_sse_push(NULL, "", 0u, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  options = lonejson_default_sse_options();
+  sse = lonejson_sse_open(&options, &error);
+  EXPECT(sse != NULL);
+  if (sse != NULL) {
+    status = lonejson_sse_push(sse, NULL, 1u, &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+    lonejson_sse_close(sse);
+  }
+}
+
+static void test_multipart_incremental_parts_and_raw_payloads(void) {
+  static const char payload[] = "raw\r\n--abc\r\nbytes\npayload";
+  static const char prefix[] =
+      "--abc\r\n"
+      "Content-Disposition: form-data; name=\"meta\"\r\n"
+      "Content-Type: application/json\r\n"
+      "\r\n"
+      "{\"ok\":true}\r\n"
+      "--abc\r\n"
+      "Content-Disposition: form-data; name=\"payload\"\r\n"
+      "Content-Type: application/octet-stream\r\n"
+      "Content-Length: 25\r\n"
+      "\r\n";
+  static const char suffix[] = "\r\n--abc--\r\n";
+  lonejson_multipart_handler handler;
+  test_multipart_state state;
+  lonejson_multipart *mp;
+  lonejson_error error;
+  lonejson_status status;
+  size_t i;
+
+  memset(&handler, 0, sizeof(handler));
+  handler.begin_part = test_multipart_begin_cb;
+  handler.part_data = test_multipart_data_cb;
+  handler.end_part = test_multipart_end_cb;
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("Multipart/Related; boundary = \"abc\"", NULL,
+                               &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  for (i = 0u; i < sizeof(prefix) - 1u; ++i) {
+    status =
+        lonejson_multipart_push(mp, prefix + i, 1u, &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+  }
+  for (i = 0u; i < sizeof(payload) - 1u; ++i) {
+    status =
+        lonejson_multipart_push(mp, payload + i, 1u, &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+  }
+  for (i = 0u; i < sizeof(suffix) - 1u; ++i) {
+    status =
+        lonejson_multipart_push(mp, suffix + i, 1u, &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+  }
+  status = lonejson_multipart_finish(mp, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 2u);
+  EXPECT(state.end_count == 2u);
+  EXPECT(strcmp(state.names[0], "meta") == 0);
+  EXPECT(strcmp(state.content_types[0], "application/json") == 0);
+  EXPECT(state.lengths[0] == -1);
+  EXPECT(strcmp(state.names[1], "payload") == 0);
+  EXPECT(strcmp(state.content_types[1], "application/octet-stream") == 0);
+  EXPECT(state.lengths[1] == 25);
+  EXPECT(strcmp(state.data, "{\"ok\":true}raw\r\n--abc\r\nbytes\npayload") ==
+         0);
+  lonejson_multipart_close(mp);
+}
+
+static void test_multipart_no_length_preserves_body_bytes(void) {
+  static const char body[] = "--b\n"
+                             "Content-Disposition: form-data; name=text\n"
+                             "\n"
+                             "line1\r\nline2\n"
+                             "--b--\n";
+  lonejson_multipart_handler handler;
+  test_multipart_state state;
+  lonejson_multipart *mp;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&handler, 0, sizeof(handler));
+  handler.begin_part = test_multipart_begin_cb;
+  handler.part_data = test_multipart_data_cb;
+  handler.end_part = test_multipart_end_cb;
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=b", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  status = lonejson_multipart_push(mp, body, sizeof(body) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_finish(mp, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 1u);
+  EXPECT(strcmp(state.names[0], "text") == 0);
+  EXPECT(strcmp(state.data, "line1\r\nline2") == 0);
+  lonejson_multipart_close(mp);
+}
+
+static void test_multipart_no_length_streams_long_lines_with_lookahead(void) {
+  static const char prefix[] = "--x\r\n\r\n";
+  static const char chunk0[] = "aaaaaaaaaaaaaaaa";
+  static const char chunk1[] = "bbbbbbbbbbbbbbbb";
+  static const char chunk2[] = "cccccccccccccccc";
+  static const char suffix[] = "\r\n--x--\r\n";
+  static const char false_boundary_body[] = "--xnot-a-delimiter";
+  lonejson_multipart_options options;
+  lonejson_multipart_handler handler;
+  test_multipart_state state;
+  lonejson_multipart *mp;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&handler, 0, sizeof(handler));
+  handler.begin_part = test_multipart_begin_cb;
+  handler.part_data = test_multipart_data_cb;
+  handler.end_part = test_multipart_end_cb;
+  options = lonejson_default_multipart_options();
+  options.max_part_buffered_bytes = 9u;
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", &options, &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  status = lonejson_multipart_push(mp, prefix, sizeof(prefix) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_push(mp, chunk0, sizeof(chunk0) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_push(mp, chunk1, sizeof(chunk1) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_push(mp, chunk2, sizeof(chunk2) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.data_len == strlen(chunk0) + strlen(chunk1) + strlen(chunk2));
+  EXPECT(strcmp(state.data,
+                "aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbcccccccccccccccc") == 0);
+  status = lonejson_multipart_push(mp, suffix, sizeof(suffix) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_finish(mp, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 1u);
+  lonejson_multipart_close(mp);
+
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", &options, &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  status = lonejson_multipart_push(mp, prefix, sizeof(prefix) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_push(mp, false_boundary_body,
+                                   sizeof(false_boundary_body) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(state.data, false_boundary_body) == 0);
+  status = lonejson_multipart_push(mp, suffix, sizeof(suffix) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_finish(mp, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.end_count == 1u);
+  lonejson_multipart_close(mp);
+}
+
+static void
+test_multipart_content_length_streams_body_without_body_allocations(void) {
+  static const char prefix[] =
+      "--stream\r\n"
+      "Content-Disposition: form-data; name=\"payload\"\r\n"
+      "Content-Type: application/octet-stream\r\n"
+      "Content-Length: 17\r\n"
+      "\r\n";
+  static const char chunk0[] = "abc";
+  static const char chunk1[] = "defgh";
+  static const char chunk2[] = "ijklmnopq";
+  static const char suffix[] = "\r\n--stream--\r\n";
+  lonejson_multipart_options options;
+  lonejson_multipart_handler handler;
+  test_allocator_state alloc;
+  test_multipart_state state;
+  lonejson_multipart *mp;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&handler, 0, sizeof(handler));
+  handler.begin_part = test_multipart_begin_cb;
+  handler.part_data = test_multipart_data_cb;
+  handler.end_part = test_multipart_end_cb;
+  test_allocator_init(&alloc);
+  options = lonejson_default_multipart_options();
+  options.allocator = &alloc.allocator;
+  memset(&state, 0, sizeof(state));
+  state.stats = &alloc.stats;
+  mp = lonejson_multipart_open("multipart/form-data; boundary=stream",
+                               &options, &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  status = lonejson_multipart_push(mp, prefix, sizeof(prefix) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.data_count == 0u);
+  state.alloc_calls_after_headers = alloc.stats.alloc_calls;
+  state.realloc_calls_after_headers = alloc.stats.realloc_calls;
+  state.check_no_body_alloc = 1;
+
+  status = lonejson_multipart_push(mp, chunk0, sizeof(chunk0) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_push(mp, chunk1, sizeof(chunk1) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_push(mp, chunk2, sizeof(chunk2) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(alloc.stats.alloc_calls == state.alloc_calls_after_headers);
+  EXPECT(alloc.stats.realloc_calls == state.realloc_calls_after_headers);
+  EXPECT(state.saw_body_alloc == 0);
+  EXPECT(state.data_count == 3u);
+  EXPECT(state.data_chunks[0] == sizeof(chunk0) - 1u);
+  EXPECT(state.data_chunks[1] == sizeof(chunk1) - 1u);
+  EXPECT(state.data_chunks[2] == sizeof(chunk2) - 1u);
+  EXPECT(strcmp(state.data, "abcdefghijklmnopq") == 0);
+  state.check_no_body_alloc = 0;
+
+  status = lonejson_multipart_push(mp, suffix, sizeof(suffix) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_finish(mp, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.end_count == 1u);
+  EXPECT(strcmp(state.names[0], "payload") == 0);
+  EXPECT(strcmp(state.content_types[0], "application/octet-stream") == 0);
+  EXPECT(state.lengths[0] == 17);
+  lonejson_multipart_close(mp);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_multipart_limits_and_invalid_usage(void) {
+  static const char invalid_header[] = "--x\nnot-a-header\n\nvalue\n--x--\n";
+  static const char too_many_headers[] = "--x\nA: 1\nB: 2\n\nvalue\n--x--\n";
+  static const char bad_length[] =
+      "--x\nContent-Length: 12x\n\nvalue\n--x--\n";
+  static const char huge_length[] =
+      "--x\nContent-Length: 999999999999999999999999999999\n\nvalue\n--x--\n";
+  static const char too_small_boundary_lookahead[] = "--x\n\n--x--\n";
+  lonejson_multipart_options options;
+  lonejson_multipart_handler handler;
+  lonejson_allocator partial_allocator;
+  test_multipart_state state;
+  lonejson_multipart *mp;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&handler, 0, sizeof(handler));
+  handler.begin_part = test_multipart_begin_cb;
+  handler.part_data = test_multipart_data_cb;
+  handler.end_part = test_multipart_end_cb;
+  memset(&partial_allocator, 0, sizeof(partial_allocator));
+  partial_allocator.malloc_fn = test_allocator_malloc;
+  options = lonejson_default_multipart_options();
+  options.allocator = &partial_allocator;
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", &options, &error);
+  EXPECT(mp == NULL);
+  EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  mp = lonejson_multipart_open("multipart/mixed", NULL, &error);
+  EXPECT(mp == NULL);
+  EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+  mp = lonejson_multipart_open("multipart/mixed; boundary=\"unterminated", NULL,
+                               &error);
+  EXPECT(mp == NULL);
+  EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  options = lonejson_default_multipart_options();
+  options.max_boundary_bytes = 3u;
+  mp = lonejson_multipart_open("multipart/mixed; boundary=abcd", &options,
+                               &error);
+  EXPECT(mp == NULL);
+  EXPECT(error.code == LONEJSON_STATUS_OVERFLOW);
+
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp != NULL) {
+    status = lonejson_multipart_push(mp, invalid_header,
+                                     sizeof(invalid_header) - 1u, &handler,
+                                     &state, &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
+    lonejson_multipart_close(mp);
+  }
+
+  options = lonejson_default_multipart_options();
+  options.max_header_count = 1u;
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", &options, &error);
+  EXPECT(mp != NULL);
+  if (mp != NULL) {
+    status = lonejson_multipart_push(mp, too_many_headers,
+                                     sizeof(too_many_headers) - 1u, &handler,
+                                     &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    lonejson_multipart_close(mp);
+  }
+
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp != NULL) {
+    status = lonejson_multipart_push(mp, bad_length, sizeof(bad_length) - 1u,
+                                     &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
+    lonejson_multipart_close(mp);
+  }
+
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp != NULL) {
+    status = lonejson_multipart_push(mp, huge_length, sizeof(huge_length) - 1u,
+                                     &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    lonejson_multipart_close(mp);
+  }
+
+  options = lonejson_default_multipart_options();
+  options.max_part_buffered_bytes = 4u;
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", &options, &error);
+  EXPECT(mp != NULL);
+  if (mp != NULL) {
+    status = lonejson_multipart_push(
+        mp, too_small_boundary_lookahead,
+        sizeof(too_small_boundary_lookahead) - 1u, &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    lonejson_multipart_close(mp);
+  }
+
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp != NULL) {
+    status = lonejson_multipart_push(mp, "--x--\n", strlen("--x--\n"),
+                                     &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    status = lonejson_multipart_finish(mp, &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    status = lonejson_multipart_push(mp, "--x--\n", strlen("--x--\n"),
+                                     &handler, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+    lonejson_multipart_close(mp);
+  }
+}
+
+static void test_multipart_failures_are_reported(void) {
+  static const char incomplete[] = "--x\nContent-Type: text/plain\n\nvalue\n";
+  static const char with_data[] =
+      "--x\nContent-Type: text/plain\nContent-Length: 5\n\nvalue\n--x--\n";
+  static const char empty_part[] = "--x\nContent-Type: text/plain\n\n\n--x--\n";
+  lonejson_multipart_handler handler;
+  test_multipart_state state;
+  lonejson_multipart *mp;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&handler, 0, sizeof(handler));
+  handler.begin_part = test_multipart_begin_cb;
+  handler.part_data = test_multipart_data_cb;
+  handler.end_part = test_multipart_end_cb;
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  status = lonejson_multipart_push(mp, incomplete, sizeof(incomplete) - 1u,
+                                   &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_finish(mp, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
+  lonejson_multipart_close(mp);
+
+  memset(&state, 0, sizeof(state));
+  state.fail_data = 1;
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  status = lonejson_multipart_push(mp, with_data, sizeof(with_data) - 1u,
+                                   &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  lonejson_multipart_close(mp);
+
+  memset(&state, 0, sizeof(state));
+  state.fail_begin = 1;
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  status = lonejson_multipart_push(mp, empty_part, sizeof(empty_part) - 1u,
+                                   &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  lonejson_multipart_close(mp);
+
+  memset(&state, 0, sizeof(state));
+  state.fail_end = 1;
+  mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  status = lonejson_multipart_push(mp, empty_part, sizeof(empty_part) - 1u,
+                                   &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  lonejson_multipart_close(mp);
 }
 
 static void test_parse_implicit_destination_reset(void) {
@@ -5186,6 +6080,17 @@ int main(void) {
   test_stream_reuses_and_changes_destination();
   test_file_and_buffer_helpers();
   test_jsonl_helpers();
+  test_sse_incremental_events_and_json_selection();
+  test_sse_json_streams_data_without_event_buffering();
+  test_sse_callback_failure_status();
+  test_sse_limits_and_allocation_contract();
+  test_sse_limits_and_invalid_usage();
+  test_multipart_incremental_parts_and_raw_payloads();
+  test_multipart_no_length_preserves_body_bytes();
+  test_multipart_no_length_streams_long_lines_with_lookahead();
+  test_multipart_content_length_streams_body_without_body_allocations();
+  test_multipart_limits_and_invalid_usage();
+  test_multipart_failures_are_reported();
   test_fixed_capacity_object_array();
   test_dynamic_object_array_alignment();
   test_formatting_variants_and_roundtrip();

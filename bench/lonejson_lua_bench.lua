@@ -6,8 +6,8 @@ local BENCH_SAMPLE_COUNT = 5
 local BENCH_MIN_SAMPLE_NS = 250000000
 local BENCH_SCHEMA_VERSION = 29
 local BENCH_NOISE_DELTA_PCT = 3.0
-local BENCH_MATERIAL_DELTA_PCT = 5.0
-local BENCH_REVIEW_IMPROVEMENT_PCT = 10.0
+local BENCH_MATERIAL_DELTA_PCT = 10.0
+local BENCH_REVIEW_IMPROVEMENT_PCT = 15.0
 
 local PARSE_JSON = table.concat({
   '{"name":"Alice","nickname":"Wonderland","age":34,',

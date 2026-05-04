@@ -803,6 +803,10 @@ typedef struct lonejson_field lonejson_field;
 typedef struct lonejson_map lonejson_map;
 /** Opaque object-framed JSON stream parser state. */
 typedef struct lonejson_stream lonejson_stream;
+/** Opaque incremental Server-Sent Events parser state. */
+typedef struct lonejson_sse lonejson_sse;
+/** Opaque incremental MIME multipart parser state. */
+typedef struct lonejson_multipart lonejson_multipart;
 /** Pull-style JSON generator state. */
 typedef struct lonejson_generator lonejson_generator;
 
@@ -903,6 +907,123 @@ typedef lonejson_read_result (*lonejson_reader_fn)(void *user,
 /** Generic sink callback used by serializer APIs and raw spool writers. */
 typedef lonejson_status (*lonejson_sink_fn)(void *user, const void *data,
                                             size_t len, lonejson_error *error);
+
+/** Header name/value pair exposed while processing multipart part headers.
+ * Pointers are valid only for the duration of the callback currently using
+ * them.
+ */
+typedef struct lonejson_header {
+  char *name;
+  char *value;
+} lonejson_header;
+
+/** Limits and allocator selection for incremental SSE parsing. Zero limit
+ * fields use the library defaults. `lonejson_sse_push` streams `data:` field
+ * bytes to the caller as lines arrive; `lonejson_sse_push_json` streams
+ * selected `data:` fields into the JSON parser as lines arrive.
+ */
+typedef struct lonejson_sse_options {
+  /** Maximum bytes accepted in one physical SSE line. Default: 64 KiB. */
+  size_t max_line_bytes;
+  /** Maximum concatenated `data:` bytes accepted for one plain SSE event.
+   * Default: 1 MiB. `lonejson_sse_push` counts these bytes while streaming
+   * them instead of retaining the complete event body. */
+  size_t max_event_data_bytes;
+  /** Maximum aggregate metadata bytes retained by the parser. Default: 1 MiB.
+   */
+  size_t max_buffered_bytes;
+  /** Optional allocator used for parser-owned buffers. */
+  const lonejson_allocator *allocator;
+} lonejson_sse_options;
+
+/** Metadata for one Server-Sent Event. Field pointers are valid only during
+ * the callback currently receiving them. `data_len` is the number of streamed
+ * data bytes for the event, including SSE-inserted newlines between multiple
+ * `data:` fields.
+ */
+typedef struct lonejson_sse_event {
+  const char *event;
+  const char *id;
+  size_t data_len;
+  unsigned long retry_ms;
+  int has_retry;
+} lonejson_sse_event;
+
+/** Streaming callbacks for `lonejson_sse_push`. `begin_event` is called before
+ * the first data chunk, or at dispatch for metadata-only events; its metadata
+ * reflects fields parsed so far. `end_event` receives the final metadata for
+ * the dispatched event.
+ */
+typedef struct lonejson_sse_handler {
+  lonejson_status (*begin_event)(void *user,
+                                 const lonejson_sse_event *event,
+                                 lonejson_error *error);
+  lonejson_status (*data_chunk)(void *user, const void *bytes, size_t len,
+                                lonejson_error *error);
+  lonejson_status (*end_event)(void *user,
+                               const lonejson_sse_event *event,
+                               lonejson_error *error);
+} lonejson_sse_handler;
+
+/** Controls JSON decoding for SSE events. When `event_names` is non-NULL and
+ * `event_name_count` is non-zero, only matching event names are decoded.
+ * Events without an explicit SSE `event:` field match the empty string. For
+ * filtered streaming, the `event:` field must arrive before the first `data:`
+ * field in that event.
+ */
+typedef struct lonejson_sse_json_options {
+  const char *const *event_names;
+  size_t event_name_count;
+  const lonejson_parse_options *parse_options;
+} lonejson_sse_json_options;
+
+/** Called after a selected SSE event's streamed JSON data has been decoded.
+ * `event->data_len` is the number of JSON data bytes streamed to the parser,
+ * including SSE-inserted newlines between multiple `data:` fields.
+ */
+typedef lonejson_status (*lonejson_sse_json_event_fn)(
+    void *user, const lonejson_sse_event *event, void *dst,
+    lonejson_error *error);
+
+/** Limits and allocator selection for incremental multipart parsing. Zero
+ * limit fields use the library defaults. Parts with `Content-Length` stream
+ * body bytes directly to `part_data` after headers are parsed; parts without
+ * `Content-Length` stream body bytes while retaining only bounded boundary
+ * lookahead.
+ */
+typedef struct lonejson_multipart_options {
+  /** Maximum accepted boundary length. Default: 200 bytes. */
+  size_t max_boundary_bytes;
+  /** Maximum bytes accepted in one header line. Default: 64 KiB. */
+  size_t max_header_line_bytes;
+  /** Maximum number of headers retained for one part. Default: 64. */
+  size_t max_header_count;
+  /** Maximum bytes buffered for one part without Content-Length. Default: 1
+   * MiB. */
+  size_t max_part_buffered_bytes;
+  /** Optional allocator used for parser-owned buffers. */
+  const lonejson_allocator *allocator;
+} lonejson_multipart_options;
+
+/** Metadata for the current multipart part. Pointers are valid only for the
+ * callback currently using them.
+ */
+typedef struct lonejson_multipart_part {
+  const char *name;
+  const char *content_type;
+  lonejson_int64 content_length;
+  const lonejson_header *headers;
+  size_t header_count;
+} lonejson_multipart_part;
+
+typedef struct lonejson_multipart_handler {
+  lonejson_status (*begin_part)(void *user, const lonejson_multipart_part *part,
+                                lonejson_error *error);
+  lonejson_status (*part_data)(void *user, const void *bytes, size_t len,
+                               lonejson_error *error);
+  lonejson_status (*end_part)(void *user, const lonejson_multipart_part *part,
+                              lonejson_error *error);
+} lonejson_multipart_handler;
 
 /** Controls how a `lonejson_json_value` field receives inbound parsed JSON.
  * Parse is stream-first by default; callers must deliberately choose one of
@@ -2102,6 +2223,65 @@ const lonejson_error *lonejson_stream_error(const lonejson_stream *stream);
 /** Closes a stream and releases resources it owns. */
 void lonejson_stream_close(lonejson_stream *stream);
 
+/** Returns the default SSE parser options. */
+lonejson_sse_options lonejson_default_sse_options(void);
+/** Opens an incremental Server-Sent Events parser. */
+lonejson_sse *lonejson_sse_open(const lonejson_sse_options *options,
+                                lonejson_error *error);
+/** Pushes arbitrary SSE bytes and streams zero or more event payload chunks. */
+lonejson_status lonejson_sse_push(lonejson_sse *sse, const void *bytes,
+                                  size_t len,
+                                  const lonejson_sse_handler *handler,
+                                  void *user, lonejson_error *error);
+/** Finishes an SSE stream, dispatching a trailing unterminated event when one
+ * is in progress.
+ */
+lonejson_status lonejson_sse_finish(lonejson_sse *sse,
+                                    const lonejson_sse_handler *handler,
+                                    void *user,
+                                    lonejson_error *error);
+/** Pushes SSE bytes, decodes selected event data as JSON, and calls `event_cb`
+ * after each decoded JSON event.
+ */
+lonejson_status lonejson_sse_push_json(lonejson_sse *sse,
+                                       const lonejson_map *map, void *dst,
+                                       const void *bytes, size_t len,
+                                       const lonejson_sse_json_options *options,
+                                       lonejson_sse_json_event_fn event_cb,
+                                       void *user, lonejson_error *error);
+/** Finishes an SSE JSON stream. */
+lonejson_status
+lonejson_sse_finish_json(lonejson_sse *sse, const lonejson_map *map, void *dst,
+                         const lonejson_sse_json_options *options,
+                         lonejson_sse_json_event_fn event_cb, void *user,
+                         lonejson_error *error);
+/** Releases an SSE parser. */
+void lonejson_sse_close(lonejson_sse *sse);
+
+/** Returns the default multipart parser options. */
+lonejson_multipart_options lonejson_default_multipart_options(void);
+/** Opens an incremental MIME multipart parser from a Content-Type value that
+ * contains a `boundary=` parameter.
+ */
+lonejson_multipart *
+lonejson_multipart_open(const char *content_type,
+                        const lonejson_multipart_options *options,
+                        lonejson_error *error);
+/** Pushes arbitrary multipart bytes and emits part lifecycle callbacks. */
+lonejson_status
+lonejson_multipart_push(lonejson_multipart *multipart, const void *bytes,
+                        size_t len, const lonejson_multipart_handler *handler,
+                        void *user, lonejson_error *error);
+/** Finishes a multipart stream and fails if the closing boundary was not
+ * observed.
+ */
+lonejson_status
+lonejson_multipart_finish(lonejson_multipart *multipart,
+                          const lonejson_multipart_handler *handler, void *user,
+                          lonejson_error *error);
+/** Releases a multipart parser. */
+void lonejson_multipart_close(lonejson_multipart *multipart);
+
 /** Parses a JSON buffer into a mapped struct. */
 lonejson_status lonejson_parse_buffer(const lonejson_map *map, void *dst,
                                       const void *data, size_t len,
@@ -2571,6 +2751,10 @@ typedef lonejson_field lj_field;
 typedef lonejson_map lj_map;
 /** Incremental parser for object-framed JSON streams. */
 typedef lonejson_stream lj_stream;
+/** Incremental Server-Sent Events parser. */
+typedef lonejson_sse lj_sse;
+/** Incremental MIME multipart parser. */
+typedef lonejson_multipart lj_multipart;
 /** Options that customize parsing behavior. */
 typedef lonejson_parse_options lj_parse_options;
 /** Result of reading bytes from a caller-supplied reader callback. */
@@ -2581,6 +2765,24 @@ typedef lonejson_reader_fn lj_reader_fn;
 typedef lonejson_write_options lj_write_options;
 /** Sink callback that receives serialized JSON bytes. */
 typedef lonejson_sink_fn lj_sink_fn;
+/** Header name/value pair exposed by multipart callbacks. */
+typedef lonejson_header lj_header;
+/** Options for incremental SSE parsing. */
+typedef lonejson_sse_options lj_sse_options;
+/** Metadata for one parsed Server-Sent Event. */
+typedef lonejson_sse_event lj_sse_event;
+/** Streaming callbacks for SSE event data. */
+typedef lonejson_sse_handler lj_sse_handler;
+/** Options for SSE event JSON decoding. */
+typedef lonejson_sse_json_options lj_sse_json_options;
+/** SSE JSON event callback. */
+typedef lonejson_sse_json_event_fn lj_sse_json_event_fn;
+/** Options for incremental multipart parsing. */
+typedef lonejson_multipart_options lj_multipart_options;
+/** Metadata for one multipart part. */
+typedef lonejson_multipart_part lj_multipart_part;
+/** Multipart lifecycle callbacks. */
+typedef lonejson_multipart_handler lj_multipart_handler;
 /** Result returned when advancing an object-framed JSON stream. */
 typedef lonejson_stream_result lj_stream_result;
 
@@ -2848,6 +3050,76 @@ lj_stream_error(const lj_stream *stream) {
 /** Closes a stream parser and releases its resources. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_stream_close(lj_stream *stream) {
   lonejson_stream_close(stream);
+}
+/** Returns the default SSE parser options. */
+LONEJSON_SHORT_ALIAS_INLINE lj_sse_options lj_default_sse_options(void) {
+  return lonejson_default_sse_options();
+}
+/** Opens an incremental Server-Sent Events parser. */
+LONEJSON_SHORT_ALIAS_INLINE lj_sse *lj_sse_open(const lj_sse_options *options,
+                                                lj_error *error) {
+  return lonejson_sse_open(options, error);
+}
+/** Pushes arbitrary SSE bytes and streams event payload chunks. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_sse_push(lj_sse *sse,
+                                                  const void *bytes, size_t len,
+                                                  const lj_sse_handler *handler,
+                                                  void *user, lj_error *error) {
+  return lonejson_sse_push(sse, bytes, len, handler, user, error);
+}
+/** Finishes an SSE stream. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_sse_finish(lj_sse *sse,
+                                                    const lj_sse_handler *handler,
+                                                    void *user,
+                                                    lj_error *error) {
+  return lonejson_sse_finish(sse, handler, user, error);
+}
+/** Pushes SSE bytes and decodes selected event data as JSON. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_sse_push_json(lj_sse *sse, const lj_map *map, void *dst, const void *bytes,
+                 size_t len, const lj_sse_json_options *options,
+                 lj_sse_json_event_fn event_cb, void *user, lj_error *error) {
+  return lonejson_sse_push_json(sse, map, dst, bytes, len, options, event_cb,
+                                user, error);
+}
+/** Finishes an SSE JSON stream. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_sse_finish_json(lj_sse *sse, const lj_map *map, void *dst,
+                   const lj_sse_json_options *options,
+                   lj_sse_json_event_fn event_cb, void *user, lj_error *error) {
+  return lonejson_sse_finish_json(sse, map, dst, options, event_cb, user,
+                                  error);
+}
+/** Releases an SSE parser. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_sse_close(lj_sse *sse) {
+  lonejson_sse_close(sse);
+}
+/** Returns the default multipart parser options. */
+LONEJSON_SHORT_ALIAS_INLINE lj_multipart_options
+lj_default_multipart_options(void) {
+  return lonejson_default_multipart_options();
+}
+/** Opens an incremental MIME multipart parser. */
+LONEJSON_SHORT_ALIAS_INLINE lj_multipart *
+lj_multipart_open(const char *content_type, const lj_multipart_options *options,
+                  lj_error *error) {
+  return lonejson_multipart_open(content_type, options, error);
+}
+/** Pushes arbitrary multipart bytes and emits part lifecycle callbacks. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_multipart_push(
+    lj_multipart *multipart, const void *bytes, size_t len,
+    const lj_multipart_handler *handler, void *user, lj_error *error) {
+  return lonejson_multipart_push(multipart, bytes, len, handler, user, error);
+}
+/** Finishes a multipart stream. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_multipart_finish(
+    lj_multipart *multipart, const lj_multipart_handler *handler, void *user,
+    lj_error *error) {
+  return lonejson_multipart_finish(multipart, handler, user, error);
+}
+/** Releases a multipart parser. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_multipart_close(lj_multipart *multipart) {
+  lonejson_multipart_close(multipart);
 }
 /** Parses a JSON buffer into a mapped struct. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status

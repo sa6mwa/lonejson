@@ -313,7 +313,11 @@ if(LONEJSON_BUILD_BENCHMARKS)
   add_executable(lonejson_bench bench/lonejson_bench.c)
   target_include_directories(lonejson_bench PRIVATE
     "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}")
-  target_compile_definitions(lonejson_bench PRIVATE LONEJSON_IMPLEMENTATION)
+  # Keep the core JSON benchmark focused on JSON hot paths; protocol framing has
+  # separate unit/fuzz coverage and would otherwise perturb single-header layout.
+  target_compile_definitions(lonejson_bench PRIVATE
+    LONEJSON_IMPLEMENTATION
+    LONEJSON__OMIT_PROTOCOL_FRAMING_IMPL)
   add_dependencies(lonejson_bench package-single-header)
   if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(lonejson_bench PRIVATE -Wno-long-long)
@@ -380,6 +384,19 @@ if(LONEJSON_BUILD_FUZZERS)
   target_link_options(lonejson_fuzz_reader_stream_generator PRIVATE
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_reader_stream_generator)
+
+  add_executable(lonejson_fuzz_protocol_framing
+    fuzz/fuzz_protocol_framing.c)
+  target_include_directories(lonejson_fuzz_protocol_framing
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_protocol_framing
+    PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_protocol_framing PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_protocol_framing PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_protocol_framing)
 endif()
 
 if(CLANG_FORMAT_BIN)
@@ -402,6 +419,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_protocol_framing.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_main.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_link_consumer.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_short_names.c"

@@ -28,9 +28,9 @@ file(WRITE "${_baseline}"
 file(WRITE "${_latest_mixed}"
   "${_common_prefix}"
   "{\"name\":\"bench/a\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":96.0,\"docs_per_sec\":96.0,\"ns_per_byte\":1.0},"
-  "{\"name\":\"bench/b\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":94.0,\"docs_per_sec\":94.0,\"ns_per_byte\":1.0},"
-  "{\"name\":\"bench/c\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":106.0,\"docs_per_sec\":106.0,\"ns_per_byte\":1.0},"
-  "{\"name\":\"bench/d\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":112.0,\"docs_per_sec\":112.0,\"ns_per_byte\":1.0}"
+  "{\"name\":\"bench/b\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":89.0,\"docs_per_sec\":89.0,\"ns_per_byte\":1.0},"
+  "{\"name\":\"bench/c\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":111.0,\"docs_per_sec\":111.0,\"ns_per_byte\":1.0},"
+  "{\"name\":\"bench/d\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":116.0,\"docs_per_sec\":116.0,\"ns_per_byte\":1.0}"
   "${_common_suffix}")
 
 file(WRITE "${_latest_small}"
@@ -45,8 +45,8 @@ file(WRITE "${_latest_improve}"
   "${_common_prefix}"
   "{\"name\":\"bench/a\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":100.0,\"docs_per_sec\":100.0,\"ns_per_byte\":1.0},"
   "{\"name\":\"bench/b\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":100.0,\"docs_per_sec\":100.0,\"ns_per_byte\":1.0},"
-  "{\"name\":\"bench/c\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":106.0,\"docs_per_sec\":106.0,\"ns_per_byte\":1.0},"
-  "{\"name\":\"bench/d\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":112.0,\"docs_per_sec\":112.0,\"ns_per_byte\":1.0}"
+  "{\"name\":\"bench/c\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":111.0,\"docs_per_sec\":111.0,\"ns_per_byte\":1.0},"
+  "{\"name\":\"bench/d\",\"group\":\"test\",\"elapsed_ns\":1,\"total_bytes\":1,\"total_documents\":1,\"mismatch_count\":0,\"mib_per_sec\":116.0,\"docs_per_sec\":116.0,\"ns_per_byte\":1.0}"
   "${_common_suffix}")
 
 file(WRITE "${_latest_broken}"
