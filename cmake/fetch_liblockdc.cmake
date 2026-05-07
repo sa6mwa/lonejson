@@ -4,7 +4,7 @@ if(NOT DEFINED LONEJSON_SOURCE_DIR)
   get_filename_component(LONEJSON_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 endif()
 
-set(LONEJSON_LIBLOCKDC_VERSION "0.1.0" CACHE STRING "liblockdc release version to fetch for tests.")
+set(LONEJSON_LIBLOCKDC_VERSION "0.5.0" CACHE STRING "liblockdc release version to fetch for tests.")
 set(LONEJSON_LIBLOCKDC_BASE_URL "https://github.com/sa6mwa/liblockdc/releases/download/v${LONEJSON_LIBLOCKDC_VERSION}" CACHE STRING "Base URL for liblockdc release downloads.")
 
 function(lonejson_detect_host_arch out_var)
@@ -78,12 +78,39 @@ if(NOT LONEJSON_LIBLOCKDC_LIBC IN_LIST _supported_libcs)
 endif()
 
 set(_triple "${LONEJSON_LIBLOCKDC_ARCH}-linux-${LONEJSON_LIBLOCKDC_LIBC}")
-set(_filename "liblockdc-${LONEJSON_LIBLOCKDC_VERSION}-${_triple}-dev.tar.gz")
+set(_bundle_dir_name "liblockdc-${LONEJSON_LIBLOCKDC_VERSION}-${_triple}")
+set(_filename "${_bundle_dir_name}.tar.gz")
 set(_url "${LONEJSON_LIBLOCKDC_BASE_URL}/${_filename}")
 set(_deps_root "${LONEJSON_SOURCE_DIR}/.deps/liblockdc/${_triple}")
 set(_archive_path "${_deps_root}/${_filename}")
 set(_extract_root "${_deps_root}/root")
+set(_staging_root "${_deps_root}/extract")
 set(_stamp_path "${_extract_root}/.lonejson-liblockdc-version")
+
+function(lonejson_validate_liblockdc_bundle extract_root filename curl_version_out openssl_version_out)
+  set(_curl_version_header "${extract_root}/include/curl/curlver.h")
+  set(_openssl_version_header "${extract_root}/include/openssl/opensslv.h")
+
+  foreach(_required_path
+      "${extract_root}/include/lc/lc.h"
+      "${_curl_version_header}"
+      "${_openssl_version_header}"
+      "${extract_root}/lib/libcurl.so"
+      "${extract_root}/lib/libssl.so"
+      "${extract_root}/lib/libcrypto.so")
+    if(NOT EXISTS "${_required_path}")
+      message(FATAL_ERROR "Downloaded liblockdc bundle ${filename} is missing required file: ${_required_path}")
+    endif()
+  endforeach()
+
+  file(STRINGS "${_curl_version_header}" _curl_version_line REGEX "^#define LIBCURL_VERSION \"[^\"]+\"")
+  file(STRINGS "${_openssl_version_header}" _openssl_version_line REGEX "^# define OPENSSL_VERSION_TEXT \"[^\"]+\"")
+  string(REGEX REPLACE "^#define LIBCURL_VERSION \"([^\"]+)\".*$" "\\1" _curl_version "${_curl_version_line}")
+  string(REGEX REPLACE "^# define OPENSSL_VERSION_TEXT \"([^\"]+)\".*$" "\\1" _openssl_version "${_openssl_version_line}")
+
+  set(${curl_version_out} "${_curl_version}" PARENT_SCOPE)
+  set(${openssl_version_out} "${_openssl_version}" PARENT_SCOPE)
+endfunction()
 
 file(MAKE_DIRECTORY "${_deps_root}")
 
@@ -91,7 +118,8 @@ if(EXISTS "${_stamp_path}")
   file(READ "${_stamp_path}" _existing_version)
   string(STRIP "${_existing_version}" _existing_version)
   if(_existing_version STREQUAL "${LONEJSON_LIBLOCKDC_VERSION}")
-    message(STATUS "liblockdc ${_triple} dev bundle already extracted at ${_extract_root}")
+    lonejson_validate_liblockdc_bundle("${_extract_root}" "${_filename}" _curl_version _openssl_version)
+    message(STATUS "liblockdc ${_triple} bundle already extracted at ${_extract_root} with curl ${_curl_version} and ${_openssl_version}")
     return()
   endif()
 endif()
@@ -110,10 +138,25 @@ if(NOT _download_code EQUAL 0)
 endif()
 
 file(REMOVE_RECURSE "${_extract_root}")
+file(REMOVE_RECURSE "${_staging_root}")
 file(MAKE_DIRECTORY "${_extract_root}")
+file(MAKE_DIRECTORY "${_staging_root}")
 
 message(STATUS "Extracting ${_archive_path} to ${_extract_root}")
-file(ARCHIVE_EXTRACT INPUT "${_archive_path}" DESTINATION "${_extract_root}")
-file(WRITE "${_stamp_path}" "${LONEJSON_LIBLOCKDC_VERSION}\n")
+file(ARCHIVE_EXTRACT INPUT "${_archive_path}" DESTINATION "${_staging_root}")
 
-message(STATUS "liblockdc ${_triple} dev bundle ready at ${_extract_root}")
+if(EXISTS "${_staging_root}/${_bundle_dir_name}/include" AND EXISTS "${_staging_root}/${_bundle_dir_name}/lib")
+  file(COPY "${_staging_root}/${_bundle_dir_name}/" DESTINATION "${_extract_root}")
+elseif(EXISTS "${_staging_root}/include" AND EXISTS "${_staging_root}/lib")
+  file(COPY "${_staging_root}/" DESTINATION "${_extract_root}")
+else()
+  file(REMOVE_RECURSE "${_staging_root}")
+  message(FATAL_ERROR "Downloaded liblockdc bundle ${_filename} does not contain the expected include/ and lib/ directories.")
+endif()
+
+lonejson_validate_liblockdc_bundle("${_extract_root}" "${_filename}" _curl_version _openssl_version)
+
+file(WRITE "${_stamp_path}" "${LONEJSON_LIBLOCKDC_VERSION}\n")
+file(REMOVE_RECURSE "${_staging_root}")
+
+message(STATUS "liblockdc ${_triple} bundle ready at ${_extract_root} with curl ${_curl_version} and ${_openssl_version}")

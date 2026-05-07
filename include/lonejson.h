@@ -929,8 +929,8 @@ typedef struct lonejson_sse_options {
    * Default: 1 MiB. `lonejson_sse_push` counts these bytes while streaming
    * them instead of retaining the complete event body. */
   size_t max_event_data_bytes;
-  /** Maximum aggregate metadata bytes retained by the parser. Default: 1 MiB.
-   */
+  /** Maximum bytes retained in each parser-owned metadata buffer. Default: 1
+   * MiB. */
   size_t max_buffered_bytes;
   /** Optional allocator used for parser-owned buffers. */
   const lonejson_allocator *allocator;
@@ -955,13 +955,11 @@ typedef struct lonejson_sse_event {
  * the dispatched event.
  */
 typedef struct lonejson_sse_handler {
-  lonejson_status (*begin_event)(void *user,
-                                 const lonejson_sse_event *event,
+  lonejson_status (*begin_event)(void *user, const lonejson_sse_event *event,
                                  lonejson_error *error);
   lonejson_status (*data_chunk)(void *user, const void *bytes, size_t len,
                                 lonejson_error *error);
-  lonejson_status (*end_event)(void *user,
-                               const lonejson_sse_event *event,
+  lonejson_status (*end_event)(void *user, const lonejson_sse_event *event,
                                lonejson_error *error);
 } lonejson_sse_handler;
 
@@ -2238,8 +2236,7 @@ lonejson_status lonejson_sse_push(lonejson_sse *sse, const void *bytes,
  */
 lonejson_status lonejson_sse_finish(lonejson_sse *sse,
                                     const lonejson_sse_handler *handler,
-                                    void *user,
-                                    lonejson_error *error);
+                                    void *user, lonejson_error *error);
 /** Pushes SSE bytes, decodes selected event data as JSON, and calls `event_cb`
  * after each decoded JSON event.
  */
@@ -3068,10 +3065,8 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_sse_push(lj_sse *sse,
   return lonejson_sse_push(sse, bytes, len, handler, user, error);
 }
 /** Finishes an SSE stream. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_sse_finish(lj_sse *sse,
-                                                    const lj_sse_handler *handler,
-                                                    void *user,
-                                                    lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_sse_finish(
+    lj_sse *sse, const lj_sse_handler *handler, void *user, lj_error *error) {
   return lonejson_sse_finish(sse, handler, user, error);
 }
 /** Pushes SSE bytes and decodes selected event data as JSON. */

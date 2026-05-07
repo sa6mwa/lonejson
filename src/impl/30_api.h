@@ -2609,6 +2609,30 @@ static int lonejson__ascii_ieq(const char *a, size_t a_len, const char *b) {
   return i == a_len && b[i] == '\0';
 }
 
+static int lonejson__parse_sse_retry(const char *value, size_t value_len,
+                                     unsigned long *out) {
+  unsigned long acc;
+  unsigned long digit;
+  size_t i;
+
+  if (value_len == 0u) {
+    return 0;
+  }
+  acc = 0u;
+  for (i = 0u; i < value_len; ++i) {
+    if (value[i] < '0' || value[i] > '9') {
+      return 0;
+    }
+    digit = (unsigned long)(value[i] - '0');
+    if (acc > (ULONG_MAX - digit) / 10u) {
+      return 0;
+    }
+    acc = (acc * 10u) + digit;
+  }
+  *out = acc;
+  return 1;
+}
+
 static lonejson_status lonejson__byte_reserve(lonejson__byte_buffer *buffer,
                                               size_t needed, size_t limit,
                                               const lonejson_allocator *alloc,
@@ -2791,18 +2815,19 @@ static void lonejson__sse_reset_event(lonejson_sse *sse) {
   sse->data_seen = 0;
 }
 
-static lonejson_status lonejson__sse_callback_error(
-    lonejson_error *error, const char *message) {
+static lonejson_status lonejson__sse_callback_error(lonejson_error *error,
+                                                    const char *message) {
   if (error != NULL && error->code != LONEJSON_STATUS_OK) {
     return error->code;
   }
-  return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
-                             0u, message);
+  return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u, 0u,
+                             message);
 }
 
-static lonejson_status lonejson__sse_begin_if_needed(
-    lonejson_sse *sse, const lonejson_sse_handler *handler, void *user,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__sse_begin_if_needed(lonejson_sse *sse,
+                              const lonejson_sse_handler *handler, void *user,
+                              lonejson_error *error) {
   lonejson_sse_event event;
   lonejson_status status;
 
@@ -2821,16 +2846,16 @@ static lonejson_status lonejson__sse_begin_if_needed(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__sse_emit_data(
-    lonejson_sse *sse, const lonejson_sse_handler *handler, void *user,
-    const char *data, size_t len, lonejson_error *error) {
+static lonejson_status
+lonejson__sse_emit_data(lonejson_sse *sse, const lonejson_sse_handler *handler,
+                        void *user, const char *data, size_t len,
+                        lonejson_error *error) {
   lonejson_status status;
   size_t add_len;
 
   add_len = len + (sse->data_seen ? 1u : 0u);
   if (add_len > sse->options.max_event_data_bytes ||
-      sse->event_data_len >
-          sse->options.max_event_data_bytes - add_len) {
+      sse->event_data_len > sse->options.max_event_data_bytes - add_len) {
     return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                                "SSE event data exceeds configured limit");
   }
@@ -2843,8 +2868,8 @@ static lonejson_status lonejson__sse_emit_data(
     if (handler != NULL && handler->data_chunk != NULL) {
       status = handler->data_chunk(user, "\n", 1u, error);
       if (status != LONEJSON_STATUS_OK) {
-        return lonejson__sse_callback_error(
-            error, "SSE data_chunk callback failed");
+        return lonejson__sse_callback_error(error,
+                                            "SSE data_chunk callback failed");
       }
     }
     ++sse->event_data_len;
@@ -2886,10 +2911,10 @@ static lonejson_status lonejson__sse_emit(lonejson_sse *sse,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__sse_process_line(lonejson_sse *sse,
-                                                  const lonejson_sse_handler *handler,
-                                                  void *user,
-                                                  lonejson_error *error) {
+static lonejson_status
+lonejson__sse_process_line(lonejson_sse *sse,
+                           const lonejson_sse_handler *handler, void *user,
+                           lonejson_error *error) {
   const char *line;
   const char *colon;
   const char *value;
@@ -2897,7 +2922,6 @@ static lonejson_status lonejson__sse_process_line(lonejson_sse *sse,
   size_t name_len;
   size_t value_len;
   unsigned long retry;
-  char *endp;
 
   line = sse->line.data ? sse->line.data : "";
   line_end = line + sse->line.len;
@@ -2920,8 +2944,7 @@ static lonejson_status lonejson__sse_process_line(lonejson_sse *sse,
   }
   value_len = (size_t)(line_end - value);
   if (name_len == 4u && memcmp(line, "data", 4u) == 0) {
-    return lonejson__sse_emit_data(sse, handler, user, value, value_len,
-                                   error);
+    return lonejson__sse_emit_data(sse, handler, user, value, value_len, error);
   }
   if (name_len == 5u && memcmp(line, "event", 5u) == 0) {
     lonejson__byte_reset(&sse->event);
@@ -2940,8 +2963,7 @@ static lonejson_status lonejson__sse_process_line(lonejson_sse *sse,
     }
   }
   if (name_len == 5u && memcmp(line, "retry", 5u) == 0) {
-    retry = strtoul(value, &endp, 10);
-    if (endp != value && *endp == '\0') {
+    if (lonejson__parse_sse_retry(value, value_len, &retry)) {
       sse->retry_ms = retry;
       sse->has_retry = 1;
       sse->event_pending = 1;
@@ -2950,10 +2972,10 @@ static lonejson_status lonejson__sse_process_line(lonejson_sse *sse,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__sse_feed_char(lonejson_sse *sse, char ch,
-                                               const lonejson_sse_handler *handler,
-                                               void *user,
-                                               lonejson_error *error) {
+static lonejson_status
+lonejson__sse_feed_char(lonejson_sse *sse, char ch,
+                        const lonejson_sse_handler *handler, void *user,
+                        lonejson_error *error) {
   lonejson_status status;
 
   if (sse->saw_cr) {
@@ -3009,8 +3031,7 @@ lonejson_status lonejson_sse_push(lonejson_sse *sse, const void *bytes,
 
 lonejson_status lonejson_sse_finish(lonejson_sse *sse,
                                     const lonejson_sse_handler *handler,
-                                    void *user,
-                                    lonejson_error *error) {
+                                    void *user, lonejson_error *error) {
   lonejson_status status;
 
   if (sse == NULL) {
@@ -3060,8 +3081,8 @@ lonejson__sse_json_event_selected(const lonejson_sse_json_options *options,
   return 0;
 }
 
-static int lonejson__sse_json_has_filter(
-    const lonejson_sse_json_options *options) {
+static int
+lonejson__sse_json_has_filter(const lonejson_sse_json_options *options) {
   return options != NULL && options->event_names != NULL &&
          options->event_name_count != 0u;
 }
@@ -3084,24 +3105,24 @@ static void lonejson__sse_json_reset_event(lonejson_sse *sse) {
   sse->has_retry = 0;
 }
 
-static lonejson_status lonejson__sse_json_begin_parser(
-    lonejson_sse *sse, const lonejson__sse_json_ctx *ctx,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__sse_json_begin_parser(lonejson_sse *sse,
+                                const lonejson__sse_json_ctx *ctx,
+                                lonejson_error *error) {
   if (sse->json_parser_active) {
     return LONEJSON_STATUS_OK;
   }
-  lonejson__parser_init_state(
-      &sse->json_parser, ctx->map, ctx->dst,
-      ctx->options ? ctx->options->parse_options : NULL, 0,
-      sse->json_workspace, sizeof(sse->json_workspace));
+  lonejson__parser_init_state(&sse->json_parser, ctx->map, ctx->dst,
+                              ctx->options ? ctx->options->parse_options : NULL,
+                              0, sse->json_workspace,
+                              sizeof(sse->json_workspace));
   if (sse->json_parser.options.clear_destination) {
     lonejson__init_map_with_allocator(ctx->map, ctx->dst,
                                       &sse->json_parser.allocator);
   }
   sse->json_map = ctx->map;
   sse->json_dst = ctx->dst;
-  sse->json_parse_options =
-      ctx->options ? ctx->options->parse_options : NULL;
+  sse->json_parse_options = ctx->options ? ctx->options->parse_options : NULL;
   sse->json_parser_active = 1;
   lonejson__clear_error(error);
   return LONEJSON_STATUS_OK;
@@ -3112,6 +3133,7 @@ static lonejson_status lonejson__sse_json_feed_data(
     size_t len, lonejson_error *error) {
   const char newline = '\n';
   lonejson_status status;
+  size_t add_len;
 
   if (!sse->json_selection_locked) {
     sse->json_selected = lonejson__sse_json_event_selected(
@@ -3120,6 +3142,12 @@ static lonejson_status lonejson__sse_json_feed_data(
   }
   if (!sse->json_selected) {
     return LONEJSON_STATUS_OK;
+  }
+  add_len = len + (sse->json_data_seen ? 1u : 0u);
+  if (add_len > sse->options.max_event_data_bytes ||
+      sse->json_data_len > sse->options.max_event_data_bytes - add_len) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "SSE JSON event data exceeds configured limit");
   }
   if (sse->json_parser_active &&
       (sse->json_map != ctx->map || sse->json_dst != ctx->dst ||
@@ -3157,9 +3185,9 @@ static lonejson_status lonejson__sse_json_feed_data(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__sse_json_emit(
-    lonejson_sse *sse, const lonejson__sse_json_ctx *ctx,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__sse_json_emit(lonejson_sse *sse, const lonejson__sse_json_ctx *ctx,
+                        lonejson_error *error) {
   lonejson_sse_event event;
   lonejson_status status;
 
@@ -3173,6 +3201,10 @@ static lonejson_status lonejson__sse_json_emit(
     sse->json_selection_locked = 1;
   }
   if (!sse->json_selected) {
+    lonejson__sse_json_reset_event(sse);
+    return LONEJSON_STATUS_OK;
+  }
+  if (!sse->json_data_seen) {
     lonejson__sse_json_reset_event(sse);
     return LONEJSON_STATUS_OK;
   }
@@ -3208,9 +3240,10 @@ static lonejson_status lonejson__sse_json_emit(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__sse_json_process_line(
-    lonejson_sse *sse, const lonejson__sse_json_ctx *ctx,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__sse_json_process_line(lonejson_sse *sse,
+                                const lonejson__sse_json_ctx *ctx,
+                                lonejson_error *error) {
   const char *line;
   const char *line_end;
   const char *colon;
@@ -3218,7 +3251,6 @@ static lonejson_status lonejson__sse_json_process_line(
   size_t name_len;
   size_t value_len;
   unsigned long retry;
-  char *endp;
 
   line = sse->line.data ? sse->line.data : "";
   line_end = line + sse->line.len;
@@ -3263,8 +3295,7 @@ static lonejson_status lonejson__sse_json_process_line(
     }
   }
   if (name_len == 5u && memcmp(line, "retry", 5u) == 0) {
-    retry = strtoul(value, &endp, 10);
-    if (endp != value && *endp == '\0') {
+    if (lonejson__parse_sse_retry(value, value_len, &retry)) {
       sse->retry_ms = retry;
       sse->has_retry = 1;
     }
@@ -3272,9 +3303,10 @@ static lonejson_status lonejson__sse_json_process_line(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__sse_json_feed_char(
-    lonejson_sse *sse, char ch, const lonejson__sse_json_ctx *ctx,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__sse_json_feed_char(lonejson_sse *sse, char ch,
+                             const lonejson__sse_json_ctx *ctx,
+                             lonejson_error *error) {
   lonejson_status status;
 
   if (sse->saw_cr) {
@@ -3338,11 +3370,10 @@ LONEJSON__COLD lonejson_status lonejson_sse_push_json(
                                0u, "map and destination are required");
   }
   if (options != NULL && options->parse_options != NULL &&
-      !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(
-          options->parse_options->allocator)) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u,
-                               "allocator must provide either all callbacks or none");
+      !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->parse_options->allocator)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "allocator must provide either all callbacks or none");
   }
   ctx.map = map;
   ctx.dst = dst;
@@ -3363,11 +3394,10 @@ lonejson_sse_finish_json(lonejson_sse *sse, const lonejson_map *map, void *dst,
                                0u, "map and destination are required");
   }
   if (options != NULL && options->parse_options != NULL &&
-      !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(
-          options->parse_options->allocator)) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u,
-                               "allocator must provide either all callbacks or none");
+      !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->parse_options->allocator)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "allocator must provide either all callbacks or none");
   }
   ctx.map = map;
   ctx.dst = dst;
@@ -3721,35 +3751,89 @@ lonejson__multipart_add_header(lonejson_multipart *mp, const char *name,
 static lonejson_status lonejson__multipart_parse_content_disposition(
     lonejson_multipart *mp, const char *value, lonejson_error *error) {
   const char *p;
+  const char *name;
+  const char *name_end;
   const char *begin;
   const char *end;
-  p = strstr(value, "name=");
-  if (p == NULL) {
-    return LONEJSON_STATUS_OK;
+  lonejson__byte_buffer unescaped;
+  lonejson_status status;
+
+  p = value;
+  while (*p != '\0' && *p != ';') {
+    ++p;
   }
-  begin = p + 5;
-  if (*begin == '"') {
-    ++begin;
-    end = strchr(begin, '"');
-    if (end == NULL) {
-      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
-                                 0u,
-                                 "multipart Content-Disposition name invalid");
+  while (*p == ';') {
+    ++p;
+    while (*p == ' ' || *p == '\t') {
+      ++p;
     }
-  } else {
-    end = begin;
-    while (*end != '\0' && *end != ';' && *end != ' ' && *end != '\t') {
-      ++end;
+    name = p;
+    while (*p != '\0' && *p != '=' && *p != ';') {
+      ++p;
+    }
+    name_end = p;
+    while (name_end > name && (name_end[-1] == ' ' || name_end[-1] == '\t')) {
+      --name_end;
+    }
+    if (*p != '=') {
+      while (*p != '\0' && *p != ';') {
+        ++p;
+      }
+      continue;
+    }
+    ++p;
+    while (*p == ' ' || *p == '\t') {
+      ++p;
+    }
+    memset(&unescaped, 0, sizeof(unescaped));
+    if (*p == '"') {
+      ++p;
+      while (*p != '\0' && *p != '"') {
+        if (*p == '\\' && p[1] != '\0') {
+          ++p;
+        }
+        status = lonejson__byte_append_char(&unescaped, *p,
+                                            mp->options.max_header_line_bytes,
+                                            &mp->allocator, error);
+        if (status != LONEJSON_STATUS_OK) {
+          lonejson__byte_free(&unescaped, &mp->allocator);
+          return status;
+        }
+        ++p;
+      }
+      if (*p != '"') {
+        lonejson__byte_free(&unescaped, &mp->allocator);
+        return lonejson__set_error(
+            error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+            "multipart Content-Disposition name invalid");
+      }
+      ++p;
+      begin = unescaped.data ? unescaped.data : "";
+      end = begin + unescaped.len;
+    } else {
+      begin = p;
+      while (*p != '\0' && *p != ';' && *p != ' ' && *p != '\t') {
+        ++p;
+      }
+      end = p;
+    }
+    if (lonejson__ascii_ieq(name, (size_t)(name_end - name), "name")) {
+      lonejson__buffer_free(&mp->allocator, mp->part_name,
+                            mp->part_name_alloc_size);
+      mp->part_name =
+          lonejson__dup_range(begin, (size_t)(end - begin), &mp->allocator,
+                              &mp->part_name_alloc_size, error);
+      lonejson__byte_free(&unescaped, &mp->allocator);
+      return mp->part_name
+                 ? LONEJSON_STATUS_OK
+                 : (error ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED);
+    }
+    lonejson__byte_free(&unescaped, &mp->allocator);
+    while (*p != '\0' && *p != ';') {
+      ++p;
     }
   }
-  lonejson__buffer_free(&mp->allocator, mp->part_name,
-                        mp->part_name_alloc_size);
-  mp->part_name =
-      lonejson__dup_range(begin, (size_t)(end - begin), &mp->allocator,
-                          &mp->part_name_alloc_size, error);
-  return mp->part_name
-             ? LONEJSON_STATUS_OK
-             : (error ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED);
+  return LONEJSON_STATUS_OK;
 }
 
 static lonejson_status lonejson__multipart_process_header_line(
@@ -3936,9 +4020,10 @@ static int lonejson__multipart_boundary_line_complete(
   return 0;
 }
 
-static int lonejson__multipart_boundary_line_prefix(
-    const lonejson__byte_buffer *body, size_t pos, const char *line,
-    size_t line_len) {
+static int
+lonejson__multipart_boundary_line_prefix(const lonejson__byte_buffer *body,
+                                         size_t pos, const char *line,
+                                         size_t line_len) {
   size_t available;
 
   if (pos >= body->len) {
@@ -3958,8 +4043,9 @@ static int lonejson__multipart_boundary_line_prefix(
   return memcmp(body->data + pos, line, available) == 0;
 }
 
-static size_t lonejson__multipart_emit_len_before_boundary(
-    const lonejson__byte_buffer *body, size_t boundary_pos) {
+static size_t
+lonejson__multipart_emit_len_before_boundary(const lonejson__byte_buffer *body,
+                                             size_t boundary_pos) {
   size_t emit_len;
 
   emit_len = boundary_pos;
@@ -4031,9 +4117,9 @@ static lonejson_status lonejson__multipart_process_body_buffer(
               &mp->body, pos, mp->closing_boundary_line.data,
               mp->closing_boundary_line.len) ||
           lonejson__multipart_boundary_line_prefix(
-              &mp->body, pos, mp->boundary_line.data,
-              mp->boundary_line.len)) {
-        keep_from = lonejson__multipart_emit_len_before_boundary(&mp->body, pos);
+              &mp->body, pos, mp->boundary_line.data, mp->boundary_line.len)) {
+        keep_from =
+            lonejson__multipart_emit_len_before_boundary(&mp->body, pos);
         if (keep_from > 0u) {
           status = lonejson__multipart_call_data(handler, user, mp->body.data,
                                                  keep_from, error);

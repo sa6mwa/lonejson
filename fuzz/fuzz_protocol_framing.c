@@ -29,8 +29,7 @@ static lonejson_status fuzz_sse_data(void *user, const void *bytes, size_t len,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status fuzz_sse_end(void *user,
-                                    const lonejson_sse_event *event,
+static lonejson_status fuzz_sse_end(void *user, const lonejson_sse_event *event,
                                     lonejson_error *error) {
   (void)user;
   (void)event;

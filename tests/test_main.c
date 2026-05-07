@@ -322,6 +322,8 @@ typedef struct test_sse_json_state {
   char event[32];
   char id[32];
   size_t data_len;
+  unsigned long retry_ms;
+  int has_retry;
   int invalid;
 } test_sse_json_state;
 
@@ -922,6 +924,25 @@ static lonejson_status test_sse_json_event_cb(void *user,
   test_copy_cstr(state->event, sizeof(state->event), event->event);
   test_copy_cstr(state->id, sizeof(state->id), event->id);
   state->data_len = event->data_len;
+  state->retry_ms = event->retry_ms;
+  state->has_retry = event->has_retry;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+test_sse_json_collect_event_cb(void *user, const lonejson_sse_event *event,
+                               void *dst, lonejson_error *error) {
+  test_sse_json_state *state;
+
+  (void)dst;
+  (void)error;
+  state = (test_sse_json_state *)user;
+  ++state->count;
+  test_copy_cstr(state->event, sizeof(state->event), event->event);
+  test_copy_cstr(state->id, sizeof(state->id), event->id);
+  state->data_len = event->data_len;
+  state->retry_ms = event->retry_ms;
+  state->has_retry = event->has_retry;
   return LONEJSON_STATUS_OK;
 }
 
@@ -969,8 +990,8 @@ static lonejson_status test_multipart_data_cb(void *user, const void *bytes,
     state->data_len += len;
     state->data[state->data_len] = '\0';
   }
-  if (state->data_count < sizeof(state->data_chunks) /
-                              sizeof(state->data_chunks[0])) {
+  if (state->data_count <
+      sizeof(state->data_chunks) / sizeof(state->data_chunks[0])) {
     state->data_chunks[state->data_count] = len;
   }
   ++state->data_count;
@@ -1450,7 +1471,7 @@ static void test_sse_json_streams_data_without_event_buffering(void) {
   json_options.event_name_count = 1u;
   json_options.parse_options = NULL;
   sse_options = lonejson_default_sse_options();
-  sse_options.max_event_data_bytes = 4u;
+  sse_options.max_event_data_bytes = 64u;
 
   memset(&json_state, 0, sizeof(json_state));
   memset(&event, 0, sizeof(event));
@@ -1459,17 +1480,17 @@ static void test_sse_json_streams_data_without_event_buffering(void) {
   if (sse == NULL) {
     return;
   }
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, chunk0, sizeof(chunk0) - 1u,
-      &json_options, test_sse_json_event_cb, &json_state, &error);
+  status = lonejson_sse_push_json(sse, &test_event_map, &event, chunk0,
+                                  sizeof(chunk0) - 1u, &json_options,
+                                  test_sse_json_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, chunk1, sizeof(chunk1) - 1u,
-      &json_options, test_sse_json_event_cb, &json_state, &error);
+  status = lonejson_sse_push_json(sse, &test_event_map, &event, chunk1,
+                                  sizeof(chunk1) - 1u, &json_options,
+                                  test_sse_json_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, chunk2, sizeof(chunk2) - 1u,
-      &json_options, test_sse_json_event_cb, &json_state, &error);
+  status = lonejson_sse_push_json(sse, &test_event_map, &event, chunk2,
+                                  sizeof(chunk2) - 1u, &json_options,
+                                  test_sse_json_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   status =
       lonejson_sse_finish_json(sse, &test_event_map, &event, &json_options,
@@ -1490,10 +1511,236 @@ static void test_sse_json_streams_data_without_event_buffering(void) {
   if (sse == NULL) {
     return;
   }
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, late_event, sizeof(late_event) - 1u,
-      &json_options, test_sse_json_event_cb, &json_state, &error);
+  status = lonejson_sse_push_json(sse, &test_event_map, &event, late_event,
+                                  sizeof(late_event) - 1u, &json_options,
+                                  test_sse_json_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  lonejson_sse_close(sse);
+}
+
+static void test_sse_json_event_limits_and_boundary_errors(void) {
+  static const char header[] = "event: keep\nid: ok\ndata: ";
+  static const char payload[] = "{\"id\":\"evtjsn\",\"ok\":true}";
+  static const char line_terminator[] = "\n";
+  static const char event_terminator[] = "\n\n";
+  static const char split_line[] = "data:\n";
+  const char *selected[] = {"keep"};
+  lonejson_sse_options sse_options;
+  lonejson_sse_json_options json_options;
+  test_sse_json_state json_state;
+  test_event event;
+  lonejson_sse *sse;
+  lonejson_error error;
+  lonejson_status status;
+  size_t payload_len;
+
+  payload_len = strlen(payload);
+  json_options.event_names = selected;
+  json_options.event_name_count = 1u;
+  json_options.parse_options = NULL;
+
+  memset(&event, 0, sizeof(event));
+  memset(&json_state, 0, sizeof(json_state));
+  sse_options = lonejson_default_sse_options();
+  sse_options.max_event_data_bytes = payload_len - 1u;
+  sse = lonejson_sse_open(&sse_options, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, header, strlen(header), &json_options,
+      test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, payload, payload_len, &json_options,
+      test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, event_terminator, strlen(event_terminator),
+      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(error.code == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(json_state.count == 0u);
+  lonejson_sse_close(sse);
+
+  memset(&event, 0, sizeof(event));
+  memset(&json_state, 0, sizeof(json_state));
+  sse_options = lonejson_default_sse_options();
+  sse_options.max_event_data_bytes = payload_len;
+  sse = lonejson_sse_open(&sse_options, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, header, strlen(header), &json_options,
+      test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, payload, payload_len, &json_options,
+      test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, line_terminator, strlen(line_terminator),
+      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_finish_json(sse, &test_event_map, &event, &json_options,
+                                    test_sse_json_collect_event_cb, &json_state,
+                                    &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(json_state.count == 1u);
+  EXPECT(json_state.data_len == payload_len);
+  EXPECT(strcmp(json_state.event, "keep") == 0);
+  EXPECT(strcmp(json_state.id, "ok") == 0);
+  lonejson_sse_close(sse);
+
+  memset(&event, 0, sizeof(event));
+  memset(&json_state, 0, sizeof(json_state));
+  sse_options = lonejson_default_sse_options();
+  sse_options.max_event_data_bytes = payload_len;
+  sse = lonejson_sse_open(&sse_options, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, header, strlen(header), &json_options,
+      test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, payload, payload_len, &json_options,
+      test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, split_line, strlen(split_line),
+      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(error.code == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(json_state.count == 0u);
+  lonejson_sse_close(sse);
+}
+
+static void test_sse_json_event_limits_alloc_guarded_e2e(void) {
+  static const char header[] = "event: keep\nid: ok\ndata: ";
+  static const char payload[] = "{\"name\":\"overflow\",\"tags\":[\"x\",\"y\","
+                                "\"z\"],\"body\":\"payload\"}";
+  static const char terminator[] = "\n\n";
+  test_allocator_state parse_alloc;
+  lonejson_parse_options parse_options;
+  lonejson_sse_options sse_options;
+  lonejson_sse_json_options json_options;
+  test_sse_json_state json_state;
+  test_alloc_parse_doc doc;
+  lonejson_sse *sse;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&json_state, 0, sizeof(json_state));
+  memset(&doc, 0, sizeof(doc));
+  test_allocator_init(&parse_alloc);
+  parse_options = lonejson_default_parse_options();
+  parse_options.allocator = &parse_alloc.allocator;
+  json_options.parse_options = &parse_options;
+  json_options.event_names = NULL;
+  json_options.event_name_count = 0u;
+
+  sse_options = lonejson_default_sse_options();
+  sse_options.max_event_data_bytes = strlen(payload) - 10u;
+  sse = lonejson_sse_open(&sse_options, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push_json(
+      sse, &test_alloc_parse_doc_map, &doc, header, strlen(header),
+      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_alloc_parse_doc_map, &doc, payload, strlen(payload),
+      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_alloc_parse_doc_map, &doc, terminator, strlen(terminator),
+      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(error.code == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(json_state.count == 0u);
+  EXPECT(parse_alloc.stats.alloc_calls == 0u);
+  EXPECT(parse_alloc.stats.realloc_calls == 0u);
+  EXPECT(parse_alloc.stats.bytes_live == 0u);
+  lonejson_sse_close(sse);
+}
+
+static void test_sse_retry_and_json_metadata_only_events(void) {
+  static const char valid_retry[] = "retry: 1500\n\n";
+  static const char invalid_retries[] =
+      "retry: -1\n\n"
+      "retry: +1\n\n"
+      "retry:  1\n\n"
+      "retry: 1844674407370955161518446744073709551615\n\n";
+  static const char data_event[] = "data: x\n\n";
+  static const char json_metadata_only[] = "event: keep\nretry: 1500\n\n";
+  static const char json_invalid_retry_only[] = "event: keep\nretry: -1\n\n";
+  const char *selected[] = {"keep"};
+  lonejson_sse_json_options json_options;
+  test_sse_json_state json_state;
+  test_sse_state state;
+  lonejson_sse_handler handler;
+  lonejson_sse *sse;
+  test_event event;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&state, 0, sizeof(state));
+  handler = test_sse_handler();
+  sse = lonejson_sse_open(NULL, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push(sse, valid_retry, sizeof(valid_retry) - 1u,
+                             &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.count == 1u);
+  EXPECT(state.has_retry);
+  EXPECT(state.retry_ms == 1500u);
+  status = lonejson_sse_push(sse, invalid_retries, sizeof(invalid_retries) - 1u,
+                             &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.count == 1u);
+  status = lonejson_sse_push(sse, data_event, sizeof(data_event) - 1u, &handler,
+                             &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.count == 2u);
+  EXPECT(!state.has_retry);
+  lonejson_sse_close(sse);
+
+  memset(&json_state, 0, sizeof(json_state));
+  memset(&event, 0, sizeof(event));
+  json_options.event_names = selected;
+  json_options.event_name_count = 1u;
+  json_options.parse_options = NULL;
+  sse = lonejson_sse_open(NULL, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, json_metadata_only,
+      sizeof(json_metadata_only) - 1u, &json_options,
+      test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(
+      sse, &test_event_map, &event, json_invalid_retry_only,
+      sizeof(json_invalid_retry_only) - 1u, &json_options,
+      test_sse_json_collect_event_cb, &json_state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_finish_json(sse, &test_event_map, &event, &json_options,
+                                    test_sse_json_collect_event_cb, &json_state,
+                                    &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(json_state.count == 0u);
   lonejson_sse_close(sse);
 }
 
@@ -1815,8 +2062,8 @@ test_multipart_content_length_streams_body_without_body_allocations(void) {
   options.allocator = &alloc.allocator;
   memset(&state, 0, sizeof(state));
   state.stats = &alloc.stats;
-  mp = lonejson_multipart_open("multipart/form-data; boundary=stream",
-                               &options, &error);
+  mp = lonejson_multipart_open("multipart/form-data; boundary=stream", &options,
+                               &error);
   EXPECT(mp != NULL);
   if (mp == NULL) {
     return;
@@ -1862,11 +2109,50 @@ test_multipart_content_length_streams_body_without_body_allocations(void) {
   EXPECT(alloc.stats.bytes_live == 0u);
 }
 
+static void test_multipart_content_disposition_name_parameters(void) {
+  static const char body[] =
+      "--d\n"
+      "Content-Disposition: form-data; filename=\"wrong\"; NAME=\"right\"\n"
+      "\n"
+      "one\n"
+      "--d\n"
+      "Content-Disposition: form-data; filename=\"wrong\"; "
+      "name=\"pay\\\"load\"\n"
+      "\n"
+      "two\n"
+      "--d--\n";
+  lonejson_multipart_handler handler;
+  test_multipart_state state;
+  lonejson_multipart *mp;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&handler, 0, sizeof(handler));
+  handler.begin_part = test_multipart_begin_cb;
+  handler.part_data = test_multipart_data_cb;
+  handler.end_part = test_multipart_end_cb;
+  memset(&state, 0, sizeof(state));
+  mp = lonejson_multipart_open("multipart/form-data; boundary=d", NULL, &error);
+  EXPECT(mp != NULL);
+  if (mp == NULL) {
+    return;
+  }
+  status = lonejson_multipart_push(mp, body, sizeof(body) - 1u, &handler,
+                                   &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_multipart_finish(mp, &handler, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 2u);
+  EXPECT(state.end_count == 2u);
+  EXPECT(strcmp(state.names[0], "right") == 0);
+  EXPECT(strcmp(state.names[1], "pay\"load") == 0);
+  lonejson_multipart_close(mp);
+}
+
 static void test_multipart_limits_and_invalid_usage(void) {
   static const char invalid_header[] = "--x\nnot-a-header\n\nvalue\n--x--\n";
   static const char too_many_headers[] = "--x\nA: 1\nB: 2\n\nvalue\n--x--\n";
-  static const char bad_length[] =
-      "--x\nContent-Length: 12x\n\nvalue\n--x--\n";
+  static const char bad_length[] = "--x\nContent-Length: 12x\n\nvalue\n--x--\n";
   static const char huge_length[] =
       "--x\nContent-Length: 999999999999999999999999999999\n\nvalue\n--x--\n";
   static const char too_small_boundary_lookahead[] = "--x\n\n--x--\n";
@@ -1909,9 +2195,9 @@ static void test_multipart_limits_and_invalid_usage(void) {
   mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
   EXPECT(mp != NULL);
   if (mp != NULL) {
-    status = lonejson_multipart_push(mp, invalid_header,
-                                     sizeof(invalid_header) - 1u, &handler,
-                                     &state, &error);
+    status =
+        lonejson_multipart_push(mp, invalid_header, sizeof(invalid_header) - 1u,
+                                &handler, &state, &error);
     EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
     lonejson_multipart_close(mp);
   }
@@ -1955,9 +2241,9 @@ static void test_multipart_limits_and_invalid_usage(void) {
   mp = lonejson_multipart_open("multipart/mixed; boundary=x", &options, &error);
   EXPECT(mp != NULL);
   if (mp != NULL) {
-    status = lonejson_multipart_push(
-        mp, too_small_boundary_lookahead,
-        sizeof(too_small_boundary_lookahead) - 1u, &handler, &state, &error);
+    status = lonejson_multipart_push(mp, too_small_boundary_lookahead,
+                                     sizeof(too_small_boundary_lookahead) - 1u,
+                                     &handler, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OVERFLOW);
     lonejson_multipart_close(mp);
   }
@@ -1966,13 +2252,13 @@ static void test_multipart_limits_and_invalid_usage(void) {
   mp = lonejson_multipart_open("multipart/mixed; boundary=x", NULL, &error);
   EXPECT(mp != NULL);
   if (mp != NULL) {
-    status = lonejson_multipart_push(mp, "--x--\n", strlen("--x--\n"),
-                                     &handler, &state, &error);
+    status = lonejson_multipart_push(mp, "--x--\n", strlen("--x--\n"), &handler,
+                                     &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
     status = lonejson_multipart_finish(mp, &handler, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
-    status = lonejson_multipart_push(mp, "--x--\n", strlen("--x--\n"),
-                                     &handler, &state, &error);
+    status = lonejson_multipart_push(mp, "--x--\n", strlen("--x--\n"), &handler,
+                                     &state, &error);
     EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
     lonejson_multipart_close(mp);
   }
@@ -6082,6 +6368,9 @@ int main(void) {
   test_jsonl_helpers();
   test_sse_incremental_events_and_json_selection();
   test_sse_json_streams_data_without_event_buffering();
+  test_sse_json_event_limits_and_boundary_errors();
+  test_sse_json_event_limits_alloc_guarded_e2e();
+  test_sse_retry_and_json_metadata_only_events();
   test_sse_callback_failure_status();
   test_sse_limits_and_allocation_contract();
   test_sse_limits_and_invalid_usage();
@@ -6089,6 +6378,7 @@ int main(void) {
   test_multipart_no_length_preserves_body_bytes();
   test_multipart_no_length_streams_long_lines_with_lookahead();
   test_multipart_content_length_streams_body_without_body_allocations();
+  test_multipart_content_disposition_name_parameters();
   test_multipart_limits_and_invalid_usage();
   test_multipart_failures_are_reported();
   test_fixed_capacity_object_array();
