@@ -67,6 +67,10 @@
 #if defined(LJ_SPOOL_MEMORY_LIMIT) && !defined(LONEJSON_SPOOL_MEMORY_LIMIT)
 #define LONEJSON_SPOOL_MEMORY_LIMIT LJ_SPOOL_MEMORY_LIMIT
 #endif
+#if defined(LJ_WRITE_MAX_OUTPUT_BYTES) &&                                      \
+    !defined(LONEJSON_WRITE_MAX_OUTPUT_BYTES)
+#define LONEJSON_WRITE_MAX_OUTPUT_BYTES LJ_WRITE_MAX_OUTPUT_BYTES
+#endif
 #if defined(LJ_SPOOL_TEMP_PATH_CAPACITY) &&                                    \
     !defined(LONEJSON_SPOOL_TEMP_PATH_CAPACITY)
 #define LONEJSON_SPOOL_TEMP_PATH_CAPACITY LJ_SPOOL_TEMP_PATH_CAPACITY
@@ -188,7 +192,10 @@ extern "C" {
  * with `lonejson_validate_*` variants available when you only need syntax
  * validation. Object-framed streams use `lonejson_stream_open_*`,
  * `lonejson_stream_next`, `lonejson_stream_error`, and
- * `lonejson_stream_close`. Serialization is exposed through
+ * `lonejson_stream_close`. Selected-array streams use
+ * `lonejson_array_stream_open_*`, `lonejson_array_stream_next`,
+ * `lonejson_array_stream_next_value`, `lonejson_array_stream_error`, and
+ * `lonejson_array_stream_close`. Serialization is exposed through
  * `lonejson_serialize_*` and `lonejson_serialize_jsonl_*`. Ownership and reuse
  * of mapped values is handled by `lonejson_cleanup` and `lonejson_reset`.
  * Large inbound values are represented by `lonejson_spooled`, large outbound
@@ -237,14 +244,18 @@ extern "C" {
  * not treat newlines as framing; it treats completed objects as framing.
  *
  * ```c
- * lonejson_stream stream;
+ * lonejson_stream *stream;
  * lonejson_stream_result result;
  * user_doc doc;
+ * lonejson_error error;
  *
- * lonejson_stream_open_fd(&stream, &user_doc_map, fd, NULL);
+ * stream = lonejson_stream_open_fd(&user_doc_map, fd, NULL, &error);
+ * if (stream == NULL) {
+ *   return;
+ * }
  *
  * for (;;) {
- *   result = lonejson_stream_next(&stream, &doc);
+ *   result = lonejson_stream_next(stream, &doc, &error);
  *   if (result == LONEJSON_STREAM_OBJECT) {
  *     lonejson_cleanup(&user_doc_map, &doc);
  *     continue;
@@ -255,7 +266,39 @@ extern "C" {
  *   break;
  * }
  *
- * lonejson_stream_close(&stream);
+ * lonejson_stream_close(stream);
+ * ```
+ *
+ * Selected-array streaming is the right fit when one valid JSON document
+ * contains an array that should be consumed item by item. `""` selects a root
+ * array. A non-empty v1 path selects one direct root object key such as
+ * `"items"`; implicit fan-out paths such as `"boards.items"` are rejected.
+ *
+ * ```c
+ * lonejson_array_stream *items;
+ * lonejson_array_stream_result result;
+ * user_doc doc;
+ * lonejson_error error;
+ *
+ * items = lonejson_array_stream_open_path("items", "/tmp/users.json", NULL,
+ *                                         &error);
+ * if (items == NULL) {
+ *   return;
+ * }
+ *
+ * for (;;) {
+ *   result = lonejson_array_stream_next(items, &user_doc_map, &doc, &error);
+ *   if (result == LONEJSON_ARRAY_STREAM_ITEM) {
+ *     lonejson_cleanup(&user_doc_map, &doc);
+ *     continue;
+ *   }
+ *   if (result == LONEJSON_ARRAY_STREAM_EOF) {
+ *     break;
+ *   }
+ *   break;
+ * }
+ *
+ * lonejson_array_stream_close(items);
  * ```
  *
  * Serializing one mapped object is symmetrical:
@@ -396,7 +439,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 3
+#define LONEJSON_ABI_VERSION 4
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -459,6 +502,13 @@ extern "C" {
  * file. */
 #ifndef LONEJSON_SPOOL_MEMORY_LIMIT
 #define LONEJSON_SPOOL_MEMORY_LIMIT 65536u
+#endif
+/** Default hard cap for serializer-owned output buffers. Set explicit
+ * `lonejson_write_options.max_output_bytes` when a call needs a larger
+ * materialized result.
+ */
+#ifndef LONEJSON_WRITE_MAX_OUTPUT_BYTES
+#define LONEJSON_WRITE_MAX_OUTPUT_BYTES (8u * 1024u * 1024u)
 #endif
 /** Fixed path-buffer capacity used for named temporary spool files. */
 #ifndef LONEJSON_SPOOL_TEMP_PATH_CAPACITY
@@ -803,6 +853,8 @@ typedef struct lonejson_field lonejson_field;
 typedef struct lonejson_map lonejson_map;
 /** Opaque object-framed JSON stream parser state. */
 typedef struct lonejson_stream lonejson_stream;
+/** Opaque selected-array item stream parser state. */
+typedef struct lonejson_array_stream lonejson_array_stream;
 /** Opaque incremental Server-Sent Events parser state. */
 typedef struct lonejson_sse lonejson_sse;
 /** Opaque incremental MIME multipart parser state. */
@@ -1181,6 +1233,12 @@ typedef struct lonejson_write_options {
   int pretty;
   /** Optional allocator used for serializer-owned output buffers. */
   const lonejson_allocator *allocator;
+  /** Hard cap for serializer-owned output bytes, excluding the trailing NUL
+   * terminator retained for C-string convenience. Zero keeps the library default
+   * `LONEJSON_WRITE_MAX_OUTPUT_BYTES`; fixed-capacity buffer and sink APIs
+   * ignore this field because their caller-provided sink is the bound.
+   */
+  size_t max_output_bytes;
 } lonejson_write_options;
 
 /** Owned serializer output buffer returned by alloc-returning APIs.
@@ -2190,6 +2248,18 @@ typedef enum lonejson_stream_result {
   LONEJSON_STREAM_ERROR
 } lonejson_stream_result;
 
+/** Result produced by `lonejson_array_stream_next*`. */
+typedef enum lonejson_array_stream_result {
+  /** One complete selected array item was parsed into the destination. */
+  LONEJSON_ARRAY_STREAM_ITEM = 0,
+  /** No more items remain in the selected array and the document is valid. */
+  LONEJSON_ARRAY_STREAM_EOF,
+  /** The underlying source would block before an array item was available. */
+  LONEJSON_ARRAY_STREAM_WOULD_BLOCK,
+  /** A parse, I/O, path, or argument error occurred. */
+  LONEJSON_ARRAY_STREAM_ERROR
+} lonejson_array_stream_result;
+
 /** Opens an object-framed JSON stream over a caller-supplied reader callback.
  */
 lonejson_stream *
@@ -2220,6 +2290,44 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
 const lonejson_error *lonejson_stream_error(const lonejson_stream *stream);
 /** Closes a stream and releases resources it owns. */
 void lonejson_stream_close(lonejson_stream *stream);
+
+/** Opens a streaming cursor over an array selected by a direct root object key.
+ * `path == NULL` or `""` selects a root array. Non-empty v1 paths must be one
+ * object-key segment such as `boards` or `items`; dotted paths are rejected
+ * instead of implicitly fanning out through arrays.
+ */
+lonejson_array_stream *lonejson_array_stream_open_reader(
+    const char *path, lonejson_reader_fn reader, void *user,
+    const lonejson_parse_options *options, lonejson_error *error);
+/** Opens an array-item stream over an open `FILE *`. */
+lonejson_array_stream *
+lonejson_array_stream_open_filep(const char *path, FILE *fp,
+                                 const lonejson_parse_options *options,
+                                 lonejson_error *error);
+/** Opens an array-item stream over a filesystem path. */
+lonejson_array_stream *
+lonejson_array_stream_open_path(const char *array_path, const char *path,
+                                const lonejson_parse_options *options,
+                                lonejson_error *error);
+/** Opens an array-item stream over a file descriptor. */
+lonejson_array_stream *
+lonejson_array_stream_open_fd(const char *path, int fd,
+                              const lonejson_parse_options *options,
+                              lonejson_error *error);
+/** Parses the next selected array item into `dst` through `map`. */
+lonejson_array_stream_result lonejson_array_stream_next(
+    lonejson_array_stream *stream, const lonejson_map *map, void *dst,
+    lonejson_error *error);
+/** Captures the next selected array item as a validated compact JSON value. */
+lonejson_array_stream_result
+lonejson_array_stream_next_value(lonejson_array_stream *stream,
+                                 lonejson_json_value *value,
+                                 lonejson_error *error);
+/** Returns the cursor's last error state. */
+const lonejson_error *
+lonejson_array_stream_error(const lonejson_array_stream *stream);
+/** Closes an array-item stream and releases resources it owns. */
+void lonejson_array_stream_close(lonejson_array_stream *stream);
 
 /** Returns the default SSE parser options. */
 lonejson_sse_options lonejson_default_sse_options(void);
@@ -2577,17 +2685,42 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_HAS_PRESENCE LONEJSON_FIELD_HAS_PRESENCE
 #define LJ_ARRAY_OWNS_ITEMS LONEJSON_ARRAY_OWNS_ITEMS
 #define LJ_ARRAY_FIXED_CAPACITY LONEJSON_ARRAY_FIXED_CAPACITY
+#ifndef LJ_MALLOC
 #define LJ_MALLOC LONEJSON_MALLOC
+#endif
+#ifndef LJ_CALLOC
 #define LJ_CALLOC LONEJSON_CALLOC
+#endif
+#ifndef LJ_REALLOC
 #define LJ_REALLOC LONEJSON_REALLOC
+#endif
+#ifndef LJ_FREE
 #define LJ_FREE LONEJSON_FREE
+#endif
+#ifndef LJ_PARSER_BUFFER_SIZE
 #define LJ_PARSER_BUFFER_SIZE LONEJSON_PARSER_BUFFER_SIZE
+#endif
+#ifndef LJ_READER_BUFFER_SIZE
 #define LJ_READER_BUFFER_SIZE LONEJSON_READER_BUFFER_SIZE
+#endif
+#ifndef LJ_PUSH_PARSER_BUFFER_SIZE
 #define LJ_PUSH_PARSER_BUFFER_SIZE LONEJSON_PUSH_PARSER_BUFFER_SIZE
+#endif
+#ifndef LJ_STREAM_BUFFER_SIZE
 #define LJ_STREAM_BUFFER_SIZE LONEJSON_STREAM_BUFFER_SIZE
+#endif
+#ifndef LJ_SPOOL_MEMORY_LIMIT
 #define LJ_SPOOL_MEMORY_LIMIT LONEJSON_SPOOL_MEMORY_LIMIT
+#endif
+#ifndef LJ_WRITE_MAX_OUTPUT_BYTES
+#define LJ_WRITE_MAX_OUTPUT_BYTES LONEJSON_WRITE_MAX_OUTPUT_BYTES
+#endif
+#ifndef LJ_SPOOL_TEMP_PATH_CAPACITY
 #define LJ_SPOOL_TEMP_PATH_CAPACITY LONEJSON_SPOOL_TEMP_PATH_CAPACITY
+#endif
+#ifndef LJ_TRACK_WORKSPACE_USAGE
 #define LJ_TRACK_WORKSPACE_USAGE LONEJSON_TRACK_WORKSPACE_USAGE
+#endif
 
 #define LJ_STATUS_OK LONEJSON_STATUS_OK
 #define LJ_STATUS_INVALID_ARGUMENT LONEJSON_STATUS_INVALID_ARGUMENT
@@ -2643,6 +2776,11 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_STREAM_EOF LONEJSON_STREAM_EOF
 #define LJ_STREAM_WOULD_BLOCK LONEJSON_STREAM_WOULD_BLOCK
 #define LJ_STREAM_ERROR LONEJSON_STREAM_ERROR
+
+#define LJ_ARRAY_STREAM_ITEM LONEJSON_ARRAY_STREAM_ITEM
+#define LJ_ARRAY_STREAM_EOF LONEJSON_ARRAY_STREAM_EOF
+#define LJ_ARRAY_STREAM_WOULD_BLOCK LONEJSON_ARRAY_STREAM_WOULD_BLOCK
+#define LJ_ARRAY_STREAM_ERROR LONEJSON_ARRAY_STREAM_ERROR
 
 #define LJ_MAP_DEFINE LONEJSON_MAP_DEFINE
 #define LJ_FIELD_STRING_ALLOC LONEJSON_FIELD_STRING_ALLOC
@@ -2748,6 +2886,8 @@ typedef lonejson_field lj_field;
 typedef lonejson_map lj_map;
 /** Incremental parser for object-framed JSON streams. */
 typedef lonejson_stream lj_stream;
+/** Incremental parser for selected array items in one JSON document. */
+typedef lonejson_array_stream lj_array_stream;
 /** Incremental Server-Sent Events parser. */
 typedef lonejson_sse lj_sse;
 /** Incremental MIME multipart parser. */
@@ -2782,6 +2922,8 @@ typedef lonejson_multipart_part lj_multipart_part;
 typedef lonejson_multipart_handler lj_multipart_handler;
 /** Result returned when advancing an object-framed JSON stream. */
 typedef lonejson_stream_result lj_stream_result;
+/** Result returned when advancing a selected-array item stream. */
+typedef lonejson_array_stream_result lj_array_stream_result;
 
 /** Returns the default configuration for spooled storage. */
 LONEJSON_SHORT_ALIAS_INLINE lj_spool_options lj_default_spool_options(void) {
@@ -3047,6 +3189,50 @@ lj_stream_error(const lj_stream *stream) {
 /** Closes a stream parser and releases its resources. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_stream_close(lj_stream *stream) {
   lonejson_stream_close(stream);
+}
+/** Opens a selected-array item stream over a reader callback. */
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_reader(
+    const char *path, lj_reader_fn reader, void *user,
+    const lj_parse_options *options, lj_error *error) {
+  return lonejson_array_stream_open_reader(path, reader, user, options, error);
+}
+/** Opens a selected-array item stream over an open `FILE *`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_filep(
+    const char *path, FILE *fp, const lj_parse_options *options,
+    lj_error *error) {
+  return lonejson_array_stream_open_filep(path, fp, options, error);
+}
+/** Opens a selected-array item stream over a filesystem path. */
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_path(
+    const char *array_path, const char *path, const lj_parse_options *options,
+    lj_error *error) {
+  return lonejson_array_stream_open_path(array_path, path, options, error);
+}
+/** Opens a selected-array item stream over a file descriptor. */
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_fd(
+    const char *path, int fd, const lj_parse_options *options,
+    lj_error *error) {
+  return lonejson_array_stream_open_fd(path, fd, options, error);
+}
+/** Parses the next selected array item into a mapped destination. */
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream_result lj_array_stream_next(
+    lj_array_stream *stream, const lj_map *map, void *dst, lj_error *error) {
+  return lonejson_array_stream_next(stream, map, dst, error);
+}
+/** Captures the next selected array item into a JSON value handle. */
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream_result lj_array_stream_next_value(
+    lj_array_stream *stream, lj_json_value *value, lj_error *error) {
+  return lonejson_array_stream_next_value(stream, value, error);
+}
+/** Returns the last error recorded by a selected-array item stream. */
+LONEJSON_SHORT_ALIAS_INLINE const lj_error *
+lj_array_stream_error(const lj_array_stream *stream) {
+  return lonejson_array_stream_error(stream);
+}
+/** Closes a selected-array item stream. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_array_stream_close(lj_array_stream *stream) {
+  lonejson_array_stream_close(stream);
 }
 /** Returns the default SSE parser options. */
 LONEJSON_SHORT_ALIAS_INLINE lj_sse_options lj_default_sse_options(void) {

@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "source": "lonejson array stream example corpus",
+    "version": 1
+  },
+  "items": [
+    {
+      "id": "ISS-1001",
+      "title": "Bound selected array cursor memory",
+      "priority": 1,
+      "open": true
+    },
+    {
+      "id": "ISS-1002",
+      "title": "Preserve would-block reader retry",
+      "priority": 2,
+      "open": true
+    },
+    {
+      "id": "ISS-1003",
+      "title": "Reject duplicate keys while skipping",
+      "priority": 3,
+      "open": false
+    }
+  ],
+  "summary": {
+    "count": 3,
+    "closed": 1
+  }
+}

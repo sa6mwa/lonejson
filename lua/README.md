@@ -3,9 +3,9 @@
 The Lua binding exposes `lonejson` as a schema-guided JSON decoder and
 serializer rather than as a generic `decode(anything)` convenience layer. That
 choice is deliberate. The C library is built around mapped object shapes,
-reusable records, object-framed streams, and explicit handling of large values;
-the Lua surface keeps those strengths instead of hiding them behind a looser
-API that would allocate more and explain less.
+reusable records, object-framed streams, selected-array streams, and explicit
+handling of large values; the Lua surface keeps those strengths instead of
+hiding them behind a looser API that would allocate more and explain less.
 
 At the top level, the binding is loaded with:
 
@@ -28,10 +28,11 @@ last allocation out of the pipeline.
 
 The second style is record-oriented and intentionally low-allocation. In that
 mode, a schema produces reusable record objects backed by the C mapping layer.
-Those records can be cleared and reused, passed through object-framed streams,
-and combined with spool-backed fields for large text or byte payloads. This is
-the intended path for streaming ingestion, ETL, and services that want the
-clarity of Lua without giving up the bounded-memory behavior of the C core.
+Those records can be cleared and reused, passed through object-framed or
+selected-array streams, and combined with spool-backed fields for large text or
+byte payloads. This is the intended path for streaming ingestion, ETL, and
+services that want the clarity of Lua without giving up the bounded-memory
+behavior of the C core.
 
 ## Building and testing from this repository
 
@@ -262,6 +263,37 @@ stream:close()
 When a record is supplied to `stream:next(rec)`, the same record is reused for
 each object. That is the intended fast path for continuous streams.
 
+## Selected array streams
+
+For a JSON document that contains one large array, use an array stream cursor
+instead of decoding the whole document. The selected path is direct only:
+`"items"` selects a root object member named `items`, while `""` selects a root
+array. Dotted fan-out paths such as `"boards.items"` are intentionally rejected
+in v1.
+
+```lua
+local stream = User:array_stream_path("items", "/tmp/users.json")
+local rec = User:new_record()
+
+while true do
+  local obj, err, status = stream:next(rec)
+  if status == "item" then
+    print(rec.name)
+  elseif status == "eof" then
+    break
+  else
+    error(err and err.message or "array stream failed")
+  end
+end
+
+stream:close()
+```
+
+`array_stream_file`, `array_stream_fd`, and `array_stream_string` mirror the
+other source helpers. `stream:next_value()` returns each selected array item as
+a native Lua JSON value when you need raw pass-through shape instead of the
+schema-mapped record.
+
 ## Path compilation and accessors
 
 The binding also exposes compiled accessors for hot paths where repeated string
@@ -346,8 +378,9 @@ The status is one of:
 - `"would_block"`
 - `"error"`
 
-Code should branch on the status instead of guessing from the object value
-alone.
+Array streams use the same convention, with `"item"` instead of `"object"` for
+successful items. Code should branch on the status instead of guessing from the
+object value alone.
 
 ## Examples and related files
 

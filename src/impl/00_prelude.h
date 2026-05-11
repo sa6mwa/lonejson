@@ -37,7 +37,8 @@ typedef enum lonejson_string_capture_mode {
   LONEJSON_STRING_CAPTURE_TOKEN = 0,
   LONEJSON_STRING_CAPTURE_DIRECT = 1,
   LONEJSON_STRING_CAPTURE_STREAM = 2,
-  LONEJSON_STRING_CAPTURE_JSON_VISITOR = 3
+  LONEJSON_STRING_CAPTURE_JSON_VISITOR = 3,
+  LONEJSON_STRING_CAPTURE_DISCARD = 4
 } lonejson_string_capture_mode;
 
 typedef struct lonejson_parser lonejson_parser;
@@ -83,6 +84,8 @@ typedef struct lonejson__parser_workspace_align_probe {
 #define LONEJSON__MAP_MASK_CACHE_SIZE 8u
 #define LONEJSON__SPOOLED_MAGIC 0x4C4A5350u
 #define LONEJSON__JSON_VALUE_MAGIC 0x4C4A4A56u
+#define LONEJSON__SPACES_64                                                    \
+  "                                                                "
 
 #if defined(__GNUC__) || defined(__clang__)
 #define LONEJSON__INLINE __inline__ __attribute__((always_inline))
@@ -162,6 +165,7 @@ typedef struct lonejson_buffer_sink {
   size_t length;
   size_t needed;
   size_t alloc_size;
+  size_t max_bytes;
   lonejson_overflow_policy policy;
   int truncated;
   const lonejson_allocator *allocator;
@@ -201,6 +205,115 @@ typedef struct lonejson__byte_buffer {
   size_t len;
   size_t cap;
 } lonejson__byte_buffer;
+
+typedef enum lonejson_array_stream_source_kind {
+  LONEJSON_ARRAY_STREAM_SOURCE_READER = 1,
+  LONEJSON_ARRAY_STREAM_SOURCE_FILE = 2,
+  LONEJSON_ARRAY_STREAM_SOURCE_FD = 3
+} lonejson_array_stream_source_kind;
+
+typedef enum lonejson_array_stream_state {
+  LONEJSON_ARRAY_STREAM_STATE_INIT = 0,
+  LONEJSON_ARRAY_STREAM_STATE_IN_ARRAY = 1,
+  LONEJSON_ARRAY_STREAM_STATE_DONE = 2,
+  LONEJSON_ARRAY_STREAM_STATE_ERROR = 3
+} lonejson_array_stream_state;
+
+typedef enum lonejson_array_stream_phase {
+  LONEJSON_ARRAY_STREAM_PHASE_START = 0,
+  LONEJSON_ARRAY_STREAM_PHASE_ROOT_OBJECT_KEY_OR_END = 1,
+  LONEJSON_ARRAY_STREAM_PHASE_ROOT_OBJECT_COLON = 2,
+  LONEJSON_ARRAY_STREAM_PHASE_ROOT_OBJECT_VALUE = 3,
+  LONEJSON_ARRAY_STREAM_PHASE_ROOT_OBJECT_COMMA_OR_END = 4,
+  LONEJSON_ARRAY_STREAM_PHASE_ARRAY_VALUE_OR_END = 5,
+  LONEJSON_ARRAY_STREAM_PHASE_ARRAY_COMMA_OR_END = 6,
+  LONEJSON_ARRAY_STREAM_PHASE_ITEM_AFTER_VALUE = 7,
+  LONEJSON_ARRAY_STREAM_PHASE_FINISH_DOCUMENT = 8
+} lonejson_array_stream_phase;
+
+typedef enum lonejson_array_stream_key_phase {
+  LONEJSON_ARRAY_STREAM_KEY_IDLE = 0,
+  LONEJSON_ARRAY_STREAM_KEY_BODY = 1,
+  LONEJSON_ARRAY_STREAM_KEY_ESCAPE = 2,
+  LONEJSON_ARRAY_STREAM_KEY_UNICODE = 3,
+  LONEJSON_ARRAY_STREAM_KEY_SURROGATE_SLASH = 4,
+  LONEJSON_ARRAY_STREAM_KEY_SURROGATE_U = 5,
+  LONEJSON_ARRAY_STREAM_KEY_SURROGATE_LOW = 6
+} lonejson_array_stream_key_phase;
+
+typedef enum lonejson_array_stream_value_mode {
+  LONEJSON_ARRAY_STREAM_VALUE_NONE = 0,
+  LONEJSON_ARRAY_STREAM_VALUE_SKIP = 1,
+  LONEJSON_ARRAY_STREAM_VALUE_MAPPED = 2,
+  LONEJSON_ARRAY_STREAM_VALUE_RAW = 3
+} lonejson_array_stream_value_mode;
+
+typedef struct lonejson__array_stream_dup_frame {
+  lonejson__byte_buffer keys;
+} lonejson__array_stream_dup_frame;
+
+typedef struct lonejson__array_stream_dup_state {
+  const lonejson_allocator *allocator;
+  lonejson__array_stream_dup_frame *frames;
+  size_t frame_count;
+  size_t frame_capacity;
+  lonejson__byte_buffer key;
+} lonejson__array_stream_dup_state;
+
+struct lonejson_array_stream {
+  lonejson_reader_fn reader;
+  void *reader_user;
+  FILE *fp;
+  int fd;
+  int owns_fp;
+  int owns_fd;
+  lonejson_array_stream_source_kind source_kind;
+  lonejson_array_stream_state state;
+  lonejson_array_stream_phase phase;
+  char *path;
+  size_t path_len;
+  size_t path_alloc_size;
+  int first_item;
+  int selected_seen;
+  int root_object_after_comma;
+  int root_array_selected;
+  int would_block;
+  int has_pushback;
+  int pushback;
+  int current_key_matched;
+  int item_pending;
+  lonejson_array_stream_key_phase key_phase;
+  lonejson_uint32 key_codepoint;
+  lonejson_uint32 key_high_surrogate;
+  int key_digits_needed;
+  lonejson_array_stream_value_mode value_mode;
+  lonejson_array_stream_value_mode pending_value_mode;
+  int value_active;
+  const lonejson_map *active_map;
+  const lonejson_map *pending_map;
+  void *active_dst;
+  void *pending_dst;
+  size_t buffered_start;
+  size_t buffered_end;
+  size_t offset;
+  size_t line;
+  size_t column;
+  size_t self_alloc_size;
+  lonejson_parse_options options;
+  lonejson_error error;
+  lonejson_allocator allocator;
+  lonejson_parser value_parser;
+  lonejson_json_value skip_value;
+  lonejson_value_visitor skip_visitor;
+  lonejson__array_stream_dup_state skip_dup_state;
+  int skip_dup_active;
+  unsigned char value_workspace[LONEJSON_PARSER_BUFFER_SIZE +
+                                LONEJSON__PARSER_WORKSPACE_SLACK];
+  unsigned char io_buffer[LONEJSON_READER_BUFFER_SIZE];
+  lonejson__byte_buffer item;
+  lonejson__byte_buffer key;
+  lonejson__byte_buffer root_keys;
+};
 
 struct lonejson_sse {
   lonejson_sse_options options;

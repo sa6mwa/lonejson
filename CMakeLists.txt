@@ -25,7 +25,7 @@ option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "3" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "4" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -232,6 +232,38 @@ if(LONEJSON_BUILD_TESTS)
       DEPENDS "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}")
   endif()
 
+  function(lonejson_add_single_header_config_test target)
+    add_executable(${target} tests/test_single_header_config_matrix.c)
+    target_include_directories(${target} PRIVATE
+      "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}")
+    add_dependencies(${target} package-single-header)
+    if(ARGN)
+      target_compile_definitions(${target} PRIVATE ${ARGN})
+    endif()
+    lonejson_configure_c_target(${target})
+    add_test(NAME ${target} COMMAND ${target})
+    list(APPEND LONEJSON_STACK_USAGE_TARGETS ${target})
+    set(LONEJSON_STACK_USAGE_TARGETS "${LONEJSON_STACK_USAGE_TARGETS}"
+      PARENT_SCOPE)
+  endfunction()
+
+  lonejson_add_single_header_config_test(
+    lonejson_single_header_config_default)
+  lonejson_add_single_header_config_test(
+    lonejson_single_header_config_omit_protocol
+    TEST_OMIT_PROTOCOL_FRAMING)
+  lonejson_add_single_header_config_test(
+    lonejson_single_header_config_lj_implementation
+    TEST_LJ_IMPLEMENTATION_ALIAS
+    TEST_USE_SHORT_NAMES)
+  lonejson_add_single_header_config_test(
+    lonejson_single_header_config_lj_config_aliases
+    TEST_LJ_CONFIG_ALIASES
+    TEST_USE_SHORT_NAMES)
+  lonejson_add_single_header_config_test(
+    lonejson_single_header_config_short_names_disabled
+    TEST_DISABLE_SHORT_NAMES)
+
   add_executable(lonejson_static_link_tests tests/test_link_consumer.c)
   target_include_directories(lonejson_static_link_tests PRIVATE
     "${LONEJSON_PUBLIC_INCLUDE_DIR}")
@@ -276,6 +308,7 @@ endif()
 
 if(LONEJSON_BUILD_EXAMPLES)
   set(LONEJSON_LINKED_EXAMPLES
+    array_stream
     generator_pull
     parse_file
     parse_reader
@@ -352,6 +385,16 @@ if(LONEJSON_BUILD_FUZZERS)
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_mapped_parse)
 
+  add_executable(lonejson_fuzz_array_stream fuzz/fuzz_array_stream.c)
+  target_include_directories(lonejson_fuzz_array_stream PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_array_stream PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_array_stream PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_array_stream PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_array_stream)
+
   add_executable(lonejson_fuzz_json_value fuzz/fuzz_json_value.c)
   target_include_directories(lonejson_fuzz_json_value PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_link_libraries(lonejson_fuzz_json_value PRIVATE lonejson)
@@ -407,25 +450,57 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson_impl.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson_internal.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/00_prelude.h"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/10_json_runtime.h"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/25_json_pull.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/10_source_runtime.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/11_json_value_io.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/12_json_value_parse.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/13_json_value_visit.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/14_json_value_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/20_parser.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/20_parser_map.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/21_parser_values.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/22_parser_actions.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/22_parser_engine.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/23_serializer_io.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/24_serializer.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/25_json_pull.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/30_api.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/32_generator_api.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/33_array_stream_api.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/34_protocol_framing_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/35_json_pull_impl.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/bench/lonejson_bench.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_module.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_record.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_schema.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_schema_methods.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_stream_spool.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_support.inc"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_validate.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_mapped_parse.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_array_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_protocol_framing.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_visitor.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_stream.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_curl_misc.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixtures_public.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generator_omit.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_json_value_sources.inc"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_main.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_parse_serialize.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_protocol_framing.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_support.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_config_matrix.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_link_consumer.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_short_names.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_short_names_disabled.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/parse_string.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/examples/array_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/parse_file.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/parse_reader.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/push_parser.c"
@@ -514,11 +589,25 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/lonejson.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson_impl.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/00_prelude.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/10_json_runtime.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/10_source_runtime.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/11_json_value_io.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/12_json_value_parse.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/13_json_value_visit.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/14_json_value_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/20_parser.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/20_parser_map.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/21_parser_values.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/22_parser_actions.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/22_parser_engine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/23_serializer_io.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/24_serializer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/25_json_pull.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/30_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/32_generator_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/33_array_stream_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/34_protocol_framing_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/35_json_pull_impl.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_single_header.cmake
   VERBATIM
 )

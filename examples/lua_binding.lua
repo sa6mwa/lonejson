@@ -33,6 +33,7 @@ end
 do
   local rec
   local jsonl_path
+  local array_path
   local stream
   local obj
   local err
@@ -59,6 +60,7 @@ do
   print("payload temp exists after clear=" .. tostring(exists(payload_path)))
 
   jsonl_path = "/tmp/lonejson-lua-example.jsonl"
+  array_path = "/tmp/lonejson-lua-example-array.json"
   assert(Example:write_path(rec, "/tmp/lonejson-lua-example-single.json"))
   do
     local f = assert(io.open(jsonl_path, "wb"))
@@ -66,6 +68,11 @@ do
     f:write('{"id":3,"name":"second","body":"')
     f:write(("streamed-"):rep(18))
     f:write('"}')
+    f:close()
+  end
+  do
+    local f = assert(io.open(array_path, "wb"))
+    f:write('{"items":[{"id":4,"name":"array-first"},{"id":5,"name":"array-second"}]}')
     f:close()
   end
 
@@ -84,6 +91,20 @@ do
     end
   end
   stream:close()
+
+  stream = Example:array_stream_path("items", array_path)
+  while true do
+    obj, err, status = stream:next(rec)
+    if status == "item" then
+      print("array item id=" .. rec.id .. " name=" .. rec.name)
+    elseif status == "eof" then
+      break
+    else
+      error(err and err.message or "array stream failed")
+    end
+  end
+  stream:close()
   os.remove("/tmp/lonejson-lua-example-single.json")
   os.remove(jsonl_path)
+  os.remove(array_path)
 end

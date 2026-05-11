@@ -26,6 +26,8 @@ cc -I ../include -o bin/serialize_file serialize_file.c \
 
 The same pattern applies to:
 
+* `array_stream.c` (streams the `items` array from
+  `tests/fixtures/array_stream/issues.json` item by item)
 * `parse_file.c`
 * `parse_reader.c`
 * `push_parser.c` (object-framed streaming reader example)
@@ -89,4 +91,6 @@ Then run the Lua example:
 eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_binding.lua
 ```
 
-That example shows the schema DSL, reusable record decoding, object-framed stream parsing, and spool-backed text/byte fields.
+That example shows the schema DSL, reusable record decoding, object-framed
+stream parsing, selected-array stream parsing, and spool-backed text/byte
+fields.

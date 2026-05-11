@@ -112,6 +112,13 @@ do
     "}",
   }, "\n")
   assert_eq(Test:encode(rec, { pretty = true }), pretty_expected)
+  assert_eq(Test:encode(rec, { max_output_bytes = 4096 }), json)
+  assert_eq(Test:encode(rec, { max_output_bytes = #json }), json)
+  local ok, err = pcall(function()
+    Test:encode(rec, { max_output_bytes = #json - 1 })
+  end)
+  assert_true(not ok)
+  assert_true(tostring(err):find("max_output_bytes", 1, true) ~= nil)
 end
 
 do
@@ -371,6 +378,213 @@ do
   assert_eq(roundtrip.selector.clauses[1].field, "state")
   assert_eq(roundtrip.fields[3].nested[3], 1.25)
   assert_eq(getmetatable(roundtrip.fields).__lonejson_json_kind, "array")
+end
+
+do
+  local stream =
+    Test:array_stream_string("items", '{"meta":{"source":"skip"},"items":[{"name":"A","age":1},{"name":"B","age":2}]}')
+  local obj, err, status
+
+  obj, err, status = stream:next()
+  assert_eq(status, "item")
+  assert_true(err == nil)
+  assert_eq(obj.name, "A")
+  assert_eq(obj.age, 1)
+
+  obj, err, status = stream:next()
+  assert_eq(status, "item")
+  assert_true(err == nil)
+  assert_eq(obj.name, "B")
+  assert_eq(obj.age, 2)
+
+  obj, err, status = stream:next()
+  assert_eq(status, "eof")
+  assert_true(err == nil)
+  stream:close()
+end
+
+do
+  local stream =
+    Query:array_stream_string("queries", '{"queries":[{"id":"q1","selector":{"x":null},"fields":["id",{"deep":[true,null]}]},{"id":"q2","selector":{"ok":true}}]}')
+  local rec = Query:new_record()
+  local obj, err, status
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "item")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.id, "q1")
+  assert_true(rec.selector.x == lj.json_null)
+  assert_eq(rec.fields[2].deep[1], true)
+  assert_true(rec.fields[2].deep[2] == lj.json_null)
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "item")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.id, "q2")
+  assert_eq(rec.selector.ok, true)
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "eof")
+  stream:close()
+end
+
+do
+  local stream =
+    Merge:array_stream_string("items", '{"items":[{"id":"stream-old","age":9,"selector":{"a":1},"fields":["keep"]},{"selector":{"b":2}}]}', { clear_destination = false })
+  local rec = Merge:new_record()
+  local obj, err, status
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "item")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.id, "stream-old")
+  assert_eq(rec.age, 9)
+  assert_eq(rec.selector.a, 1)
+  assert_eq(rec.fields[1], "keep")
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "item")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.id, "stream-old")
+  assert_eq(rec.age, 9)
+  assert_true(rec.selector.a == nil)
+  assert_eq(rec.selector.b, 2)
+  assert_eq(rec.fields[1], "keep")
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "eof")
+  stream:close()
+end
+
+do
+  local stream = Query:array_stream_string("", '[{"a":1},null,[true,null],"text"]')
+  local value, err, status
+
+  value, err, status = stream:next_value()
+  assert_eq(status, "item")
+  assert_true(err == nil)
+  assert_eq(value.a, 1)
+  assert_eq(getmetatable(value).__lonejson_json_kind, "object")
+
+  value, err, status = stream:next_value()
+  assert_eq(status, "item")
+  assert_true(value == nil)
+  assert_true(err == nil)
+
+  value, err, status = stream:next_value()
+  assert_eq(status, "item")
+  assert_eq(value[1], true)
+  assert_true(value[2] == lj.json_null)
+  assert_eq(getmetatable(value).__lonejson_json_kind, "array")
+
+  value, err, status = stream:next_value()
+  assert_eq(status, "item")
+  assert_eq(value, "text")
+
+  value, err, status = stream:next_value()
+  assert_eq(status, "eof")
+  stream:close()
+end
+
+do
+  local path = "/tmp/lonejson-lua-array-stream.json"
+  local f = assert(io.open(path, "wb"))
+  local stream
+  local obj, err, status
+
+  f:write('{"items":[{"name":"Path","age":11}]}')
+  f:close()
+
+  stream = Test:array_stream_path("items", path)
+  obj, err, status = stream:next()
+  assert_eq(status, "item")
+  assert_true(err == nil)
+  assert_eq(obj.name, "Path")
+  obj, err, status = stream:next()
+  assert_eq(status, "eof")
+  stream:close()
+  os.remove(path)
+end
+
+do
+  local path = "/tmp/lonejson-lua-array-stream-fd.json"
+  local f = assert(io.open(path, "wb"))
+  local stream
+  local obj, err, status
+
+  f:write('{"items":[{"name":"FD","age":12}]}')
+  f:close()
+
+  f = assert(io.open(path, "rb"))
+  stream = Test:array_stream_fd("items", f)
+  obj, err, status = stream:next()
+  assert_eq(status, "item")
+  assert_true(err == nil)
+  assert_eq(obj.name, "FD")
+  stream:close()
+  f:close()
+  os.remove(path)
+end
+
+do
+  local path = "/tmp/lonejson-lua-array-stream-file.json"
+  local f = assert(io.open(path, "wb"))
+  local stream
+  local obj, err, status
+
+  f:write('{"items":[{"name":"File","age":13}]}')
+  f:close()
+
+  f = assert(io.open(path, "rb"))
+  stream = Test:array_stream_file("items", f)
+  obj, err, status = stream:next()
+  assert_eq(status, "item")
+  assert_true(err == nil)
+  assert_eq(obj.name, "File")
+  stream:close()
+  f:close()
+  os.remove(path)
+end
+
+do
+  local bad = Test:array_stream_string("boards.items", '{"boards":[{"items":[{"name":"x"}]}]}')
+  assert_true(type(bad) == "table")
+  assert_true(bad.status ~= nil)
+end
+
+do
+  local stream = Test:array_stream_string("items", '{"meta":{"x":1,"x":2},"items":[{"name":"bad"}]}')
+  local obj, err, status = stream:next()
+  assert_eq(status, "error")
+  assert_true(obj == nil)
+  assert_true(err ~= nil)
+  assert_eq(err.status, "duplicate_field")
+  stream:close()
+end
+
+do
+  local stream = Test:array_stream_string("items", '{"meta":{"x":1,"x":2},"items":[{"name":"ok","age":14}]}', { reject_duplicate_keys = false })
+  local obj, err, status = stream:next()
+  assert_eq(status, "item")
+  assert_true(err == nil)
+  assert_eq(obj.name, "ok")
+  assert_eq(obj.age, 14)
+  obj, err, status = stream:next()
+  assert_eq(status, "eof")
+  stream:close()
+end
+
+do
+  local stream = Query:array_stream_string("", '[{"ok":true}x]')
+  local value, err, status = stream:next_value()
+  assert_eq(status, "error")
+  assert_true(value == nil)
+  assert_true(err ~= nil)
+  stream:close()
 end
 
 print("lua tests passed")

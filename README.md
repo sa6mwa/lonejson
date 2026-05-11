@@ -40,10 +40,11 @@ descriptors when the data already exists outside the process heap.
 At the core is the public header `include/lonejson.h`, paired with the compiled
 library in the normal build. That API can parse from C strings, raw buffers,
 reader callbacks, `FILE *`, filesystem paths, and object-framed streams built
-on the same underlying parser. Serialization is available to sink callbacks,
-caller-supplied buffers, allocated strings, `FILE *`, filesystem paths, and
-JSON Lines. Pretty printing is optional and uses a fixed two-space indentation
-style.
+on the same underlying parser. It can also stream one selected array from a
+valid JSON document item by item without decoding the whole document first.
+Serialization is available to sink callbacks, caller-supplied buffers,
+allocated strings, `FILE *`, filesystem paths, and JSON Lines. Pretty printing
+is optional and uses a fixed two-space indentation style.
 
 Field mappings can be fixed-capacity or dynamically allocated. Large inbound
 values can be represented by spool-backed text or base64-decoded byte fields,
@@ -55,8 +56,8 @@ same surface also exposes `lonejson_value_visitor` and `lonejson_visit_value_*`
 for streaming one arbitrary JSON value as structured callbacks without
 building a DOM. Short aliases are enabled by default through `lj_*` and
 `LJ_*`. The repository also ships a Lua binding with a schema DSL, reusable
-records, object-framed streaming, spool-backed fields, and native-Lua
-`json_value` decoding built on the same visitor model.
+records, object-framed streaming, selected-array streaming, spool-backed
+fields, and native-Lua `json_value` decoding built on the same visitor model.
 
 When you need caller-owned fixed-capacity array backing storage during parse,
 initialize the destination first with `lonejson_init(...)`, configure that
@@ -114,8 +115,11 @@ by `lonejson_parse_cstr`, `lonejson_parse_buffer`, `lonejson_parse_reader`,
 `lonejson_parse_filep`, and `lonejson_parse_path`, with `lonejson_validate_*`
 variants available when syntax validation is all you need. Streaming uses
 `lonejson_stream_open_*`, `lonejson_stream_next`, `lonejson_stream_error`, and
-`lonejson_stream_close`. Serialization is exposed through `lonejson_serialize_*`,
-`lonejson_serialize_jsonl_*`, and the pull-style
+`lonejson_stream_close`. Selected-array cursors use
+`lonejson_array_stream_open_*`, `lonejson_array_stream_next`,
+`lonejson_array_stream_next_value`, `lonejson_array_stream_error`, and
+`lonejson_array_stream_close`. Serialization is exposed through
+`lonejson_serialize_*`, `lonejson_serialize_jsonl_*`, and the pull-style
 `lonejson_generator_init/read/cleanup` trio. Ownership and reuse of mapped
 values is handled by `lonejson_cleanup` and `lonejson_reset`.
 
@@ -128,6 +132,12 @@ where a typed envelope needs to embed one already-formed JSON value directly,
 and `lonejson_visit_value_*` covers the lower-level case where one arbitrary
 JSON value should be visited without a schema. Parse and write behavior is
 configured through `lonejson_parse_options` and `lonejson_write_options`.
+Serializer-owned output APIs such as `lonejson_serialize_alloc()` and
+`lonejson_serialize_owned()` are materializing APIs and are capped by
+`lonejson_write_options.max_output_bytes`, which defaults to
+`LONEJSON_WRITE_MAX_OUTPUT_BYTES` (8 MiB). Fixed caller buffers are bounded by
+their explicit capacity, and sink/file/generator serializers remain streaming
+or caller-bounded rather than using this materialized-output cap.
 
 The new generator surface is the transport-facing serializer primitive. It is
 bounded and pull-based rather than sink-driven, so adapters like curl upload do
@@ -204,15 +214,17 @@ objects separated by blank lines, and JSONL-style one-object-per-line input all
 fit the same model.
 
 ```c
-lonejson_stream stream;
+lonejson_stream *stream;
 user_doc doc;
+lonejson_error error;
 
-if (lonejson_stream_open_fd(&stream, &user_doc_map, fd, NULL) != LONEJSON_STATUS_OK) {
+stream = lonejson_stream_open_fd(&user_doc_map, fd, NULL, &error);
+if (stream == NULL) {
   return 1;
 }
 
 for (;;) {
-  lonejson_stream_result result = lonejson_stream_next(&stream, &doc);
+  lonejson_stream_result result = lonejson_stream_next(stream, &doc, &error);
   if (result == LONEJSON_STREAM_OBJECT) {
     /* process doc */
     lonejson_cleanup(&user_doc_map, &doc);
@@ -221,11 +233,64 @@ for (;;) {
   if (result == LONEJSON_STREAM_EOF) {
     break;
   }
-  /* inspect lonejson_stream_error(&stream) */
+  /* inspect lonejson_stream_error(stream) */
   break;
 }
 
-lonejson_stream_close(&stream);
+lonejson_stream_close(stream);
+```
+
+### Read a selected array stream
+
+Use a selected-array cursor when one valid JSON document contains an array that
+should be consumed item by item. `""` selects a root array. A non-empty v1 path
+selects one direct root object key such as `"items"`; implicit fan-out paths
+such as `"boards.items"` are rejected so traversal semantics stay explicit.
+
+Mapped item delivery parses each item directly into the destination map:
+
+```c
+lonejson_array_stream *items;
+user_doc doc;
+lonejson_error error;
+
+items = lonejson_array_stream_open_path("items", "/tmp/users.json", NULL,
+                                        &error);
+if (items == NULL) {
+  return 1;
+}
+
+for (;;) {
+  lonejson_array_stream_result result =
+      lonejson_array_stream_next(items, &user_doc_map, &doc, &error);
+  if (result == LONEJSON_ARRAY_STREAM_ITEM) {
+    /* process one mapped item */
+    lonejson_cleanup(&user_doc_map, &doc);
+    continue;
+  }
+  if (result == LONEJSON_ARRAY_STREAM_EOF) {
+    break;
+  }
+  /* inspect lonejson_array_stream_error(items) */
+  break;
+}
+
+lonejson_array_stream_close(items);
+```
+
+With an open array cursor, raw item delivery explicitly captures each selected
+item as a `lonejson_json_value`:
+
+```c
+lonejson_json_value value;
+
+lonejson_json_value_init(&value);
+while (lonejson_array_stream_next_value(items, &value, &error) ==
+       LONEJSON_ARRAY_STREAM_ITEM) {
+  lonejson_json_value_write_to_sink(&value, sink_fn, user, &error);
+  lonejson_json_value_reset(&value);
+}
+lonejson_json_value_cleanup(&value);
 ```
 
 ### Serialize one mapped object
@@ -464,10 +529,16 @@ The same option applies to normal JSON serializers and to JSONL serializers,
 where each record is formatted independently and then terminated by `\n`.
 
 When you use the default alloc-returning serializer, release the returned
-buffer with `LONEJSON_FREE()`:
+buffer with `LONEJSON_FREE()`. Alloc-returning and owned-buffer serializers
+enforce `options.max_output_bytes`; set a larger explicit value when you
+intentionally materialize a larger document.
 
 ```c
-char *json = lonejson_serialize_alloc(&user_doc_map, &doc, NULL, NULL, &error);
+lonejson_write_options options = lonejson_default_write_options();
+options.max_output_bytes = 16u * 1024u * 1024u;
+
+char *json =
+    lonejson_serialize_alloc(&user_doc_map, &doc, NULL, &options, &error);
 if (json == NULL) {
   return 1;
 }
@@ -536,8 +607,8 @@ default and can be disabled with:
 ## Lua binding
 
 The repository also ships a Lua binding with schema-guided decoding, reusable
-records, object-framed streams, spool-backed fields, and native-Lua arbitrary
-`json_value` fields backed by the C visitor path.
+records, object-framed streams, selected-array streams, spool-backed fields,
+and native-Lua arbitrary `json_value` fields backed by the C visitor path.
 
 Build and install it into the local LuaRocks tree:
 
@@ -561,8 +632,8 @@ eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_binding.lua
 
 See [examples/README.md](examples/README.md) for the full set. The example
 programs cover one-shot parsing, object-framed streams, fixed-storage mappings,
-spool-to-disk fields, source-backed outbound fields, string/file/JSONL
-serialization, optional curl integration, and the Lua binding.
+selected-array streams, spool-to-disk fields, source-backed outbound fields,
+string/file/JSONL serialization, optional curl integration, and the Lua binding.
 
 Online:
 
