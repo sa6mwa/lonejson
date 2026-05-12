@@ -2260,6 +2260,13 @@ typedef enum lonejson_array_stream_result {
   LONEJSON_ARRAY_STREAM_ERROR
 } lonejson_array_stream_result;
 
+/** Callback invoked after one push-fed selected array item has been parsed into
+ * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
+ * so callers that need to retain an item must copy it here.
+ */
+typedef lonejson_status (*lonejson_array_stream_item_fn)(void *user,
+                                                         void *dst);
+
 /** Opens an object-framed JSON stream over a caller-supplied reader callback.
  */
 lonejson_stream *
@@ -2314,6 +2321,14 @@ lonejson_array_stream *
 lonejson_array_stream_open_fd(const char *path, int fd,
                               const lonejson_parse_options *options,
                               lonejson_error *error);
+/** Opens a push-fed array-item stream for write-callback style sources. Feed
+ * bytes with `lonejson_array_stream_push` and validate EOF with
+ * `lonejson_array_stream_finish`.
+ */
+lonejson_array_stream *
+lonejson_array_stream_open_push(const char *path,
+                                const lonejson_parse_options *options,
+                                lonejson_error *error);
 /** Parses the next selected array item into `dst` through `map`. */
 lonejson_array_stream_result lonejson_array_stream_next(
     lonejson_array_stream *stream, const lonejson_map *map, void *dst,
@@ -2323,6 +2338,20 @@ lonejson_array_stream_result
 lonejson_array_stream_next_value(lonejson_array_stream *stream,
                                  lonejson_json_value *value,
                                  lonejson_error *error);
+/** Feeds response bytes into a push-fed selected-array stream. Each complete
+ * item is parsed directly into `dst` through `map`, then reported to
+ * `callback`. This function consumes bounded chunks; it does not materialize
+ * the complete response or selected array.
+ */
+lonejson_status lonejson_array_stream_push(
+    lonejson_array_stream *stream, const lonejson_map *map, void *dst,
+    const void *bytes, size_t len, lonejson_array_stream_item_fn callback,
+    void *user, lonejson_error *error);
+/** Finalizes a push-fed selected-array stream after the source reaches EOF. */
+lonejson_status lonejson_array_stream_finish(
+    lonejson_array_stream *stream, const lonejson_map *map, void *dst,
+    lonejson_array_stream_item_fn callback, void *user,
+    lonejson_error *error);
 /** Returns the cursor's last error state. */
 const lonejson_error *
 lonejson_array_stream_error(const lonejson_array_stream *stream);
@@ -2631,6 +2660,24 @@ typedef struct lonejson_curl_parse {
   lonejson_error error;
 } lonejson_curl_parse;
 
+/** Curl response adapter state for streaming selected array items from
+ * `CURLOPT_WRITEFUNCTION` chunks.
+ */
+typedef struct lonejson_curl_array_parse {
+  /** Push-fed selected-array stream owned by the curl adapter. */
+  lonejson_array_stream *stream;
+  /** Map used to parse each selected array item. */
+  const lonejson_map *map;
+  /** Reused destination populated before each item callback. */
+  void *dst;
+  /** Callback invoked for each complete selected array item. */
+  lonejson_array_stream_item_fn callback;
+  /** User data passed to `callback`. */
+  void *user;
+  /** Last parse or callback error captured by the curl adapter. */
+  lonejson_error error;
+} lonejson_curl_array_parse;
+
 /** Curl upload adapter state for streaming generated JSON to libcurl. */
 typedef struct lonejson_curl_upload {
   /** Underlying pull-style JSON generator used by the curl adapter. */
@@ -2648,6 +2695,24 @@ size_t lonejson_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 lonejson_status lonejson_curl_parse_finish(lonejson_curl_parse *ctx);
 /** Releases resources owned by a curl parse adapter. */
 void lonejson_curl_parse_cleanup(lonejson_curl_parse *ctx);
+
+/** Initializes a curl write adapter that streams selected array items directly
+ * into `dst` and reports each item through `callback`.
+ */
+lonejson_status lonejson_curl_array_parse_init(
+    lonejson_curl_array_parse *ctx, const char *path, const lonejson_map *map,
+    void *dst, const lonejson_parse_options *options,
+    lonejson_array_stream_item_fn callback, void *user);
+/** Curl write callback that forwards response bytes into a selected-array
+ * stream adapter.
+ */
+size_t lonejson_curl_array_write_callback(char *ptr, size_t size, size_t nmemb,
+                                          void *userdata);
+/** Finalizes a curl selected-array stream adapter after curl reaches EOF. */
+lonejson_status
+lonejson_curl_array_parse_finish(lonejson_curl_array_parse *ctx);
+/** Releases resources owned by a curl selected-array stream adapter. */
+void lonejson_curl_array_parse_cleanup(lonejson_curl_array_parse *ctx);
 
 /** Initializes a curl upload adapter for a mapped struct.
  *
@@ -2888,6 +2953,7 @@ typedef lonejson_map lj_map;
 typedef lonejson_stream lj_stream;
 /** Incremental parser for selected array items in one JSON document. */
 typedef lonejson_array_stream lj_array_stream;
+typedef lonejson_array_stream_item_fn lj_array_stream_item_fn;
 /** Incremental Server-Sent Events parser. */
 typedef lonejson_sse lj_sse;
 /** Incremental MIME multipart parser. */
@@ -3214,6 +3280,11 @@ LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_fd(
     lj_error *error) {
   return lonejson_array_stream_open_fd(path, fd, options, error);
 }
+/** Opens a push-fed selected-array item stream. */
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_push(
+    const char *path, const lj_parse_options *options, lj_error *error) {
+  return lonejson_array_stream_open_push(path, options, error);
+}
 /** Parses the next selected array item into a mapped destination. */
 LONEJSON_SHORT_ALIAS_INLINE lj_array_stream_result lj_array_stream_next(
     lj_array_stream *stream, const lj_map *map, void *dst, lj_error *error) {
@@ -3223,6 +3294,20 @@ LONEJSON_SHORT_ALIAS_INLINE lj_array_stream_result lj_array_stream_next(
 LONEJSON_SHORT_ALIAS_INLINE lj_array_stream_result lj_array_stream_next_value(
     lj_array_stream *stream, lj_json_value *value, lj_error *error) {
   return lonejson_array_stream_next_value(stream, value, error);
+}
+/** Feeds bytes into a push-fed selected-array item stream. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_stream_push(
+    lj_array_stream *stream, const lj_map *map, void *dst, const void *bytes,
+    size_t len, lj_array_stream_item_fn callback, void *user,
+    lj_error *error) {
+  return lonejson_array_stream_push(stream, map, dst, bytes, len, callback,
+                                    user, error);
+}
+/** Finalizes a push-fed selected-array item stream. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_stream_finish(
+    lj_array_stream *stream, const lj_map *map, void *dst,
+    lj_array_stream_item_fn callback, void *user, lj_error *error) {
+  return lonejson_array_stream_finish(stream, map, dst, callback, user, error);
 }
 /** Returns the last error recorded by a selected-array item stream. */
 LONEJSON_SHORT_ALIAS_INLINE const lj_error *
@@ -3563,6 +3648,8 @@ LONEJSON_SHORT_ALIAS_INLINE void lj_reset(const lj_map *map, void *value) {
 #ifdef LONEJSON_WITH_CURL
 /** Curl response parser state for feeding bytes into lonejson incrementally. */
 typedef lonejson_curl_parse lj_curl_parse;
+/** Curl selected-array response parser state. */
+typedef lonejson_curl_array_parse lj_curl_array_parse;
 /** Curl upload state for serving serialized JSON bytes to libcurl. */
 typedef lonejson_curl_upload lj_curl_upload;
 /** Initializes a curl parse adapter for use with `CURLOPT_WRITEFUNCTION`. */
@@ -3585,6 +3672,30 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_curl_parse_finish(lj_curl_parse *ctx) {
 /** Releases resources owned by a curl parse adapter. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_curl_parse_cleanup(lj_curl_parse *ctx) {
   lonejson_curl_parse_cleanup(ctx);
+}
+/** Initializes a curl selected-array write adapter. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_curl_array_parse_init(
+    lj_curl_array_parse *ctx, const char *path, const lj_map *map, void *dst,
+    const lj_parse_options *options, lj_array_stream_item_fn callback,
+    void *user) {
+  return lonejson_curl_array_parse_init(ctx, path, map, dst, options, callback,
+                                        user);
+}
+/** Curl write callback for a selected-array adapter. */
+LONEJSON_SHORT_ALIAS_INLINE size_t
+lj_curl_array_write_callback(char *ptr, size_t size, size_t nmemb,
+                             void *userdata) {
+  return lonejson_curl_array_write_callback(ptr, size, nmemb, userdata);
+}
+/** Finalizes a curl selected-array adapter. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_curl_array_parse_finish(lj_curl_array_parse *ctx) {
+  return lonejson_curl_array_parse_finish(ctx);
+}
+/** Releases resources owned by a curl selected-array adapter. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_curl_array_parse_cleanup(lj_curl_array_parse *ctx) {
+  lonejson_curl_array_parse_cleanup(ctx);
 }
 /** Initializes a curl upload adapter for a mapped struct.
  *

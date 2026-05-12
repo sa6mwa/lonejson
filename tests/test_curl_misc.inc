@@ -123,6 +123,115 @@ static void test_curl_upload_streaming_does_not_buffer_payload(void) {
   lonejson_cleanup(&test_source_doc_map, &doc);
   unlink(path);
 }
+
+typedef struct test_curl_array_seen {
+  int ids[8];
+  size_t count;
+} test_curl_array_seen;
+
+static lonejson_status test_curl_array_item(void *user, void *dst) {
+  test_curl_array_seen *seen = (test_curl_array_seen *)user;
+  test_item *item = (test_item *)dst;
+
+  if (seen->count >= sizeof(seen->ids) / sizeof(seen->ids[0])) {
+    return LONEJSON_STATUS_OVERFLOW;
+  }
+  seen->ids[seen->count++] = (int)item->id;
+  return LONEJSON_STATUS_OK;
+}
+
+static void test_curl_array_parse_streams_selected_arrays(void) {
+  static const char json[] =
+      "{\"meta\":{\"ignored\":true},\"items\":[{\"id\":11,\"label\":\"a\"},"
+      "{\"id\":12,\"label\":\"b\"}]}";
+  lonejson_curl_array_parse parse;
+  test_curl_array_seen seen;
+  test_item item;
+  size_t i;
+  size_t got;
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_curl_array_parse_init(&parse, "items", &test_item_map, &item,
+                                        NULL, test_curl_array_item, &seen) ==
+         LONEJSON_STATUS_OK);
+  for (i = 0u; i < strlen(json); ++i) {
+    got = lonejson_curl_array_write_callback((char *)json + i, 1u, 1u, &parse);
+    EXPECT(got == 1u);
+  }
+  EXPECT(seen.count == 2u);
+  EXPECT(seen.ids[0] == 11);
+  EXPECT(seen.ids[1] == 12);
+  EXPECT(lonejson_curl_array_parse_finish(&parse) == LONEJSON_STATUS_OK);
+  lonejson_curl_array_parse_cleanup(&parse);
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_curl_array_parse_init(&parse, "", &test_item_map, &item,
+                                        NULL, test_curl_array_item, &seen) ==
+         LONEJSON_STATUS_OK);
+  got = lonejson_curl_array_write_callback(
+      "[{\"id\":21,\"label\":\"root\"}]", 1u,
+      strlen("[{\"id\":21,\"label\":\"root\"}]"), &parse);
+  EXPECT(got == strlen("[{\"id\":21,\"label\":\"root\"}]"));
+  EXPECT(lonejson_curl_array_parse_finish(&parse) == LONEJSON_STATUS_OK);
+  EXPECT(seen.count == 1u);
+  EXPECT(seen.ids[0] == 21);
+  lonejson_curl_array_parse_cleanup(&parse);
+}
+
+static void test_curl_array_parse_failure_cleanup_and_truncation(void) {
+  lonejson_curl_array_parse parse;
+  test_curl_array_seen seen;
+  test_item item;
+  size_t got;
+
+  memset(&parse, 0xA5, sizeof(parse));
+  EXPECT(lonejson_curl_array_parse_init(&parse, "", NULL, &item, NULL,
+                                        test_curl_array_item, &seen) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(parse.stream == NULL);
+  EXPECT(parse.error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
+  lonejson_curl_array_parse_cleanup(&parse);
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_curl_array_parse_init(&parse, "", &test_item_map, &item,
+                                        NULL, test_curl_array_item, &seen) ==
+         LONEJSON_STATUS_OK);
+  got = lonejson_curl_array_write_callback(
+      "[{\"id\":31,\"label\":\"label-that-is-too-long\"}]", 1u,
+      strlen("[{\"id\":31,\"label\":\"label-that-is-too-long\"}]"), &parse);
+  EXPECT(got == strlen("[{\"id\":31,\"label\":\"label-that-is-too-long\"}]"));
+  EXPECT(parse.error.code == LONEJSON_STATUS_TRUNCATED);
+  EXPECT(parse.error.truncated);
+  EXPECT(seen.count == 1u);
+  EXPECT(seen.ids[0] == 31);
+  EXPECT(lonejson_curl_array_parse_finish(&parse) == LONEJSON_STATUS_TRUNCATED);
+  EXPECT(parse.error.truncated);
+  lonejson_curl_array_parse_cleanup(&parse);
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_curl_array_parse_init(&parse, "items", &test_item_map, &item,
+                                        NULL, test_curl_array_item, &seen) ==
+         LONEJSON_STATUS_OK);
+  got = lonejson_curl_array_write_callback("{\"meta\":true}", 1u,
+                                           strlen("{\"meta\":true}"), &parse);
+  EXPECT(got == 0u);
+  EXPECT(parse.error.code == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+  EXPECT(seen.count == 0u);
+  lonejson_curl_array_parse_cleanup(&parse);
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_curl_array_parse_init(&parse, "items", &test_item_map, &item,
+                                        NULL, test_curl_array_item, &seen) ==
+         LONEJSON_STATUS_OK);
+  got = lonejson_curl_array_write_callback(
+      "{\"items\":[{\"id\":41}],\"tail\":{bad}}", 1u,
+      strlen("{\"items\":[{\"id\":41}],\"tail\":{bad}}"), &parse);
+  EXPECT(got == 0u);
+  EXPECT(parse.error.code == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(seen.count == 1u);
+  EXPECT(seen.ids[0] == 41);
+  lonejson_curl_array_parse_cleanup(&parse);
+}
 #endif
 
 static int test_child_parse_poisoned_stream_and_json_value_fields(void) {

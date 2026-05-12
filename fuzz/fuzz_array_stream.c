@@ -23,11 +23,27 @@ typedef struct fuzz_reader {
   size_t read_calls;
 } fuzz_reader;
 
+typedef struct fuzz_push_state {
+  size_t items;
+  size_t fail_after;
+} fuzz_push_state;
+
 static const lonejson_field fuzz_item_fields[] = {
     LONEJSON_FIELD_I64(fuzz_item, id, "id"),
     LONEJSON_FIELD_STRING_FIXED(fuzz_item, label, "label",
                                 LONEJSON_OVERFLOW_TRUNCATE)};
 LONEJSON_MAP_DEFINE(fuzz_item_map, fuzz_item, fuzz_item_fields);
+
+static lonejson_status fuzz_push_item(void *user, void *dst) {
+  fuzz_push_state *state = (fuzz_push_state *)user;
+
+  lonejson_cleanup(&fuzz_item_map, dst);
+  state->items++;
+  if (state->fail_after != 0u && state->items >= state->fail_after) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  return LONEJSON_STATUS_OK;
+}
 
 static lonejson_read_result fuzz_array_stream_reader(void *user,
                                                      unsigned char *buffer,
@@ -152,6 +168,53 @@ static void fuzz_drive_raw(const char *path, const uint8_t *json,
       break;
     }
   }
+  lonejson_array_stream_close(stream);
+}
+
+static void fuzz_drive_push(const char *path, const uint8_t *json,
+                            size_t json_len, size_t chunk_size,
+                            int reject_duplicate_keys, size_t fail_after) {
+  lonejson_parse_options options;
+  lonejson_array_stream *stream;
+  lonejson_error error;
+  fuzz_push_state state;
+  fuzz_item item;
+  size_t offset;
+
+  options = lonejson_default_parse_options();
+  options.reject_duplicate_keys = reject_duplicate_keys;
+  state.items = 0u;
+  state.fail_after = fail_after;
+  stream = lonejson_array_stream_open_push(path, &options, &error);
+  if (stream == NULL) {
+    return;
+  }
+  offset = 0u;
+  while (offset < json_len) {
+    size_t n = chunk_size;
+    lonejson_status status;
+
+    if (n == 0u || n > json_len - offset) {
+      n = json_len - offset;
+    }
+    memset(&item, 0, sizeof(item));
+    status = lonejson_array_stream_push(stream, &fuzz_item_map, &item,
+                                        json + offset, n, fuzz_push_item,
+                                        &state, &error);
+    lonejson_cleanup(&fuzz_item_map, &item);
+    offset += n;
+    if (status != LONEJSON_STATUS_OK) {
+      lonejson_array_stream_close(stream);
+      return;
+    }
+    if (state.items > 16u) {
+      break;
+    }
+  }
+  memset(&item, 0, sizeof(item));
+  (void)lonejson_array_stream_finish(stream, &fuzz_item_map, &item,
+                                     fuzz_push_item, &state, &error);
+  lonejson_cleanup(&fuzz_item_map, &item);
   lonejson_array_stream_close(stream);
 }
 
@@ -303,6 +366,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                     would_block_every);
   fuzz_drive_raw("", json, json_len, 1u, reject_duplicate_keys,
                  would_block_every);
+  fuzz_drive_push(path, json, json_len, chunk_size, reject_duplicate_keys,
+                  (data[0] & 0x20u) ? 1u : 0u);
+  fuzz_drive_push("", json, json_len, 1u + ((data[0] >> 2u) % 17u),
+                  reject_duplicate_keys, 0u);
   fuzz_drive_duplicate_oracles(data, size);
   return 0;
 }

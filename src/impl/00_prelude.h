@@ -209,7 +209,8 @@ typedef struct lonejson__byte_buffer {
 typedef enum lonejson_array_stream_source_kind {
   LONEJSON_ARRAY_STREAM_SOURCE_READER = 1,
   LONEJSON_ARRAY_STREAM_SOURCE_FILE = 2,
-  LONEJSON_ARRAY_STREAM_SOURCE_FD = 3
+  LONEJSON_ARRAY_STREAM_SOURCE_FD = 3,
+  LONEJSON_ARRAY_STREAM_SOURCE_PUSH = 4
 } lonejson_array_stream_source_kind;
 
 typedef enum lonejson_array_stream_state {
@@ -278,6 +279,8 @@ struct lonejson_array_stream {
   int root_object_after_comma;
   int root_array_selected;
   int would_block;
+  int push_eof;
+  int push_truncated;
   int has_pushback;
   int pushback;
   int current_key_matched;
