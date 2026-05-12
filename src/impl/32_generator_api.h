@@ -377,6 +377,11 @@ static lonejson_status lonejson__generator_push_value_from_field(
     frame.depth = depth;
     frame.u.string_array.arr = (const lonejson_string_array *)ptr;
     return lonejson__generator_push_frame(state, &frame, error);
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, error ? error->offset : 0u,
+        error ? error->line : 0u, error ? error->column : 0u,
+        "field '%s' is parse-only and cannot be serialized", field->json_key);
   case LONEJSON_FIELD_KIND_I64_ARRAY:
     frame.kind = LONEJSON__GEN_FRAME_I64_ARRAY;
     frame.depth = depth;
@@ -1299,4 +1304,3 @@ void lonejson_generator_cleanup(lonejson_generator *generator) {
   }
   memset(generator, 0, sizeof(*generator));
 }
-

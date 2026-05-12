@@ -16,6 +16,17 @@ typedef struct short_parse_doc {
   bool active;
 } short_parse_doc;
 
+typedef struct short_stream_doc {
+  lj_string_array_stream keys;
+  lj_uint64 count;
+} short_stream_doc;
+
+typedef struct short_stream_seen {
+  size_t begins;
+  size_t chunks;
+  size_t ends;
+} short_stream_seen;
+
 static const lj_field short_doc_fields[] = {
     LJ_FIELD_STRING_FIXED_REQ(short_doc, id, "id", LJ_OVERFLOW_FAIL),
     LJ_FIELD_STRING_SOURCE(short_doc, text, "text")};
@@ -27,6 +38,36 @@ static const lj_field short_parse_doc_fields[] = {
     LJ_FIELD_BOOL(short_parse_doc, active, "active")};
 LJ_MAP_DEFINE(short_parse_doc_map, short_parse_doc, short_parse_doc_fields);
 
+static const lj_field short_stream_doc_fields[] = {
+    LJ_FIELD_STRING_ARRAY_STREAM_REQ(short_stream_doc, keys, "keys"),
+    LJ_FIELD_U64_REQ(short_stream_doc, count, "count")};
+LJ_MAP_DEFINE(short_stream_doc_map, short_stream_doc,
+              short_stream_doc_fields);
+
+static lj_status short_stream_begin(void *user, lj_error *error) {
+  short_stream_seen *seen = (short_stream_seen *)user;
+  (void)error;
+  seen->begins++;
+  return LJ_STATUS_OK;
+}
+
+static lj_status short_stream_chunk(void *user, const char *data, size_t len,
+                                    lj_error *error) {
+  short_stream_seen *seen = (short_stream_seen *)user;
+  (void)data;
+  (void)len;
+  (void)error;
+  seen->chunks++;
+  return LJ_STATUS_OK;
+}
+
+static lj_status short_stream_end(void *user, lj_error *error) {
+  short_stream_seen *seen = (short_stream_seen *)user;
+  (void)error;
+  seen->ends++;
+  return LJ_STATUS_OK;
+}
+
 int main(void) {
   static const char payload[] = "short alias text";
   static const char parse_json[] =
@@ -34,6 +75,9 @@ int main(void) {
   short_doc doc;
   short_parse_doc short_record;
   short_parse_doc long_record;
+  short_stream_doc stream_doc;
+  short_stream_seen stream_seen;
+  lj_array_stream_string_handler stream_handler;
   lj_error error;
   lj_status status;
   char path[] = "/tmp/lonejson-short-XXXXXX";
@@ -45,6 +89,7 @@ int main(void) {
   lj_init(&short_doc_map, &doc);
   lj_init(&short_parse_doc_map, &short_record);
   lonejson_init(&short_parse_doc_map, &long_record);
+  lj_init(&short_stream_doc_map, &stream_doc);
   strcpy(doc.id, "ok");
 
   fd = mkstemp(path);
@@ -95,6 +140,32 @@ int main(void) {
     return 1;
   }
 
+  memset(&stream_seen, 0, sizeof(stream_seen));
+  memset(&stream_handler, 0, sizeof(stream_handler));
+  stream_handler.begin = short_stream_begin;
+  stream_handler.chunk = short_stream_chunk;
+  stream_handler.end = short_stream_end;
+  status = lj_string_array_stream_set_handler(&stream_doc.keys,
+                                              &stream_handler, &stream_seen,
+                                              &error);
+  if (status != LJ_STATUS_OK) {
+    lj_cleanup(&short_parse_doc_map, &short_record);
+    lonejson_cleanup(&short_parse_doc_map, &long_record);
+    lj_cleanup(&short_stream_doc_map, &stream_doc);
+    return 1;
+  }
+  status = lj_parse_cstr(&short_stream_doc_map, &stream_doc,
+                         "{\"keys\":[\"a\",\"b\"],\"count\":2}", NULL,
+                         &error);
+  if (status != LJ_STATUS_OK || stream_seen.begins != 2u ||
+      stream_seen.ends != 2u || stream_seen.chunks == 0u ||
+      stream_doc.count != 2u) {
+    lj_cleanup(&short_parse_doc_map, &short_record);
+    lonejson_cleanup(&short_parse_doc_map, &long_record);
+    lj_cleanup(&short_stream_doc_map, &stream_doc);
+    return 1;
+  }
+
   status = lj_serialize_buffer(&short_parse_doc_map, &short_record, short_json,
                                sizeof(short_json), NULL, NULL, &error);
   if (status != LJ_STATUS_OK) {
@@ -112,5 +183,6 @@ int main(void) {
   }
   lj_cleanup(&short_parse_doc_map, &short_record);
   lonejson_cleanup(&short_parse_doc_map, &long_record);
+  lj_cleanup(&short_stream_doc_map, &stream_doc);
   return strcmp(short_json, long_json) == 0 ? 0 : 1;
 }

@@ -358,6 +358,25 @@ static void test_public_initializers_and_defaults(void) {
   EXPECT(write_options.overflow_policy == LONEJSON_OVERFLOW_FAIL);
   EXPECT(write_options.pretty == 0);
 
+  EXPECT((int)LONEJSON_FIELD_KIND_STRING == 0);
+  EXPECT((int)LONEJSON_FIELD_KIND_STRING_STREAM == 1);
+  EXPECT((int)LONEJSON_FIELD_KIND_BASE64_STREAM == 2);
+  EXPECT((int)LONEJSON_FIELD_KIND_STRING_SOURCE == 3);
+  EXPECT((int)LONEJSON_FIELD_KIND_BASE64_SOURCE == 4);
+  EXPECT((int)LONEJSON_FIELD_KIND_JSON_VALUE == 5);
+  EXPECT((int)LONEJSON_FIELD_KIND_I64 == 6);
+  EXPECT((int)LONEJSON_FIELD_KIND_U64 == 7);
+  EXPECT((int)LONEJSON_FIELD_KIND_F64 == 8);
+  EXPECT((int)LONEJSON_FIELD_KIND_BOOL == 9);
+  EXPECT((int)LONEJSON_FIELD_KIND_OBJECT == 10);
+  EXPECT((int)LONEJSON_FIELD_KIND_STRING_ARRAY == 11);
+  EXPECT((int)LONEJSON_FIELD_KIND_I64_ARRAY == 12);
+  EXPECT((int)LONEJSON_FIELD_KIND_U64_ARRAY == 13);
+  EXPECT((int)LONEJSON_FIELD_KIND_F64_ARRAY == 14);
+  EXPECT((int)LONEJSON_FIELD_KIND_BOOL_ARRAY == 15);
+  EXPECT((int)LONEJSON_FIELD_KIND_OBJECT_ARRAY == 16);
+  EXPECT((int)LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM == 17);
+
   value_limits = lonejson_default_value_limits();
 
   poison_bytes(&doc, sizeof(doc), 0x5Au);
@@ -662,4 +681,3 @@ static void test_json_test_suite_parsing(void) {
   EXPECT(i_count == 35u);
   EXPECT(i_accept + i_reject == i_count);
 }
-

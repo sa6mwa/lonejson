@@ -2026,3 +2026,228 @@ static void test_array_stream_push_string_failure_modes(void) {
     lonejson_array_stream_close(stream);
   }
 }
+
+typedef struct test_mapped_string_array_stream_doc {
+  lonejson_string_array_stream keys;
+  char cursor[32];
+  lonejson_uint64 index_seq;
+  lonejson_json_value metadata;
+} test_mapped_string_array_stream_doc;
+
+static const lonejson_field test_mapped_string_array_stream_doc_fields[] = {
+    LONEJSON_FIELD_STRING_ARRAY_STREAM_REQ(test_mapped_string_array_stream_doc,
+                                           keys, "keys"),
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_mapped_string_array_stream_doc, cursor,
+                                    "cursor", LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_U64_REQ(test_mapped_string_array_stream_doc, index_seq,
+                           "index_seq"),
+    LONEJSON_FIELD_JSON_VALUE(test_mapped_string_array_stream_doc, metadata,
+                              "metadata")};
+LONEJSON_MAP_DEFINE(test_mapped_string_array_stream_doc_map,
+                    test_mapped_string_array_stream_doc,
+                    test_mapped_string_array_stream_doc_fields);
+
+static void test_array_stream_mapped_string_field_envelope(void) {
+  static const char json[] =
+      "{\"namespace\":\"default\",\"keys\":[\"key-a\",\"key-b\",\"key-c\"],"
+      "\"cursor\":\"next-page\",\"index_seq\":123}";
+  test_reader_state state = {json, 0u, 3u};
+  test_mapped_string_array_stream_doc doc;
+  test_array_stream_string_seen seen;
+  lonejson_array_stream_string_handler handler;
+  lonejson_error error;
+
+  memset(&seen, 0, sizeof(seen));
+  handler = test_array_stream_string_handler();
+  lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+  EXPECT(lonejson_string_array_stream_set_handler(&doc.keys, &handler, &seen,
+                                                  &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_parse_reader(&test_mapped_string_array_stream_doc_map, &doc,
+                               test_state_reader, &state, NULL, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(seen.begins == 3u);
+  EXPECT(seen.ends == 3u);
+  EXPECT(strcmp(seen.items[0], "key-a") == 0);
+  EXPECT(strcmp(seen.items[1], "key-b") == 0);
+  EXPECT(strcmp(seen.items[2], "key-c") == 0);
+  EXPECT(strcmp(doc.cursor, "next-page") == 0);
+  EXPECT(doc.index_seq == 123u);
+  lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
+}
+
+static void test_array_stream_mapped_string_field_metadata_and_long_item(void) {
+  static const char prefix[] =
+      "{\"keys\":[\"";
+  static const char suffix[] =
+      "\"],\"cursor\":\"done\",\"index_seq\":9,"
+      "\"metadata\":{\"source\":\"index\",\"ok\":true}}";
+  test_mapped_string_array_stream_doc doc;
+  test_array_stream_string_seen seen;
+  lonejson_array_stream_string_handler handler;
+  lonejson_parse_options options;
+  test_buffer_sink sink;
+  test_reader_state state;
+  lonejson_error error;
+  unsigned char raw[96];
+  char *json;
+  size_t string_len = 8192u;
+  size_t total = strlen(prefix) + string_len + strlen(suffix);
+
+  json = (char *)malloc(total + 1u);
+  EXPECT(json != NULL);
+  if (json == NULL) {
+    return;
+  }
+  memcpy(json, prefix, strlen(prefix));
+  memset(json + strlen(prefix), 'z', string_len);
+  memcpy(json + strlen(prefix) + string_len, suffix, strlen(suffix));
+  json[total] = '\0';
+
+  memset(&seen, 0, sizeof(seen));
+  handler = test_array_stream_string_handler();
+  options = lonejson_default_parse_options();
+  options.clear_destination = 0;
+  lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+  EXPECT(lonejson_string_array_stream_set_handler(&doc.keys, &handler, &seen,
+                                                  &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_json_value_enable_parse_capture(&doc.metadata, &error) ==
+         LONEJSON_STATUS_OK);
+  state.json = json;
+  state.offset = 0u;
+  state.chunk_size = 17u;
+  EXPECT(lonejson_parse_reader(&test_mapped_string_array_stream_doc_map, &doc,
+                               test_state_reader, &state, &options, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(seen.begins == 1u);
+  EXPECT(seen.ends == 1u);
+  EXPECT(seen.chunks > 1u);
+  EXPECT(strcmp(doc.cursor, "done") == 0);
+  EXPECT(doc.index_seq == 9u);
+
+  sink.buffer = raw;
+  sink.capacity = sizeof(raw);
+  sink.length = 0u;
+  EXPECT(lonejson_json_value_write_to_sink(&doc.metadata,
+                                           test_buffer_sink_write, &sink,
+                                           &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)raw, "{\"source\":\"index\",\"ok\":true}") == 0);
+
+  lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
+  free(json);
+}
+
+static void test_array_stream_mapped_string_field_failure_modes(void) {
+  static const char *const jsons[] = {
+      "{\"cursor\":\"x\",\"index_seq\":1}",
+      "{\"keys\":\"not-array\",\"cursor\":\"x\",\"index_seq\":1}",
+      "{\"keys\":[1],\"cursor\":\"x\",\"index_seq\":1}",
+      "{\"keys\":[{\"bad\":true}],\"cursor\":\"x\",\"index_seq\":1}",
+      "{\"keys\":[\"ok\"],\"cursor\":4,\"index_seq\":1}",
+      "{\"keys\":[\"ok\"],\"cursor\":\"x\",\"index_seq\":1} trailing",
+      "{\"keys\":[\"ok\"],\"cursor\":\"x\",\"cursor\":\"y\","
+      "\"index_seq\":1}",
+      "{\"keys\":[\"ok\"],\"keys\":[\"dup\"],\"cursor\":\"x\","
+      "\"index_seq\":1}"};
+  static const lonejson_status expected[] = {
+      LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
+      LONEJSON_STATUS_TYPE_MISMATCH,
+      LONEJSON_STATUS_TYPE_MISMATCH,
+      LONEJSON_STATUS_TYPE_MISMATCH,
+      LONEJSON_STATUS_TYPE_MISMATCH,
+      LONEJSON_STATUS_INVALID_JSON,
+      LONEJSON_STATUS_DUPLICATE_FIELD,
+      LONEJSON_STATUS_DUPLICATE_FIELD};
+  size_t i;
+
+  for (i = 0u; i < sizeof(jsons) / sizeof(jsons[0]); ++i) {
+    test_mapped_string_array_stream_doc doc;
+    test_array_stream_string_seen seen;
+    lonejson_array_stream_string_handler handler =
+        test_array_stream_string_handler();
+    lonejson_error error;
+    lonejson_status status;
+
+    memset(&seen, 0, sizeof(seen));
+    lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+    EXPECT(lonejson_string_array_stream_set_handler(&doc.keys, &handler, &seen,
+                                                    &error) ==
+           LONEJSON_STATUS_OK);
+    status = lonejson_parse_cstr(&test_mapped_string_array_stream_doc_map, &doc,
+                                 jsons[i], NULL, &error);
+    EXPECT(status == expected[i]);
+    lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
+  }
+
+  {
+    test_mapped_string_array_stream_doc doc;
+    test_array_stream_string_seen seen;
+    lonejson_array_stream_string_handler handler =
+        test_array_stream_string_handler();
+    lonejson_error error;
+
+    memset(&seen, 0, sizeof(seen));
+    seen.fail_after_chunks = 1u;
+    lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+    EXPECT(lonejson_string_array_stream_set_handler(&doc.keys, &handler, &seen,
+                                                    &error) ==
+           LONEJSON_STATUS_OK);
+    EXPECT(lonejson_parse_cstr(&test_mapped_string_array_stream_doc_map, &doc,
+                               "{\"keys\":[\"fail\"],\"cursor\":\"x\","
+                               "\"index_seq\":1}",
+                               NULL, &error) == LONEJSON_STATUS_IO_ERROR);
+    lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
+  }
+}
+
+static void test_array_stream_mapped_string_field_serialize_rejected(void) {
+  test_mapped_string_array_stream_doc doc;
+  lonejson_error error;
+  char buffer[64];
+
+  lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+  strcpy(doc.cursor, "x");
+  doc.index_seq = 1u;
+  EXPECT(lonejson_serialize_buffer(&test_mapped_string_array_stream_doc_map,
+                                   &doc, buffer, sizeof(buffer), NULL, NULL,
+                                   &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
+}
+
+#ifdef LONEJSON_WITH_CURL
+static void test_array_stream_mapped_string_field_curl_facade(void) {
+  static const char json[] =
+      "{\"keys\":[\"a\",\"b\"],\"cursor\":\"c\",\"index_seq\":44}";
+  test_mapped_string_array_stream_doc doc;
+  test_array_stream_string_seen seen;
+  lonejson_array_stream_string_handler handler;
+  lonejson_curl_parse parse;
+  lonejson_error error;
+  size_t i;
+
+  memset(&seen, 0, sizeof(seen));
+  handler = test_array_stream_string_handler();
+  lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+  EXPECT(lonejson_string_array_stream_set_handler(&doc.keys, &handler, &seen,
+                                                  &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_parse_init(&parse,
+                                  &test_mapped_string_array_stream_doc_map,
+                                  &doc, NULL) == LONEJSON_STATUS_OK);
+  for (i = 0u; i < strlen(json); ++i) {
+    EXPECT(lonejson_curl_write_callback((char *)json + i, 1u, 1u, &parse) ==
+           1u);
+  }
+  EXPECT(lonejson_curl_parse_finish(&parse) == LONEJSON_STATUS_OK);
+  EXPECT(seen.ends == 2u);
+  EXPECT(strcmp(seen.items[0], "a") == 0);
+  EXPECT(strcmp(seen.items[1], "b") == 0);
+  EXPECT(strcmp(doc.cursor, "c") == 0);
+  EXPECT(doc.index_seq == 44u);
+  lonejson_curl_parse_cleanup(&parse);
+  lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
+}
+#else
+static void test_array_stream_mapped_string_field_curl_facade(void) {}
+#endif

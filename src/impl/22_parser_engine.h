@@ -892,6 +892,14 @@ static lonejson_status lonejson__parser_consume_char(lonejson_parser *parser,
       if (ch == '"') {
         lonejson_status status;
 
+        if (frame->pending_field != NULL &&
+            frame->pending_field->kind ==
+                LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM) {
+          return lonejson__set_error(
+              &parser->error, LONEJSON_STATUS_TYPE_MISMATCH,
+              parser->error.offset, parser->error.line, parser->error.column,
+              "field '%s' is not an array", frame->pending_field->json_key);
+        }
         parser->lex_mode = LONEJSON_LEX_STRING;
         parser->lex_is_key = 0;
         parser->lex_escape = 0;
@@ -1247,6 +1255,20 @@ lonejson__parser_feed_bytes(lonejson_parser *parser, const unsigned char *bytes,
         }
         if (active->state == LONEJSON_FRAME_OBJECT_VALUE) {
           if (bytes[i] == '"') {
+            if (active->pending_field != NULL &&
+                active->pending_field->kind ==
+                    LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM) {
+              status = lonejson__set_error(
+                  &parser->error, LONEJSON_STATUS_TYPE_MISMATCH,
+                  parser->error.offset, parser->error.line,
+                  parser->error.column, "field '%s' is not an array",
+                  active->pending_field->json_key);
+              parser->failed = 1;
+              if (consumed != NULL) {
+                *consumed = i + 1u;
+              }
+              return status;
+            }
             status = lonejson__begin_string_value_lex(
                 parser, active->pending_field,
                 active->pending_field != NULL

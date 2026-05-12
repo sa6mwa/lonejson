@@ -43,6 +43,43 @@ lonejson_owned_buffer lonejson_default_owned_buffer(void) {
   return buffer;
 }
 
+static int lonejson__string_array_stream_is_initialized(
+    const lonejson_string_array_stream *stream) {
+  return stream != NULL &&
+         stream->_lonejson_magic ==
+             lonejson__init_cookie(stream,
+                                   LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+}
+
+void lonejson_string_array_stream_init(lonejson_string_array_stream *stream) {
+  if (stream == NULL) {
+    return;
+  }
+  memset(stream, 0, sizeof(*stream));
+  stream->_lonejson_magic =
+      lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+}
+
+lonejson_status lonejson_string_array_stream_set_handler(
+    lonejson_string_array_stream *stream,
+    const lonejson_array_stream_string_handler *handler, void *user,
+    lonejson_error *error) {
+  if (stream == NULL || handler == NULL || handler->chunk == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "string array stream and chunk handler are "
+                               "required");
+  }
+  if (!lonejson__string_array_stream_is_initialized(stream)) {
+    lonejson_string_array_stream_init(stream);
+  }
+  stream->handler = *handler;
+  stream->user = user;
+  stream->active = 0;
+  lonejson__clear_error(error);
+  return LONEJSON_STATUS_OK;
+}
+
 void lonejson_owned_buffer_init(lonejson_owned_buffer *buffer) {
   if (buffer == NULL) {
     return;
@@ -1410,4 +1447,3 @@ void lonejson_init(const lonejson_map *map, void *value) {
 void lonejson_reset(const lonejson_map *map, void *value) {
   lonejson__reset_map(map, value);
 }
-

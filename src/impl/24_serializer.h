@@ -77,6 +77,18 @@ static lonejson_status lonejson__serialize_value_compact_buffer_grow(
     lonejson_error *error);
 
 static lonejson_status
+lonejson__serialize_parse_only_field_error(const lonejson_field *field,
+                                           lonejson_error *error) {
+  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH,
+                             error ? error->offset : 0u,
+                             error ? error->line : 0u,
+                             error ? error->column : 0u,
+                             "field '%s' is parse-only and cannot be "
+                             "serialized",
+                             field->json_key);
+}
+
+static lonejson_status
 lonejson__serialize_map_pretty(const lonejson_map *map, const void *src,
                                lonejson__write_state *state) {
   size_t i;
@@ -632,6 +644,8 @@ lonejson__serialize_value_pretty(const lonejson_field *field, const void *ptr,
     }
     return lonejson__emit_cstr(state->sink, state->user, state->error, "]");
   }
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
+    return lonejson__serialize_parse_only_field_error(field, state->error);
   case LONEJSON_FIELD_KIND_I64_ARRAY: {
     const lonejson_i64_array *arr = (const lonejson_i64_array *)ptr;
     status = lonejson__emit_cstr(state->sink, state->user, state->error, "[");
@@ -967,6 +981,8 @@ lonejson__serialize_value_compact(const lonejson_field *field, const void *ptr,
     }
     return lonejson__emit_cstr(sink, user, error, "]");
   }
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
+    return lonejson__serialize_parse_only_field_error(field, error);
   case LONEJSON_FIELD_KIND_I64_ARRAY: {
     const lonejson_i64_array *arr = (const lonejson_i64_array *)ptr;
     status = lonejson__emit_cstr(sink, user, error, "[");
@@ -1210,6 +1226,8 @@ static lonejson_status lonejson__serialize_value_compact_buffer_exact(
     }
     return lonejson__buffer_emit_cstr_exact(sink, error, "]");
   }
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
+    return lonejson__serialize_parse_only_field_error(field, error);
   case LONEJSON_FIELD_KIND_I64_ARRAY: {
     const lonejson_i64_array *arr = (const lonejson_i64_array *)ptr;
     status = lonejson__buffer_emit_cstr_exact(sink, error, "[");
@@ -1449,6 +1467,8 @@ static lonejson_status lonejson__serialize_value_compact_buffer_grow(
     }
     return lonejson__buffer_emit_cstr_grow(sink, error, "]");
   }
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
+    return lonejson__serialize_parse_only_field_error(field, error);
   case LONEJSON_FIELD_KIND_I64_ARRAY: {
     const lonejson_i64_array *arr = (const lonejson_i64_array *)ptr;
     status = lonejson__buffer_emit_cstr_grow(sink, error, "[");

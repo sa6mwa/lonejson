@@ -124,6 +124,11 @@ lonejson__handle_array_scalar(lonejson_parser *parser,
   void *ptr = lonejson__field_ptr(array_frame->object_ptr, array_frame->field);
 
   switch (array_frame->field->kind) {
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
+    if (mode == LONEJSON_LEX_STRING) {
+      return LONEJSON_STATUS_OK;
+    }
+    return lonejson__string_array_stream_type_error(parser, array_frame->field);
   case LONEJSON_FIELD_KIND_STRING_ARRAY:
     if (mode == LONEJSON_LEX_NULL) {
       return lonejson__array_append_string(
@@ -416,6 +421,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
       } else {
         switch (field->kind) {
         case LONEJSON_FIELD_KIND_STRING_ARRAY:
+        case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
         case LONEJSON_FIELD_KIND_I64_ARRAY:
         case LONEJSON_FIELD_KIND_U64_ARRAY:
         case LONEJSON_FIELD_KIND_F64_ARRAY:

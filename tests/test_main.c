@@ -58,6 +58,11 @@ int main(void) {
   test_array_stream_push_string_item_callback();
   test_array_stream_push_string_item_callback_bounds();
   test_array_stream_push_string_failure_modes();
+  test_array_stream_mapped_string_field_envelope();
+  test_array_stream_mapped_string_field_metadata_and_long_item();
+  test_array_stream_mapped_string_field_failure_modes();
+  test_array_stream_mapped_string_field_serialize_rejected();
+  test_array_stream_mapped_string_field_curl_facade();
   test_file_and_buffer_helpers();
   test_jsonl_helpers();
   test_sse_incremental_events_and_json_selection();

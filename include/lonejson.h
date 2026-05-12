@@ -553,41 +553,43 @@ typedef enum lonejson_status {
  * select these indirectly through the `LONEJSON_FIELD_*` macros. */
 typedef enum lonejson_field_kind {
   /** JSON string stored in a fixed buffer or allocated `char *`. */
-  LONEJSON_FIELD_KIND_STRING,
+  LONEJSON_FIELD_KIND_STRING = 0,
   /** JSON string streamed into a `lonejson_spooled` handle. */
-  LONEJSON_FIELD_KIND_STRING_STREAM,
+  LONEJSON_FIELD_KIND_STRING_STREAM = 1,
   /** Base64 JSON string decoded into a `lonejson_spooled` handle. */
-  LONEJSON_FIELD_KIND_BASE64_STREAM,
+  LONEJSON_FIELD_KIND_BASE64_STREAM = 2,
   /** Serialize-only JSON string streamed from a `lonejson_source` handle. */
-  LONEJSON_FIELD_KIND_STRING_SOURCE,
+  LONEJSON_FIELD_KIND_STRING_SOURCE = 3,
   /** Serialize-only Base64 JSON string streamed from a `lonejson_source`
    * handle. */
-  LONEJSON_FIELD_KIND_BASE64_SOURCE,
+  LONEJSON_FIELD_KIND_BASE64_SOURCE = 4,
   /** Arbitrary embedded JSON value stored or streamed through
    * `lonejson_json_value`. */
-  LONEJSON_FIELD_KIND_JSON_VALUE,
+  LONEJSON_FIELD_KIND_JSON_VALUE = 5,
   /** JSON integer stored in a `lonejson_int64`. */
-  LONEJSON_FIELD_KIND_I64,
+  LONEJSON_FIELD_KIND_I64 = 6,
   /** JSON unsigned integer stored in a `lonejson_uint64`. */
-  LONEJSON_FIELD_KIND_U64,
+  LONEJSON_FIELD_KIND_U64 = 7,
   /** JSON number stored in a `double`. */
-  LONEJSON_FIELD_KIND_F64,
+  LONEJSON_FIELD_KIND_F64 = 8,
   /** JSON boolean stored in a `bool`. */
-  LONEJSON_FIELD_KIND_BOOL,
+  LONEJSON_FIELD_KIND_BOOL = 9,
   /** Nested JSON object mapped by a nested `lonejson_map`. */
-  LONEJSON_FIELD_KIND_OBJECT,
+  LONEJSON_FIELD_KIND_OBJECT = 10,
   /** JSON array of strings stored in `lonejson_string_array`. */
-  LONEJSON_FIELD_KIND_STRING_ARRAY,
+  LONEJSON_FIELD_KIND_STRING_ARRAY = 11,
   /** JSON array of integers stored in `lonejson_i64_array`. */
-  LONEJSON_FIELD_KIND_I64_ARRAY,
+  LONEJSON_FIELD_KIND_I64_ARRAY = 12,
   /** JSON array of unsigned integers stored in `lonejson_u64_array`. */
-  LONEJSON_FIELD_KIND_U64_ARRAY,
+  LONEJSON_FIELD_KIND_U64_ARRAY = 13,
   /** JSON array of numbers stored in `lonejson_f64_array`. */
-  LONEJSON_FIELD_KIND_F64_ARRAY,
+  LONEJSON_FIELD_KIND_F64_ARRAY = 14,
   /** JSON array of booleans stored in `lonejson_bool_array`. */
-  LONEJSON_FIELD_KIND_BOOL_ARRAY,
+  LONEJSON_FIELD_KIND_BOOL_ARRAY = 15,
   /** JSON array of nested objects stored in `lonejson_object_array`. */
-  LONEJSON_FIELD_KIND_OBJECT_ARRAY
+  LONEJSON_FIELD_KIND_OBJECT_ARRAY = 16,
+  /** JSON array of strings streamed through `lonejson_string_array_stream`. */
+  LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM = 17
 } lonejson_field_kind;
 
 /** Backing source kind used by `lonejson_source` outbound field handles. */
@@ -1130,6 +1132,28 @@ typedef lonejson_status (*lonejson_value_chunk_fn)(void *user, const char *data,
 typedef lonejson_status (*lonejson_value_bool_fn)(void *user, int value,
                                                   lonejson_error *error);
 
+/** Handler invoked while a mapped string-array stream field is decoded.
+ * `chunk` receives decoded UTF-8 string bytes and may be called more than once
+ * per item. `end` is called only after the string item is complete; the JSON
+ * array and enclosing document are still validated before parse completion.
+ */
+typedef struct lonejson_array_stream_string_handler {
+  lonejson_value_event_fn begin;
+  lonejson_value_chunk_fn chunk;
+  lonejson_value_event_fn end;
+} lonejson_array_stream_string_handler;
+
+/** Destination member for `LONEJSON_FIELD_STRING_ARRAY_STREAM*` fields. Set the
+ * handler before parsing; lonejson preserves the configured callbacks across
+ * destination clearing and only resets per-parse internal state.
+ */
+typedef struct lonejson_string_array_stream {
+  lonejson_array_stream_string_handler handler;
+  void *user;
+  int active;
+  unsigned _lonejson_magic;
+} lonejson_string_array_stream;
+
 /** Visitor callbacks for one arbitrary JSON value. String values and object
  * keys are delivered as decoded UTF-8 in chunks. Number values are delivered as
  * raw token bytes in chunks. Any callback may be `NULL` when the caller does
@@ -1462,6 +1486,43 @@ struct lonejson_generator {
    0u,                                                                         \
    NULL,                                                                       \
    options_ptr,                                                                \
+   0u}
+
+/** Maps a JSON array of strings into a chunked streaming field. The destination
+ * member must be a `lonejson_string_array_stream` configured with
+ * `lonejson_string_array_stream_set_handler` before parsing.
+ */
+#define LONEJSON_FIELD_STRING_ARRAY_STREAM(type, member, key)                  \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM,                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   0u,                                                                         \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   0u}
+
+/** Maps a required JSON array of strings into a chunked streaming field. */
+#define LONEJSON_FIELD_STRING_ARRAY_STREAM_REQ(type, member, key)              \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM,                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_REQUIRED,                                                    \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
    0u}
 
 /** Maps a serialize-only JSON string field into a `lonejson_source` member
@@ -2066,6 +2127,13 @@ lonejson_allocator lonejson_default_allocator(void);
 lonejson_read_result lonejson_default_read_result(void);
 /** Returns the empty visitor with all callbacks set to `NULL`. */
 lonejson_value_visitor lonejson_default_value_visitor(void);
+/** Initializes a mapped string-array stream field with no handler. */
+void lonejson_string_array_stream_init(lonejson_string_array_stream *stream);
+/** Configures callbacks for a mapped string-array stream field. */
+lonejson_status lonejson_string_array_stream_set_handler(
+    lonejson_string_array_stream *stream,
+    const lonejson_array_stream_string_handler *handler, void *user,
+    lonejson_error *error);
 /** Initializes a spool handle to its default or caller-configured empty state
  * using lonejson's default allocator.
  */
@@ -2273,17 +2341,6 @@ typedef lonejson_status (*lonejson_array_stream_item_fn)(void *user,
  */
 typedef lonejson_status (*lonejson_array_stream_string_fn)(
     void *user, const char *data, size_t len, lonejson_error *error);
-
-/** Handler invoked while a push-fed selected array string item is decoded.
- * `chunk` receives decoded UTF-8 string bytes and may be called more than once
- * per item. `end` is called only after the item value and following array
- * delimiter have been validated.
- */
-typedef struct lonejson_array_stream_string_handler {
-  lonejson_value_event_fn begin;
-  lonejson_value_chunk_fn chunk;
-  lonejson_value_event_fn end;
-} lonejson_array_stream_string_handler;
 
 /** Opens an object-framed JSON stream over a caller-supplied reader callback.
  */
@@ -2915,6 +2972,7 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_KIND_BOOL LONEJSON_FIELD_KIND_BOOL
 #define LJ_FIELD_KIND_OBJECT LONEJSON_FIELD_KIND_OBJECT
 #define LJ_FIELD_KIND_STRING_ARRAY LONEJSON_FIELD_KIND_STRING_ARRAY
+#define LJ_FIELD_KIND_STRING_ARRAY_STREAM LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM
 #define LJ_FIELD_KIND_I64_ARRAY LONEJSON_FIELD_KIND_I64_ARRAY
 #define LJ_FIELD_KIND_U64_ARRAY LONEJSON_FIELD_KIND_U64_ARRAY
 #define LJ_FIELD_KIND_F64_ARRAY LONEJSON_FIELD_KIND_F64_ARRAY
@@ -2987,6 +3045,8 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_OBJECT_REQ LONEJSON_FIELD_OBJECT_REQ
 #define LJ_FIELD_OBJECT_OMIT_EMPTY LONEJSON_FIELD_OBJECT_OMIT_EMPTY
 #define LJ_FIELD_STRING_ARRAY LONEJSON_FIELD_STRING_ARRAY
+#define LJ_FIELD_STRING_ARRAY_STREAM LONEJSON_FIELD_STRING_ARRAY_STREAM
+#define LJ_FIELD_STRING_ARRAY_STREAM_REQ LONEJSON_FIELD_STRING_ARRAY_STREAM_REQ
 #define LJ_FIELD_STRING_ARRAY_OMIT_EMPTY LONEJSON_FIELD_STRING_ARRAY_OMIT_EMPTY
 #define LJ_FIELD_I64_ARRAY LONEJSON_FIELD_I64_ARRAY
 #define LJ_FIELD_U64_ARRAY LONEJSON_FIELD_U64_ARRAY
@@ -3017,6 +3077,8 @@ typedef lonejson_value_limits lj_value_limits;
  * structure events and chunked string/key/number delivery.
  */
 typedef lonejson_value_visitor lj_value_visitor;
+typedef lonejson_array_stream_string_handler lj_array_stream_string_handler;
+typedef lonejson_string_array_stream lj_string_array_stream;
 /** Describes whether mapped storage is dynamic or fixed-capacity. */
 typedef lonejson_storage_kind lj_storage_kind;
 /** Overflow handling policy for fixed-capacity string storage. */
@@ -3058,7 +3120,6 @@ typedef lonejson_stream lj_stream;
 typedef lonejson_array_stream lj_array_stream;
 typedef lonejson_array_stream_item_fn lj_array_stream_item_fn;
 typedef lonejson_array_stream_string_fn lj_array_stream_string_fn;
-typedef lonejson_array_stream_string_handler lj_array_stream_string_handler;
 /** Incremental Server-Sent Events parser. */
 typedef lonejson_sse lj_sse;
 /** Incremental MIME multipart parser. */
@@ -3116,6 +3177,18 @@ LONEJSON_SHORT_ALIAS_INLINE lj_read_result lj_default_read_result(void) {
 /** Returns the empty visitor with all callbacks set to `NULL`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_value_visitor lj_default_value_visitor(void) {
   return lonejson_default_value_visitor();
+}
+/** Initializes a mapped string-array stream field with no handler. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_string_array_stream_init(lj_string_array_stream *stream) {
+  lonejson_string_array_stream_init(stream);
+}
+/** Configures callbacks for a mapped string-array stream field. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_string_array_stream_set_handler(
+    lj_string_array_stream *stream,
+    const lj_array_stream_string_handler *handler, void *user,
+    lj_error *error) {
+  return lonejson_string_array_stream_set_handler(stream, handler, user, error);
 }
 /** Initializes a spooled byte container. */
 LONEJSON_SHORT_ALIAS_INLINE void

@@ -323,6 +323,8 @@ static size_t lonejson__field_storage_size(const lonejson_field *field) {
     return field->submap ? field->submap->struct_size : 0u;
   case LONEJSON_FIELD_KIND_STRING_ARRAY:
     return sizeof(lonejson_string_array);
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
+    return sizeof(lonejson_string_array_stream);
   case LONEJSON_FIELD_KIND_I64_ARRAY:
     return sizeof(lonejson_i64_array);
   case LONEJSON_FIELD_KIND_U64_ARRAY:
@@ -897,6 +899,18 @@ static void lonejson__init_value(const lonejson_field *field, void *ptr,
     memset(arr, 0, sizeof(*arr));
     break;
   }
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM: {
+    lonejson_string_array_stream *stream =
+        (lonejson_string_array_stream *)ptr;
+    if (stream->_lonejson_magic !=
+        lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC)) {
+      memset(stream, 0, sizeof(*stream));
+      stream->_lonejson_magic =
+          lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+    }
+    stream->active = 0;
+    break;
+  }
   case LONEJSON_FIELD_KIND_I64_ARRAY: {
     lonejson_i64_array *arr = (lonejson_i64_array *)ptr;
     memset(arr, 0, sizeof(*arr));
@@ -996,6 +1010,18 @@ static void lonejson__cleanup_value(const lonejson_field *field, void *ptr) {
       arr->capacity = capacity;
       arr->flags = flags & LONEJSON_ARRAY_FIXED_CAPACITY;
     }
+    break;
+  }
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM: {
+    lonejson_string_array_stream *stream =
+        (lonejson_string_array_stream *)ptr;
+    if (stream->_lonejson_magic !=
+        lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC)) {
+      memset(stream, 0, sizeof(*stream));
+      stream->_lonejson_magic =
+          lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+    }
+    stream->active = 0;
     break;
   }
   case LONEJSON_FIELD_KIND_I64_ARRAY: {
