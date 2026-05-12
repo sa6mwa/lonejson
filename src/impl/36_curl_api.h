@@ -101,6 +101,118 @@ void lonejson_curl_array_parse_cleanup(lonejson_curl_array_parse *ctx) {
   ctx->stream = NULL;
 }
 
+lonejson_status lonejson_curl_string_array_parse_init(
+    lonejson_curl_string_array_parse *ctx, const char *path,
+    const lonejson_parse_options *options,
+    const lonejson_array_stream_string_handler *handler, void *user) {
+  if (ctx == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  memset(ctx, 0, sizeof(*ctx));
+  if (handler == NULL || handler->chunk == NULL) {
+    return lonejson__set_error(&ctx->error, LONEJSON_STATUS_INVALID_ARGUMENT,
+                               0u, 0u, 0u,
+                               "string chunk handler is required");
+  }
+  ctx->handler = *handler;
+  ctx->user = user;
+  ctx->stream = lonejson_array_stream_open_push(path, options, &ctx->error);
+  return ctx->stream ? LONEJSON_STATUS_OK : ctx->error.code;
+}
+
+size_t lonejson_curl_string_array_write_callback(char *ptr, size_t size,
+                                                 size_t nmemb,
+                                                 void *userdata) {
+  lonejson_curl_string_array_parse *ctx =
+      (lonejson_curl_string_array_parse *)userdata;
+  size_t bytes = size * nmemb;
+  lonejson_status status;
+
+  if (ctx == NULL || ctx->stream == NULL) {
+    return 0u;
+  }
+  if (bytes != 0u && ptr == NULL) {
+    return 0u;
+  }
+  status = lonejson_array_stream_push_string(ctx->stream, ptr, bytes,
+                                             &ctx->handler, ctx->user,
+                                             &ctx->error);
+  return status == LONEJSON_STATUS_OK ? bytes : 0u;
+}
+
+lonejson_status lonejson_curl_string_array_parse_finish(
+    lonejson_curl_string_array_parse *ctx) {
+  if (ctx == NULL || ctx->stream == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  return lonejson_array_stream_finish_string(ctx->stream, &ctx->handler,
+                                             ctx->user, &ctx->error);
+}
+
+void lonejson_curl_string_array_parse_cleanup(
+    lonejson_curl_string_array_parse *ctx) {
+  if (ctx == NULL) {
+    return;
+  }
+  lonejson_array_stream_close(ctx->stream);
+  ctx->stream = NULL;
+}
+
+lonejson_status lonejson_curl_string_items_parse_init(
+    lonejson_curl_string_items_parse *ctx, const char *path,
+    const lonejson_parse_options *options,
+    lonejson_array_stream_string_fn callback, void *user) {
+  if (ctx == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  memset(ctx, 0, sizeof(*ctx));
+  if (callback == NULL) {
+    return lonejson__set_error(&ctx->error, LONEJSON_STATUS_INVALID_ARGUMENT,
+                               0u, 0u, 0u,
+                               "string item callback is required");
+  }
+  ctx->callback = callback;
+  ctx->user = user;
+  ctx->stream = lonejson_array_stream_open_push(path, options, &ctx->error);
+  return ctx->stream ? LONEJSON_STATUS_OK : ctx->error.code;
+}
+
+size_t lonejson_curl_string_items_write_callback(char *ptr, size_t size,
+                                                 size_t nmemb, void *userdata) {
+  lonejson_curl_string_items_parse *ctx =
+      (lonejson_curl_string_items_parse *)userdata;
+  size_t bytes = size * nmemb;
+  lonejson_status status;
+
+  if (ctx == NULL || ctx->stream == NULL) {
+    return 0u;
+  }
+  if (bytes != 0u && ptr == NULL) {
+    return 0u;
+  }
+  status = lonejson_array_stream_push_string_items(
+      ctx->stream, ptr, bytes, ctx->callback, ctx->user, &ctx->error);
+  return status == LONEJSON_STATUS_OK ? bytes : 0u;
+}
+
+lonejson_status lonejson_curl_string_items_parse_finish(
+    lonejson_curl_string_items_parse *ctx) {
+  if (ctx == NULL || ctx->stream == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  return lonejson_array_stream_finish_string_items(
+      ctx->stream, ctx->callback, ctx->user, &ctx->error);
+}
+
+void lonejson_curl_string_items_parse_cleanup(
+    lonejson_curl_string_items_parse *ctx) {
+  if (ctx == NULL) {
+    return;
+  }
+  lonejson_array_stream_close(ctx->stream);
+  ctx->stream = NULL;
+}
+
 lonejson_status
 lonejson_curl_upload_init(lonejson_curl_upload *ctx, const lonejson_map *map,
                           const void *src,

@@ -757,6 +757,18 @@ static lonejson_status lonejson__parser_consume_char(lonejson_parser *parser,
       parser->unicode_pending_high = 0u;
       parser->unicode_digits_needed = 0;
       if (parser->validate_only) {
+        if (LONEJSON__UNLIKELY(
+                lonejson__json_value_parse_visitor_active(parser))) {
+          lonejson_status status = lonejson__json_value_string_begin(parser, 0);
+          if (status != LONEJSON_STATUS_OK) {
+            return status;
+          }
+          parser->string_capture_mode = LONEJSON_STRING_CAPTURE_JSON_VISITOR;
+          parser->token.data = NULL;
+          parser->token.cap = 0u;
+          parser->token.len = 0u;
+          return LONEJSON_STATUS_OK;
+        }
         parser->string_capture_mode = LONEJSON_STRING_CAPTURE_DISCARD;
         parser->token.data = NULL;
         parser->token.cap = 0u;

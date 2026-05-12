@@ -92,6 +92,8 @@ typedef struct lonejson__parser_workspace_align_probe {
 #define LONEJSON__NOINLINE __attribute__((noinline))
 #define LONEJSON__COLD __attribute__((cold))
 #define LONEJSON__HOT __attribute__((hot))
+#define LONEJSON__LIKELY(expr) __builtin_expect(!!(expr), 1)
+#define LONEJSON__UNLIKELY(expr) __builtin_expect(!!(expr), 0)
 #define LONEJSON__TEXT_LEN(text)                                               \
   (__builtin_constant_p(text) ? (sizeof(text) - 1u) : strlen(text))
 #else
@@ -99,6 +101,8 @@ typedef struct lonejson__parser_workspace_align_probe {
 #define LONEJSON__NOINLINE
 #define LONEJSON__COLD
 #define LONEJSON__HOT
+#define LONEJSON__LIKELY(expr) (expr)
+#define LONEJSON__UNLIKELY(expr) (expr)
 #define LONEJSON__TEXT_LEN(text) strlen(text)
 #endif
 
@@ -246,7 +250,8 @@ typedef enum lonejson_array_stream_value_mode {
   LONEJSON_ARRAY_STREAM_VALUE_NONE = 0,
   LONEJSON_ARRAY_STREAM_VALUE_SKIP = 1,
   LONEJSON_ARRAY_STREAM_VALUE_MAPPED = 2,
-  LONEJSON_ARRAY_STREAM_VALUE_RAW = 3
+  LONEJSON_ARRAY_STREAM_VALUE_RAW = 3,
+  LONEJSON_ARRAY_STREAM_VALUE_STRING = 4
 } lonejson_array_stream_value_mode;
 
 typedef struct lonejson__array_stream_dup_frame {
@@ -310,6 +315,16 @@ struct lonejson_array_stream {
   lonejson_value_visitor skip_visitor;
   lonejson__array_stream_dup_state skip_dup_state;
   int skip_dup_active;
+  lonejson_json_value string_value;
+  lonejson_value_visitor string_visitor;
+  const lonejson_array_stream_string_handler *string_handler;
+  void *string_user;
+  int string_active;
+  int string_seen;
+  lonejson__byte_buffer string_item;
+  lonejson_array_stream_string_fn string_callback;
+  void *string_callback_user;
+  size_t string_item_max_bytes;
   unsigned char value_workspace[LONEJSON_PARSER_BUFFER_SIZE +
                                 LONEJSON__PARSER_WORKSPACE_SLACK];
   unsigned char io_buffer[LONEJSON_READER_BUFFER_SIZE];

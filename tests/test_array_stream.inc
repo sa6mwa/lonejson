@@ -1360,6 +1360,18 @@ typedef struct test_array_stream_push_seen {
   size_t count;
 } test_array_stream_push_seen;
 
+typedef struct test_array_stream_string_seen {
+  char items[8][64];
+  size_t item_lens[8];
+  size_t begins;
+  size_t chunks;
+  size_t ends;
+  size_t current;
+  size_t fail_after_chunks;
+  size_t null_items;
+  size_t unterminated_items;
+} test_array_stream_string_seen;
+
 static lonejson_status test_array_stream_push_item(void *user, void *dst) {
   test_array_stream_push_seen *seen = (test_array_stream_push_seen *)user;
   test_item *item = (test_item *)dst;
@@ -1399,6 +1411,97 @@ static lonejson_status test_array_stream_push_alloc_fail_item(void *user,
   (void)user;
   (void)dst;
   return LONEJSON_STATUS_IO_ERROR;
+}
+
+static lonejson_status test_array_stream_string_begin(void *user,
+                                                      lonejson_error *error) {
+  test_array_stream_string_seen *seen = (test_array_stream_string_seen *)user;
+  (void)error;
+  if (seen->begins >= sizeof(seen->items) / sizeof(seen->items[0])) {
+    return LONEJSON_STATUS_OVERFLOW;
+  }
+  seen->current = seen->begins;
+  seen->item_lens[seen->current] = 0u;
+  seen->items[seen->current][0] = '\0';
+  seen->begins++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_array_stream_string_chunk(void *user,
+                                                      const char *data,
+                                                      size_t len,
+                                                      lonejson_error *error) {
+  test_array_stream_string_seen *seen = (test_array_stream_string_seen *)user;
+  size_t room;
+  (void)error;
+  seen->chunks++;
+  if (seen->fail_after_chunks != 0u &&
+      seen->chunks >= seen->fail_after_chunks) {
+    return LONEJSON_STATUS_IO_ERROR;
+  }
+  if (seen->begins == 0u) {
+    return LONEJSON_STATUS_INTERNAL_ERROR;
+  }
+  room = sizeof(seen->items[seen->current]) - 1u - seen->item_lens[seen->current];
+  if (len > room) {
+    len = room;
+  }
+  memcpy(seen->items[seen->current] + seen->item_lens[seen->current], data, len);
+  seen->item_lens[seen->current] += len;
+  seen->items[seen->current][seen->item_lens[seen->current]] = '\0';
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_array_stream_string_end(void *user,
+                                                    lonejson_error *error) {
+  test_array_stream_string_seen *seen = (test_array_stream_string_seen *)user;
+  (void)error;
+  seen->ends++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_array_stream_string_handler test_array_stream_string_handler(
+    void) {
+  lonejson_array_stream_string_handler handler;
+  memset(&handler, 0, sizeof(handler));
+  handler.begin = test_array_stream_string_begin;
+  handler.chunk = test_array_stream_string_chunk;
+  handler.end = test_array_stream_string_end;
+  return handler;
+}
+
+static lonejson_status test_array_stream_string_item(void *user,
+                                                     const char *data,
+                                                     size_t len,
+                                                     lonejson_error *error) {
+  test_array_stream_string_seen *seen = (test_array_stream_string_seen *)user;
+  size_t room;
+  (void)error;
+
+  if (seen->ends >= sizeof(seen->items) / sizeof(seen->items[0])) {
+    return LONEJSON_STATUS_OVERFLOW;
+  }
+  if (data == NULL) {
+    seen->null_items++;
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (data[len] != '\0') {
+    seen->unterminated_items++;
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (seen->fail_after_chunks != 0u &&
+      seen->ends + 1u >= seen->fail_after_chunks) {
+    return LONEJSON_STATUS_IO_ERROR;
+  }
+  room = sizeof(seen->items[seen->ends]) - 1u;
+  if (len > room) {
+    len = room;
+  }
+  memcpy(seen->items[seen->ends], data, len);
+  seen->items[seen->ends][len] = '\0';
+  seen->item_lens[seen->ends] = len;
+  seen->ends++;
+  return LONEJSON_STATUS_OK;
 }
 
 static void test_array_stream_push_api(void) {
@@ -1743,4 +1846,183 @@ static void test_array_stream_push_cleans_reused_destination(void) {
   EXPECT(status == LONEJSON_STATUS_IO_ERROR);
   lonejson_array_stream_close(stream);
   EXPECT(alloc_state.stats.bytes_live == 0u);
+}
+
+static void test_array_stream_push_string_items(void) {
+  static const char json[] =
+      "{\"cursor\":\"c1\",\"keys\":[\"alpha\",\"br\\u0061vo\",\"line\\nkey\"],"
+      "\"index_seq\":7}";
+  lonejson_array_stream_string_handler handler =
+      test_array_stream_string_handler();
+  lonejson_array_stream *stream;
+  lonejson_error error;
+  lonejson_status status;
+  test_array_stream_string_seen seen;
+  size_t i;
+
+  memset(&seen, 0, sizeof(seen));
+  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  EXPECT(stream != NULL);
+  if (stream == NULL) {
+    return;
+  }
+  for (i = 0u; i < strlen(json); ++i) {
+    status = lonejson_array_stream_push_string(stream, json + i, 1u, &handler,
+                                               &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+  }
+  status =
+      lonejson_array_stream_finish_string(stream, &handler, &seen, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(seen.begins == 3u);
+  EXPECT(seen.ends == 3u);
+  EXPECT(seen.chunks >= 3u);
+  EXPECT(strcmp(seen.items[0], "alpha") == 0);
+  EXPECT(strcmp(seen.items[1], "bravo") == 0);
+  EXPECT(strcmp(seen.items[2], "line\nkey") == 0);
+  lonejson_array_stream_close(stream);
+}
+
+static void test_array_stream_push_string_item_callback(void) {
+  static const char json[] =
+      "{\"cursor\":\"c1\",\"keys\":[\"\",\"alpha\",\"\",\"br\\u0061vo\","
+      "\"line\\nkey\"],"
+      "\"index_seq\":7}";
+  lonejson_array_stream *stream;
+  lonejson_error error;
+  lonejson_status status;
+  test_array_stream_string_seen seen;
+  size_t i;
+
+  memset(&seen, 0, sizeof(seen));
+  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  EXPECT(stream != NULL);
+  if (stream == NULL) {
+    return;
+  }
+  for (i = 0u; i < strlen(json); ++i) {
+    status = lonejson_array_stream_push_string_items(
+        stream, json + i, 1u, test_array_stream_string_item, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+  }
+  status = lonejson_array_stream_finish_string_items(
+      stream, test_array_stream_string_item, &seen, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(seen.ends == 5u);
+  EXPECT(seen.null_items == 0u);
+  EXPECT(seen.unterminated_items == 0u);
+  EXPECT(strcmp(seen.items[0], "") == 0);
+  EXPECT(strcmp(seen.items[1], "alpha") == 0);
+  EXPECT(strcmp(seen.items[2], "") == 0);
+  EXPECT(strcmp(seen.items[3], "bravo") == 0);
+  EXPECT(strcmp(seen.items[4], "line\nkey") == 0);
+  lonejson_array_stream_close(stream);
+
+  memset(&seen, 0, sizeof(seen));
+  seen.fail_after_chunks = 1u;
+  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    status = lonejson_array_stream_push_string_items(
+        stream, "{\"keys\":[\"fail\"]}", strlen("{\"keys\":[\"fail\"]}"),
+        test_array_stream_string_item, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_IO_ERROR);
+    lonejson_array_stream_close(stream);
+  }
+}
+
+static void test_array_stream_push_string_item_callback_bounds(void) {
+  const char prefix[] = "{\"keys\":[\"";
+  const char suffix[] = "\"]}";
+  lonejson_array_stream *stream;
+  lonejson_error error;
+  lonejson_status status;
+  test_array_stream_string_seen seen;
+  lonejson_value_limits limits;
+  char *json;
+  size_t string_len;
+  size_t total;
+
+  limits = lonejson_default_value_limits();
+  string_len = limits.max_string_bytes + 1u;
+  total = strlen(prefix) + string_len + strlen(suffix);
+  json = (char *)malloc(total + 1u);
+  EXPECT(json != NULL);
+  if (json == NULL) {
+    return;
+  }
+  memcpy(json, prefix, strlen(prefix));
+  memset(json + strlen(prefix), 'a', string_len);
+  memcpy(json + strlen(prefix) + string_len, suffix, strlen(suffix));
+  json[total] = '\0';
+
+  memset(&seen, 0, sizeof(seen));
+  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    status = lonejson_array_stream_push_string_items(
+        stream, json, total, test_array_stream_string_item, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    EXPECT(seen.ends == 0u);
+    lonejson_array_stream_close(stream);
+  }
+  free(json);
+}
+
+static void test_array_stream_push_string_failure_modes(void) {
+  lonejson_array_stream_string_handler handler =
+      test_array_stream_string_handler();
+  lonejson_array_stream *stream;
+  lonejson_error error;
+  lonejson_status status;
+  test_array_stream_string_seen seen;
+
+  memset(&seen, 0, sizeof(seen));
+  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    static const char json[] = "{\"keys\":[\"ok\",42]}";
+    status = lonejson_array_stream_push_string(stream, json, strlen(json),
+                                               &handler, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
+    EXPECT(seen.ends == 1u);
+    lonejson_array_stream_close(stream);
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    static const char json[] = "{\"keys\":[\"ok\"x]}";
+    status = lonejson_array_stream_push_string(stream, json, strlen(json),
+                                               &handler, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
+    EXPECT(seen.begins == 1u);
+    EXPECT(seen.ends == 0u);
+    lonejson_array_stream_close(stream);
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    static const char json[] = "{\"meta\":true}";
+    status = lonejson_array_stream_push_string(stream, json, strlen(json),
+                                               &handler, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+    EXPECT(seen.begins == 0u);
+    lonejson_array_stream_close(stream);
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  seen.fail_after_chunks = 1u;
+  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    static const char json[] = "{\"keys\":[\"fail\"]}";
+    status = lonejson_array_stream_push_string(stream, json, strlen(json),
+                                               &handler, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_IO_ERROR);
+    lonejson_array_stream_close(stream);
+  }
 }

@@ -54,6 +54,10 @@ int main(void) {
   test_array_stream_push_invariant_failure_modes();
   test_array_stream_push_does_not_materialize_response();
   test_array_stream_push_cleans_reused_destination();
+  test_array_stream_push_string_items();
+  test_array_stream_push_string_item_callback();
+  test_array_stream_push_string_item_callback_bounds();
+  test_array_stream_push_string_failure_modes();
   test_file_and_buffer_helpers();
   test_jsonl_helpers();
   test_sse_incremental_events_and_json_selection();
@@ -134,6 +138,8 @@ int main(void) {
   test_curl_upload_streaming_does_not_buffer_payload();
   test_curl_array_parse_streams_selected_arrays();
   test_curl_array_parse_failure_cleanup_and_truncation();
+  test_curl_string_array_parse_streams_keys();
+  test_curl_string_items_parse_streams_keys();
 #endif
   test_clear_destination_ignores_poisoned_stream_and_json_value_state();
   test_prepared_fixed_object_array_parse_preserves_storage();

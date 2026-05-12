@@ -293,6 +293,14 @@ while (lonejson_array_stream_next_value(items, &value, &error) ==
 lonejson_json_value_cleanup(&value);
 ```
 
+Push-fed selected-array streams fit write-callback transports such as libcurl.
+For string arrays, `lonejson_array_stream_push_string` exposes true decoded
+string chunks through begin/chunk/end callbacks. If a caller wants one callback
+per key-like string item, `lonejson_array_stream_push_string_items` builds only
+the current string through that chunk path under the default string-size cap,
+then invokes the item callback. `lonejson_curl_string_items_parse_*` provides the
+same bounded item-callback shape for `CURLOPT_WRITEFUNCTION`.
+
 ### Serialize one mapped object
 
 ```c

@@ -129,6 +129,16 @@ typedef struct test_curl_array_seen {
   size_t count;
 } test_curl_array_seen;
 
+typedef struct test_curl_string_seen {
+  char items[8][32];
+  size_t lens[8];
+  size_t begins;
+  size_t ends;
+  size_t current;
+  size_t null_items;
+  size_t unterminated_items;
+} test_curl_string_seen;
+
 static lonejson_status test_curl_array_item(void *user, void *dst) {
   test_curl_array_seen *seen = (test_curl_array_seen *)user;
   test_item *item = (test_item *)dst;
@@ -137,6 +147,77 @@ static lonejson_status test_curl_array_item(void *user, void *dst) {
     return LONEJSON_STATUS_OVERFLOW;
   }
   seen->ids[seen->count++] = (int)item->id;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_curl_string_begin(void *user,
+                                              lonejson_error *error) {
+  test_curl_string_seen *seen = (test_curl_string_seen *)user;
+  (void)error;
+  seen->current = seen->begins++;
+  seen->lens[seen->current] = 0u;
+  seen->items[seen->current][0] = '\0';
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_curl_string_chunk(void *user, const char *data,
+                                              size_t len,
+                                              lonejson_error *error) {
+  test_curl_string_seen *seen = (test_curl_string_seen *)user;
+  size_t room;
+  (void)error;
+  room = sizeof(seen->items[seen->current]) - 1u - seen->lens[seen->current];
+  if (len > room) {
+    len = room;
+  }
+  memcpy(seen->items[seen->current] + seen->lens[seen->current], data, len);
+  seen->lens[seen->current] += len;
+  seen->items[seen->current][seen->lens[seen->current]] = '\0';
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_curl_string_end(void *user, lonejson_error *error) {
+  test_curl_string_seen *seen = (test_curl_string_seen *)user;
+  (void)error;
+  seen->ends++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_array_stream_string_handler test_curl_string_handler(void) {
+  lonejson_array_stream_string_handler handler;
+  memset(&handler, 0, sizeof(handler));
+  handler.begin = test_curl_string_begin;
+  handler.chunk = test_curl_string_chunk;
+  handler.end = test_curl_string_end;
+  return handler;
+}
+
+static lonejson_status test_curl_string_item(void *user, const char *data,
+                                             size_t len,
+                                             lonejson_error *error) {
+  test_curl_string_seen *seen = (test_curl_string_seen *)user;
+  size_t room;
+  (void)error;
+
+  if (seen->ends >= sizeof(seen->items) / sizeof(seen->items[0])) {
+    return LONEJSON_STATUS_OVERFLOW;
+  }
+  if (data == NULL) {
+    seen->null_items++;
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (data[len] != '\0') {
+    seen->unterminated_items++;
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  room = sizeof(seen->items[seen->ends]) - 1u;
+  if (len > room) {
+    len = room;
+  }
+  memcpy(seen->items[seen->ends], data, len);
+  seen->items[seen->ends][len] = '\0';
+  seen->lens[seen->ends] = len;
+  seen->ends++;
   return LONEJSON_STATUS_OK;
 }
 
@@ -231,6 +312,83 @@ static void test_curl_array_parse_failure_cleanup_and_truncation(void) {
   EXPECT(seen.count == 1u);
   EXPECT(seen.ids[0] == 41);
   lonejson_curl_array_parse_cleanup(&parse);
+}
+
+static void test_curl_string_array_parse_streams_keys(void) {
+  static const char json[] =
+      "{\"cursor\":\"c\",\"keys\":[\"k1\",\"k\\u0032\"],\"index_seq\":9}";
+  lonejson_curl_string_array_parse parse;
+  lonejson_array_stream_string_handler handler = test_curl_string_handler();
+  test_curl_string_seen seen;
+  size_t i;
+  size_t got;
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_curl_string_array_parse_init(&parse, "keys", NULL, &handler,
+                                               &seen) == LONEJSON_STATUS_OK);
+  for (i = 0u; i < strlen(json); ++i) {
+    got = lonejson_curl_string_array_write_callback((char *)json + i, 1u, 1u,
+                                                    &parse);
+    EXPECT(got == 1u);
+  }
+  EXPECT(lonejson_curl_string_array_parse_finish(&parse) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(seen.begins == 2u);
+  EXPECT(seen.ends == 2u);
+  EXPECT(strcmp(seen.items[0], "k1") == 0);
+  EXPECT(strcmp(seen.items[1], "k2") == 0);
+  lonejson_curl_string_array_parse_cleanup(&parse);
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_curl_string_array_parse_init(&parse, "keys", NULL, &handler,
+                                               &seen) == LONEJSON_STATUS_OK);
+  got = lonejson_curl_string_array_write_callback("{\"keys\":[1]}", 1u,
+                                                  strlen("{\"keys\":[1]}"),
+                                                  &parse);
+  EXPECT(got == 0u);
+  EXPECT(parse.error.code == LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_curl_string_array_parse_cleanup(&parse);
+}
+
+static void test_curl_string_items_parse_streams_keys(void) {
+  static const char json[] =
+      "{\"cursor\":\"c\",\"keys\":[\"\",\"k1\",\"\",\"k\\u0032\"],"
+      "\"index_seq\":9}";
+  lonejson_curl_string_items_parse parse;
+  test_curl_string_seen seen;
+  size_t i;
+  size_t got;
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_curl_string_items_parse_init(
+             &parse, "keys", NULL, test_curl_string_item, &seen) ==
+         LONEJSON_STATUS_OK);
+  for (i = 0u; i < strlen(json); ++i) {
+    got = lonejson_curl_string_items_write_callback((char *)json + i, 1u, 1u,
+                                                    &parse);
+    EXPECT(got == 1u);
+  }
+  EXPECT(lonejson_curl_string_items_parse_finish(&parse) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(seen.ends == 4u);
+  EXPECT(seen.null_items == 0u);
+  EXPECT(seen.unterminated_items == 0u);
+  EXPECT(strcmp(seen.items[0], "") == 0);
+  EXPECT(strcmp(seen.items[1], "k1") == 0);
+  EXPECT(strcmp(seen.items[2], "") == 0);
+  EXPECT(strcmp(seen.items[3], "k2") == 0);
+  lonejson_curl_string_items_parse_cleanup(&parse);
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_curl_string_items_parse_init(
+             &parse, "keys", NULL, test_curl_string_item, &seen) ==
+         LONEJSON_STATUS_OK);
+  got = lonejson_curl_string_items_write_callback("{\"keys\":[1]}", 1u,
+                                                  strlen("{\"keys\":[1]}"),
+                                                  &parse);
+  EXPECT(got == 0u);
+  EXPECT(parse.error.code == LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_curl_string_items_parse_cleanup(&parse);
 }
 #endif
 

@@ -624,6 +624,33 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
 
   if (frame == NULL) {
     if (!parser->root_started && parser->validate_only) {
+      lonejson_status status = LONEJSON_STATUS_OK;
+
+      if (mode == LONEJSON_LEX_NUMBER &&
+          !lonejson__is_valid_json_number(token_text, parser->token.len)) {
+        return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
+                                   parser->error.offset, parser->error.line,
+                                   parser->error.column, "invalid JSON number");
+      }
+      if (LONEJSON__UNLIKELY(
+              lonejson__json_value_parse_visitor_active(parser))) {
+        if (mode == LONEJSON_LEX_NUMBER) {
+          status =
+              lonejson__json_value_number(parser, token_text, parser->token.len);
+        } else if (mode == LONEJSON_LEX_TRUE) {
+          status = lonejson__json_value_visit_bool(parser, 1);
+        } else if (mode == LONEJSON_LEX_FALSE) {
+          status = lonejson__json_value_visit_bool(parser, 0);
+        } else if (mode == LONEJSON_LEX_NULL) {
+          status = lonejson__json_value_visit_event(
+              parser, parser->json_stream_value->parse_visitor->null_value);
+        }
+        if (status != LONEJSON_STATUS_OK) {
+          return status;
+        }
+        lonejson__parser_clear_json_stream_value(parser);
+        parser->json_stream_depth = 0u;
+      }
       parser->root_started = 1;
       parser->root_finished = 1;
       return LONEJSON_STATUS_OK;
@@ -764,4 +791,3 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
                              parser->error.offset, parser->error.line,
                              parser->error.column, "invalid parser state");
 }
-

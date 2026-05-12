@@ -1,3 +1,16 @@
+static LONEJSON__INLINE size_t lonejson__popcount_u64(lonejson_uint64 value) {
+  lonejson_uint64 all_bits = ~(lonejson_uint64)0u;
+  lonejson_uint64 ones = all_bits / 3u;
+  lonejson_uint64 twos = all_bits / 5u;
+  lonejson_uint64 fours = all_bits / 17u;
+  lonejson_uint64 bytes = all_bits / 255u;
+
+  value = value - ((value >> 1u) & ones);
+  value = (value & twos) + ((value >> 2u) & twos);
+  value = (value + (value >> 4u)) & fours;
+  return (size_t)((value * bytes) >> 56u);
+}
+
 static lonejson_uint64
 lonejson__required_mask_for_map(lonejson_parser *parser,
                                 const lonejson_map *map) {
@@ -33,13 +46,7 @@ static size_t lonejson__required_count_for_map(lonejson_parser *parser,
   }
   if (map->field_count <= 64u) {
     lonejson_uint64 mask = lonejson__required_mask_for_map(parser, map);
-    size_t required_count = 0u;
-
-    while (mask != 0u) {
-      required_count += (size_t)(mask & 1u);
-      mask >>= 1u;
-    }
-    return required_count;
+    return lonejson__popcount_u64(mask);
   }
   count = 0u;
   for (i = 0u; i < map->field_count; ++i) {
@@ -208,83 +215,10 @@ lonejson__field_key_matches(const lonejson_field *field, const char *key,
       field->json_key_last != (unsigned char)key[key_len - 1u]) {
     return 0;
   }
-  switch (key_len) {
-  case 1u:
-  case 2u:
+  if (key_len <= 2u) {
     return 1;
-  case 3u:
-    return field->json_key[1] == key[1];
-  case 4u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2];
-  case 5u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3];
-  case 6u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4];
-  case 7u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5];
-  case 8u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5] && field->json_key[6] == key[6];
-  case 9u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5] && field->json_key[6] == key[6] &&
-           field->json_key[7] == key[7];
-  case 10u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5] && field->json_key[6] == key[6] &&
-           field->json_key[7] == key[7] && field->json_key[8] == key[8];
-  case 11u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5] && field->json_key[6] == key[6] &&
-           field->json_key[7] == key[7] && field->json_key[8] == key[8] &&
-           field->json_key[9] == key[9];
-  case 12u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5] && field->json_key[6] == key[6] &&
-           field->json_key[7] == key[7] && field->json_key[8] == key[8] &&
-           field->json_key[9] == key[9] && field->json_key[10] == key[10];
-  case 13u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5] && field->json_key[6] == key[6] &&
-           field->json_key[7] == key[7] && field->json_key[8] == key[8] &&
-           field->json_key[9] == key[9] && field->json_key[10] == key[10] &&
-           field->json_key[11] == key[11];
-  case 14u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5] && field->json_key[6] == key[6] &&
-           field->json_key[7] == key[7] && field->json_key[8] == key[8] &&
-           field->json_key[9] == key[9] && field->json_key[10] == key[10] &&
-           field->json_key[11] == key[11] && field->json_key[12] == key[12];
-  case 15u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5] && field->json_key[6] == key[6] &&
-           field->json_key[7] == key[7] && field->json_key[8] == key[8] &&
-           field->json_key[9] == key[9] && field->json_key[10] == key[10] &&
-           field->json_key[11] == key[11] && field->json_key[12] == key[12] &&
-           field->json_key[13] == key[13];
-  case 16u:
-    return field->json_key[1] == key[1] && field->json_key[2] == key[2] &&
-           field->json_key[3] == key[3] && field->json_key[4] == key[4] &&
-           field->json_key[5] == key[5] && field->json_key[6] == key[6] &&
-           field->json_key[7] == key[7] && field->json_key[8] == key[8] &&
-           field->json_key[9] == key[9] && field->json_key[10] == key[10] &&
-           field->json_key[11] == key[11] && field->json_key[12] == key[12] &&
-           field->json_key[13] == key[13] && field->json_key[14] == key[14];
-  default:
-    return memcmp(field->json_key + 1u, key + 1u, key_len - 2u) == 0;
   }
+  return memcmp(field->json_key + 1u, key + 1u, key_len - 2u) == 0;
 }
 
 static LONEJSON__INLINE size_t
@@ -1156,4 +1090,3 @@ static void lonejson__cleanup_value(const lonejson_field *field, void *ptr) {
     break;
   }
 }
-
