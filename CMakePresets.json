@@ -42,6 +42,10 @@
       "name": "linux-gnu-release",
       "inherits": "host",
       "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root",
+        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root/include",
+        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_TARGET_ARCH": "x86_64",
         "LONEJSON_TARGET_OS": "linux",
         "LONEJSON_TARGET_LIBC": "gnu"
@@ -52,75 +56,67 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-musl.cmake",
       "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-musl/root",
+        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-musl/root/include",
+        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-musl/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_TARGET_ARCH": "x86_64",
         "LONEJSON_TARGET_OS": "linux",
         "LONEJSON_TARGET_LIBC": "musl"
       }
     },
     {
-      "name": "linux-gnu-curl-release",
-      "inherits": "linux-gnu-release",
-      "cacheVariables": {
-        "LONEJSON_BUILD_WITH_CURL": "ON"
-      }
-    },
-    {
-      "name": "linux-musl-curl-release",
-      "inherits": "linux-musl-release",
-      "cacheVariables": {
-        "LONEJSON_BUILD_WITH_CURL": "ON"
-      }
-    },
-    {
       "name": "aarch64-linux-gnu-release",
       "inherits": "host",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-gnu.cmake"
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-gnu.cmake",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-gnu/root",
+        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-gnu/root/include",
+        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-gnu/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
     },
     {
       "name": "aarch64-linux-musl-release",
       "inherits": "host",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-musl.cmake"
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-musl.cmake",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-musl/root",
+        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-musl/root/include",
+        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-musl/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
     },
     {
       "name": "armhf-linux-gnu-release",
       "inherits": "host",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-gnu.cmake"
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-gnu.cmake",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-gnu/root",
+        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-gnu/root/include",
+        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-gnu/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
     },
     {
       "name": "armhf-linux-musl-release",
       "inherits": "host",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-musl.cmake"
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-musl.cmake",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-musl/root",
+        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-musl/root/include",
+        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-musl/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_BUILD_WITH_CURL": "ON"
+      }
     },
     {
       "name": "arm64-apple-darwin-release",
       "inherits": "host",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-apple-darwin.cmake"
-    },
-    {
-      "name": "aarch64-linux-gnu-curl-release",
-      "inherits": "aarch64-linux-gnu-release",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-apple-darwin.cmake",
       "cacheVariables": {
-        "LONEJSON_BUILD_WITH_CURL": "ON"
-      }
-    },
-    {
-      "name": "aarch64-linux-musl-curl-release",
-      "inherits": "aarch64-linux-musl-release",
-      "cacheVariables": {
-        "LONEJSON_BUILD_WITH_CURL": "ON"
-      }
-    },
-    {
-      "name": "armhf-linux-gnu-curl-release",
-      "inherits": "armhf-linux-gnu-release",
-      "cacheVariables": {
-        "LONEJSON_BUILD_WITH_CURL": "ON"
-      }
-    },
-    {
-      "name": "armhf-linux-musl-curl-release",
-      "inherits": "armhf-linux-musl-release",
-      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/arm64-apple-darwin/root",
+        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/arm64-apple-darwin/root/include",
+        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/arm64-apple-darwin/root/lib/libcurl.4.8.0.dylib",
         "LONEJSON_BUILD_WITH_CURL": "ON"
       }
     },
@@ -180,14 +176,6 @@
       "configurePreset": "linux-musl-release"
     },
     {
-      "name": "linux-gnu-curl-release",
-      "configurePreset": "linux-gnu-curl-release"
-    },
-    {
-      "name": "linux-musl-curl-release",
-      "configurePreset": "linux-musl-curl-release"
-    },
-    {
       "name": "aarch64-linux-gnu-release",
       "configurePreset": "aarch64-linux-gnu-release"
     },
@@ -206,22 +194,6 @@
     {
       "name": "arm64-apple-darwin-release",
       "configurePreset": "arm64-apple-darwin-release"
-    },
-    {
-      "name": "aarch64-linux-gnu-curl-release",
-      "configurePreset": "aarch64-linux-gnu-curl-release"
-    },
-    {
-      "name": "aarch64-linux-musl-curl-release",
-      "configurePreset": "aarch64-linux-musl-curl-release"
-    },
-    {
-      "name": "armhf-linux-gnu-curl-release",
-      "configurePreset": "armhf-linux-gnu-curl-release"
-    },
-    {
-      "name": "armhf-linux-musl-curl-release",
-      "configurePreset": "armhf-linux-musl-curl-release"
     },
     {
       "name": "format",
@@ -247,20 +219,6 @@
     {
       "name": "package-archive-linux-musl",
       "configurePreset": "linux-musl-release",
-      "targets": [
-        "package-archive"
-      ]
-    },
-    {
-      "name": "package-archive-linux-gnu-curl",
-      "configurePreset": "linux-gnu-curl-release",
-      "targets": [
-        "package-archive"
-      ]
-    },
-    {
-      "name": "package-archive-linux-musl-curl",
-      "configurePreset": "linux-musl-curl-release",
       "targets": [
         "package-archive"
       ]
@@ -305,34 +263,6 @@
       "configurePreset": "arm64-apple-darwin-release",
       "targets": [
         "package-darwin-smoke-bundle"
-      ]
-    },
-    {
-      "name": "package-archive-aarch64-linux-gnu-curl",
-      "configurePreset": "aarch64-linux-gnu-curl-release",
-      "targets": [
-        "package-archive"
-      ]
-    },
-    {
-      "name": "package-archive-aarch64-linux-musl-curl",
-      "configurePreset": "aarch64-linux-musl-curl-release",
-      "targets": [
-        "package-archive"
-      ]
-    },
-    {
-      "name": "package-archive-armhf-linux-gnu-curl",
-      "configurePreset": "armhf-linux-gnu-curl-release",
-      "targets": [
-        "package-archive"
-      ]
-    },
-    {
-      "name": "package-archive-armhf-linux-musl-curl",
-      "configurePreset": "armhf-linux-musl-curl-release",
-      "targets": [
-        "package-archive"
       ]
     },
     {
@@ -408,20 +338,6 @@
       }
     },
     {
-      "name": "linux-gnu-curl-release",
-      "configurePreset": "linux-gnu-curl-release",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "linux-musl-curl-release",
-      "configurePreset": "linux-musl-curl-release",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
       "name": "aarch64-linux-gnu-release",
       "configurePreset": "aarch64-linux-gnu-release",
       "output": {
@@ -445,34 +361,6 @@
     {
       "name": "armhf-linux-musl-release",
       "configurePreset": "armhf-linux-musl-release",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "aarch64-linux-gnu-curl-release",
-      "configurePreset": "aarch64-linux-gnu-curl-release",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "aarch64-linux-musl-curl-release",
-      "configurePreset": "aarch64-linux-musl-curl-release",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "armhf-linux-gnu-curl-release",
-      "configurePreset": "armhf-linux-gnu-curl-release",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "armhf-linux-musl-curl-release",
-      "configurePreset": "armhf-linux-musl-curl-release",
       "output": {
         "outputOnFailure": true
       }

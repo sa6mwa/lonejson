@@ -1,7 +1,10 @@
-if(NOT DEFINED LONEJSON_RELEASE_VARIANT_SUFFIX)
-  set(LONEJSON_RELEASE_VARIANT_SUFFIX "")
+if(NOT LONEJSON_BUILD_WITH_CURL)
+  message(FATAL_ERROR
+    "package-archive requires LONEJSON_BUILD_WITH_CURL=ON; binary releases "
+    "must include the lonejson_curl_* ABI")
 endif()
-set(archive_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}${LONEJSON_RELEASE_VARIANT_SUFFIX}")
+
+set(archive_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}")
 set(package_stage_root "${LONEJSON_BINARY_DIR}/package/archive")
 set(package_root "${package_stage_root}/${archive_name}")
 file(REMOVE_RECURSE "${package_stage_root}")

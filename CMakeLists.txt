@@ -108,11 +108,20 @@ elseif(LONEJSON_TARGET_OS_LOWER STREQUAL "darwin" AND
 else()
   set(LONEJSON_TARGET_ID "${LONEJSON_TARGET_ARCH_LOWER}-${LONEJSON_TARGET_OS_LOWER}")
 endif()
-set(LONEJSON_RELEASE_VARIANT_SUFFIX "")
 if(LONEJSON_BUILD_WITH_CURL)
-  set(LONEJSON_RELEASE_VARIANT_SUFFIX "-curl")
   find_package(CURL REQUIRED)
 endif()
+
+function(lonejson_target_include_curl target)
+  if(CURL_INCLUDE_DIRS)
+    target_include_directories(${target} SYSTEM PRIVATE ${CURL_INCLUDE_DIRS})
+    return()
+  endif()
+  get_target_property(curl_include_dirs CURL::libcurl INTERFACE_INCLUDE_DIRECTORIES)
+  if(curl_include_dirs)
+    target_include_directories(${target} SYSTEM PRIVATE ${curl_include_dirs})
+  endif()
+endfunction()
 
 if(LONEJSON_ENABLE_ASAN AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -151,7 +160,7 @@ foreach(target lonejson_shared lonejson_static)
   lonejson_configure_c_target(${target})
   if(LONEJSON_BUILD_WITH_CURL)
     target_compile_definitions(${target} PRIVATE LONEJSON_WITH_CURL)
-    target_link_libraries(${target} PUBLIC CURL::libcurl)
+    lonejson_target_include_curl(${target})
   endif()
 endforeach()
 
@@ -567,7 +576,7 @@ add_custom_target(package-archive
     -DLONEJSON_SHARED_LINK_NAME=$<TARGET_LINKER_FILE_NAME:lonejson_shared>
     -DLONEJSON_SHARED_LIB_NAME=$<TARGET_FILE_NAME:lonejson_shared>
     -DLONEJSON_SHARED_SONAME=$<TARGET_SONAME_FILE_NAME:lonejson_shared>
-    -DLONEJSON_RELEASE_VARIANT_SUFFIX=${LONEJSON_RELEASE_VARIANT_SUFFIX}
+    -DLONEJSON_BUILD_WITH_CURL=${LONEJSON_BUILD_WITH_CURL}
     -DLONEJSON_STRIP=${CMAKE_STRIP}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_archive.cmake
   DEPENDS lonejson_shared lonejson_static
