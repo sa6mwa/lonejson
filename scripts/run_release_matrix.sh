@@ -40,6 +40,48 @@ require_linux_origin_rpath() {
     IFS="$old_ifs"
 }
 
+target_compiler() {
+    target_id="$1"
+
+    case "$target_id" in
+        x86_64-linux-gnu) printf '%s\n' cc ;;
+        x86_64-linux-musl) printf '%s\n' musl-gcc ;;
+        aarch64-linux-gnu) printf '%s\n' aarch64-linux-gnu-gcc ;;
+        aarch64-linux-musl) printf '%s\n' aarch64-linux-musl-gcc ;;
+        armhf-linux-gnu) printf '%s\n' arm-linux-gnueabihf-gcc ;;
+        armhf-linux-musl) printf '%s\n' arm-linux-musleabihf-gcc ;;
+        arm64-apple-darwin)
+            printf '%s\n' "${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/arm64-apple-darwin25-clang"
+            ;;
+        *)
+            printf 'unknown target compiler for %s\n' "$target_id" >&2
+            exit 1
+            ;;
+    esac
+}
+
+target_cmake_system_name() {
+    target_id="$1"
+
+    case "$target_id" in
+        *apple-darwin) printf '%s\n' Darwin ;;
+        *) printf '%s\n' Linux ;;
+    esac
+}
+
+target_raw_link_flags() {
+    target_id="$1"
+
+    case "$target_id" in
+        arm64-apple-darwin)
+            printf '%s\n' "--ld-path=${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/arm64-apple-darwin25-ld"
+            ;;
+        *)
+            printf '%s\n' ""
+            ;;
+    esac
+}
+
 release_archive_path() {
     target_id="$1"
 
@@ -57,11 +99,17 @@ require_archive_contract() {
             "include/" | \
             "include/lonejson.h" | \
             "lib/" | \
+            "lib/cmake/" | \
+            "lib/cmake/lonejson/" | \
+            "lib/cmake/lonejson/lonejsonConfig.cmake" | \
+            "lib/cmake/lonejson/lonejsonConfigVersion.cmake" | \
             "lib/liblonejson.a" | \
             "lib/liblonejson.so" | \
             "lib/liblonejson.so."* | \
             "lib/liblonejson.dylib" | \
             "lib/liblonejson."*".dylib" | \
+            "lib/pkgconfig/" | \
+            "lib/pkgconfig/lonejson.pc" | \
             "share/" | \
             "share/doc/" | \
             "share/doc/liblonejson/" | \
@@ -81,6 +129,20 @@ require_archive_contract() {
     package_root="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1)"
     if [ -z "$package_root" ]; then
         printf 'failed to inspect archive: %s\n' "$archive" >&2
+        exit 1
+    fi
+
+    require_file "$package_root/lib/pkgconfig/lonejson.pc"
+    require_file "$package_root/lib/cmake/lonejson/lonejsonConfig.cmake"
+    require_file "$package_root/lib/cmake/lonejson/lonejsonConfigVersion.cmake"
+    if grep -RE 'libcurl|c\.pkt\.systems|\.deps/|/home/|/build/' \
+        "$package_root/lib/pkgconfig/lonejson.pc" \
+        "$package_root/lib/cmake/lonejson" >/dev/null; then
+        printf 'forbidden dependency or path leak in release metadata for %s\n' "$archive" >&2
+        exit 1
+    fi
+    if grep -Eq '^(Requires|Requires.private):.*curl' "$package_root/lib/pkgconfig/lonejson.pc"; then
+        printf 'unexpected curl pkg-config dependency in %s\n' "$archive" >&2
         exit 1
     fi
 
@@ -119,6 +181,80 @@ require_archive_contract() {
         esac
         require_linux_origin_rpath "$archive" "$dynamic_metadata"
     fi
+
+    rm -rf "$tmp_dir"
+    trap - EXIT
+}
+
+require_archive_consumer_metadata() {
+    archive="$1"
+    target_id="$2"
+
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' EXIT
+    tar -xzf "$archive" -C "$tmp_dir"
+    package_root="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | sort | head -n 1)"
+    if [ -z "$package_root" ]; then
+        printf 'failed to inspect archive: %s\n' "$archive" >&2
+        exit 1
+    fi
+
+    compiler="$(target_compiler "$target_id")"
+    require_command "$compiler"
+
+    consumer_source="$tmp_dir/consumer.c"
+    cat >"$consumer_source" <<'EOF'
+#include <lonejson.h>
+
+int main(void) {
+    lonejson_error error;
+    lonejson_error_init(&error);
+    return lonejson_validate_cstr("{\"ok\":true}", &error) == LONEJSON_STATUS_OK ? 0 : 1;
+}
+EOF
+
+    require_command pkg-config
+    pkg_config_flags="$(PKG_CONFIG_PATH="$package_root/lib/pkgconfig" pkg-config --cflags --libs lonejson)"
+    raw_link_flags="$(target_raw_link_flags "$target_id")"
+    # shellcheck disable=SC2086
+    "$compiler" "$consumer_source" $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
+
+    cmake_source_dir="$tmp_dir/cmake-consumer"
+    cmake_build_dir="$tmp_dir/cmake-build"
+    mkdir -p "$cmake_source_dir"
+    cp "$consumer_source" "$cmake_source_dir/main.c"
+    cat >"$cmake_source_dir/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.21)
+project(lonejson_archive_consumer C)
+find_package(lonejson CONFIG REQUIRED)
+add_executable(lonejson_archive_consumer main.c)
+target_link_libraries(lonejson_archive_consumer PRIVATE lonejson::lonejson)
+EOF
+
+    if [ "${target_id#*apple-darwin}" != "$target_id" ]; then
+        cmake_args=(
+            -S "$cmake_source_dir"
+            -B "$cmake_build_dir"
+            -G Ninja
+            -D "CMAKE_PREFIX_PATH=$package_root"
+            -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
+            -D "CMAKE_TOOLCHAIN_FILE=$repo_root/cmake/toolchains/arm64-apple-darwin.cmake"
+        )
+    else
+        cmake_system_name="$(target_cmake_system_name "$target_id")"
+        cmake_args=(
+            -S "$cmake_source_dir"
+            -B "$cmake_build_dir"
+            -G Ninja
+            -D "CMAKE_PREFIX_PATH=$package_root"
+            -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
+            -D "CMAKE_C_COMPILER=$compiler"
+            -D "CMAKE_SYSTEM_NAME=$cmake_system_name"
+            -D CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+        )
+    fi
+    cmake "${cmake_args[@]}"
+    cmake --build "$cmake_build_dir"
 
     rm -rf "$tmp_dir"
     trap - EXIT
@@ -200,6 +336,7 @@ run_target() {
     archive="$(release_archive_path "$target_id")"
     require_archive_contract "$archive" "$target_id"
     require_curl_symbol "$archive" "$target_id"
+    require_archive_consumer_metadata "$archive" "$target_id"
 }
 
 run_build_only_target() {
@@ -214,6 +351,7 @@ run_build_only_target() {
     archive="$(release_archive_path "$target_id")"
     require_archive_contract "$archive" "$target_id"
     require_curl_symbol "$archive" "$target_id"
+    require_archive_consumer_metadata "$archive" "$target_id"
 }
 
 require_command cmake
@@ -221,6 +359,7 @@ require_command ctest
 require_command make
 require_command nm
 require_command readelf
+require_command ninja
 require_command luarocks
 require_command musl-gcc
 require_command aarch64-linux-gnu-gcc

@@ -10,6 +10,8 @@ set(package_root "${package_stage_root}/${archive_name}")
 file(REMOVE_RECURSE "${package_stage_root}")
 file(MAKE_DIRECTORY "${package_root}/include")
 file(MAKE_DIRECTORY "${package_root}/lib")
+file(MAKE_DIRECTORY "${package_root}/lib/cmake/lonejson")
+file(MAKE_DIRECTORY "${package_root}/lib/pkgconfig")
 file(MAKE_DIRECTORY "${package_root}/share/doc/liblonejson")
 
 file(COPY "${LONEJSON_PUBLIC_HEADER}" DESTINATION "${package_root}/include")
@@ -63,6 +65,60 @@ endif()
 
 file(COPY "${LONEJSON_ROOT}/LICENSE" DESTINATION "${package_root}/share/doc/liblonejson")
 file(COPY "${LONEJSON_ROOT}/README.md" DESTINATION "${package_root}/share/doc/liblonejson")
+
+set(pkgconfig_file "${package_root}/lib/pkgconfig/lonejson.pc")
+file(WRITE "${pkgconfig_file}"
+"prefix=\${pcfiledir}/../..
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: lonejson
+Description: Strict C89 JSON parser, serializer, and streaming toolkit
+Version: ${LONEJSON_VERSION}
+Libs: -L\${libdir} -llonejson
+Cflags: -I\${includedir}
+")
+
+set(cmake_config_file "${package_root}/lib/cmake/lonejson/lonejsonConfig.cmake")
+file(WRITE "${cmake_config_file}"
+"get_filename_component(_lonejson_prefix \"\${CMAKE_CURRENT_LIST_DIR}/../../..\" ABSOLUTE)
+
+if(NOT TARGET lonejson::lonejson)
+  add_library(lonejson::lonejson SHARED IMPORTED)
+  set_target_properties(lonejson::lonejson PROPERTIES
+    IMPORTED_LOCATION \"\${_lonejson_prefix}/lib/${LONEJSON_SHARED_LIB_NAME}\"
+    INTERFACE_INCLUDE_DIRECTORIES \"\${_lonejson_prefix}/include\"
+  )
+endif()
+
+if(NOT TARGET lonejson::lonejson_static)
+  add_library(lonejson::lonejson_static STATIC IMPORTED)
+  set_target_properties(lonejson::lonejson_static PROPERTIES
+    IMPORTED_LOCATION \"\${_lonejson_prefix}/lib/${LONEJSON_STATIC_LIB_NAME}\"
+    INTERFACE_INCLUDE_DIRECTORIES \"\${_lonejson_prefix}/include\"
+  )
+endif()
+
+set(lonejson_FOUND TRUE)
+unset(_lonejson_prefix)
+")
+
+set(cmake_version_file "${package_root}/lib/cmake/lonejson/lonejsonConfigVersion.cmake")
+file(WRITE "${cmake_version_file}"
+"set(PACKAGE_VERSION \"${LONEJSON_VERSION}\")
+
+if(PACKAGE_FIND_VERSION)
+  if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+    set(PACKAGE_VERSION_EXACT TRUE)
+    set(PACKAGE_VERSION_COMPATIBLE TRUE)
+  elseif(PACKAGE_FIND_VERSION VERSION_LESS PACKAGE_VERSION)
+    set(PACKAGE_VERSION_COMPATIBLE TRUE)
+  else()
+    set(PACKAGE_VERSION_COMPATIBLE FALSE)
+  endif()
+endif()
+")
 
 file(MAKE_DIRECTORY "${LONEJSON_ROOT}/dist")
 set(archive_base "${LONEJSON_ROOT}/dist/${archive_name}.tar")
