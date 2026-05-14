@@ -34,7 +34,7 @@ set(LONEJSON_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(LONEJSON_GENERATED_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/include")
 set(LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/single-header/include")
 set(LONEJSON_GENERATED_FIXTURE_DIR "${LONEJSON_SHARED_BUILD_DIR}/generated/fixtures")
-set(LONEJSON_TEST_BUNDLE_ROOT "" CACHE PATH "Root directory for extracted liblockdc dev bundle content used by tests.")
+set(LONEJSON_TEST_BUNDLE_ROOT "" CACHE PATH "Root directory for extracted c.pkt.systems dependency bundle content used by tests.")
 set(LONEJSON_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "Artifact architecture name")
 set(LONEJSON_TARGET_OS "${CMAKE_SYSTEM_NAME}" CACHE STRING "Artifact operating system name")
 set(LONEJSON_TARGET_LIBC "" CACHE STRING "Artifact libc suffix for Linux targets (gnu, musl, or empty)")
@@ -46,6 +46,9 @@ set(LONEJSON_SINGLE_HEADER_DIST_GZ "${CMAKE_CURRENT_SOURCE_DIR}/dist/lonejson-${
 function(lonejson_configure_c_target target)
   if(UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     target_compile_definitions(${target} PRIVATE _POSIX_C_SOURCE=200809L)
+  endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_compile_definitions(${target} PRIVATE _DARWIN_C_SOURCE=1)
   endif()
   if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(${target} PRIVATE
@@ -77,6 +80,9 @@ function(lonejson_configure_strict_downstream_target target)
   if(UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     target_compile_definitions(${target} PRIVATE _POSIX_C_SOURCE=200809L)
   endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_compile_definitions(${target} PRIVATE _DARWIN_C_SOURCE=1)
+  endif()
   if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(${target} PRIVATE
       ${LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS})
@@ -96,6 +102,9 @@ if(LONEJSON_TARGET_OS_LOWER STREQUAL "linux" AND NOT LONEJSON_TARGET_LIBC)
 endif()
 if(LONEJSON_TARGET_OS_LOWER STREQUAL "linux")
   set(LONEJSON_TARGET_ID "${LONEJSON_TARGET_ARCH_LOWER}-linux-${LONEJSON_TARGET_LIBC}")
+elseif(LONEJSON_TARGET_OS_LOWER STREQUAL "darwin" AND
+       LONEJSON_TARGET_ARCH_LOWER STREQUAL "aarch64")
+  set(LONEJSON_TARGET_ID "arm64-apple-darwin")
 else()
   set(LONEJSON_TARGET_ID "${LONEJSON_TARGET_ARCH_LOWER}-${LONEJSON_TARGET_OS_LOWER}")
 endif()
@@ -310,6 +319,10 @@ if(LONEJSON_BUILD_EXAMPLES)
   set(LONEJSON_LINKED_EXAMPLES
     array_stream
     generator_pull
+    json_value_buffer
+    json_value_parse
+    json_value_source
+    json_value_visitor
     parse_file
     parse_reader
     push_parser
@@ -560,6 +573,40 @@ add_custom_target(package-archive
   DEPENDS lonejson_shared lonejson_static
   VERBATIM
 )
+
+add_custom_target(package-darwin-smoke-bundle
+  COMMAND "${CMAKE_COMMAND}"
+    -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+    -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
+    -DLONEJSON_TARGET_ID=${LONEJSON_TARGET_ID}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_darwin_smoke_bundle.cmake
+  DEPENDS package-archive
+  VERBATIM
+)
+foreach(example_name
+        array_stream
+        fixed_storage
+        generator_pull
+        json_value_buffer
+        json_value_parse
+        json_value_source
+        json_value_visitor
+        parse_file
+        parse_reader
+        parse_string
+        push_parser
+        serialize_file
+        serialize_jsonl
+        serialize_string
+        source_bytes
+        source_text
+        spooled_bytes
+        spooled_text)
+  if(TARGET "example_${example_name}")
+    add_dependencies(package-darwin-smoke-bundle "example_${example_name}")
+  endif()
+endforeach()
 
 add_custom_target(package-source
   COMMAND "${CMAKE_COMMAND}"

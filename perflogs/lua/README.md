@@ -13,7 +13,7 @@ The Lua benchmark harness is separate from the C benchmark harness. It compares 
 
 `lonejson`'s fast lanes are schema-guided: the binding compiles a schema into a C-backed mapped layout and parses directly into that layout or a reusable record, instead of decoding into a generic DOM first. That is why some lonejson Lua lanes can beat generic Lua decoders on known shapes. The bounded-memory third-party comparison lanes should therefore be read as "schema-guided mapped decode" versus "generic table decode".
 
-If `lua-cjson` is available in the active Lua environment, the harness also adds bounded-memory decode lanes for it. Those third-party cases are intentionally limited to one-shot decode scenarios and line-by-line JSONL decode from `lockdbench.jsonl`; they are not used for lonejson-style streaming or large generated fixture runs.
+If `lua-cjson` is available in the active Lua environment, the harness also adds bounded-memory decode lanes for it. Those third-party cases are intentionally limited to one-shot decode scenarios and line-by-line JSONL decode from `workloadbench.jsonl`; they are not used for lonejson-style streaming or large generated fixture runs.
 
 The multilingual `*_wide/*` lanes are included specifically to show that this advantage is not limited to single-field objects.
 

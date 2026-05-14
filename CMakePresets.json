@@ -92,6 +92,11 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-musl.cmake"
     },
     {
+      "name": "arm64-apple-darwin-release",
+      "inherits": "host",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-apple-darwin.cmake"
+    },
+    {
       "name": "aarch64-linux-gnu-curl-release",
       "inherits": "aarch64-linux-gnu-release",
       "cacheVariables": {
@@ -199,6 +204,10 @@
       "configurePreset": "armhf-linux-musl-release"
     },
     {
+      "name": "arm64-apple-darwin-release",
+      "configurePreset": "arm64-apple-darwin-release"
+    },
+    {
       "name": "aarch64-linux-gnu-curl-release",
       "configurePreset": "aarch64-linux-gnu-curl-release"
     },
@@ -282,6 +291,20 @@
       "configurePreset": "armhf-linux-musl-release",
       "targets": [
         "package-archive"
+      ]
+    },
+    {
+      "name": "package-archive-arm64-apple-darwin",
+      "configurePreset": "arm64-apple-darwin-release",
+      "targets": [
+        "package-archive"
+      ]
+    },
+    {
+      "name": "package-darwin-smoke-bundle",
+      "configurePreset": "arm64-apple-darwin-release",
+      "targets": [
+        "package-darwin-smoke-bundle"
       ]
     },
     {

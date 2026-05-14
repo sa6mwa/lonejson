@@ -55,13 +55,13 @@ default helpers instead of manual `memset` or `{0}` for public structs:
 `lonejson_default_*` / `lj_default_*` for option, visitor, and read-result
 structs.
 
-The curl examples also define `LONEJSON_WITH_CURL` and need curl headers/libs. With a host-native `liblockdc` dev bundle downloaded via `make deps-host`, a typical command is:
+The curl examples also define `LONEJSON_WITH_CURL` and need curl headers/libs. With a host-native `c.pkt.systems` dependency bundle downloaded via `make deps-host`, a typical command is:
 
 ```sh
 cc -I ../include ../src/lonejson.c \
-   -I ../.deps/liblockdc/x86_64-linux-gnu/root/include \
+   -I ../.deps/c.pkt.systems/x86_64-linux-gnu/root/include \
    -o bin/curl_get curl_get.c \
-   -L ../.deps/liblockdc/x86_64-linux-gnu/root/lib \
+   -L ../.deps/c.pkt.systems/x86_64-linux-gnu/root/lib \
    -lcurl -lssl -lcrypto -lnghttp2 -lz
 ```
 

@@ -12,7 +12,8 @@ RELEASE_BUILD_PRESETS := \
 	aarch64-linux-gnu-release \
 	aarch64-linux-musl-release \
 	armhf-linux-gnu-release \
-	armhf-linux-musl-release
+	armhf-linux-musl-release \
+	$(shell if [ -x "$${OSXCROSS_ROOT:-$$HOME/.local/cross/osxcross}/bin/arm64-apple-darwin25-clang" ]; then printf '%s' arm64-apple-darwin-release; fi)
 CROSS_RELEASE_PRESETS := \
 	aarch64-linux-gnu-release \
 	aarch64-linux-musl-release \
@@ -102,6 +103,7 @@ LUA_ROCK_SOURCES := \
 	release-lua-artifacts \
 	release-source-artifact \
 	release-source-smoke \
+	release-darwin-smoke-bundle \
 	release \
 	lua-rock \
 	lua-test \
@@ -133,6 +135,7 @@ LUA_ROCK_SOURCES := \
 	deps-aarch64-linux-musl \
 	deps-armhf-linux-gnu \
 	deps-armhf-linux-musl \
+	deps-arm64-apple-darwin \
 	deps-all \
 	certs \
 	compose-up \
@@ -148,8 +151,9 @@ help:
 		'make build                  Configure and build the full debug tree (tests and standalone examples, excluding lua-* and curl-examples).' \
 		'make build-host             Configure and build the host-native release preset.' \
 		'make build-release          Configure and build the full shipped release test matrix.' \
-		'make release                Run the Linux release matrix and package generation.' \
+		'make release                Run the release matrix and package generation.' \
 		'make release-source-smoke   Unpack the source release tarball into a temp tree and run make release there.' \
+		'make release-darwin-smoke-bundle Build the Darwin smoke ZIP with example and link-smoke binaries.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
 		'make lua-test               Build the Lua module and run the Lua integration test.' \
 		'make lua-bench              Run the standalone Lua benchmark harness, compare it, and enforce the Lua benchmark gate.' \
@@ -173,19 +177,20 @@ help:
 		'make fuzz-long              Run the same fuzz targets with a several-minute soak per target.' \
 		'make stack-usage            Build with compiler stack-usage reporting and print the report.' \
 		'make format                 Run clang-format over the C sources.' \
-		'make deps-host              Download and extract the host-native liblockdc dev bundle.' \
-		'make deps-x86_64-linux-gnu  Download and extract the x86_64 glibc liblockdc dev bundle.' \
-		'make deps-x86_64-linux-musl Download and extract the x86_64 musl liblockdc dev bundle.' \
-		'make deps-aarch64-linux-gnu Download and extract the aarch64 glibc liblockdc dev bundle.' \
-		'make deps-aarch64-linux-musl Download and extract the aarch64 musl liblockdc dev bundle.' \
-		'make deps-armhf-linux-gnu   Download and extract the armhf glibc liblockdc dev bundle.' \
-		'make deps-armhf-linux-musl  Download and extract the armhf musl liblockdc dev bundle.' \
-		'make deps-all               Download and extract every supported liblockdc dev bundle.' \
+		'make deps-host              Download and extract the host-native c.pkt.systems dependency bundle.' \
+		'make deps-x86_64-linux-gnu  Download and extract the x86_64 glibc c.pkt.systems bundle.' \
+		'make deps-x86_64-linux-musl Download and extract the x86_64 musl c.pkt.systems bundle.' \
+		'make deps-aarch64-linux-gnu Download and extract the aarch64 glibc c.pkt.systems bundle.' \
+		'make deps-aarch64-linux-musl Download and extract the aarch64 musl c.pkt.systems bundle.' \
+		'make deps-armhf-linux-gnu   Download and extract the armhf glibc c.pkt.systems bundle.' \
+		'make deps-armhf-linux-musl  Download and extract the armhf musl c.pkt.systems bundle.' \
+		'make deps-arm64-apple-darwin Download and extract the arm64 Darwin c.pkt.systems bundle.' \
+		'make deps-all               Download and extract every supported c.pkt.systems bundle.' \
 		'make certs                  Generate the local self-signed localhost TLS cert for nginx.' \
 		'make compose-up             Start the local nginx + sink HTTP/HTTPS test rig.' \
 		'make compose-down           Stop and remove the local compose stack.' \
 		'make compose-logs           Tail logs from the local compose stack.' \
-		'make curl-examples          Build the curl examples against the host liblockdc dev bundle.' \
+		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
 		'make test-curl-e2e          Build and run the curl examples against the local HTTPS rig.' \
 		'make release-source-artifact Build the source-only release tarball in dist/.' \
 		'make clean                  Remove build/, dist/, .deps/, examples/bin/, and generated Lua module artifacts.' \
@@ -248,9 +253,14 @@ $(RELEASE_SOURCE_TARBALL):
 
 release-source-smoke: release-source-artifact
 	./scripts/test_release_from_source.sh "$(CURDIR)" "$(DIST_DIR)/lonejson-$(RELEASE_VERSION).tar.gz"
+	cmake --build --preset package-checksums
+
+release-darwin-smoke-bundle:
+	cmake --preset arm64-apple-darwin-release
+	cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
 
 release:
-	./scripts/run_linux_release_matrix.sh
+	./scripts/run_release_matrix.sh
 
 bench:
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
@@ -452,25 +462,28 @@ format:
 	cmake --build --preset format
 
 deps-host:
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -P cmake/fetch_liblockdc.cmake
+	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -P cmake/fetch_c_pkt_systems.cmake
 
 deps-x86_64-linux-gnu:
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_LIBLOCKDC_ARCH=x86_64 -D LONEJSON_LIBLOCKDC_LIBC=gnu -P cmake/fetch_liblockdc.cmake
+	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
 
 deps-x86_64-linux-musl:
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_LIBLOCKDC_ARCH=x86_64 -D LONEJSON_LIBLOCKDC_LIBC=musl -P cmake/fetch_liblockdc.cmake
+	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-musl -P cmake/fetch_c_pkt_systems.cmake
 
 deps-aarch64-linux-gnu:
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_LIBLOCKDC_ARCH=aarch64 -D LONEJSON_LIBLOCKDC_LIBC=gnu -P cmake/fetch_liblockdc.cmake
+	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aarch64-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
 
 deps-aarch64-linux-musl:
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_LIBLOCKDC_ARCH=aarch64 -D LONEJSON_LIBLOCKDC_LIBC=musl -P cmake/fetch_liblockdc.cmake
+	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aarch64-linux-musl -P cmake/fetch_c_pkt_systems.cmake
 
 deps-armhf-linux-gnu:
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_LIBLOCKDC_ARCH=armhf -D LONEJSON_LIBLOCKDC_LIBC=gnu -P cmake/fetch_liblockdc.cmake
+	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
 
 deps-armhf-linux-musl:
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_LIBLOCKDC_ARCH=armhf -D LONEJSON_LIBLOCKDC_LIBC=musl -P cmake/fetch_liblockdc.cmake
+	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-musl -P cmake/fetch_c_pkt_systems.cmake
+
+deps-arm64-apple-darwin:
+	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=arm64-apple-darwin -P cmake/fetch_c_pkt_systems.cmake
 
 deps-all: \
 	deps-x86_64-linux-gnu \
@@ -478,7 +491,8 @@ deps-all: \
 	deps-aarch64-linux-gnu \
 	deps-aarch64-linux-musl \
 	deps-armhf-linux-gnu \
-	deps-armhf-linux-musl
+	deps-armhf-linux-musl \
+	deps-arm64-apple-darwin
 
 certs:
 	./scripts/ensure_test_certs.sh

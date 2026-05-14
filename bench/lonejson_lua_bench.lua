@@ -247,7 +247,7 @@ local PhaseStats = lj.object {
   },
 }
 
-local LockdPhasesFields = {
+local WorkloadPhasesFields = {
   lj.field("acquire", lj.object { fields = PhaseStats.fields }),
   lj.field("attach", lj.object { fields = PhaseStats.fields }),
   lj.field("delete", lj.object { fields = PhaseStats.fields }),
@@ -263,18 +263,18 @@ local LockdPhasesFields = {
   lj.field("update-b", lj.object { fields = PhaseStats.fields }),
 }
 
-local LockdCase = lj.object {
+local WorkloadCase = lj.object {
   fields = {
     lj.field("workload", lj.string { required = true, fixed_capacity = 24, overflow = "fail" }),
     lj.field("size", lj.i64()),
     lj.field("ops", lj.i64 { required = true }),
     lj.field("payload_bytes", lj.i64()),
     lj.field("attachment_bytes", lj.i64()),
-    lj.field("phases", lj.object { required = true, fields = LockdPhasesFields }),
+    lj.field("phases", lj.object { required = true, fields = WorkloadPhasesFields }),
   },
 }
 
-local LockdRun = lj.schema("BenchLockdRun", {
+local WorkloadRun = lj.schema("BenchWorkloadRun", {
   lj.field("run_id", lj.string { required = true, fixed_capacity = 64, overflow = "fail" }),
   lj.field("timestamp", lj.string { required = true, fixed_capacity = 32, overflow = "fail" }),
   lj.field("history_branch", lj.string { fixed_capacity = 32, overflow = "fail" }),
@@ -301,7 +301,7 @@ local LockdRun = lj.schema("BenchLockdRun", {
       lj.field("qrf_disabled", lj.bool()),
     },
   }),
-  lj.field("cases", lj.object_array { fields = LockdCase.fields, fixed_capacity = 16, overflow = "fail" }),
+  lj.field("cases", lj.object_array { fields = WorkloadCase.fields, fixed_capacity = 16, overflow = "fail" }),
 })
 
 local BenchResultSchema = lj.object {
@@ -343,12 +343,12 @@ local CLatestRun = lj.schema("CBenchRunSubset", {
   lj.field("results", lj.object_array { required = true, fields = CLatestResult.fields, fixed_capacity = 64, overflow = "fail" }),
 })
 
-local LOCKD_JSONL = read_file("tests/fixtures/lockdbench.jsonl")
+local WORKLOAD_JSONL = read_file("tests/fixtures/workloadbench.jsonl")
 local BENCH_RECORD_COMPACT_JSON = read_file("tests/golden/bench_record_compact.json")
 local BENCH_RECORD_PRETTY_JSON = read_file("tests/golden/bench_record_pretty.json")
-local LOCKD_LINES = {}
-for line in LOCKD_JSONL:gmatch("[^\r\n]+") do
-  LOCKD_LINES[#LOCKD_LINES + 1] = line
+local WORKLOAD_LINES = {}
+for line in WORKLOAD_JSONL:gmatch("[^\r\n]+") do
+  WORKLOAD_LINES[#WORKLOAD_LINES + 1] = line
 end
 
 local EXPECTED_LABEL = "bravo-longer-th"
@@ -399,16 +399,16 @@ local FIXED_PATHS = {
   item2_label = FixedRecord:compile_get("items[2].label"),
 }
 
-local LOCKD_PATHS = {
-  run_id = LockdRun:compile_get("run_id"),
-  git_short_sha = LockdRun:compile_get("git.short_sha"),
-  git_dirty = LockdRun:compile_get("git.dirty"),
-  config_concurrency = LockdRun:compile_get("config.concurrency"),
-  cases_count = LockdRun:compile_count("cases"),
-  case1_workload = LockdRun:compile_get("cases[1].workload"),
-  case5_workload = LockdRun:compile_get("cases[5].workload"),
-  case9_workload = LockdRun:compile_get("cases[9].workload"),
-  case1_acquire_ops = LockdRun:compile_get("cases[1].phases.acquire.ops"),
+local WORKLOAD_PATHS = {
+  run_id = WorkloadRun:compile_get("run_id"),
+  git_short_sha = WorkloadRun:compile_get("git.short_sha"),
+  git_dirty = WorkloadRun:compile_get("git.dirty"),
+  config_concurrency = WorkloadRun:compile_get("config.concurrency"),
+  cases_count = WorkloadRun:compile_count("cases"),
+  case1_workload = WorkloadRun:compile_get("cases[1].workload"),
+  case5_workload = WorkloadRun:compile_get("cases[5].workload"),
+  case9_workload = WorkloadRun:compile_get("cases[9].workload"),
+  case1_acquire_ops = WorkloadRun:compile_get("cases[1].phases.acquire.ops"),
 }
 
 local function assert_fixed_record(rec)
@@ -513,7 +513,7 @@ local function assert_vendor_language_wide_table(obj, lang, script, source, summ
       and obj.metrics.chars >= min_chars
 end
 
-local function assert_lockd_table(obj, index)
+local function assert_workload_table(obj, index)
   local ids = {
     "20260322T130525Z-b62770c-dirty-fast-disk",
     "20260322T141810Z-b62770c-dirty-fast-disk",
@@ -673,14 +673,14 @@ local function bench_cases()
       end,
     }
     cases[#cases + 1] = {
-      name = "decode/lockdbench/lua",
+      name = "decode/workloadbench/lua",
       group = "decode",
-      bytes_per_call = #LOCKD_JSONL,
-      docs_per_call = #LOCKD_LINES,
+      bytes_per_call = #WORKLOAD_JSONL,
+      docs_per_call = #WORKLOAD_LINES,
       run_once = function()
         local i
-        for i = 1, #LOCKD_LINES do
-          if not assert_lockd_table(LockdRun:decode(LOCKD_LINES[i]), i) then
+        for i = 1, #WORKLOAD_LINES do
+          if not assert_workload_table(WorkloadRun:decode(WORKLOAD_LINES[i]), i) then
             return false
           end
         end
@@ -784,14 +784,14 @@ local function bench_cases()
       end,
     }
     cases[#cases + 1] = {
-      name = "decode/lockdbench/cjson",
+      name = "decode/workloadbench/cjson",
       group = "decode",
-      bytes_per_call = #LOCKD_JSONL,
-      docs_per_call = #LOCKD_LINES,
+      bytes_per_call = #WORKLOAD_JSONL,
+      docs_per_call = #WORKLOAD_LINES,
       run_once = function()
         local i
-        for i = 1, #LOCKD_LINES do
-          if not assert_lockd_table(cjson_decode(LOCKD_LINES[i]), i) then
+        for i = 1, #WORKLOAD_LINES do
+          if not assert_workload_table(cjson_decode(WORKLOAD_LINES[i]), i) then
             return false
           end
         end
@@ -1123,14 +1123,14 @@ local function bench_cases()
 
   do
     cases[#cases + 1] = {
-      name = "stream/lockdbench/lua",
+      name = "stream/workloadbench/lua",
       group = "stream",
-      sibling_name = "stream/lockdbench/lonejson",
-      bytes_per_call = #LOCKD_JSONL,
+      sibling_name = "stream/workloadbench/lonejson",
+      bytes_per_call = #WORKLOAD_JSONL,
       docs_per_call = 5,
       run_once = function()
-        local stream = LockdRun:stream_string(LOCKD_JSONL, { clear_destination = false })
-        local rec = LockdRun:new_record()
+        local stream = WorkloadRun:stream_string(WORKLOAD_JSONL, { clear_destination = false })
+        local rec = WorkloadRun:new_record()
         local ids = {
           "20260322T130525Z-b62770c-dirty-fast-disk",
           "20260322T141810Z-b62770c-dirty-fast-disk",
@@ -1144,11 +1144,11 @@ local function bench_cases()
           local obj, err, status = stream:next(rec)
           if status == "object" then
             count = count + 1
-            if LOCKD_PATHS.run_id(rec) ~= ids[count] or LOCKD_PATHS.git_short_sha(rec) == nil or LOCKD_PATHS.git_dirty(rec) == nil or LOCKD_PATHS.config_concurrency(rec) ~= 8 or LOCKD_PATHS.cases_count(rec) ~= 9 then
+            if WORKLOAD_PATHS.run_id(rec) ~= ids[count] or WORKLOAD_PATHS.git_short_sha(rec) == nil or WORKLOAD_PATHS.git_dirty(rec) == nil or WORKLOAD_PATHS.config_concurrency(rec) ~= 8 or WORKLOAD_PATHS.cases_count(rec) ~= 9 then
               stream:close()
               return false
             end
-            if LOCKD_PATHS.case1_workload(rec) ~= "attachments" or LOCKD_PATHS.case5_workload(rec) ~= "public-read" or LOCKD_PATHS.case9_workload(rec) ~= "xa-rollback" or LOCKD_PATHS.case1_acquire_ops(rec) ~= 4000 then
+            if WORKLOAD_PATHS.case1_workload(rec) ~= "attachments" or WORKLOAD_PATHS.case5_workload(rec) ~= "public-read" or WORKLOAD_PATHS.case9_workload(rec) ~= "xa-rollback" or WORKLOAD_PATHS.case1_acquire_ops(rec) ~= 4000 then
               stream:close()
               return false
             end
