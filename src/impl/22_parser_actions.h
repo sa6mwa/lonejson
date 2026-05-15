@@ -129,6 +129,11 @@ lonejson__handle_array_scalar(lonejson_parser *parser,
       return LONEJSON_STATUS_OK;
     }
     return lonejson__string_array_stream_type_error(parser, array_frame->field);
+  case LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM:
+    return lonejson__set_error(
+        &parser->error, LONEJSON_STATUS_TYPE_MISMATCH, parser->error.offset,
+        parser->error.line, parser->error.column,
+        "array '%s' expects object items", array_frame->field->json_key);
   case LONEJSON_FIELD_KIND_STRING_ARRAY:
     if (mode == LONEJSON_LEX_NULL) {
       return lonejson__array_append_string(
@@ -209,6 +214,133 @@ lonejson__handle_array_scalar(lonejson_parser *parser,
   }
 }
 
+static lonejson_status lonejson__mapped_array_stream_require_handler(
+    lonejson_parser *parser, const lonejson_field *field,
+    lonejson_mapped_array_stream *stream) {
+  if (stream == NULL ||
+      stream->_lonejson_magic !=
+          lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC) ||
+      stream->handler.item_map == NULL || stream->handler.item_dst == NULL ||
+      stream->handler.item == NULL) {
+    return lonejson__set_error(
+        &parser->error, LONEJSON_STATUS_INVALID_ARGUMENT, parser->error.offset,
+        parser->error.line, parser->error.column,
+        "mapped array stream field '%s' has no item handler", field->json_key);
+  }
+  if (!lonejson__map_layout_is_valid(stream->handler.item_map)) {
+    return lonejson__set_error(
+        &parser->error, LONEJSON_STATUS_INVALID_ARGUMENT, parser->error.offset,
+        parser->error.line, parser->error.column,
+        "mapped array stream field '%s' has an invalid item map",
+        field->json_key);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+lonejson__mapped_array_stream_finish_item(lonejson_parser *parser,
+                                          lonejson_frame *frame) {
+  lonejson_frame *parent;
+  lonejson_mapped_array_stream *stream;
+  lonejson_status status;
+
+  if (frame == NULL || frame->field == NULL ||
+      frame->field->kind != LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (parser->frame_count < 2u) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "mapped array stream item has no parent array");
+  }
+  parent = &parser->frames[parser->frame_count - 2u];
+  if (parent->kind != LONEJSON_CONTAINER_ARRAY ||
+      parent->field != frame->field || parent->object_ptr == NULL) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "mapped array stream item parent mismatch");
+  }
+  stream = (lonejson_mapped_array_stream *)lonejson__field_ptr(
+      parent->object_ptr, parent->field);
+  status = stream->handler.item(stream->handler.user, stream->handler.item_dst,
+                                &parser->error);
+  lonejson__cleanup_map(stream->handler.item_map, stream->handler.item_dst);
+  lonejson__init_map_with_allocator(
+      stream->handler.item_map, stream->handler.item_dst, &parser->allocator);
+  if (status != LONEJSON_STATUS_OK) {
+    if (parser->error.code == LONEJSON_STATUS_OK) {
+      return lonejson__set_error(
+          &parser->error, status, parser->error.offset, parser->error.line,
+          parser->error.column,
+          "mapped array stream field '%s' item callback failed",
+          frame->field->json_key);
+    }
+    return status;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static void lonejson__mapped_array_stream_reset_item(
+    lonejson_parser *parser, lonejson_mapped_array_stream *stream) {
+  if (parser == NULL || stream == NULL ||
+      stream->_lonejson_magic !=
+          lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC) ||
+      stream->handler.item_map == NULL || stream->handler.item_dst == NULL) {
+    return;
+  }
+  lonejson__cleanup_map(stream->handler.item_map, stream->handler.item_dst);
+  lonejson__init_map_with_allocator(stream->handler.item_map,
+                                    stream->handler.item_dst,
+                                    &parser->allocator);
+}
+
+static void
+lonejson__parser_unwind_active_mapped_array_streams(lonejson_parser *parser) {
+  size_t i;
+
+  if (parser == NULL) {
+    return;
+  }
+  i = parser->frame_count;
+  while (i != 0u) {
+    lonejson_frame *frame;
+    lonejson_frame *parent;
+    lonejson_mapped_array_stream *stream;
+
+    --i;
+    frame = &parser->frames[i];
+    if (frame->kind != LONEJSON_CONTAINER_OBJECT || frame->field == NULL ||
+        frame->field->kind != LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM ||
+        i == 0u) {
+      continue;
+    }
+    parent = &parser->frames[i - 1u];
+    if (parent->kind != LONEJSON_CONTAINER_ARRAY ||
+        parent->field != frame->field || parent->object_ptr == NULL) {
+      continue;
+    }
+    stream = (lonejson_mapped_array_stream *)lonejson__field_ptr(
+        parent->object_ptr, parent->field);
+    lonejson__mapped_array_stream_reset_item(parser, stream);
+  }
+  for (i = 0u; i < parser->frame_count; ++i) {
+    lonejson_frame *frame = &parser->frames[i];
+    if (frame->kind == LONEJSON_CONTAINER_ARRAY && frame->field != NULL &&
+        frame->field->kind == LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM &&
+        frame->object_ptr != NULL) {
+      lonejson_mapped_array_stream *stream =
+          (lonejson_mapped_array_stream *)lonejson__field_ptr(
+              frame->object_ptr, frame->field);
+      if (stream->_lonejson_magic ==
+          lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC)) {
+        stream->active = 0;
+      }
+    }
+  }
+}
+
 static LONEJSON__INLINE lonejson_status
 lonejson__begin_object_value(lonejson_parser *parser) {
   lonejson_frame *parent = (parser->frame_count != 0u)
@@ -218,6 +350,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
   void *object_ptr = NULL;
   const lonejson_map *map = NULL;
   lonejson_frame *frame;
+  lonejson_mapped_array_stream *mapped_stream = NULL;
   int started_capture = 0;
   int started_root_visitor = 0;
 
@@ -293,6 +426,22 @@ lonejson__begin_object_value(lonejson_parser *parser) {
     if (parent->field == NULL) {
       map = NULL;
       object_ptr = NULL;
+    } else if (parent->field->kind == LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM) {
+      lonejson_status status = lonejson__mapped_array_stream_require_handler(
+          parser, parent->field,
+          (lonejson_mapped_array_stream *)lonejson__field_ptr(
+              parent->object_ptr, parent->field));
+      mapped_stream = (lonejson_mapped_array_stream *)lonejson__field_ptr(
+          parent->object_ptr, parent->field);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+      lonejson__init_map_with_allocator(mapped_stream->handler.item_map,
+                                        mapped_stream->handler.item_dst,
+                                        &parser->allocator);
+      field = parent->field;
+      map = mapped_stream->handler.item_map;
+      object_ptr = mapped_stream->handler.item_dst;
     } else {
       lonejson_object_array *arr;
       if (parent->field->kind != LONEJSON_FIELD_KIND_OBJECT_ARRAY) {
@@ -319,6 +468,9 @@ lonejson__begin_object_value(lonejson_parser *parser) {
 
   frame = lonejson__push_frame(parser, LONEJSON_CONTAINER_OBJECT);
   if (frame == NULL) {
+    if (mapped_stream != NULL) {
+      lonejson__mapped_array_stream_reset_item(parser, mapped_stream);
+    }
     return parser->error.code;
   }
   frame->map = map;
@@ -422,6 +574,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
         switch (field->kind) {
         case LONEJSON_FIELD_KIND_STRING_ARRAY:
         case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
+        case LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM:
         case LONEJSON_FIELD_KIND_I64_ARRAY:
         case LONEJSON_FIELD_KIND_U64_ARRAY:
         case LONEJSON_FIELD_KIND_F64_ARRAY:
@@ -433,6 +586,25 @@ lonejson__begin_array_value(lonejson_parser *parser) {
               &parser->error, LONEJSON_STATUS_TYPE_MISMATCH,
               parser->error.offset, parser->error.line, parser->error.column,
               "field '%s' is not an array", field->json_key);
+        }
+        if (field->kind == LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM) {
+          lonejson_mapped_array_stream *stream =
+              (lonejson_mapped_array_stream *)lonejson__field_ptr(object_ptr,
+                                                                  field);
+          lonejson_status status =
+              lonejson__mapped_array_stream_require_handler(parser, field,
+                                                            stream);
+          if (status != LONEJSON_STATUS_OK) {
+            return status;
+          }
+          if (stream->active) {
+            return lonejson__set_error(
+                &parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
+                parser->error.offset, parser->error.line, parser->error.column,
+                "mapped array stream field '%s' is already active",
+                field->json_key);
+          }
+          stream->active = 1;
         }
       }
     }
@@ -450,6 +622,17 @@ lonejson__begin_array_value(lonejson_parser *parser) {
 
   frame = lonejson__push_frame(parser, LONEJSON_CONTAINER_ARRAY);
   if (frame == NULL) {
+    if (field != NULL &&
+        field->kind == LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM &&
+        object_ptr != NULL) {
+      lonejson_mapped_array_stream *stream =
+          (lonejson_mapped_array_stream *)lonejson__field_ptr(object_ptr,
+                                                              field);
+      if (stream->_lonejson_magic ==
+          lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC)) {
+        stream->active = 0;
+      }
+    }
     return parser->error.code;
   }
   frame->map = NULL;
@@ -483,11 +666,14 @@ lonejson__begin_array_value(lonejson_parser *parser) {
 static LONEJSON__INLINE lonejson_status
 lonejson__finalize_object(lonejson_parser *parser) {
   lonejson_frame *frame = &parser->frames[parser->frame_count - 1u];
+  lonejson_status status;
   size_t i;
   lonejson_uint64 bit;
   lonejson_uint64 required_mask;
 
-  if (frame->map != NULL && frame->required_remaining == 0u) {
+  if (frame->map != NULL && frame->required_remaining == 0u &&
+      (frame->field == NULL ||
+       frame->field->kind != LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM)) {
     lonejson__pop_frame(parser);
     return lonejson__complete_parent_after_value(parser);
   }
@@ -527,7 +713,7 @@ lonejson__finalize_object(lonejson_parser *parser) {
   }
 
   if (parser->json_stream_active) {
-    lonejson_status status =
+    status =
         lonejson__json_value_parse_visitor_active(parser)
             ? lonejson__json_value_visit_event(
                   parser, parser->json_stream_value->parse_visitor->object_end)
@@ -535,6 +721,10 @@ lonejson__finalize_object(lonejson_parser *parser) {
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
+  }
+  status = lonejson__mapped_array_stream_finish_item(parser, frame);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
   }
   lonejson__pop_frame(parser);
   if (parser->json_stream_active && parser->json_stream_depth != 0u) {
@@ -548,6 +738,7 @@ lonejson__finalize_object(lonejson_parser *parser) {
 
 static LONEJSON__INLINE lonejson_status
 lonejson__finalize_array(lonejson_parser *parser) {
+  lonejson_frame *frame = &parser->frames[parser->frame_count - 1u];
   if (parser->json_stream_active) {
     lonejson_status status =
         lonejson__json_value_parse_visitor_active(parser)
@@ -557,6 +748,14 @@ lonejson__finalize_array(lonejson_parser *parser) {
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
+  }
+  if (frame->field != NULL &&
+      frame->field->kind == LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM &&
+      frame->object_ptr != NULL) {
+    lonejson_mapped_array_stream *stream =
+        (lonejson_mapped_array_stream *)lonejson__field_ptr(frame->object_ptr,
+                                                            frame->field);
+    stream->active = 0;
   }
   lonejson__pop_frame(parser);
   if (parser->json_stream_active && parser->json_stream_depth != 0u) {
@@ -641,8 +840,8 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
       if (LONEJSON__UNLIKELY(
               lonejson__json_value_parse_visitor_active(parser))) {
         if (mode == LONEJSON_LEX_NUMBER) {
-          status =
-              lonejson__json_value_number(parser, token_text, parser->token.len);
+          status = lonejson__json_value_number(parser, token_text,
+                                               parser->token.len);
         } else if (mode == LONEJSON_LEX_TRUE) {
           status = lonejson__json_value_visit_bool(parser, 1);
         } else if (mode == LONEJSON_LEX_FALSE) {

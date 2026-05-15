@@ -85,6 +85,7 @@ typedef struct lonejson__parser_workspace_align_probe {
 #define LONEJSON__SPOOLED_MAGIC 0x4C4A5350u
 #define LONEJSON__JSON_VALUE_MAGIC 0x4C4A4A56u
 #define LONEJSON__STRING_ARRAY_STREAM_MAGIC 0x4C4A4153u
+#define LONEJSON__MAPPED_ARRAY_STREAM_MAGIC 0x4C4A4D53u
 #define LONEJSON__SPACES_64                                                    \
   "                                                                "
 

@@ -47,8 +47,14 @@ static int lonejson__string_array_stream_is_initialized(
     const lonejson_string_array_stream *stream) {
   return stream != NULL &&
          stream->_lonejson_magic ==
-             lonejson__init_cookie(stream,
-                                   LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+             lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+}
+
+static int lonejson__mapped_array_stream_is_initialized(
+    const lonejson_mapped_array_stream *stream) {
+  return stream != NULL &&
+         stream->_lonejson_magic ==
+             lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
 }
 
 void lonejson_string_array_stream_init(lonejson_string_array_stream *stream) {
@@ -75,6 +81,39 @@ lonejson_status lonejson_string_array_stream_set_handler(
   }
   stream->handler = *handler;
   stream->user = user;
+  stream->active = 0;
+  lonejson__clear_error(error);
+  return LONEJSON_STATUS_OK;
+}
+
+void lonejson_mapped_array_stream_init(lonejson_mapped_array_stream *stream) {
+  if (stream == NULL) {
+    return;
+  }
+  memset(stream, 0, sizeof(*stream));
+  stream->_lonejson_magic =
+      lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
+}
+
+lonejson_status lonejson_mapped_array_stream_set_handler(
+    lonejson_mapped_array_stream *stream,
+    const lonejson_mapped_array_stream_handler *handler,
+    lonejson_error *error) {
+  if (stream == NULL || handler == NULL || handler->item_map == NULL ||
+      handler->item_dst == NULL || handler->item == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "mapped array stream, item map, destination, "
+                               "and callback are required");
+  }
+  if (!lonejson__map_layout_is_valid(handler->item_map)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "mapped array stream item map is invalid");
+  }
+  if (!lonejson__mapped_array_stream_is_initialized(stream)) {
+    lonejson_mapped_array_stream_init(stream);
+  }
+  stream->handler = *handler;
   stream->active = 0;
   lonejson__clear_error(error);
   return LONEJSON_STATUS_OK;
@@ -206,6 +245,7 @@ static void lonejson_parser_destroy(lonejson_parser *parser) {
   if (parser == NULL) {
     return;
   }
+  lonejson__parser_unwind_active_mapped_array_streams(parser);
   while (parser->frame_count != 0u) {
     lonejson__pop_frame(parser);
   }
@@ -248,6 +288,9 @@ lonejson_status lonejson_parse_buffer(const lonejson_map *map, void *dst,
   status = lonejson_parser_feed(parser, data, len);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     status = lonejson_parser_finish(parser);
+  }
+  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    lonejson__parser_unwind_active_mapped_array_streams(parser);
   }
   if (error != NULL) {
     *error = parser->error;
@@ -329,6 +372,9 @@ lonejson_status lonejson_parse_reader(const lonejson_map *map, void *dst,
       status = lonejson_parser_finish(parser);
       break;
     }
+  }
+  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    lonejson__parser_unwind_active_mapped_array_streams(parser);
   }
   if (error != NULL) {
     *error = parser->error;
@@ -1002,16 +1048,16 @@ lonejson_status lonejson_serialize_buffer(const lonejson_map *map,
   if (local_options.overflow_policy == LONEJSON_OVERFLOW_FAIL &&
       !local_options.pretty) {
     if (map == NULL || src == NULL) {
-      status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
-                                   0u, 0u,
-                                   "map, source, and sink are required");
+      status =
+          lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                              0u, "map, source, and sink are required");
     } else if (!lonejson__map_layout_is_valid(map)) {
       status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                                    0u, 0u, "invalid map layout");
     } else {
       lonejson__clear_error(error);
-      status = lonejson__serialize_map_compact_buffer_exact(map, src, &sink,
-                                                            error);
+      status =
+          lonejson__serialize_map_compact_buffer_exact(map, src, &sink, error);
     }
   } else {
     status = lonejson_serialize_sink(
@@ -1058,16 +1104,16 @@ lonejson_status lonejson_serialize_owned(const lonejson_map *map,
   sink.max_bytes = lonejson__write_max_output_bytes(options);
   if ((options == NULL || !options->pretty)) {
     if (map == NULL || src == NULL) {
-      status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
-                                   0u, 0u,
-                                   "map, source, and sink are required");
+      status =
+          lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                              0u, "map, source, and sink are required");
     } else if (!lonejson__map_layout_is_valid(map)) {
       status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                                    0u, 0u, "invalid map layout");
     } else {
       lonejson__clear_error(error);
-      status = lonejson__serialize_map_compact_buffer_grow(map, src, &sink,
-                                                           error);
+      status =
+          lonejson__serialize_map_compact_buffer_grow(map, src, &sink, error);
     }
   } else {
     status = lonejson_serialize_sink(map, src, lonejson__sink_grow, &sink,
@@ -1236,13 +1282,13 @@ lonejson_status lonejson_serialize_jsonl_buffer(
       status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                                    0u, 0u, "map and sink are required");
     } else if (count != 0u && items == NULL) {
-      status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
-                                   0u, 0u,
-                                   "items are required when count is non-zero");
+      status =
+          lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                              0u, "items are required when count is non-zero");
     } else if ((stride != 0u && stride < map->struct_size)) {
-      status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
-                                   0u, 0u,
-                                   "stride must be at least map->struct_size");
+      status =
+          lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                              0u, "stride must be at least map->struct_size");
     } else if (!lonejson__map_layout_is_valid(map)) {
       status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                                    0u, 0u, "invalid map layout");
@@ -1315,13 +1361,13 @@ lonejson_status lonejson_serialize_jsonl_owned(
       status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                                    0u, 0u, "map and sink are required");
     } else if (count != 0u && items == NULL) {
-      status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
-                                   0u, 0u,
-                                   "items are required when count is non-zero");
+      status =
+          lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                              0u, "items are required when count is non-zero");
     } else if ((stride != 0u && stride < map->struct_size)) {
-      status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
-                                   0u, 0u,
-                                   "stride must be at least map->struct_size");
+      status =
+          lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                              0u, "stride must be at least map->struct_size");
     } else if (!lonejson__map_layout_is_valid(map)) {
       status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                                    0u, 0u, "invalid map layout");

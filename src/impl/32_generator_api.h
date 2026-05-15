@@ -378,6 +378,7 @@ static lonejson_status lonejson__generator_push_value_from_field(
     frame.u.string_array.arr = (const lonejson_string_array *)ptr;
     return lonejson__generator_push_frame(state, &frame, error);
   case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
+  case LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM:
     return lonejson__set_error(
         error, LONEJSON_STATUS_TYPE_MISMATCH, error ? error->offset : 0u,
         error ? error->line : 0u, error ? error->column : 0u,

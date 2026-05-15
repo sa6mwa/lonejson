@@ -325,6 +325,8 @@ static size_t lonejson__field_storage_size(const lonejson_field *field) {
     return sizeof(lonejson_string_array);
   case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM:
     return sizeof(lonejson_string_array_stream);
+  case LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM:
+    return sizeof(lonejson_mapped_array_stream);
   case LONEJSON_FIELD_KIND_I64_ARRAY:
     return sizeof(lonejson_i64_array);
   case LONEJSON_FIELD_KIND_U64_ARRAY:
@@ -900,13 +902,23 @@ static void lonejson__init_value(const lonejson_field *field, void *ptr,
     break;
   }
   case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM: {
-    lonejson_string_array_stream *stream =
-        (lonejson_string_array_stream *)ptr;
+    lonejson_string_array_stream *stream = (lonejson_string_array_stream *)ptr;
     if (stream->_lonejson_magic !=
         lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC)) {
       memset(stream, 0, sizeof(*stream));
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+    }
+    stream->active = 0;
+    break;
+  }
+  case LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM: {
+    lonejson_mapped_array_stream *stream = (lonejson_mapped_array_stream *)ptr;
+    if (stream->_lonejson_magic !=
+        lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC)) {
+      memset(stream, 0, sizeof(*stream));
+      stream->_lonejson_magic =
+          lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
     }
     stream->active = 0;
     break;
@@ -1013,13 +1025,23 @@ static void lonejson__cleanup_value(const lonejson_field *field, void *ptr) {
     break;
   }
   case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM: {
-    lonejson_string_array_stream *stream =
-        (lonejson_string_array_stream *)ptr;
+    lonejson_string_array_stream *stream = (lonejson_string_array_stream *)ptr;
     if (stream->_lonejson_magic !=
         lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC)) {
       memset(stream, 0, sizeof(*stream));
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+    }
+    stream->active = 0;
+    break;
+  }
+  case LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM: {
+    lonejson_mapped_array_stream *stream = (lonejson_mapped_array_stream *)ptr;
+    if (stream->_lonejson_magic !=
+        lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC)) {
+      memset(stream, 0, sizeof(*stream));
+      stream->_lonejson_magic =
+          lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
     }
     stream->active = 0;
     break;

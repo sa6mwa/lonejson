@@ -2215,6 +2215,501 @@ static void test_array_stream_mapped_string_field_serialize_rejected(void) {
   lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
 }
 
+typedef struct test_mapped_stream_board {
+  char name[16];
+  lonejson_mapped_array_stream items;
+  lonejson_int64 seq;
+} test_mapped_stream_board;
+
+typedef struct test_mapped_stream_store {
+  lonejson_mapped_array_stream boards;
+  char tail[16];
+} test_mapped_stream_store;
+
+typedef struct test_mapped_stream_seen {
+  const test_mapped_stream_board *active_board;
+  size_t item_count;
+  size_t board_count;
+  size_t fail_after_items;
+  size_t fail_after_boards;
+  char item_board_names[4][16];
+  lonejson_int64 item_ids[4];
+  char item_labels[4][12];
+  char board_names[4][16];
+  lonejson_int64 board_seqs[4];
+} test_mapped_stream_seen;
+
+typedef struct test_alloc_mapped_child {
+  char *name;
+  lonejson_int64 id;
+} test_alloc_mapped_child;
+
+typedef struct test_alloc_mapped_parent {
+  char *name;
+  lonejson_mapped_array_stream children;
+  lonejson_int64 seq;
+} test_alloc_mapped_parent;
+
+typedef struct test_alloc_mapped_doc {
+  lonejson_mapped_array_stream parents;
+  char tail[16];
+} test_alloc_mapped_doc;
+
+typedef struct test_alloc_mapped_seen {
+  size_t child_count;
+  size_t parent_count;
+  char child_names[4][16];
+  lonejson_int64 child_ids[4];
+  char parent_names[4][16];
+  lonejson_int64 parent_seqs[4];
+} test_alloc_mapped_seen;
+
+static const lonejson_field test_mapped_stream_board_fields[] = {
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_mapped_stream_board, name, "name",
+                                    LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_MAPPED_ARRAY_STREAM_REQ(test_mapped_stream_board, items,
+                                           "items"),
+    LONEJSON_FIELD_I64_REQ(test_mapped_stream_board, seq, "seq")};
+LONEJSON_MAP_DEFINE(test_mapped_stream_board_map, test_mapped_stream_board,
+                    test_mapped_stream_board_fields);
+
+static const lonejson_field test_mapped_stream_store_fields[] = {
+    LONEJSON_FIELD_MAPPED_ARRAY_STREAM_REQ(test_mapped_stream_store, boards,
+                                           "boards"),
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_mapped_stream_store, tail, "tail",
+                                    LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_mapped_stream_store_map, test_mapped_stream_store,
+                    test_mapped_stream_store_fields);
+
+static const lonejson_field test_alloc_mapped_child_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC_REQ(test_alloc_mapped_child, name, "name"),
+    LONEJSON_FIELD_I64_REQ(test_alloc_mapped_child, id, "id")};
+LONEJSON_MAP_DEFINE(test_alloc_mapped_child_map, test_alloc_mapped_child,
+                    test_alloc_mapped_child_fields);
+
+static const lonejson_field test_alloc_mapped_parent_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC_REQ(test_alloc_mapped_parent, name, "name"),
+    LONEJSON_FIELD_MAPPED_ARRAY_STREAM_REQ(test_alloc_mapped_parent, children,
+                                           "children"),
+    LONEJSON_FIELD_I64_REQ(test_alloc_mapped_parent, seq, "seq")};
+LONEJSON_MAP_DEFINE(test_alloc_mapped_parent_map, test_alloc_mapped_parent,
+                    test_alloc_mapped_parent_fields);
+
+static const lonejson_field test_alloc_mapped_doc_fields[] = {
+    LONEJSON_FIELD_MAPPED_ARRAY_STREAM_REQ(test_alloc_mapped_doc, parents,
+                                           "parents"),
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_alloc_mapped_doc, tail, "tail",
+                                    LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_alloc_mapped_doc_map, test_alloc_mapped_doc,
+                    test_alloc_mapped_doc_fields);
+
+static lonejson_status test_mapped_stream_item(void *user, void *item,
+                                               lonejson_error *error) {
+  test_mapped_stream_seen *seen = (test_mapped_stream_seen *)user;
+  test_item *it = (test_item *)item;
+  (void)error;
+  if (seen->fail_after_items != 0u &&
+      seen->item_count >= seen->fail_after_items) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (seen->item_count >= 4u) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  strcpy(seen->item_board_names[seen->item_count],
+         seen->active_board != NULL ? seen->active_board->name : "");
+  seen->item_ids[seen->item_count] = it->id;
+  strcpy(seen->item_labels[seen->item_count], it->label);
+  seen->item_count++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_mapped_stream_board_item(void *user, void *item,
+                                                     lonejson_error *error) {
+  test_mapped_stream_seen *seen = (test_mapped_stream_seen *)user;
+  test_mapped_stream_board *board = (test_mapped_stream_board *)item;
+  (void)error;
+  if (seen->fail_after_boards != 0u &&
+      seen->board_count >= seen->fail_after_boards) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (seen->board_count >= 4u) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  strcpy(seen->board_names[seen->board_count], board->name);
+  seen->board_seqs[seen->board_count] = board->seq;
+  seen->board_count++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_alloc_mapped_child_item(void *user, void *item,
+                                                    lonejson_error *error) {
+  test_alloc_mapped_seen *seen = (test_alloc_mapped_seen *)user;
+  test_alloc_mapped_child *child = (test_alloc_mapped_child *)item;
+  (void)error;
+  if (seen->child_count >= 4u) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  strcpy(seen->child_names[seen->child_count],
+         child->name != NULL ? child->name : "");
+  seen->child_ids[seen->child_count] = child->id;
+  seen->child_count++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_alloc_mapped_parent_item(void *user, void *item,
+                                                     lonejson_error *error) {
+  test_alloc_mapped_seen *seen = (test_alloc_mapped_seen *)user;
+  test_alloc_mapped_parent *parent = (test_alloc_mapped_parent *)item;
+  (void)error;
+  if (seen->parent_count >= 4u) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  strcpy(seen->parent_names[seen->parent_count],
+         parent->name != NULL ? parent->name : "");
+  seen->parent_seqs[seen->parent_count] = parent->seq;
+  seen->parent_count++;
+  return LONEJSON_STATUS_OK;
+}
+
+static void test_array_stream_mapped_field_nested_items(void) {
+  static const char json[] =
+      "{\"boards\":[{\"name\":\"alpha\",\"items\":[{\"id\":1,"
+      "\"label\":\"one\"},{\"id\":2,\"label\":\"two\"}],\"seq\":7},"
+      "{\"name\":\"beta\",\"items\":[{\"id\":3,\"label\":\"three\"}],"
+      "\"seq\":8}],\"tail\":\"done\"}";
+  test_mapped_stream_store store;
+  test_mapped_stream_board board;
+  test_item item;
+  test_mapped_stream_seen seen;
+  lonejson_mapped_array_stream_handler board_handler;
+  lonejson_mapped_array_stream_handler item_handler;
+  lonejson_error error;
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&board_handler, 0, sizeof(board_handler));
+  memset(&item_handler, 0, sizeof(item_handler));
+  memset(&store, 0, sizeof(store));
+  memset(&board, 0, sizeof(board));
+
+  lonejson_init(&test_mapped_stream_store_map, &store);
+  lonejson_init(&test_mapped_stream_board_map, &board);
+  lonejson_init(&test_item_map, &item);
+
+  seen.active_board = &board;
+  item_handler.item_map = &test_item_map;
+  item_handler.item_dst = &item;
+  item_handler.item = test_mapped_stream_item;
+  item_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&board.items, &item_handler,
+                                                  &error) ==
+         LONEJSON_STATUS_OK);
+
+  board_handler.item_map = &test_mapped_stream_board_map;
+  board_handler.item_dst = &board;
+  board_handler.item = test_mapped_stream_board_item;
+  board_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&store.boards,
+                                                  &board_handler, &error) ==
+         LONEJSON_STATUS_OK);
+
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store, json, NULL,
+                             &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(store.tail, "done") == 0);
+  EXPECT(seen.item_count == 3u);
+  EXPECT(seen.board_count == 2u);
+  EXPECT(strcmp(seen.item_board_names[0], "alpha") == 0);
+  EXPECT(seen.item_ids[0] == 1);
+  EXPECT(strcmp(seen.item_labels[1], "two") == 0);
+  EXPECT(strcmp(seen.item_board_names[2], "beta") == 0);
+  EXPECT(seen.item_ids[2] == 3);
+  EXPECT(strcmp(seen.board_names[0], "alpha") == 0);
+  EXPECT(seen.board_seqs[0] == 7);
+  EXPECT(strcmp(seen.board_names[1], "beta") == 0);
+  EXPECT(seen.board_seqs[1] == 8);
+
+  lonejson_cleanup(&test_item_map, &item);
+  lonejson_cleanup(&test_mapped_stream_board_map, &board);
+  lonejson_cleanup(&test_mapped_stream_store_map, &store);
+}
+
+static void test_array_stream_mapped_field_failure_modes(void) {
+  static const char bad_item[] =
+      "{\"boards\":[{\"name\":\"alpha\",\"items\":[1],\"seq\":7}],"
+      "\"tail\":\"done\"}";
+  static const char non_array[] =
+      "{\"boards\":{\"name\":\"alpha\",\"items\":[],\"seq\":7},"
+      "\"tail\":\"done\"}";
+  static const char missing_boards[] = "{\"tail\":\"done\"}";
+  static const char duplicate_boards[] =
+      "{\"boards\":[],\"boards\":[],\"tail\":\"done\"}";
+  static const char duplicate_nested_items[] =
+      "{\"boards\":[{\"name\":\"alpha\",\"items\":[],\"items\":[],"
+      "\"seq\":7}],\"tail\":\"done\"}";
+  static const char callback_failure[] =
+      "{\"boards\":[{\"name\":\"alpha\",\"items\":[{\"id\":1,"
+      "\"label\":\"one\"},{\"id\":2,\"label\":\"two\"}],\"seq\":7}],"
+      "\"tail\":\"done\"}";
+  static const char valid_after_failure[] =
+      "{\"boards\":[{\"name\":\"reused\",\"items\":[{\"id\":9,"
+      "\"label\":\"again\"}],\"seq\":10}],\"tail\":\"ok\"}";
+  static const char missing_handler[] =
+      "{\"boards\":[{\"name\":\"alpha\",\"items\":[],\"seq\":7}],"
+      "\"tail\":\"done\"}";
+  test_mapped_stream_store store;
+  test_mapped_stream_board board;
+  test_item item;
+  test_mapped_stream_seen seen;
+  lonejson_mapped_array_stream_handler board_handler;
+  lonejson_mapped_array_stream_handler item_handler;
+  lonejson_parse_options options;
+  lonejson_error error;
+  char buffer[128];
+
+  options = lonejson_default_parse_options();
+  options.clear_destination = 0;
+  memset(&seen, 0, sizeof(seen));
+  memset(&board_handler, 0, sizeof(board_handler));
+  memset(&item_handler, 0, sizeof(item_handler));
+  EXPECT(lonejson_mapped_array_stream_set_handler(NULL, &item_handler,
+                                                  &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_mapped_array_stream_set_handler(&board.items, NULL,
+                                                  &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  lonejson_init(&test_mapped_stream_store_map, &store);
+  lonejson_init(&test_mapped_stream_board_map, &board);
+  lonejson_init(&test_item_map, &item);
+
+  seen.active_board = &board;
+  item_handler.item_map = &test_item_map;
+  item_handler.item_dst = &item;
+  item_handler.item = test_mapped_stream_item;
+  item_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&board.items, &item_handler,
+                                                  &error) ==
+         LONEJSON_STATUS_OK);
+  board_handler.item_map = &test_mapped_stream_board_map;
+  board_handler.item_dst = &board;
+  board_handler.item = test_mapped_stream_board_item;
+  board_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&store.boards,
+                                                  &board_handler, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store, bad_item,
+                             NULL, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store, non_array,
+                             NULL, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+                             missing_boards, NULL, &error) ==
+         LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+                             duplicate_boards, NULL, &error) ==
+         LONEJSON_STATUS_DUPLICATE_FIELD);
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+                             duplicate_nested_items, NULL, &error) ==
+         LONEJSON_STATUS_DUPLICATE_FIELD);
+  memset(&seen, 0, sizeof(seen));
+  seen.active_board = &board;
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store, bad_item,
+                             &options, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+                             valid_after_failure, &options, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(store.tail, "ok") == 0);
+  EXPECT(seen.item_count == 1u);
+  EXPECT(strcmp(seen.item_board_names[0], "reused") == 0);
+  EXPECT(seen.item_ids[0] == 9);
+
+  memset(&seen, 0, sizeof(seen));
+  seen.active_board = &board;
+  seen.fail_after_items = 1u;
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+                             callback_failure, &options, &error) ==
+         LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(seen.item_count == 1u);
+  EXPECT(strcmp(item.label, "") == 0);
+  memset(&seen, 0, sizeof(seen));
+  seen.active_board = &board;
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+                             valid_after_failure, &options, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(store.tail, "ok") == 0);
+  EXPECT(seen.item_count == 1u);
+  EXPECT(seen.board_count == 1u);
+
+  lonejson_cleanup(&test_item_map, &item);
+  lonejson_cleanup(&test_mapped_stream_board_map, &board);
+  lonejson_cleanup(&test_mapped_stream_store_map, &store);
+
+  memset(&store, 0, sizeof(store));
+  memset(&board, 0, sizeof(board));
+  lonejson_init(&test_mapped_stream_store_map, &store);
+  lonejson_init(&test_mapped_stream_board_map, &board);
+  board_handler.item_map = &test_mapped_stream_board_map;
+  board_handler.item_dst = &board;
+  board_handler.item = test_mapped_stream_board_item;
+  board_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&store.boards,
+                                                  &board_handler, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+                             missing_handler, NULL, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  EXPECT(lonejson_serialize_buffer(&test_mapped_stream_store_map, &store,
+                                   buffer, sizeof(buffer), NULL, NULL,
+                                   &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+
+  lonejson_cleanup(&test_mapped_stream_board_map, &board);
+  lonejson_cleanup(&test_mapped_stream_store_map, &store);
+}
+
+static void test_array_stream_mapped_field_failure_cleans_alloc_items(void) {
+  static const char missing_child_id[] =
+      "{\"parents\":[{\"name\":\"outer\",\"children\":[{\"name\":\"inner\"}],"
+      "\"seq\":1}],\"tail\":\"bad\"}";
+  static const char child_type_mismatch[] =
+      "{\"parents\":[{\"name\":\"outer\",\"children\":[{\"name\":\"inner\","
+      "\"id\":\"bad\"}],\"seq\":1}],\"tail\":\"bad\"}";
+  static const char valid_after_failure[] =
+      "{\"parents\":[{\"name\":\"outer-ok\",\"children\":[{\"name\":\"inner-ok\","
+      "\"id\":2}],\"seq\":3}],\"tail\":\"ok\"}";
+  test_alloc_mapped_doc doc;
+  test_alloc_mapped_parent parent;
+  test_alloc_mapped_child child;
+  test_alloc_mapped_seen seen;
+  test_allocator_state alloc_state;
+  lonejson_mapped_array_stream_handler parent_handler;
+  lonejson_mapped_array_stream_handler child_handler;
+  lonejson_parse_options options;
+  lonejson_error error;
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&parent_handler, 0, sizeof(parent_handler));
+  memset(&child_handler, 0, sizeof(child_handler));
+  test_allocator_init(&alloc_state);
+  options = lonejson_default_parse_options();
+  options.clear_destination = 0;
+  options.allocator = &alloc_state.allocator;
+
+  lonejson_init(&test_alloc_mapped_doc_map, &doc);
+  lonejson_init(&test_alloc_mapped_parent_map, &parent);
+  lonejson_init(&test_alloc_mapped_child_map, &child);
+
+  child_handler.item_map = &test_alloc_mapped_child_map;
+  child_handler.item_dst = &child;
+  child_handler.item = test_alloc_mapped_child_item;
+  child_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&parent.children,
+                                                  &child_handler, &error) ==
+         LONEJSON_STATUS_OK);
+
+  parent_handler.item_map = &test_alloc_mapped_parent_map;
+  parent_handler.item_dst = &parent;
+  parent_handler.item = test_alloc_mapped_parent_item;
+  parent_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&doc.parents, &parent_handler,
+                                                  &error) == LONEJSON_STATUS_OK);
+
+  EXPECT(lonejson_parse_cstr(&test_alloc_mapped_doc_map, &doc, missing_child_id,
+                             &options, &error) ==
+         LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+  EXPECT(alloc_state.stats.bytes_live == 0u);
+  EXPECT(parent.name == NULL);
+  EXPECT(child.name == NULL);
+
+  EXPECT(lonejson_parse_cstr(&test_alloc_mapped_doc_map, &doc,
+                             child_type_mismatch, &options, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(alloc_state.stats.bytes_live == 0u);
+  EXPECT(parent.name == NULL);
+  EXPECT(child.name == NULL);
+
+  memset(&seen, 0, sizeof(seen));
+  EXPECT(lonejson_parse_cstr(&test_alloc_mapped_doc_map, &doc,
+                             valid_after_failure, &options, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(alloc_state.stats.bytes_live == 0u);
+  EXPECT(strcmp(doc.tail, "ok") == 0);
+  EXPECT(seen.child_count == 1u);
+  EXPECT(seen.parent_count == 1u);
+  EXPECT(strcmp(seen.child_names[0], "inner-ok") == 0);
+  EXPECT(seen.child_ids[0] == 2);
+  EXPECT(strcmp(seen.parent_names[0], "outer-ok") == 0);
+  EXPECT(seen.parent_seqs[0] == 3);
+
+  lonejson_cleanup(&test_alloc_mapped_child_map, &child);
+  lonejson_cleanup(&test_alloc_mapped_parent_map, &parent);
+  lonejson_cleanup(&test_alloc_mapped_doc_map, &doc);
+  EXPECT(alloc_state.stats.bytes_live == 0u);
+}
+
+#ifdef LONEJSON_WITH_CURL
+static void test_array_stream_mapped_field_curl_facade(void) {
+  static const char json[] =
+      "{\"boards\":[{\"name\":\"alpha\",\"items\":[{\"id\":1,"
+      "\"label\":\"one\"}],\"seq\":7},{\"name\":\"beta\",\"items\":[],"
+      "\"seq\":8}],\"tail\":\"done\"}";
+  test_mapped_stream_store store;
+  test_mapped_stream_board board;
+  test_item item;
+  test_mapped_stream_seen seen;
+  lonejson_mapped_array_stream_handler board_handler;
+  lonejson_mapped_array_stream_handler item_handler;
+  lonejson_curl_parse parse;
+  lonejson_error error;
+  size_t i;
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&board_handler, 0, sizeof(board_handler));
+  memset(&item_handler, 0, sizeof(item_handler));
+  memset(&store, 0, sizeof(store));
+  memset(&board, 0, sizeof(board));
+  lonejson_init(&test_mapped_stream_store_map, &store);
+  lonejson_init(&test_mapped_stream_board_map, &board);
+  lonejson_init(&test_item_map, &item);
+
+  seen.active_board = &board;
+  item_handler.item_map = &test_item_map;
+  item_handler.item_dst = &item;
+  item_handler.item = test_mapped_stream_item;
+  item_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&board.items, &item_handler,
+                                                  &error) ==
+         LONEJSON_STATUS_OK);
+  board_handler.item_map = &test_mapped_stream_board_map;
+  board_handler.item_dst = &board;
+  board_handler.item = test_mapped_stream_board_item;
+  board_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&store.boards,
+                                                  &board_handler, &error) ==
+         LONEJSON_STATUS_OK);
+
+  EXPECT(lonejson_curl_parse_init(&parse, &test_mapped_stream_store_map,
+                                  &store, NULL) == LONEJSON_STATUS_OK);
+  for (i = 0u; i < strlen(json); ++i) {
+    EXPECT(lonejson_curl_write_callback((char *)json + i, 1u, 1u, &parse) ==
+           1u);
+  }
+  EXPECT(lonejson_curl_parse_finish(&parse) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(store.tail, "done") == 0);
+  EXPECT(seen.item_count == 1u);
+  EXPECT(seen.board_count == 2u);
+  EXPECT(strcmp(seen.item_board_names[0], "alpha") == 0);
+  EXPECT(seen.item_ids[0] == 1);
+  EXPECT(strcmp(seen.board_names[1], "beta") == 0);
+  EXPECT(seen.board_seqs[1] == 8);
+
+  lonejson_curl_parse_cleanup(&parse);
+  lonejson_cleanup(&test_item_map, &item);
+  lonejson_cleanup(&test_mapped_stream_board_map, &board);
+  lonejson_cleanup(&test_mapped_stream_store_map, &store);
+}
+#else
+static void test_array_stream_mapped_field_curl_facade(void) {}
+#endif
+
 #ifdef LONEJSON_WITH_CURL
 static void test_array_stream_mapped_string_field_curl_facade(void) {
   static const char json[] =

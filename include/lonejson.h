@@ -589,7 +589,9 @@ typedef enum lonejson_field_kind {
   /** JSON array of nested objects stored in `lonejson_object_array`. */
   LONEJSON_FIELD_KIND_OBJECT_ARRAY = 16,
   /** JSON array of strings streamed through `lonejson_string_array_stream`. */
-  LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM = 17
+  LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM = 17,
+  /** JSON array of mapped objects streamed item-by-item. */
+  LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM = 18
 } lonejson_field_kind;
 
 /** Backing source kind used by `lonejson_source` outbound field handles. */
@@ -1154,6 +1156,45 @@ typedef struct lonejson_string_array_stream {
   unsigned _lonejson_magic;
 } lonejson_string_array_stream;
 
+/** Callback invoked after one mapped array-stream item has been parsed into
+ * the configured reusable item destination. The destination is valid only for
+ * the duration of the callback; lonejson cleans and reuses it before parsing
+ * the next item.
+ */
+typedef lonejson_status (*lonejson_mapped_array_stream_item_fn)(
+    void *user, void *item, lonejson_error *error);
+
+/** Handler configured on a `lonejson_mapped_array_stream` field before
+ * parsing. `item_map` must describe one object item and `item_dst` is reused
+ * for each item.
+ */
+typedef struct lonejson_mapped_array_stream_handler {
+  const lonejson_map *item_map;
+  void *item_dst;
+  lonejson_mapped_array_stream_item_fn item;
+  void *user;
+} lonejson_mapped_array_stream_handler;
+
+/** Destination member for `LONEJSON_FIELD_MAPPED_ARRAY_STREAM*` fields.
+ *
+ * This streams mapped object items from a JSON array field during normal mapped
+ * parsing. Item callbacks are invoked in source JSON order. Sibling fields
+ * that appear later in the containing object have not been parsed yet when an
+ * earlier streamed array item is delivered. If callbacks need envelope or
+ * parent metadata, serialize those fields before the streamed array field or
+ * defer that work until the containing parse has completed.
+ *
+ * The selected array and enclosing document are not materialized. Each item is
+ * parsed into the configured reusable destination, delivered to the callback,
+ * then cleaned before the next item. Item maps may themselves contain mapped
+ * array-stream fields, so nested streamed arrays compose through normal maps.
+ */
+typedef struct lonejson_mapped_array_stream {
+  lonejson_mapped_array_stream_handler handler;
+  int active;
+  unsigned _lonejson_magic;
+} lonejson_mapped_array_stream;
+
 /** Visitor callbacks for one arbitrary JSON value. String values and object
  * keys are delivered as decoded UTF-8 in chunks. Number values are delivered as
  * raw token bytes in chunks. Any callback may be `NULL` when the caller does
@@ -1258,9 +1299,9 @@ typedef struct lonejson_write_options {
   /** Optional allocator used for serializer-owned output buffers. */
   const lonejson_allocator *allocator;
   /** Hard cap for serializer-owned output bytes, excluding the trailing NUL
-   * terminator retained for C-string convenience. Zero keeps the library default
-   * `LONEJSON_WRITE_MAX_OUTPUT_BYTES`; fixed-capacity buffer and sink APIs
-   * ignore this field because their caller-provided sink is the bound.
+   * terminator retained for C-string convenience. Zero keeps the library
+   * default `LONEJSON_WRITE_MAX_OUTPUT_BYTES`; fixed-capacity buffer and sink
+   * APIs ignore this field because their caller-provided sink is the bound.
    */
   size_t max_output_bytes;
 } lonejson_write_options;
@@ -1516,6 +1557,43 @@ struct lonejson_generator {
    LONEJSON__KEY_LAST(key),                                                    \
    offsetof(type, member),                                                     \
    LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM,                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_REQUIRED,                                                    \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   0u}
+
+/** Maps a JSON array of objects into an item-by-item mapped stream. The
+ * destination member must be a `lonejson_mapped_array_stream` configured with
+ * `lonejson_mapped_array_stream_set_handler` before parsing.
+ */
+#define LONEJSON_FIELD_MAPPED_ARRAY_STREAM(type, member, key)                  \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM,                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   0u,                                                                         \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   0u}
+
+/** Maps a required JSON array of objects into an item-by-item mapped stream. */
+#define LONEJSON_FIELD_MAPPED_ARRAY_STREAM_REQ(type, member, key)              \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM,                                    \
    LONEJSON_STORAGE_FIXED,                                                     \
    LONEJSON_OVERFLOW_FAIL,                                                     \
    LONEJSON_FIELD_REQUIRED,                                                    \
@@ -2134,6 +2212,13 @@ lonejson_status lonejson_string_array_stream_set_handler(
     lonejson_string_array_stream *stream,
     const lonejson_array_stream_string_handler *handler, void *user,
     lonejson_error *error);
+void lonejson_mapped_array_stream_init(lonejson_mapped_array_stream *stream);
+/** Configures callbacks and reusable item storage for a mapped array-stream
+ * field.
+ */
+lonejson_status lonejson_mapped_array_stream_set_handler(
+    lonejson_mapped_array_stream *stream,
+    const lonejson_mapped_array_stream_handler *handler, lonejson_error *error);
 /** Initializes a spool handle to its default or caller-configured empty state
  * using lonejson's default allocator.
  */
@@ -2332,8 +2417,7 @@ typedef enum lonejson_array_stream_result {
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
  * so callers that need to retain an item must copy it here.
  */
-typedef lonejson_status (*lonejson_array_stream_item_fn)(void *user,
-                                                         void *dst);
+typedef lonejson_status (*lonejson_array_stream_item_fn)(void *user, void *dst);
 
 /** Callback invoked after one push-fed selected string-array item has been
  * decoded into a bounded, NUL-terminated temporary buffer. The pointer is valid
@@ -2405,9 +2489,10 @@ lonejson_array_stream_open_push(const char *path,
                                 const lonejson_parse_options *options,
                                 lonejson_error *error);
 /** Parses the next selected array item into `dst` through `map`. */
-lonejson_array_stream_result lonejson_array_stream_next(
-    lonejson_array_stream *stream, const lonejson_map *map, void *dst,
-    lonejson_error *error);
+lonejson_array_stream_result
+lonejson_array_stream_next(lonejson_array_stream *stream,
+                           const lonejson_map *map, void *dst,
+                           lonejson_error *error);
 /** Captures the next selected array item as a validated compact JSON value. */
 lonejson_array_stream_result
 lonejson_array_stream_next_value(lonejson_array_stream *stream,
@@ -2425,8 +2510,7 @@ lonejson_status lonejson_array_stream_push(
 /** Finalizes a push-fed selected-array stream after the source reaches EOF. */
 lonejson_status lonejson_array_stream_finish(
     lonejson_array_stream *stream, const lonejson_map *map, void *dst,
-    lonejson_array_stream_item_fn callback, void *user,
-    lonejson_error *error);
+    lonejson_array_stream_item_fn callback, void *user, lonejson_error *error);
 /** Feeds bytes into a push-fed selected string-array stream. String item bytes
  * are decoded and delivered incrementally through `handler`.
  */
@@ -2446,7 +2530,8 @@ lonejson_status lonejson_array_stream_finish_string(
  */
 lonejson_status lonejson_array_stream_push_string_items(
     lonejson_array_stream *stream, const void *bytes, size_t len,
-    lonejson_array_stream_string_fn callback, void *user, lonejson_error *error);
+    lonejson_array_stream_string_fn callback, void *user,
+    lonejson_error *error);
 /** Finalizes a push-fed selected string-array item stream after source EOF. */
 lonejson_status lonejson_array_stream_finish_string_items(
     lonejson_array_stream *stream, lonejson_array_stream_string_fn callback,
@@ -2791,8 +2876,8 @@ typedef struct lonejson_curl_string_array_parse {
   lonejson_error error;
 } lonejson_curl_string_array_parse;
 
-/** Curl response adapter state for selected string array items reported once per
- * decoded item from `CURLOPT_WRITEFUNCTION` chunks.
+/** Curl response adapter state for selected string array items reported once
+ * per decoded item from `CURLOPT_WRITEFUNCTION` chunks.
  */
 typedef struct lonejson_curl_string_items_parse {
   /** Push-fed selected-array stream owned by the curl adapter. */
@@ -2841,7 +2926,8 @@ lonejson_curl_array_parse_finish(lonejson_curl_array_parse *ctx);
 /** Releases resources owned by a curl selected-array stream adapter. */
 void lonejson_curl_array_parse_cleanup(lonejson_curl_array_parse *ctx);
 
-/** Initializes a curl write adapter that streams selected string-array items. */
+/** Initializes a curl write adapter that streams selected string-array items.
+ */
 lonejson_status lonejson_curl_string_array_parse_init(
     lonejson_curl_string_array_parse *ctx, const char *path,
     const lonejson_parse_options *options,
@@ -2972,7 +3058,10 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_KIND_BOOL LONEJSON_FIELD_KIND_BOOL
 #define LJ_FIELD_KIND_OBJECT LONEJSON_FIELD_KIND_OBJECT
 #define LJ_FIELD_KIND_STRING_ARRAY LONEJSON_FIELD_KIND_STRING_ARRAY
-#define LJ_FIELD_KIND_STRING_ARRAY_STREAM LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM
+#define LJ_FIELD_KIND_STRING_ARRAY_STREAM                                      \
+  LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM
+#define LJ_FIELD_KIND_MAPPED_ARRAY_STREAM                                      \
+  LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM
 #define LJ_FIELD_KIND_I64_ARRAY LONEJSON_FIELD_KIND_I64_ARRAY
 #define LJ_FIELD_KIND_U64_ARRAY LONEJSON_FIELD_KIND_U64_ARRAY
 #define LJ_FIELD_KIND_F64_ARRAY LONEJSON_FIELD_KIND_F64_ARRAY
@@ -3047,6 +3136,8 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_STRING_ARRAY LONEJSON_FIELD_STRING_ARRAY
 #define LJ_FIELD_STRING_ARRAY_STREAM LONEJSON_FIELD_STRING_ARRAY_STREAM
 #define LJ_FIELD_STRING_ARRAY_STREAM_REQ LONEJSON_FIELD_STRING_ARRAY_STREAM_REQ
+#define LJ_FIELD_MAPPED_ARRAY_STREAM LONEJSON_FIELD_MAPPED_ARRAY_STREAM
+#define LJ_FIELD_MAPPED_ARRAY_STREAM_REQ LONEJSON_FIELD_MAPPED_ARRAY_STREAM_REQ
 #define LJ_FIELD_STRING_ARRAY_OMIT_EMPTY LONEJSON_FIELD_STRING_ARRAY_OMIT_EMPTY
 #define LJ_FIELD_I64_ARRAY LONEJSON_FIELD_I64_ARRAY
 #define LJ_FIELD_U64_ARRAY LONEJSON_FIELD_U64_ARRAY
@@ -3079,6 +3170,9 @@ typedef lonejson_value_limits lj_value_limits;
 typedef lonejson_value_visitor lj_value_visitor;
 typedef lonejson_array_stream_string_handler lj_array_stream_string_handler;
 typedef lonejson_string_array_stream lj_string_array_stream;
+typedef lonejson_mapped_array_stream_item_fn lj_mapped_array_stream_item_fn;
+typedef lonejson_mapped_array_stream_handler lj_mapped_array_stream_handler;
+typedef lonejson_mapped_array_stream lj_mapped_array_stream;
 /** Describes whether mapped storage is dynamic or fixed-capacity. */
 typedef lonejson_storage_kind lj_storage_kind;
 /** Overflow handling policy for fixed-capacity string storage. */
@@ -3189,6 +3283,17 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_string_array_stream_set_handler(
     const lj_array_stream_string_handler *handler, void *user,
     lj_error *error) {
   return lonejson_string_array_stream_set_handler(stream, handler, user, error);
+}
+/** Initializes a mapped array-stream field with no handler. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_mapped_array_stream_init(lj_mapped_array_stream *stream) {
+  lonejson_mapped_array_stream_init(stream);
+}
+/** Configures callbacks and item storage for a mapped array-stream field. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_mapped_array_stream_set_handler(
+    lj_mapped_array_stream *stream,
+    const lj_mapped_array_stream_handler *handler, lj_error *error) {
+  return lonejson_mapped_array_stream_set_handler(stream, handler, error);
 }
 /** Initializes a spooled byte container. */
 LONEJSON_SHORT_ALIAS_INLINE void
@@ -3435,32 +3540,33 @@ LONEJSON_SHORT_ALIAS_INLINE void lj_stream_close(lj_stream *stream) {
   lonejson_stream_close(stream);
 }
 /** Opens a selected-array item stream over a reader callback. */
-LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_reader(
-    const char *path, lj_reader_fn reader, void *user,
-    const lj_parse_options *options, lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *
+lj_array_stream_open_reader(const char *path, lj_reader_fn reader, void *user,
+                            const lj_parse_options *options, lj_error *error) {
   return lonejson_array_stream_open_reader(path, reader, user, options, error);
 }
 /** Opens a selected-array item stream over an open `FILE *`. */
-LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_filep(
-    const char *path, FILE *fp, const lj_parse_options *options,
-    lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *
+lj_array_stream_open_filep(const char *path, FILE *fp,
+                           const lj_parse_options *options, lj_error *error) {
   return lonejson_array_stream_open_filep(path, fp, options, error);
 }
 /** Opens a selected-array item stream over a filesystem path. */
-LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_path(
-    const char *array_path, const char *path, const lj_parse_options *options,
-    lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *
+lj_array_stream_open_path(const char *array_path, const char *path,
+                          const lj_parse_options *options, lj_error *error) {
   return lonejson_array_stream_open_path(array_path, path, options, error);
 }
 /** Opens a selected-array item stream over a file descriptor. */
-LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_fd(
-    const char *path, int fd, const lj_parse_options *options,
-    lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *
+lj_array_stream_open_fd(const char *path, int fd,
+                        const lj_parse_options *options, lj_error *error) {
   return lonejson_array_stream_open_fd(path, fd, options, error);
 }
 /** Opens a push-fed selected-array item stream. */
-LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *lj_array_stream_open_push(
-    const char *path, const lj_parse_options *options, lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_array_stream *
+lj_array_stream_open_push(const char *path, const lj_parse_options *options,
+                          lj_error *error) {
   return lonejson_array_stream_open_push(path, options, error);
 }
 /** Parses the next selected array item into a mapped destination. */
@@ -3476,8 +3582,7 @@ LONEJSON_SHORT_ALIAS_INLINE lj_array_stream_result lj_array_stream_next_value(
 /** Feeds bytes into a push-fed selected-array item stream. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_stream_push(
     lj_array_stream *stream, const lj_map *map, void *dst, const void *bytes,
-    size_t len, lj_array_stream_item_fn callback, void *user,
-    lj_error *error) {
+    size_t len, lj_array_stream_item_fn callback, void *user, lj_error *error) {
   return lonejson_array_stream_push(stream, map, dst, bytes, len, callback,
                                     user, error);
 }
@@ -3506,14 +3611,14 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_stream_push_string_items(
     lj_array_stream *stream, const void *bytes, size_t len,
     lj_array_stream_string_fn callback, void *user, lj_error *error) {
   return lonejson_array_stream_push_string_items(stream, bytes, len, callback,
-                                                user, error);
+                                                 user, error);
 }
 /** Finalizes a push-fed selected string-array item stream. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_stream_finish_string_items(
     lj_array_stream *stream, lj_array_stream_string_fn callback, void *user,
     lj_error *error) {
   return lonejson_array_stream_finish_string_items(stream, callback, user,
-                                                  error);
+                                                   error);
 }
 /** Returns the last error recorded by a selected-array item stream. */
 LONEJSON_SHORT_ALIAS_INLINE const lj_error *
@@ -3892,9 +3997,8 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_curl_array_parse_init(
                                         user);
 }
 /** Curl write callback for a selected-array adapter. */
-LONEJSON_SHORT_ALIAS_INLINE size_t
-lj_curl_array_write_callback(char *ptr, size_t size, size_t nmemb,
-                             void *userdata) {
+LONEJSON_SHORT_ALIAS_INLINE size_t lj_curl_array_write_callback(
+    char *ptr, size_t size, size_t nmemb, void *userdata) {
   return lonejson_curl_array_write_callback(ptr, size, nmemb, userdata);
 }
 /** Finalizes a curl selected-array adapter. */
@@ -3916,9 +4020,8 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_curl_string_array_parse_init(
                                                user);
 }
 /** Curl write callback for a selected string-array adapter. */
-LONEJSON_SHORT_ALIAS_INLINE size_t
-lj_curl_string_array_write_callback(char *ptr, size_t size, size_t nmemb,
-                                    void *userdata) {
+LONEJSON_SHORT_ALIAS_INLINE size_t lj_curl_string_array_write_callback(
+    char *ptr, size_t size, size_t nmemb, void *userdata) {
   return lonejson_curl_string_array_write_callback(ptr, size, nmemb, userdata);
 }
 /** Finalizes a curl selected string-array adapter. */
@@ -3940,9 +4043,8 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_curl_string_items_parse_init(
                                                user);
 }
 /** Curl write callback for a selected string-array item adapter. */
-LONEJSON_SHORT_ALIAS_INLINE size_t
-lj_curl_string_items_write_callback(char *ptr, size_t size, size_t nmemb,
-                                    void *userdata) {
+LONEJSON_SHORT_ALIAS_INLINE size_t lj_curl_string_items_write_callback(
+    char *ptr, size_t size, size_t nmemb, void *userdata) {
   return lonejson_curl_string_items_write_callback(ptr, size, nmemb, userdata);
 }
 /** Finalizes a curl selected string-array item adapter. */
