@@ -12,6 +12,13 @@ local function assert_true(v, msg)
   end
 end
 
+local function assert_rewrite_callback_failed(value, err, needle)
+  assert_true(value == nil)
+  assert_true(err ~= nil)
+  assert_eq(err.status, "callback_failed")
+  assert_true(err.message:find(needle, 1, true) ~= nil, err.message)
+end
+
 local function exists(path)
   local f
 
@@ -585,6 +592,200 @@ do
   assert_true(value == nil)
   assert_true(err ~= nil)
   stream:close()
+end
+
+do
+  local input = '{"items":[{"id":"a","n":1},{"id":"b","n":2},{"id":"c","n":3}],"tail":true}'
+  local seen = {}
+  local output = lj.array_rewrite_string("items", input, {
+    item = function(item)
+      seen[#seen + 1] = item.id
+      if item.id == "a" then
+        return "keep"
+      end
+      if item.id == "b" then
+        return { action = "replace", replacement = { id = "bb", n = 20 } }
+      end
+      return { action = "insert_after", insert = { id = "after-c", n = 4 } }
+    end,
+    append = function(ctx, emit)
+      assert_eq(ctx.selector, "items")
+      local ok, err = emit({ id = "appended", n = 5 })
+      assert_true(ok, err and err.message)
+    end,
+  })
+  assert_eq(table.concat(seen, ","), "a,b,c")
+  assert_eq(output, '{"items":[{"id":"a","n":1},{"id":"bb","n":20},{"id":"c","n":3},{"id":"after-c","n":4},{"id":"appended","n":5}],"tail":true}')
+end
+
+do
+  local Parent = lj.schema("RewriteParent", {
+    lj.field("id", lj.string { required = true }),
+  })
+  local selected = {}
+  local output = lj.array_rewrite_string("boards[].items", '{"boards":[{"id":"left","items":[{"v":1},{"v":2}]},{"id":"right","items":[{"v":3}]}]}', {
+    parents = {
+      { segment = "boards", schema = Parent },
+    },
+    item = function(item, ctx)
+      selected[#selected + 1] = ctx.parents[1].value.id .. ":" .. tostring(item.v)
+      if ctx.parents[1].value.id == "left" then
+        return "drop"
+      end
+      return { action = "replace", value = { v = item.v * 10 } }
+    end,
+    append = function(ctx, emit)
+      if ctx.parents[1].value.id == "right" then
+        assert_true(emit({ v = 40 }))
+      end
+    end,
+  })
+  assert_eq(table.concat(selected, ","), "left:1,left:2,right:3")
+  assert_eq(output, '{"boards":[{"id":"left","items":[]},{"id":"right","items":[{"v":30},{"v":40}]}]}')
+end
+
+do
+  local input_path = "/tmp/lonejson-lua-array-rewrite-in.json"
+  local output_path = "/tmp/lonejson-lua-array-rewrite-out.json"
+  local f = assert(io.open(input_path, "wb"))
+  f:write('{"items":[{"id":1},{"id":2}]}')
+  f:close()
+  local ok, err = lj.array_rewrite_path("items", input_path, output_path, {
+    item = function(item)
+      if item.id == 1 then
+        return "drop"
+      end
+      return "keep"
+    end,
+  })
+  assert_true(ok, err and err.message)
+  f = assert(io.open(output_path, "rb"))
+  assert_eq(f:read("*a"), '{"items":[{"id":2}]}')
+  f:close()
+  os.remove(input_path)
+  os.remove(output_path)
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[1,2]}', {
+    item = function()
+      error("forced item failure")
+    end,
+  })
+  assert_true(out == nil)
+  assert_true(err ~= nil)
+  assert_eq(err.status, "callback_failed")
+  assert_true(err.message:find("forced item failure", 1, true) ~= nil)
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[1]}', {
+    item = function()
+      return "nonsense"
+    end,
+  })
+  assert_true(out == nil)
+  assert_true(err ~= nil)
+  assert_eq(err.status, "callback_failed")
+  assert_true(err.message:find("unsupported array rewrite action", 1, true) ~= nil)
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[1]}', {
+    item = function()
+      return { action = "replace", value = function()
+      end }
+    end,
+  })
+  assert_rewrite_callback_failed(out, err, "unsupported Lua type for JSON value")
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[1]}', {
+    item = function()
+      return { action = "replace", value = lj.json_object({ [2] = "x" }) }
+    end,
+  })
+  assert_rewrite_callback_failed(out, err, "JSON object keys must be strings")
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[1]}', {
+    item = function()
+      return { action = "insert_after", insert = lj.json_object({ [2] = "x" }) }
+    end,
+  })
+  assert_rewrite_callback_failed(out, err, "JSON object keys must be strings")
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[1]}', {
+    item = function()
+      local cycle = {}
+      cycle.self = cycle
+      return { action = "insert_after", insert = cycle }
+    end,
+  })
+  assert_rewrite_callback_failed(out, err, "cyclic Lua tables cannot be encoded as JSON")
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[1]}', {
+    item = function()
+      return { action = "replace_and_insert_after", replacement = { n = 0 / 0 }, insert = { ok = true } }
+    end,
+  })
+  assert_rewrite_callback_failed(out, err, "JSON numbers must be finite")
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[]}', {
+    append = function(ctx, emit)
+      local ok, emit_err = emit(lj.json_object({ [2] = "x" }))
+      assert_true(ok == nil)
+      assert_true(emit_err ~= nil)
+      error(emit_err.message)
+    end,
+  })
+  assert_rewrite_callback_failed(out, err, "JSON object keys must be strings")
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[]}', {
+    append = function(ctx, emit)
+      local ok, emit_err = emit({ bad = function()
+      end })
+      assert_true(ok == nil)
+      assert_true(emit_err ~= nil)
+      error(emit_err.message)
+    end,
+  })
+  assert_rewrite_callback_failed(out, err, "unsupported Lua type for JSON value")
+end
+
+do
+  local out, err = lj.array_rewrite_string("items", '{"items":[1,]}', {
+    item = function()
+      return "keep"
+    end,
+  })
+  assert_true(out == nil)
+  assert_true(err ~= nil)
+  assert_true(err.status ~= "ok")
+end
+
+do
+  local ok = pcall(function()
+    lj.array_rewrite_string("boards[].items", '{"boards":[{"items":[1]}]}', {
+      parents = {
+        { segment = "boards" },
+      },
+      item = function()
+        return "keep"
+      end,
+    })
+  end)
+  assert_true(not ok)
 end
 
 print("lua tests passed")

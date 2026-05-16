@@ -237,8 +237,8 @@ static int lonejson__array_stream_getc(lonejson_array_stream *stream) {
       lonejson_read_result chunk = lonejson__array_stream_read(stream);
       if (chunk.error_code != 0) {
         stream->error.system_errno = chunk.error_code;
-        (void)lonejson__array_stream_set_error(
-            stream, LONEJSON_STATUS_IO_ERROR, "array stream read failed");
+        (void)lonejson__array_stream_set_error(stream, LONEJSON_STATUS_IO_ERROR,
+                                               "array stream read failed");
         return -2;
       }
       if (chunk.would_block) {
@@ -305,9 +305,10 @@ static int lonejson__array_stream_nonspace(lonejson_array_stream *stream) {
   return ch;
 }
 
-static lonejson_status lonejson__array_stream_append_key_codepoint(
-    lonejson_array_stream *stream, lonejson__byte_buffer *decoded_key,
-    lonejson_uint32 cp) {
+static lonejson_status
+lonejson__array_stream_append_key_codepoint(lonejson_array_stream *stream,
+                                            lonejson__byte_buffer *decoded_key,
+                                            lonejson_uint32 cp) {
   unsigned char utf8[4];
   size_t utf8_len;
 
@@ -392,48 +393,48 @@ lonejson__array_stream_read_key(lonejson_array_stream *stream) {
       case '\\':
       case '/':
         if (lonejson__byte_append_char(&stream->key, (char)ch, SIZE_MAX - 1u,
-                                       &stream->allocator, &stream->error) !=
-            LONEJSON_STATUS_OK) {
+                                       &stream->allocator,
+                                       &stream->error) != LONEJSON_STATUS_OK) {
           stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
           return stream->error.code;
         }
         break;
       case 'b':
         if (lonejson__byte_append_char(&stream->key, '\b', SIZE_MAX - 1u,
-                                       &stream->allocator, &stream->error) !=
-            LONEJSON_STATUS_OK) {
+                                       &stream->allocator,
+                                       &stream->error) != LONEJSON_STATUS_OK) {
           stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
           return stream->error.code;
         }
         break;
       case 'f':
         if (lonejson__byte_append_char(&stream->key, '\f', SIZE_MAX - 1u,
-                                       &stream->allocator, &stream->error) !=
-            LONEJSON_STATUS_OK) {
+                                       &stream->allocator,
+                                       &stream->error) != LONEJSON_STATUS_OK) {
           stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
           return stream->error.code;
         }
         break;
       case 'n':
         if (lonejson__byte_append_char(&stream->key, '\n', SIZE_MAX - 1u,
-                                       &stream->allocator, &stream->error) !=
-            LONEJSON_STATUS_OK) {
+                                       &stream->allocator,
+                                       &stream->error) != LONEJSON_STATUS_OK) {
           stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
           return stream->error.code;
         }
         break;
       case 'r':
         if (lonejson__byte_append_char(&stream->key, '\r', SIZE_MAX - 1u,
-                                       &stream->allocator, &stream->error) !=
-            LONEJSON_STATUS_OK) {
+                                       &stream->allocator,
+                                       &stream->error) != LONEJSON_STATUS_OK) {
           stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
           return stream->error.code;
         }
         break;
       case 't':
         if (lonejson__byte_append_char(&stream->key, '\t', SIZE_MAX - 1u,
-                                       &stream->allocator, &stream->error) !=
-            LONEJSON_STATUS_OK) {
+                                       &stream->allocator,
+                                       &stream->error) != LONEJSON_STATUS_OK) {
           stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
           return stream->error.code;
         }
@@ -530,8 +531,8 @@ static int lonejson__array_stream_value_char_may_continue_number(int ch) {
          ch == 'e' || ch == 'E';
 }
 
-static size_t lonejson__array_stream_value_feed_len(
-    const lonejson_array_stream *stream) {
+static size_t
+lonejson__array_stream_value_feed_len(const lonejson_array_stream *stream) {
   const unsigned char *begin;
   size_t available;
   size_t len;
@@ -563,16 +564,17 @@ static size_t lonejson__array_stream_value_feed_len(
 
 static void lonejson__array_stream_dup_state_cleanup(
     lonejson__array_stream_dup_state *state);
-static lonejson_status lonejson__array_stream_dup_push_object(
-    void *user, lonejson_error *error);
-static lonejson_status lonejson__array_stream_dup_pop_object(
-    void *user, lonejson_error *error);
-static lonejson_status lonejson__array_stream_dup_key_begin(
-    void *user, lonejson_error *error);
-static lonejson_status lonejson__array_stream_dup_key_chunk(
-    void *user, const char *data, size_t len, lonejson_error *error);
-static lonejson_status lonejson__array_stream_dup_key_end(
-    void *user, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_dup_push_object(void *user, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_dup_pop_object(void *user, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_dup_key_begin(void *user, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_dup_key_chunk(void *user, const char *data, size_t len,
+                                     lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_dup_key_end(void *user, lonejson_error *error);
 static lonejson_status lonejson__array_stream_string_begin(void *user,
                                                            lonejson_error *e);
 static lonejson_status lonejson__array_stream_string_chunk(void *user,
@@ -581,24 +583,29 @@ static lonejson_status lonejson__array_stream_string_chunk(void *user,
                                                            lonejson_error *e);
 static lonejson_status lonejson__array_stream_string_end(void *user,
                                                          lonejson_error *e);
-static lonejson_status lonejson__array_stream_string_item_begin(
-    void *user, lonejson_error *error);
-static lonejson_status lonejson__array_stream_string_item_chunk(
-    void *user, const char *data, size_t len, lonejson_error *error);
-static lonejson_status lonejson__array_stream_string_item_end(
-    void *user, lonejson_error *error);
-static lonejson_status lonejson__array_stream_string_type_error(
-    lonejson_array_stream *stream, lonejson_error *error);
-static lonejson_status lonejson__array_stream_string_bad_event(
-    void *user, lonejson_error *error);
-static lonejson_status lonejson__array_stream_string_bad_chunk(
-    void *user, const char *data, size_t len, lonejson_error *error);
-static lonejson_status lonejson__array_stream_string_bad_bool(
-    void *user, int value, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_string_item_begin(void *user, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_string_item_chunk(void *user, const char *data,
+                                         size_t len, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_string_item_end(void *user, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_string_type_error(lonejson_array_stream *stream,
+                                         lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_string_bad_event(void *user, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_string_bad_chunk(void *user, const char *data,
+                                        size_t len, lonejson_error *error);
+static lonejson_status
+lonejson__array_stream_string_bad_bool(void *user, int value,
+                                       lonejson_error *error);
 
-static lonejson_status lonejson__array_stream_start_value(
-    lonejson_array_stream *stream, lonejson_array_stream_value_mode mode,
-    const lonejson_map *map, void *dst) {
+static lonejson_status
+lonejson__array_stream_start_value(lonejson_array_stream *stream,
+                                   lonejson_array_stream_value_mode mode,
+                                   const lonejson_map *map, void *dst) {
   lonejson_value_limits limits;
 
   if (stream->value_active) {
@@ -661,9 +668,11 @@ static lonejson_status lonejson__array_stream_start_value(
     stream->string_visitor.string_begin = lonejson__array_stream_string_begin;
     stream->string_visitor.string_chunk = lonejson__array_stream_string_chunk;
     stream->string_visitor.string_end = lonejson__array_stream_string_end;
-    stream->string_visitor.object_begin = lonejson__array_stream_string_bad_event;
+    stream->string_visitor.object_begin =
+        lonejson__array_stream_string_bad_event;
     stream->string_visitor.object_end = lonejson__array_stream_string_bad_event;
-    stream->string_visitor.array_begin = lonejson__array_stream_string_bad_event;
+    stream->string_visitor.array_begin =
+        lonejson__array_stream_string_bad_event;
     stream->string_visitor.array_end = lonejson__array_stream_string_bad_event;
     stream->string_visitor.object_key_begin =
         lonejson__array_stream_string_bad_event;
@@ -691,7 +700,8 @@ static lonejson_status lonejson__array_stream_start_value(
   }
   if (mode == LONEJSON_ARRAY_STREAM_VALUE_MAPPED &&
       stream->value_parser.options.clear_destination) {
-    lonejson__init_map_with_allocator(map, dst, &stream->value_parser.allocator);
+    lonejson__init_map_with_allocator(map, dst,
+                                      &stream->value_parser.allocator);
     stream->value_parser.options.clear_destination = 0;
   }
   stream->value_mode = mode;
@@ -716,16 +726,16 @@ static void lonejson__array_stream_clear_value(lonejson_array_stream *stream) {
   stream->active_dst = NULL;
 }
 
-static lonejson_status lonejson__array_stream_finish_value(
-    lonejson_array_stream *stream) {
+static lonejson_status
+lonejson__array_stream_finish_value(lonejson_array_stream *stream) {
   lonejson_status status = lonejson_parser_finish(&stream->value_parser);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     if (stream->value_parser.error.code != LONEJSON_STATUS_OK) {
       stream->error = stream->value_parser.error;
     } else if (stream->error.code != status) {
       (void)lonejson__set_error(&stream->error, status, stream->offset,
-                                 stream->line, stream->column,
-                                 "array stream value parser failed");
+                                stream->line, stream->column,
+                                "array stream value parser failed");
     }
     stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
     lonejson__array_stream_clear_value(stream);
@@ -736,26 +746,28 @@ static lonejson_status lonejson__array_stream_finish_value(
   return status;
 }
 
-static void lonejson__array_stream_mark_pending_item(
-    lonejson_array_stream *stream, lonejson_array_stream_value_mode mode,
-    const lonejson_map *map, void *dst) {
+static void
+lonejson__array_stream_mark_pending_item(lonejson_array_stream *stream,
+                                         lonejson_array_stream_value_mode mode,
+                                         const lonejson_map *map, void *dst) {
   stream->item_pending = 1;
   stream->pending_value_mode = mode;
   stream->pending_map = map;
   stream->pending_dst = dst;
 }
 
-static void lonejson__array_stream_clear_pending_item(
-    lonejson_array_stream *stream) {
+static void
+lonejson__array_stream_clear_pending_item(lonejson_array_stream *stream) {
   stream->item_pending = 0;
   stream->pending_value_mode = LONEJSON_ARRAY_STREAM_VALUE_NONE;
   stream->pending_map = NULL;
   stream->pending_dst = NULL;
 }
 
-static lonejson_status lonejson__array_stream_check_pending_item(
-    lonejson_array_stream *stream, lonejson_array_stream_value_mode mode,
-    const lonejson_map *map, void *dst) {
+static lonejson_status
+lonejson__array_stream_check_pending_item(lonejson_array_stream *stream,
+                                          lonejson_array_stream_value_mode mode,
+                                          const lonejson_map *map, void *dst) {
   if (!stream->item_pending) {
     return LONEJSON_STATUS_OK;
   }
@@ -768,9 +780,10 @@ static lonejson_status lonejson__array_stream_check_pending_item(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__array_stream_step_value(
-    lonejson_array_stream *stream, lonejson_array_stream_value_mode mode,
-    const lonejson_map *map, void *dst) {
+static lonejson_status
+lonejson__array_stream_step_value(lonejson_array_stream *stream,
+                                  lonejson_array_stream_value_mode mode,
+                                  const lonejson_map *map, void *dst) {
   lonejson_status status;
 
   status = lonejson__array_stream_start_value(stream, mode, map, dst);
@@ -797,8 +810,8 @@ static lonejson_status lonejson__array_stream_step_value(
       if (consumed != 0u) {
         if (mode == LONEJSON_ARRAY_STREAM_VALUE_RAW &&
             lonejson__byte_append(&stream->item, &byte, 1u, SIZE_MAX - 1u,
-                                  &stream->allocator, &stream->error) !=
-                LONEJSON_STATUS_OK) {
+                                  &stream->allocator,
+                                  &stream->error) != LONEJSON_STATUS_OK) {
           stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
           lonejson__array_stream_clear_value(stream);
           return stream->error.code;
@@ -807,14 +820,13 @@ static lonejson_status lonejson__array_stream_step_value(
       } else {
         stream->has_pushback = 1;
       }
-      if (status != LONEJSON_STATUS_OK &&
-          status != LONEJSON_STATUS_TRUNCATED) {
+      if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         if (stream->value_parser.error.code != LONEJSON_STATUS_OK) {
           stream->error = stream->value_parser.error;
         } else if (stream->error.code != status) {
           (void)lonejson__set_error(&stream->error, status, stream->offset,
-                                     stream->line, stream->column,
-                                     "array stream value parser failed");
+                                    stream->line, stream->column,
+                                    "array stream value parser failed");
         }
         stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
         lonejson__array_stream_clear_value(stream);
@@ -871,8 +883,8 @@ static lonejson_status lonejson__array_stream_step_value(
                                            available, &consumed, 1);
       if (consumed != 0u) {
         if (mode == LONEJSON_ARRAY_STREAM_VALUE_RAW &&
-            lonejson__byte_append(&stream->item, begin, consumed,
-                                  SIZE_MAX - 1u, &stream->allocator,
+            lonejson__byte_append(&stream->item, begin, consumed, SIZE_MAX - 1u,
+                                  &stream->allocator,
                                   &stream->error) != LONEJSON_STATUS_OK) {
           stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
           lonejson__array_stream_clear_value(stream);
@@ -881,14 +893,13 @@ static lonejson_status lonejson__array_stream_step_value(
         lonejson__array_stream_advance(stream, begin, consumed);
         stream->buffered_start += consumed;
       }
-      if (status != LONEJSON_STATUS_OK &&
-          status != LONEJSON_STATUS_TRUNCATED) {
+      if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         if (stream->value_parser.error.code != LONEJSON_STATUS_OK) {
           stream->error = stream->value_parser.error;
         } else if (stream->error.code != status) {
           (void)lonejson__set_error(&stream->error, status, stream->offset,
-                                     stream->line, stream->column,
-                                     "array stream value parser failed");
+                                    stream->line, stream->column,
+                                    "array stream value parser failed");
         }
         stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
         lonejson__array_stream_clear_value(stream);
@@ -927,9 +938,9 @@ lonejson__array_stream_note_root_key(lonejson_array_stream *stream) {
     if (len == stream->key.len &&
         (len == 0u ||
          memcmp(stream->root_keys.data + pos, stream->key.data, len) == 0)) {
-      return lonejson__array_stream_set_error(
-          stream, LONEJSON_STATUS_DUPLICATE_FIELD,
-          "duplicate root object field");
+      return lonejson__array_stream_set_error(stream,
+                                              LONEJSON_STATUS_DUPLICATE_FIELD,
+                                              "duplicate root object field");
     }
     pos += len;
   }
@@ -967,8 +978,8 @@ static void lonejson__array_stream_dup_state_cleanup(
   memset(state, 0, sizeof(*state));
 }
 
-static lonejson_status lonejson__array_stream_dup_push_object(
-    void *user, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_dup_push_object(void *user, lonejson_error *error) {
   lonejson__array_stream_dup_state *state =
       (lonejson__array_stream_dup_state *)user;
   lonejson__array_stream_dup_frame *next;
@@ -993,8 +1004,8 @@ static lonejson_status lonejson__array_stream_dup_push_object(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__array_stream_dup_pop_object(
-    void *user, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_dup_pop_object(void *user, lonejson_error *error) {
   lonejson__array_stream_dup_state *state =
       (lonejson__array_stream_dup_state *)user;
 
@@ -1007,8 +1018,8 @@ static lonejson_status lonejson__array_stream_dup_pop_object(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__array_stream_dup_key_begin(
-    void *user, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_dup_key_begin(void *user, lonejson_error *error) {
   lonejson__array_stream_dup_state *state =
       (lonejson__array_stream_dup_state *)user;
 
@@ -1017,8 +1028,9 @@ static lonejson_status lonejson__array_stream_dup_key_begin(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__array_stream_dup_key_chunk(
-    void *user, const char *data, size_t len, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_dup_key_chunk(void *user, const char *data, size_t len,
+                                     lonejson_error *error) {
   lonejson__array_stream_dup_state *state =
       (lonejson__array_stream_dup_state *)user;
 
@@ -1026,8 +1038,8 @@ static lonejson_status lonejson__array_stream_dup_key_chunk(
                                state->allocator, error);
 }
 
-static lonejson_status lonejson__array_stream_dup_key_end(
-    void *user, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_dup_key_end(void *user, lonejson_error *error) {
   lonejson__array_stream_dup_state *state =
       (lonejson__array_stream_dup_state *)user;
   lonejson__array_stream_dup_frame *frame;
@@ -1051,8 +1063,8 @@ static lonejson_status lonejson__array_stream_dup_key_end(
     if (len == state->key.len &&
         (len == 0u ||
          memcmp(frame->keys.data + pos, state->key.data, len) == 0)) {
-      return lonejson__set_error(error, LONEJSON_STATUS_DUPLICATE_FIELD, 0u,
-                                 0u, 0u, "duplicate object field");
+      return lonejson__set_error(error, LONEJSON_STATUS_DUPLICATE_FIELD, 0u, 0u,
+                                 0u, "duplicate object field");
     }
     pos += len;
   }
@@ -1070,36 +1082,39 @@ static lonejson_status lonejson__array_stream_dup_key_end(
                                SIZE_MAX - 1u, state->allocator, error);
 }
 
-static lonejson_status lonejson__array_stream_string_type_error(
-    lonejson_array_stream *stream, lonejson_error *error) {
-  lonejson_status status = lonejson__array_stream_set_error(
-      stream, LONEJSON_STATUS_TYPE_MISMATCH,
-      "selected array item is not a string");
+static lonejson_status
+lonejson__array_stream_string_type_error(lonejson_array_stream *stream,
+                                         lonejson_error *error) {
+  lonejson_status status =
+      lonejson__array_stream_set_error(stream, LONEJSON_STATUS_TYPE_MISMATCH,
+                                       "selected array item is not a string");
   if (error != NULL) {
     *error = stream->error;
   }
   return status;
 }
 
-static lonejson_status lonejson__array_stream_string_bad_event(
-    void *user, lonejson_error *error) {
-  return lonejson__array_stream_string_type_error(
-      (lonejson_array_stream *)user, error);
+static lonejson_status
+lonejson__array_stream_string_bad_event(void *user, lonejson_error *error) {
+  return lonejson__array_stream_string_type_error((lonejson_array_stream *)user,
+                                                  error);
 }
 
-static lonejson_status lonejson__array_stream_string_bad_chunk(
-    void *user, const char *data, size_t len, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_string_bad_chunk(void *user, const char *data,
+                                        size_t len, lonejson_error *error) {
   (void)data;
   (void)len;
-  return lonejson__array_stream_string_type_error(
-      (lonejson_array_stream *)user, error);
+  return lonejson__array_stream_string_type_error((lonejson_array_stream *)user,
+                                                  error);
 }
 
-static lonejson_status lonejson__array_stream_string_bad_bool(
-    void *user, int value, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_string_bad_bool(void *user, int value,
+                                       lonejson_error *error) {
   (void)value;
-  return lonejson__array_stream_string_type_error(
-      (lonejson_array_stream *)user, error);
+  return lonejson__array_stream_string_type_error((lonejson_array_stream *)user,
+                                                  error);
 }
 
 static lonejson_status lonejson__array_stream_string_begin(void *user,
@@ -1133,41 +1148,42 @@ static lonejson_status lonejson__array_stream_string_end(void *user,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__array_stream_string_item_begin(
-    void *user, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_string_item_begin(void *user, lonejson_error *error) {
   lonejson_array_stream *stream = (lonejson_array_stream *)user;
   (void)error;
   lonejson__byte_reset(&stream->string_item);
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__array_stream_string_item_chunk(
-    void *user, const char *data, size_t len, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_string_item_chunk(void *user, const char *data,
+                                         size_t len, lonejson_error *error) {
   lonejson_array_stream *stream = (lonejson_array_stream *)user;
   return lonejson__byte_append(&stream->string_item, data, len,
                                stream->string_item_max_bytes,
                                &stream->allocator, error);
 }
 
-static lonejson_status lonejson__array_stream_string_item_end(
-    void *user, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_string_item_end(void *user, lonejson_error *error) {
   lonejson_array_stream *stream = (lonejson_array_stream *)user;
   lonejson_status status;
 
   if (stream->string_callback == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  status = stream->string_callback(stream->string_callback_user,
-                                   stream->string_item.data != NULL
-                                       ? stream->string_item.data
-                                       : "",
-                                   stream->string_item.len, error);
+  status = stream->string_callback(
+      stream->string_callback_user,
+      stream->string_item.data != NULL ? stream->string_item.data : "",
+      stream->string_item.len, error);
   lonejson__byte_reset(&stream->string_item);
   return status;
 }
 
-static lonejson_status lonejson__array_stream_validate_duplicate_keys(
-    lonejson_array_stream *stream, const void *data, size_t len) {
+static lonejson_status
+lonejson__array_stream_validate_duplicate_keys(lonejson_array_stream *stream,
+                                               const void *data, size_t len) {
   lonejson__array_stream_dup_state state;
   lonejson_value_visitor visitor;
   lonejson_value_limits limits;
@@ -1192,9 +1208,8 @@ static lonejson_status lonejson__array_stream_validate_duplicate_keys(
   limits.max_number_bytes = len == 0u ? 1u : len;
   limits.max_key_bytes = len == 0u ? 1u : len;
   limits.max_total_bytes = 0u;
-  status =
-      lonejson_visit_value_buffer(data, len, &visitor, &state, &limits,
-                                  &stream->error);
+  status = lonejson_visit_value_buffer(data, len, &visitor, &state, &limits,
+                                       &stream->error);
   lonejson__array_stream_dup_state_cleanup(&state);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
@@ -1206,8 +1221,7 @@ static lonejson_status
 lonejson__array_stream_getc_status(lonejson_array_stream *stream, int *out) {
   int ch = lonejson__array_stream_nonspace(stream);
   if (ch == -2) {
-    return stream->would_block ? LONEJSON_STATUS_TRUNCATED
-                               : stream->error.code;
+    return stream->would_block ? LONEJSON_STATUS_TRUNCATED : stream->error.code;
   }
   *out = ch;
   return LONEJSON_STATUS_OK;
@@ -1229,12 +1243,13 @@ lonejson__array_stream_open_common(const char *path,
   }
   path_len = path == NULL ? 0u : strlen(path);
   if (path_len != 0u && strchr(path, '.') != NULL) {
-    lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-                        "array stream v1 supports only one direct path segment");
+    lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "array stream v1 supports only one direct path segment");
     return NULL;
   }
-  stream = (lonejson_array_stream *)lonejson__buffer_alloc(
-      resolved.allocator, sizeof(*stream));
+  stream = (lonejson_array_stream *)lonejson__buffer_alloc(resolved.allocator,
+                                                           sizeof(*stream));
   if (stream == NULL) {
     lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
                         "failed to allocate array stream");
@@ -1251,7 +1266,8 @@ lonejson__array_stream_open_common(const char *path,
     stream->path = lonejson__dup_range(path, path_len, &stream->allocator,
                                        &stream->path_alloc_size, error);
     if (stream->path == NULL) {
-      lonejson__buffer_free(&stream->allocator, stream, stream->self_alloc_size);
+      lonejson__buffer_free(&stream->allocator, stream,
+                            stream->self_alloc_size);
       return NULL;
     }
     stream->path_len = path_len;
@@ -1365,11 +1381,9 @@ lonejson_array_stream_open_push(const char *path,
   return stream;
 }
 
-static lonejson_array_stream_result
-lonejson__array_stream_next_raw(lonejson_array_stream *stream,
-                                lonejson_array_stream_value_mode mode,
-                                const lonejson_map *map, void *dst,
-                                lonejson_error *error) {
+static lonejson_array_stream_result lonejson__array_stream_next_raw(
+    lonejson_array_stream *stream, lonejson_array_stream_value_mode mode,
+    const lonejson_map *map, void *dst, lonejson_error *error) {
   int ch = 0;
   lonejson_status status;
 
@@ -1488,9 +1502,9 @@ lonejson__array_stream_next_raw(lonejson_array_stream *stream,
         return lonejson__array_stream_result_from_status(stream, status, error);
       }
       if (ch != ':') {
-        (void)lonejson__array_stream_set_error(
-            stream, LONEJSON_STATUS_INVALID_JSON,
-            "expected ':' after object key");
+        (void)lonejson__array_stream_set_error(stream,
+                                               LONEJSON_STATUS_INVALID_JSON,
+                                               "expected ':' after object key");
         if (error != NULL) {
           *error = stream->error;
         }
@@ -1551,9 +1565,9 @@ lonejson__array_stream_next_raw(lonejson_array_stream *stream,
         break;
       }
       if (ch != ',') {
-        (void)lonejson__array_stream_set_error(
-            stream, LONEJSON_STATUS_INVALID_JSON,
-            "expected ',' or '}' in object");
+        (void)lonejson__array_stream_set_error(stream,
+                                               LONEJSON_STATUS_INVALID_JSON,
+                                               "expected ',' or '}' in object");
         if (error != NULL) {
           *error = stream->error;
         }
@@ -1584,9 +1598,9 @@ lonejson__array_stream_next_raw(lonejson_array_stream *stream,
         return lonejson__array_stream_result_from_status(stream, status, error);
       }
       if (ch == EOF) {
-        (void)lonejson__array_stream_set_error(
-            stream, LONEJSON_STATUS_INVALID_JSON,
-            "unterminated selected array");
+        (void)lonejson__array_stream_set_error(stream,
+                                               LONEJSON_STATUS_INVALID_JSON,
+                                               "unterminated selected array");
         if (error != NULL) {
           *error = stream->error;
         }
@@ -1657,9 +1671,9 @@ lonejson__array_stream_next_raw(lonejson_array_stream *stream,
         return lonejson__array_stream_result_from_status(stream, status, error);
       }
       if (ch == EOF) {
-        (void)lonejson__array_stream_set_error(
-            stream, LONEJSON_STATUS_INVALID_JSON,
-            "unterminated selected array");
+        (void)lonejson__array_stream_set_error(stream,
+                                               LONEJSON_STATUS_INVALID_JSON,
+                                               "unterminated selected array");
         if (error != NULL) {
           *error = stream->error;
         }
@@ -1707,9 +1721,10 @@ lonejson__array_stream_next_raw(lonejson_array_stream *stream,
   }
 }
 
-lonejson_array_stream_result lonejson_array_stream_next(
-    lonejson_array_stream *stream, const lonejson_map *map, void *dst,
-    lonejson_error *error) {
+lonejson_array_stream_result
+lonejson_array_stream_next(lonejson_array_stream *stream,
+                           const lonejson_map *map, void *dst,
+                           lonejson_error *error) {
   lonejson_array_stream_result result;
 
   if (stream == NULL || map == NULL || dst == NULL) {
@@ -1753,9 +1768,8 @@ lonejson_array_stream_next_value(lonejson_array_stream *stream,
     }
     return LONEJSON_ARRAY_STREAM_ERROR;
   }
-  status =
-      lonejson_json_value_set_buffer(value, stream->item.data, stream->item.len,
-                                     &stream->error);
+  status = lonejson_json_value_set_buffer(value, stream->item.data,
+                                          stream->item.len, &stream->error);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
     if (error != NULL) {
@@ -1777,8 +1791,8 @@ static lonejson_status lonejson__array_stream_push_invoke(
   status = callback(user, dst);
   lonejson_cleanup(map, dst);
   if (status != LONEJSON_STATUS_OK) {
-    (void)lonejson__array_stream_set_error(
-        stream, status, "array stream item callback failed");
+    (void)lonejson__array_stream_set_error(stream, status,
+                                           "array stream item callback failed");
     if (error != NULL) {
       *error = stream->error;
     }
@@ -1787,9 +1801,10 @@ static lonejson_status lonejson__array_stream_push_invoke(
   return LONEJSON_STATUS_OK;
 }
 
-static void lonejson__array_stream_note_truncation(
-    lonejson_array_stream *stream, lonejson_status *final_status,
-    lonejson_error *final_error) {
+static void
+lonejson__array_stream_note_truncation(lonejson_array_stream *stream,
+                                       lonejson_status *final_status,
+                                       lonejson_error *final_error) {
   if (stream->error.truncated || stream->push_truncated) {
     stream->push_truncated = 1;
     *final_status = LONEJSON_STATUS_TRUNCATED;
@@ -1799,12 +1814,13 @@ static void lonejson__array_stream_note_truncation(
   }
 }
 
-static lonejson_status lonejson__array_stream_return_error(
-    lonejson_array_stream *stream, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_return_error(lonejson_array_stream *stream,
+                                    lonejson_error *error) {
   if (stream->error.code == LONEJSON_STATUS_OK) {
     (void)lonejson__set_error(&stream->error, LONEJSON_STATUS_INTERNAL_ERROR,
-                               stream->offset, stream->line, stream->column,
-                               "array stream failed without an error code");
+                              stream->offset, stream->line, stream->column,
+                              "array stream failed without an error code");
   }
   if (error != NULL) {
     *error = stream->error;
@@ -1812,8 +1828,9 @@ static lonejson_status lonejson__array_stream_return_error(
   return stream->error.code;
 }
 
-static lonejson_status lonejson__array_stream_string_finish_item(
-    lonejson_array_stream *stream, lonejson_error *error) {
+static lonejson_status
+lonejson__array_stream_string_finish_item(lonejson_array_stream *stream,
+                                          lonejson_error *error) {
   lonejson_status status = LONEJSON_STATUS_OK;
 
   if (!stream->string_seen) {
@@ -1883,14 +1900,11 @@ static lonejson_status lonejson__array_stream_push_common(
     stream->push_eof = 0;
 
     for (;;) {
-      lonejson_array_stream_result result =
-          lonejson__array_stream_next_raw(stream,
-                                          LONEJSON_ARRAY_STREAM_VALUE_MAPPED,
-                                          map, dst, error);
+      lonejson_array_stream_result result = lonejson__array_stream_next_raw(
+          stream, LONEJSON_ARRAY_STREAM_VALUE_MAPPED, map, dst, error);
       if (result == LONEJSON_ARRAY_STREAM_ITEM) {
-        lonejson_status status =
-            lonejson__array_stream_push_invoke(stream, callback, user, map, dst,
-                                               error);
+        lonejson_status status = lonejson__array_stream_push_invoke(
+            stream, callback, user, map, dst, error);
         if (status != LONEJSON_STATUS_OK) {
           return status;
         }
@@ -1923,14 +1937,11 @@ static lonejson_status lonejson__array_stream_push_common(
   if (finish) {
     stream->push_eof = 1;
     for (;;) {
-      lonejson_array_stream_result result =
-          lonejson__array_stream_next_raw(stream,
-                                          LONEJSON_ARRAY_STREAM_VALUE_MAPPED,
-                                          map, dst, error);
+      lonejson_array_stream_result result = lonejson__array_stream_next_raw(
+          stream, LONEJSON_ARRAY_STREAM_VALUE_MAPPED, map, dst, error);
       if (result == LONEJSON_ARRAY_STREAM_ITEM) {
-        lonejson_status status =
-            lonejson__array_stream_push_invoke(stream, callback, user, map, dst,
-                                               error);
+        lonejson_status status = lonejson__array_stream_push_invoke(
+            stream, callback, user, map, dst, error);
         if (status != LONEJSON_STATUS_OK) {
           return status;
         }
@@ -2025,10 +2036,8 @@ static lonejson_status lonejson__array_stream_push_string_common(
     stream->push_eof = 0;
 
     for (;;) {
-      lonejson_array_stream_result result =
-          lonejson__array_stream_next_raw(stream,
-                                          LONEJSON_ARRAY_STREAM_VALUE_STRING,
-                                          NULL, NULL, error);
+      lonejson_array_stream_result result = lonejson__array_stream_next_raw(
+          stream, LONEJSON_ARRAY_STREAM_VALUE_STRING, NULL, NULL, error);
       if (result == LONEJSON_ARRAY_STREAM_ITEM) {
         lonejson_status status =
             lonejson__array_stream_string_finish_item(stream, error);
@@ -2053,10 +2062,8 @@ static lonejson_status lonejson__array_stream_push_string_common(
   if (finish) {
     stream->push_eof = 1;
     for (;;) {
-      lonejson_array_stream_result result =
-          lonejson__array_stream_next_raw(stream,
-                                          LONEJSON_ARRAY_STREAM_VALUE_STRING,
-                                          NULL, NULL, error);
+      lonejson_array_stream_result result = lonejson__array_stream_next_raw(
+          stream, LONEJSON_ARRAY_STREAM_VALUE_STRING, NULL, NULL, error);
       if (result == LONEJSON_ARRAY_STREAM_ITEM) {
         lonejson_status status =
             lonejson__array_stream_string_finish_item(stream, error);
@@ -2118,8 +2125,7 @@ lonejson_status lonejson_array_stream_push(
 
 lonejson_status lonejson_array_stream_finish(
     lonejson_array_stream *stream, const lonejson_map *map, void *dst,
-    lonejson_array_stream_item_fn callback, void *user,
-    lonejson_error *error) {
+    lonejson_array_stream_item_fn callback, void *user, lonejson_error *error) {
   return lonejson__array_stream_push_common(stream, map, dst, NULL, 0u,
                                             callback, user, 1, error);
 }

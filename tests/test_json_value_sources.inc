@@ -585,10 +585,8 @@ static void test_json_value_parse_capture_escapes(void) {
       "\"selector\":{\"text\":\"line\\n\\t\\\"\\\\\\u0001\\u0061\"},"
       "\"fields\":[\"quote\\\"\",\"slash\\\\\",\"ctrl\\u0002\"]"
       "}";
-  const char *expected_selector =
-      "{\"text\":\"line\\n\\t\\\"\\\\\\u0001a\"}";
-  const char *expected_fields =
-      "[\"quote\\\"\",\"slash\\\\\",\"ctrl\\u0002\"]";
+  const char *expected_selector = "{\"text\":\"line\\n\\t\\\"\\\\\\u0001a\"}";
+  const char *expected_fields = "[\"quote\\\"\",\"slash\\\\\",\"ctrl\\u0002\"]";
   test_json_value_doc doc;
   test_json_value_doc streamed;
   test_reader_state stream_state;
@@ -604,9 +602,8 @@ static void test_json_value_parse_capture_escapes(void) {
   status = lonejson_json_value_enable_parse_capture(&doc.fields, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   options.clear_destination = 0;
-  status =
-      lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
-                          &error);
+  status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                               &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(doc.selector.json, expected_selector) == 0);
   EXPECT(strcmp(doc.fields.json, expected_fields) == 0);
@@ -1368,4 +1365,3 @@ static void test_json_value_nested_failure_matrix(void) {
   }
   lonejson_json_value_cleanup(&value);
 }
-

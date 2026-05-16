@@ -74,10 +74,13 @@ static void ljlua_register_metatable(lua_State *L, const char *name,
 }
 
 int luaopen_lonejson_core(lua_State *L) {
-  static const luaL_Reg funcs[] = {{"compile_schema", ljlua_schema_new},
-                                   {"json_null", ljlua_json_null},
-                                   {"monotonic_ns", ljlua_monotonic_ns},
-                                   {NULL, NULL}};
+  static const luaL_Reg funcs[] = {
+      {"compile_schema", ljlua_schema_new},
+      {"array_rewrite_string", ljlua_array_rewrite_string},
+      {"array_rewrite_path", ljlua_array_rewrite_path},
+      {"json_null", ljlua_json_null},
+      {"monotonic_ns", ljlua_monotonic_ns},
+      {NULL, NULL}};
 
   luaL_checkversion(L);
   ljlua_register_metatable(L, LJLUA_SCHEMA_MT, ljlua_schema_methods,
@@ -86,9 +89,8 @@ int luaopen_lonejson_core(lua_State *L) {
                            ljlua_record_gc, ljlua_record_index);
   ljlua_register_metatable(L, LJLUA_STREAM_MT, ljlua_stream_methods,
                            ljlua_stream_gc, NULL);
-  ljlua_register_metatable(L, LJLUA_ARRAY_STREAM_MT,
-                           ljlua_array_stream_methods, ljlua_array_stream_gc,
-                           NULL);
+  ljlua_register_metatable(L, LJLUA_ARRAY_STREAM_MT, ljlua_array_stream_methods,
+                           ljlua_array_stream_gc, NULL);
   ljlua_register_metatable(L, LJLUA_SPOOL_MT, ljlua_spool_methods,
                            ljlua_spool_gc, NULL);
   ljlua_register_metatable(L, LJLUA_PATH_MT, ljlua_path_methods, ljlua_path_gc,

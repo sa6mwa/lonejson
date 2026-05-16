@@ -735,8 +735,8 @@ static lonejson_read_result test_state_reader(void *user, unsigned char *buffer,
 }
 
 static lonejson_read_result test_empty_then_state_reader(void *user,
-                                                        unsigned char *buffer,
-                                                        size_t capacity) {
+                                                         unsigned char *buffer,
+                                                         size_t capacity) {
   test_empty_read_state *st = (test_empty_read_state *)user;
   lonejson_read_result rr;
 
@@ -748,8 +748,9 @@ static lonejson_read_result test_empty_then_state_reader(void *user,
   return test_state_reader(&st->inner, buffer, capacity);
 }
 
-static lonejson_read_result test_intermittent_empty_reader(
-    void *user, unsigned char *buffer, size_t capacity) {
+static lonejson_read_result
+test_intermittent_empty_reader(void *user, unsigned char *buffer,
+                               size_t capacity) {
   test_intermittent_empty_read_state *st =
       (test_intermittent_empty_read_state *)user;
   lonejson_read_result rr;
@@ -1512,9 +1513,8 @@ static void test_expect_compact_buffer_matches_sink(const lonejson_map *map,
   lonejson_status status;
   size_t needed = 0u;
 
-  status = lonejson_serialize_buffer(map, src, buffer_json,
-                                     sizeof(buffer_json), &needed, NULL,
-                                     &error);
+  status = lonejson_serialize_buffer(map, src, buffer_json, sizeof(buffer_json),
+                                     &needed, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(needed == strlen(buffer_json));
   if (expected != NULL) {
@@ -1538,4 +1538,3 @@ static void poison_bytes(void *ptr, size_t len, unsigned char value) {
     bytes[i] = value;
   }
 }
-

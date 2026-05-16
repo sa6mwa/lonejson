@@ -45,9 +45,8 @@ static lonejson_status fuzz_push_item(void *user, void *dst) {
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_read_result fuzz_array_stream_reader(void *user,
-                                                     unsigned char *buffer,
-                                                     size_t capacity) {
+static lonejson_read_result
+fuzz_array_stream_reader(void *user, unsigned char *buffer, size_t capacity) {
   fuzz_reader *reader = (fuzz_reader *)user;
   lonejson_read_result result;
   size_t remaining;
@@ -198,9 +197,9 @@ static void fuzz_drive_push(const char *path, const uint8_t *json,
       n = json_len - offset;
     }
     memset(&item, 0, sizeof(item));
-    status = lonejson_array_stream_push(stream, &fuzz_item_map, &item,
-                                        json + offset, n, fuzz_push_item,
-                                        &state, &error);
+    status =
+        lonejson_array_stream_push(stream, &fuzz_item_map, &item, json + offset,
+                                   n, fuzz_push_item, &state, &error);
     lonejson_cleanup(&fuzz_item_map, &item);
     offset += n;
     if (status != LONEJSON_STATUS_OK) {
@@ -308,8 +307,7 @@ static void fuzz_drive_duplicate_oracles(const uint8_t *data, size_t size) {
   raw_len = snprintf(raw_doc, sizeof(raw_doc),
                      "[{\"a\":%u,\"\\u0061\":%u,"
                      "\"nested\":{\"a\":%u,\"\\u0061\":%u}}]",
-                     a % 997u, b % 997u, (a + 1u) % 997u,
-                     (b + 1u) % 997u);
+                     a % 997u, b % 997u, (a + 1u) % 997u, (b + 1u) % 997u);
   if (raw_len <= 0 || (size_t)raw_len >= sizeof(raw_doc)) {
     abort();
   }

@@ -199,4 +199,3 @@ int lonejson_source_is_rewindable(const lonejson_source *value) {
     return 0;
   }
 }
-

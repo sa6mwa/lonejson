@@ -18,9 +18,8 @@ static const lonejson_field strict_item_fields[] = {
                                     LONEJSON_OVERFLOW_FAIL)};
 LONEJSON_MAP_DEFINE(strict_item_map, strict_item, strict_item_fields);
 
-static lonejson_read_result strict_array_reader(void *user,
-                                                unsigned char *buffer,
-                                                size_t capacity) {
+static lonejson_read_result
+strict_array_reader(void *user, unsigned char *buffer, size_t capacity) {
   strict_reader_state *state;
   lonejson_read_result result;
   size_t remaining;

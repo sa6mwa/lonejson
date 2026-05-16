@@ -64,19 +64,17 @@ static LONEJSON__INLINE lonejson_status lonejson__sink_grow(
     return LONEJSON_STATUS_OK;
   }
   if (len > (SIZE_MAX - sink->length)) {
-    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW,
-                               error ? error->offset : 0u,
-                               error ? error->line : 0u,
-                               error ? error->column : 0u,
-                               "output buffer too large");
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_OVERFLOW, error ? error->offset : 0u,
+        error ? error->line : 0u, error ? error->column : 0u,
+        "output buffer too large");
   }
   payload_required = sink->length + len;
   if (payload_required == SIZE_MAX) {
-    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW,
-                               error ? error->offset : 0u,
-                               error ? error->line : 0u,
-                               error ? error->column : 0u,
-                               "output buffer too large");
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_OVERFLOW, error ? error->offset : 0u,
+        error ? error->line : 0u, error ? error->column : 0u,
+        "output buffer too large");
   }
   if (sink->max_bytes != 0u && payload_required > sink->max_bytes) {
     return lonejson__set_error(
@@ -96,11 +94,10 @@ static LONEJSON__INLINE lonejson_status lonejson__sink_grow(
     }
     max_alloc = sink->max_bytes != 0u ? sink->max_bytes + 1u : 0u;
     if (sink->max_bytes != 0u && max_alloc == 0u) {
-      return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW,
-                                 error ? error->offset : 0u,
-                                 error ? error->line : 0u,
-                                 error ? error->column : 0u,
-                                 "output buffer too large");
+      return lonejson__set_error(
+          error, LONEJSON_STATUS_OVERFLOW, error ? error->offset : 0u,
+          error ? error->line : 0u, error ? error->column : 0u,
+          "output buffer too large");
     }
     if (max_alloc != 0u && next_cap > max_alloc) {
       next_cap = max_alloc;
@@ -291,9 +288,8 @@ static LONEJSON__INLINE lonejson_status lonejson__buffer_emit_cstr_exact(
                                      LONEJSON__TEXT_LEN(text));
 }
 
-static LONEJSON__INLINE lonejson_status
-lonejson__buffer_reserve_grow(lonejson_buffer_sink *sink, lonejson_error *error,
-                              size_t len) {
+static LONEJSON__INLINE lonejson_status lonejson__buffer_reserve_grow(
+    lonejson_buffer_sink *sink, lonejson_error *error, size_t len) {
   char *next;
   size_t next_cap;
   size_t alloc_required;
@@ -301,19 +297,17 @@ lonejson__buffer_reserve_grow(lonejson_buffer_sink *sink, lonejson_error *error,
   size_t max_alloc;
 
   if (len > (SIZE_MAX - sink->length)) {
-    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW,
-                               error ? error->offset : 0u,
-                               error ? error->line : 0u,
-                               error ? error->column : 0u,
-                               "output buffer too large");
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_OVERFLOW, error ? error->offset : 0u,
+        error ? error->line : 0u, error ? error->column : 0u,
+        "output buffer too large");
   }
   payload_required = sink->length + len;
   if (payload_required == SIZE_MAX) {
-    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW,
-                               error ? error->offset : 0u,
-                               error ? error->line : 0u,
-                               error ? error->column : 0u,
-                               "output buffer too large");
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_OVERFLOW, error ? error->offset : 0u,
+        error ? error->line : 0u, error ? error->column : 0u,
+        "output buffer too large");
   }
   if (sink->max_bytes != 0u && payload_required > sink->max_bytes) {
     return lonejson__set_error(
@@ -335,11 +329,10 @@ lonejson__buffer_reserve_grow(lonejson_buffer_sink *sink, lonejson_error *error,
   }
   max_alloc = sink->max_bytes != 0u ? sink->max_bytes + 1u : 0u;
   if (sink->max_bytes != 0u && max_alloc == 0u) {
-    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW,
-                               error ? error->offset : 0u,
-                               error ? error->line : 0u,
-                               error ? error->column : 0u,
-                               "output buffer too large");
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_OVERFLOW, error ? error->offset : 0u,
+        error ? error->line : 0u, error ? error->column : 0u,
+        "output buffer too large");
   }
   if (max_alloc != 0u && next_cap > max_alloc) {
     next_cap = max_alloc;
@@ -376,7 +369,8 @@ lonejson__buffer_emit_grow(lonejson_buffer_sink *sink, lonejson_error *error,
 
 static LONEJSON__INLINE lonejson_status lonejson__buffer_emit_cstr_grow(
     lonejson_buffer_sink *sink, lonejson_error *error, const char *text) {
-  return lonejson__buffer_emit_grow(sink, error, text, LONEJSON__TEXT_LEN(text));
+  return lonejson__buffer_emit_grow(sink, error, text,
+                                    LONEJSON__TEXT_LEN(text));
 }
 
 static lonejson_status lonejson__buffer_emit_escaped_fragment_exact(

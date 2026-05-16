@@ -604,7 +604,8 @@ static const lonejson_field bench_workload_case_result_fields[] = {
                                     "workload", LONEJSON_OVERFLOW_FAIL),
     LONEJSON_FIELD_I64(bench_workload_case_result, size, "size"),
     LONEJSON_FIELD_I64_REQ(bench_workload_case_result, ops, "ops"),
-    LONEJSON_FIELD_I64(bench_workload_case_result, payload_bytes, "payload_bytes"),
+    LONEJSON_FIELD_I64(bench_workload_case_result, payload_bytes,
+                       "payload_bytes"),
     LONEJSON_FIELD_I64(bench_workload_case_result, attachment_bytes,
                        "attachment_bytes"),
     LONEJSON_FIELD_OBJECT_REQ(bench_workload_case_result, phases, "phases",
@@ -620,14 +621,16 @@ LONEJSON_MAP_DEFINE(bench_workload_git_info_map, bench_workload_git_info,
                     bench_workload_git_info_fields);
 
 static const lonejson_field bench_workload_run_config_fields[] = {
-    LONEJSON_FIELD_STRING_FIXED_REQ(bench_workload_run_config, ha_mode, "ha_mode",
-                                    LONEJSON_OVERFLOW_FAIL),
-    LONEJSON_FIELD_I64_REQ(bench_workload_run_config, concurrency, "concurrency"),
+    LONEJSON_FIELD_STRING_FIXED_REQ(bench_workload_run_config, ha_mode,
+                                    "ha_mode", LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_I64_REQ(bench_workload_run_config, concurrency,
+                           "concurrency"),
     LONEJSON_FIELD_I64_REQ(bench_workload_run_config, runs, "runs"),
     LONEJSON_FIELD_I64_REQ(bench_workload_run_config, warmup, "warmup"),
     LONEJSON_FIELD_STRING_FIXED(bench_workload_run_config, query_return,
                                 "query_return", LONEJSON_OVERFLOW_FAIL),
-    LONEJSON_FIELD_BOOL(bench_workload_run_config, qrf_disabled, "qrf_disabled")};
+    LONEJSON_FIELD_BOOL(bench_workload_run_config, qrf_disabled,
+                        "qrf_disabled")};
 LONEJSON_MAP_DEFINE(bench_workload_run_config_map, bench_workload_run_config,
                     bench_workload_run_config_fields);
 
@@ -640,12 +643,12 @@ static const lonejson_field bench_workload_run_record_fields[] = {
                                 "history_branch", LONEJSON_OVERFLOW_FAIL),
     LONEJSON_FIELD_STRING_FIXED_REQ(bench_workload_run_record, preset, "preset",
                                     LONEJSON_OVERFLOW_FAIL),
-    LONEJSON_FIELD_STRING_FIXED_REQ(bench_workload_run_record, backend, "backend",
-                                    LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_STRING_FIXED_REQ(bench_workload_run_record, backend,
+                                    "backend", LONEJSON_OVERFLOW_FAIL),
     LONEJSON_FIELD_STRING_FIXED(bench_workload_run_record, store, "store",
                                 LONEJSON_OVERFLOW_FAIL),
-    LONEJSON_FIELD_STRING_FIXED(bench_workload_run_record, disk_root, "disk_root",
-                                LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_STRING_FIXED(bench_workload_run_record, disk_root,
+                                "disk_root", LONEJSON_OVERFLOW_FAIL),
     LONEJSON_FIELD_OBJECT_REQ(bench_workload_run_record, git, "git",
                               &bench_workload_git_info_map),
     LONEJSON_FIELD_BOOL(bench_workload_run_record, golden, "golden"),
@@ -1174,14 +1177,15 @@ static void bench_init_workload_target(bench_workload_target *target) {
 }
 
 static int bench_check_workload_record(const bench_workload_target *target,
-                                    size_t index) {
+                                       size_t index) {
   const bench_workload_case_result *cases;
 
   if (index >= 5u) {
     return 0;
   }
   cases = (const bench_workload_case_result *)target->record.cases.items;
-  if (strcmp(target->record.run_id, bench_workload_expected_run_ids[index]) != 0 ||
+  if (strcmp(target->record.run_id, bench_workload_expected_run_ids[index]) !=
+          0 ||
       strcmp(target->record.git.short_sha,
              bench_workload_expected_short_shas[index]) != 0 ||
       target->record.git.dirty !=
@@ -1698,8 +1702,7 @@ static int bench_stream_workload_case(void *user) {
   return seen == ctx->object_count;
 }
 
-static int bench_check_array_stream_item(const bench_item *item,
-                                         size_t index) {
+static int bench_check_array_stream_item(const bench_item *item, size_t index) {
   if (index == 0u) {
     return item->id == 1 && strcmp(item->label, "alpha") == 0;
   }
@@ -1751,8 +1754,9 @@ static lonejson_status bench_array_stream_string_end(void *user,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status bench_array_stream_string_item_cb(
-    void *user, const char *data, size_t len, lonejson_error *error) {
+static lonejson_status
+bench_array_stream_string_item_cb(void *user, const char *data, size_t len,
+                                  lonejson_error *error) {
   bench_array_stream_count *state;
   (void)error;
   if (data == NULL) {
@@ -1879,9 +1883,9 @@ static int bench_array_stream_push_mapped_case(void *user) {
     }
     offset += chunk;
   }
-  status = lonejson_array_stream_finish(stream, &bench_item_map, &item,
-                                        bench_array_stream_item_cb, &state,
-                                        &error);
+  status =
+      lonejson_array_stream_finish(stream, &bench_item_map, &item,
+                                   bench_array_stream_item_cb, &state, &error);
   lonejson_array_stream_close(stream);
   if (status != LONEJSON_STATUS_OK || state.count != ctx->item_count) {
     return 0;
@@ -1915,8 +1919,8 @@ static int bench_array_stream_push_string_case(void *user) {
     if (chunk > ctx->json_len - offset) {
       chunk = ctx->json_len - offset;
     }
-    status = lonejson_array_stream_push_string(
-        stream, ctx->json + offset, chunk, &handler, &state, &error);
+    status = lonejson_array_stream_push_string(stream, ctx->json + offset,
+                                               chunk, &handler, &state, &error);
     if (status != LONEJSON_STATUS_OK) {
       lonejson_array_stream_close(stream);
       return 0;
@@ -2543,8 +2547,8 @@ static int bench_prepare_benchmark_cases(
 }
 
 static void bench_prepare_workload_case(bench_workload_case *workload_case,
-                                     unsigned char *jsonl_data,
-                                     size_t jsonl_len) {
+                                        unsigned char *jsonl_data,
+                                        size_t jsonl_len) {
   workload_case->map = &bench_workload_run_record_map;
   workload_case->jsonl = jsonl_data;
   workload_case->jsonl_len = jsonl_len;
@@ -2639,8 +2643,8 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                         &n_count, &i_count) != 0) {
     return 1;
   }
-  if (bench_read_file("tests/fixtures/workloadbench.jsonl", &workload_jsonl_data,
-                      &workload_jsonl_len) != 0) {
+  if (bench_read_file("tests/fixtures/workloadbench.jsonl",
+                      &workload_jsonl_data, &workload_jsonl_len) != 0) {
     bench_free_docs(docs, doc_count);
     return 1;
   }
@@ -2729,7 +2733,8 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   array_tags_case.chunk_size = LONEJSON_PUSH_PARSER_BUFFER_SIZE;
   array_tags_push_tiny_case = array_tags_case;
   array_tags_push_tiny_case.chunk_size = 5u;
-  bench_prepare_workload_case(&workload_case, workload_jsonl_data, workload_jsonl_len);
+  bench_prepare_workload_case(&workload_case, workload_jsonl_data,
+                              workload_jsonl_len);
   vendor_long_case.kind = BENCH_VENDOR_LONG_STRINGS;
   vendor_long_case.map = &bench_vendor_long_doc_map;
   vendor_long_case.json = (const unsigned char *)bench_vendor_long_strings_json;
@@ -2846,24 +2851,21 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           bench_stream_fixed_case, &stream_prepared_case,
                           iterations, stream_prepared_case.stream_len,
                           stream_prepared_case.object_count);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "array_stream/pull_mapped_items/lonejson",
-                          "array_stream", bench_array_stream_pull_mapped_case,
-                          &array_items_case, iterations,
-                          array_items_case.json_len,
-                          array_items_case.item_count);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "array_stream/pull_raw_items/lonejson",
-                          "array_stream", bench_array_stream_pull_value_case,
-                          &array_items_case, iterations,
-                          array_items_case.json_len,
-                          array_items_case.item_count);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "array_stream/push_mapped_items/lonejson",
-                          "array_stream", bench_array_stream_push_mapped_case,
-                          &array_items_push_case, iterations,
-                          array_items_push_case.json_len,
-                          array_items_push_case.item_count);
+    bench_run_simple_case(
+        &run.result_storage[result_index++],
+        "array_stream/pull_mapped_items/lonejson", "array_stream",
+        bench_array_stream_pull_mapped_case, &array_items_case, iterations,
+        array_items_case.json_len, array_items_case.item_count);
+    bench_run_simple_case(
+        &run.result_storage[result_index++],
+        "array_stream/pull_raw_items/lonejson", "array_stream",
+        bench_array_stream_pull_value_case, &array_items_case, iterations,
+        array_items_case.json_len, array_items_case.item_count);
+    bench_run_simple_case(
+        &run.result_storage[result_index++],
+        "array_stream/push_mapped_items/lonejson", "array_stream",
+        bench_array_stream_push_mapped_case, &array_items_push_case, iterations,
+        array_items_push_case.json_len, array_items_push_case.item_count);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "array_stream/push_mapped_items_tiny/lonejson",
                           "array_stream", bench_array_stream_push_mapped_case,
@@ -2875,13 +2877,12 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           "array_stream", bench_array_stream_push_string_case,
                           &array_tags_case, iterations,
                           array_tags_case.json_len, array_tags_case.item_count);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "array_stream/push_string_items_tiny/lonejson",
-                          "array_stream",
-                          bench_array_stream_push_string_items_case,
-                          &array_tags_push_tiny_case, iterations,
-                          array_tags_push_tiny_case.json_len,
-                          array_tags_push_tiny_case.item_count);
+    bench_run_simple_case(
+        &run.result_storage[result_index++],
+        "array_stream/push_string_items_tiny/lonejson", "array_stream",
+        bench_array_stream_push_string_items_case, &array_tags_push_tiny_case,
+        iterations, array_tags_push_tiny_case.json_len,
+        array_tags_push_tiny_case.item_count);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "stream/doc_long_strings/lonejson", "stream",
                           bench_stream_vendor_doc_case, &vendor_long_case,
@@ -2894,10 +2895,10 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           "stream/doc_string_unicode/lonejson", "stream",
                           bench_stream_vendor_doc_case, &vendor_unicode_case,
                           iterations, vendor_unicode_case.json_len, 1u);
-    bench_run_simple_case(&run.result_storage[result_index++],
-                          "stream/workloadbench/lonejson", "stream",
-                          bench_stream_workload_case, &workload_case, iterations,
-                          workload_case.jsonl_len, workload_case.object_count);
+    bench_run_simple_case(
+        &run.result_storage[result_index++], "stream/workloadbench/lonejson",
+        "stream", bench_stream_workload_case, &workload_case, iterations,
+        workload_case.jsonl_len, workload_case.object_count);
     bench_run_simple_case(&run.result_storage[result_index++],
                           "stream/doc_japanese/lonejson", "stream",
                           bench_stream_vendor_doc_case, &vendor_japanese_case,
@@ -3201,8 +3202,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
           sizeof(json_value_path)) != 0) {
     return 1;
   }
-  if (bench_read_file("tests/fixtures/workloadbench.jsonl", &workload_jsonl_data,
-                      &workload_jsonl_len) != 0) {
+  if (bench_read_file("tests/fixtures/workloadbench.jsonl",
+                      &workload_jsonl_data, &workload_jsonl_len) != 0) {
     return 1;
   }
   if (bench_read_file("tests/fixtures/languages/japanese_hojoki.json",
@@ -3246,7 +3247,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   array_tags_case.chunk_size = LONEJSON_PUSH_PARSER_BUFFER_SIZE;
   array_tags_push_tiny_case = array_tags_case;
   array_tags_push_tiny_case.chunk_size = 5u;
-  bench_prepare_workload_case(&workload_case, workload_jsonl_data, workload_jsonl_len);
+  bench_prepare_workload_case(&workload_case, workload_jsonl_data,
+                              workload_jsonl_len);
   vendor_long_case.kind = BENCH_VENDOR_LONG_STRINGS;
   vendor_long_case.map = &bench_vendor_long_doc_map;
   vendor_long_case.json = (const unsigned char *)bench_vendor_long_strings_json;
@@ -3338,8 +3340,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "stream";
     bytes_per_call = stream_prepared_case.stream_len;
     docs_per_call = stream_prepared_case.object_count;
-  } else if (strcmp(case_name,
-                    "array_stream/pull_mapped_items/lonejson") == 0) {
+  } else if (strcmp(case_name, "array_stream/pull_mapped_items/lonejson") ==
+             0) {
     fn = bench_array_stream_pull_mapped_case;
     ctx = &array_items_case;
     group = "array_stream";
@@ -3351,8 +3353,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "array_stream";
     bytes_per_call = array_items_case.json_len;
     docs_per_call = array_items_case.item_count;
-  } else if (strcmp(case_name,
-                    "array_stream/push_mapped_items/lonejson") == 0) {
+  } else if (strcmp(case_name, "array_stream/push_mapped_items/lonejson") ==
+             0) {
     fn = bench_array_stream_push_mapped_case;
     ctx = &array_items_push_case;
     group = "array_stream";
@@ -3365,8 +3367,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "array_stream";
     bytes_per_call = array_items_push_tiny_case.json_len;
     docs_per_call = array_items_push_tiny_case.item_count;
-  } else if (strcmp(case_name,
-                    "array_stream/push_string_chunks/lonejson") == 0) {
+  } else if (strcmp(case_name, "array_stream/push_string_chunks/lonejson") ==
+             0) {
     fn = bench_array_stream_push_string_case;
     ctx = &array_tags_case;
     group = "array_stream";

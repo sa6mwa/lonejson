@@ -97,6 +97,8 @@ function M.chunks(spool, chunk_size)
   end
 end
 
+M.array_rewrite_string = core.array_rewrite_string
+M.array_rewrite_path = core.array_rewrite_path
 M.core = core
 M.json_null = core.json_null()
 

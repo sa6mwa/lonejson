@@ -294,6 +294,35 @@ other source helpers. `stream:next_value()` returns each selected array item as
 a native Lua JSON value when you need raw pass-through shape instead of the
 schema-mapped record.
 
+## Selected array rewrites
+
+Use `lj.array_rewrite_string(selector, json, options)` or
+`lj.array_rewrite_path(selector, input_path, output_path, options)` to transform
+one selected array while streaming the surrounding document through the
+rewriter. The selector accepts `""` for a root array, direct object paths such
+as `"items"`, and explicit fan-out segments such as `"boards[].items"`.
+
+```lua
+local out = lj.array_rewrite_string("items", [[{"items":[{"id":1},{"id":2}]}]], {
+  item = function(item)
+    if item.id == 1 then
+      return "drop"
+    end
+    return { action = "replace", value = { id = item.id, kept = true } }
+  end,
+  append = function(ctx, emit)
+    assert(emit({ id = 3, kept = true }))
+  end,
+})
+```
+
+The item callback receives a native Lua JSON value and a context table. Return
+`"keep"`, `"drop"`, or an action table using `replace`, `insert_before`,
+`insert_after`, or `replace_and_insert_after`; replacement values are serialized
+as JSON in deterministic key order. Parent contexts can be mapped by passing
+`parents = { { segment = "boards", schema = Board } }`; callbacks then read
+`ctx.parents[1].value`.
+
 ## Path compilation and accessors
 
 The binding also exposes compiled accessors for hot paths where repeated string

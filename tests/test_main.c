@@ -1,12 +1,15 @@
 #include "test_support.inc"
+/* clang-format off */
 #include "test_protocol_framing.inc"
 #include "test_parse_serialize.inc"
 #include "test_array_stream.inc"
+#include "test_array_rewrite.inc"
 #include "test_fixtures_public.inc"
 #include "test_json_value_sources.inc"
 #include "test_allocator_visitor.inc"
 #include "test_generator_omit.inc"
 #include "test_curl_misc.inc"
+/* clang-format on */
 
 int main(void) {
   test_parse_implicit_destination_reset();
@@ -67,6 +70,32 @@ int main(void) {
   test_array_stream_mapped_field_failure_cleans_alloc_items();
   test_array_stream_mapped_field_curl_facade();
   test_array_stream_mapped_string_field_curl_facade();
+  test_array_rewrite_root_array_mapped_actions();
+  test_array_rewrite_direct_and_nested_arrays();
+  test_array_rewrite_parent_context_filters_nested_array();
+  test_array_rewrite_repeated_parent_segments();
+  test_array_rewrite_json_value_items_and_failures();
+  test_array_rewrite_callback_and_action_failures();
+  test_array_rewrite_argument_and_selector_failures();
+  test_array_rewrite_parse_type_and_reader_failures();
+  test_array_rewrite_string_capture_allocation_failures();
+  test_array_rewrite_reader_uses_configured_allocator();
+  test_array_rewrite_reader_allocator_failure();
+  test_array_rewrite_item_parse_and_limit_failures();
+  test_array_rewrite_source_and_parent_failures();
+  test_array_rewrite_append_only_and_object_path();
+  test_array_rewrite_empty_all_drop_and_all_append();
+  test_array_rewrite_append_only_root_zero_alloc();
+  test_array_rewrite_spooled_replacement_item();
+  test_array_rewrite_large_array_memory_bound();
+  test_array_rewrite_owned_item_cleanup_between_items();
+  test_array_rewrite_truncation_status_is_preserved();
+  test_array_rewrite_owned_parent_cleanup_between_parents();
+  test_array_rewrite_owned_item_cleanup_on_failures();
+  test_array_rewrite_owned_parent_cleanup_on_failures();
+  test_array_rewrite_path_helper();
+  test_array_rewrite_helper_failures();
+  test_array_rewrite_fd_to_fd_helper();
   test_file_and_buffer_helpers();
   test_jsonl_helpers();
   test_sse_incremental_events_and_json_selection();

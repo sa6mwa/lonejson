@@ -41,8 +41,7 @@ LJ_MAP_DEFINE(short_parse_doc_map, short_parse_doc, short_parse_doc_fields);
 static const lj_field short_stream_doc_fields[] = {
     LJ_FIELD_STRING_ARRAY_STREAM_REQ(short_stream_doc, keys, "keys"),
     LJ_FIELD_U64_REQ(short_stream_doc, count, "count")};
-LJ_MAP_DEFINE(short_stream_doc_map, short_stream_doc,
-              short_stream_doc_fields);
+LJ_MAP_DEFINE(short_stream_doc_map, short_stream_doc, short_stream_doc_fields);
 
 static lj_status short_stream_begin(void *user, lj_error *error) {
   short_stream_seen *seen = (short_stream_seen *)user;
@@ -145,9 +144,8 @@ int main(void) {
   stream_handler.begin = short_stream_begin;
   stream_handler.chunk = short_stream_chunk;
   stream_handler.end = short_stream_end;
-  status = lj_string_array_stream_set_handler(&stream_doc.keys,
-                                              &stream_handler, &stream_seen,
-                                              &error);
+  status = lj_string_array_stream_set_handler(&stream_doc.keys, &stream_handler,
+                                              &stream_seen, &error);
   if (status != LJ_STATUS_OK) {
     lj_cleanup(&short_parse_doc_map, &short_record);
     lonejson_cleanup(&short_parse_doc_map, &long_record);
@@ -155,8 +153,7 @@ int main(void) {
     return 1;
   }
   status = lj_parse_cstr(&short_stream_doc_map, &stream_doc,
-                         "{\"keys\":[\"a\",\"b\"],\"count\":2}", NULL,
-                         &error);
+                         "{\"keys\":[\"a\",\"b\"],\"count\":2}", NULL, &error);
   if (status != LJ_STATUS_OK || stream_seen.begins != 2u ||
       stream_seen.ends != 2u || stream_seen.chunks == 0u ||
       stream_doc.count != 2u) {

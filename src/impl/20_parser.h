@@ -182,10 +182,10 @@ static LONEJSON__INLINE int lonejson__prepare_token(lonejson_parser *parser) {
 }
 
 static int lonejson__field_is_streamed(const lonejson_field *field) {
-  return field != NULL && (field->kind == LONEJSON_FIELD_KIND_STRING_STREAM ||
-                           field->kind == LONEJSON_FIELD_KIND_BASE64_STREAM ||
-                           field->kind ==
-                               LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM);
+  return field != NULL &&
+         (field->kind == LONEJSON_FIELD_KIND_STRING_STREAM ||
+          field->kind == LONEJSON_FIELD_KIND_BASE64_STREAM ||
+          field->kind == LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM);
 }
 
 static LONEJSON__INLINE lonejson_status
@@ -353,12 +353,13 @@ lonejson__stream_value_append_decoded(lonejson_parser *parser,
                                   len, &parser->error);
 }
 
-static lonejson_status lonejson__string_array_stream_type_error(
-    lonejson_parser *parser, const lonejson_field *field) {
+static lonejson_status
+lonejson__string_array_stream_type_error(lonejson_parser *parser,
+                                         const lonejson_field *field) {
   return lonejson__set_error(&parser->error, LONEJSON_STATUS_TYPE_MISMATCH,
                              parser->error.offset, parser->error.line,
-                             parser->error.column,
-                             "array '%s' expects strings", field->json_key);
+                             parser->error.column, "array '%s' expects strings",
+                             field->json_key);
 }
 
 static lonejson_status
@@ -463,7 +464,8 @@ static lonejson_status lonejson__stream_value_begin(lonejson_parser *parser,
   if (field->kind == LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM) {
     lonejson_string_array_stream *stream = (lonejson_string_array_stream *)ptr;
     if (stream->_lonejson_magic !=
-        lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC) ||
+            lonejson__init_cookie(stream,
+                                  LONEJSON__STRING_ARRAY_STREAM_MAGIC) ||
         stream->handler.chunk == NULL) {
       return lonejson__set_error(
           &parser->error, LONEJSON_STATUS_INVALID_ARGUMENT,
@@ -473,10 +475,9 @@ static lonejson_status lonejson__stream_value_begin(lonejson_parser *parser,
     }
     if (stream->active) {
       return lonejson__set_error(
-          &parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
-          parser->error.offset, parser->error.line, parser->error.column,
-          "string array stream field '%s' is already active",
-          field->json_key);
+          &parser->error, LONEJSON_STATUS_INTERNAL_ERROR, parser->error.offset,
+          parser->error.line, parser->error.column,
+          "string array stream field '%s' is already active", field->json_key);
     }
     if (stream->handler.begin != NULL) {
       lonejson_status status =
@@ -511,11 +512,10 @@ static lonejson_status lonejson__stream_value_finish(lonejson_parser *parser) {
   if (parser->stream_value_active) {
     if (parser->stream_field->kind == LONEJSON_FIELD_KIND_BASE64_STREAM &&
         parser->stream_base64_quad_len != 0u) {
-      status =
-          lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
-                              parser->error.offset, parser->error.line,
-                              parser->error.column,
-                              "incomplete base64 quartet in streamed field");
+      status = lonejson__set_error(
+          &parser->error, LONEJSON_STATUS_INVALID_JSON, parser->error.offset,
+          parser->error.line, parser->error.column,
+          "incomplete base64 quartet in streamed field");
     } else if (parser->stream_field->kind ==
                LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM) {
       lonejson_string_array_stream *stream =

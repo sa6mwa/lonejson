@@ -1288,7 +1288,7 @@ static int ljlua_encode_json_table(lua_State *L, int index, ljlua_json_buf *buf,
       size_t len;
       const char *key;
 
-      if (!lua_isstring(L, -2)) {
+      if (lua_type(L, -2) != LUA_TSTRING) {
         free(keys);
         lua_pop(L, 2);
         return luaL_error(L, "JSON object keys must be strings");
@@ -1499,4 +1499,3 @@ static int ljlua_field_kind_from_name(const char *name) {
   }
   return 0;
 }
-

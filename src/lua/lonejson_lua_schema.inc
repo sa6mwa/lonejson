@@ -71,8 +71,7 @@ static int ljlua_push_compiled_path_value(lua_State *L, void *record,
 static lonejson_read_result
 ljlua_mem_stream_read(void *user, unsigned char *buffer, size_t capacity);
 static lonejson_read_result
-ljlua_array_mem_stream_read(void *user, unsigned char *buffer,
-                            size_t capacity);
+ljlua_array_mem_stream_read(void *user, unsigned char *buffer, size_t capacity);
 static int ljlua_monotonic_ns(lua_State *L);
 static int ljlua_json_null(lua_State *L);
 
@@ -555,7 +554,7 @@ static ljlua_array_stream_ud *ljlua_check_array_stream(lua_State *L,
     }
   }
   return (ljlua_array_stream_ud *)luaL_checkudata(L, index,
-                                                 LJLUA_ARRAY_STREAM_MT);
+                                                  LJLUA_ARRAY_STREAM_MT);
 }
 
 static ljlua_spool_ud *ljlua_check_spool(lua_State *L, int index) {
@@ -585,4 +584,3 @@ static FILE *ljlua_check_file(lua_State *L, int index) {
   luaL_argcheck(L, stream->closef != NULL, index, "closed file");
   return stream->f;
 }
-

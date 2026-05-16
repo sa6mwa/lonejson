@@ -487,4 +487,3 @@ static void test_partial_allocator_generator_init_is_rejected(void) {
   EXPECT(alloc.stats.free_calls == 0u);
   EXPECT(alloc.stats.bytes_live == 0u);
 }
-

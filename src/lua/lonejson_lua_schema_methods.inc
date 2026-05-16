@@ -597,9 +597,9 @@ static char *ljlua_serialize_value(lua_State *L, ljlua_schema *schema,
     if (serialize_capacity > max_buffer_capacity) {
       serialize_capacity = max_buffer_capacity;
     }
-    status = lonejson_serialize_buffer(
-        &schema->map, record, schema->encode_buffer, serialize_capacity, &needed,
-        options, &error);
+    status =
+        lonejson_serialize_buffer(&schema->map, record, schema->encode_buffer,
+                                  serialize_capacity, &needed, options, &error);
     if (status != LONEJSON_STATUS_OVERFLOW) {
       break;
     }

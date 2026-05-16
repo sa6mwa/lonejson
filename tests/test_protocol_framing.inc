@@ -949,4 +949,3 @@ static void test_multipart_failures_are_reported(void) {
   EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
   lonejson_multipart_close(mp);
 }
-

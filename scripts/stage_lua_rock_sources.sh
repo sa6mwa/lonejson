@@ -40,6 +40,7 @@ files=(
   src/impl/34_protocol_framing_api.h
   src/impl/35_json_pull_impl.h
   src/impl/36_curl_api.h
+  src/impl/37_array_rewrite_api.h
   src/lua/lonejson_lua.c
   src/lua/lonejson_lua_module.inc
   src/lua/lonejson_lua_record.inc

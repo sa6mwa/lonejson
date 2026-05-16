@@ -911,4 +911,3 @@ static int ljlua_assign_table_to_record(lua_State *L, ljlua_schema *schema,
   }
   return 1;
 }
-

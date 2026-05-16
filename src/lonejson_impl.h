@@ -18,3 +18,4 @@
 #include "impl/34_protocol_framing_api.h"
 #include "impl/35_json_pull_impl.h"
 #include "impl/36_curl_api.h"
+#include "impl/37_array_rewrite_api.h"

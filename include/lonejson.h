@@ -2413,6 +2413,108 @@ typedef enum lonejson_array_stream_result {
   LONEJSON_ARRAY_STREAM_ERROR
 } lonejson_array_stream_result;
 
+/** Action returned by a selected-array rewrite item callback. The rewriter owns
+ * array framing and comma placement for all actions.
+ */
+typedef enum lonejson_array_rewrite_action {
+  /** Emit the original selected item. */
+  LONEJSON_ARRAY_REWRITE_KEEP = 0,
+  /** Omit the original selected item. */
+  LONEJSON_ARRAY_REWRITE_DROP,
+  /** Emit `replacement` instead of the original selected item. */
+  LONEJSON_ARRAY_REWRITE_REPLACE,
+  /** Emit `insert` before the original selected item, then keep the item. */
+  LONEJSON_ARRAY_REWRITE_INSERT_BEFORE,
+  /** Keep the original selected item, then emit `insert`. */
+  LONEJSON_ARRAY_REWRITE_INSERT_AFTER,
+  /** Emit `replacement`, then emit `insert`. */
+  LONEJSON_ARRAY_REWRITE_REPLACE_AND_INSERT_AFTER
+} lonejson_array_rewrite_action;
+
+/** One outbound item supplied by a selected-array rewrite callback. Exactly one
+ * source form must be set: either `map`+`src`, or `json`.
+ */
+typedef struct lonejson_array_rewrite_source {
+  const lonejson_map *map;
+  const void *src;
+  const lonejson_json_value *json;
+} lonejson_array_rewrite_source;
+
+/** Mutable result initialized to `KEEP` before each item callback. */
+typedef struct lonejson_array_rewrite_result {
+  lonejson_array_rewrite_action action;
+  lonejson_array_rewrite_source replacement;
+  lonejson_array_rewrite_source insert;
+} lonejson_array_rewrite_result;
+
+/** Bounded parent context for a `[]` selector segment such as `boards[]`.
+ * `dst` is reused for one active parent item and is updated in source JSON
+ * order as fields are parsed. Fields that appear after the selected child
+ * array are not visible to child item callbacks until later.
+ */
+typedef struct lonejson_array_rewrite_parent {
+  const char *segment;
+  const lonejson_map *map;
+  void *dst;
+} lonejson_array_rewrite_parent;
+
+/** Context passed to rewrite callbacks. Parent entries are ordered from the
+ * root toward the selected array. Pointers remain valid only for the callback.
+ */
+typedef struct lonejson_array_rewrite_context {
+  const char *selector;
+  const lonejson_array_rewrite_parent *parents;
+  size_t parent_count;
+} lonejson_array_rewrite_context;
+
+/** Emits one appended selected-array item. */
+typedef lonejson_status (*lonejson_array_rewrite_emit_fn)(
+    void *emit_user, const lonejson_array_rewrite_source *source,
+    lonejson_error *error);
+
+/** Called once for each selected array item. If `item_map` is configured in
+ * the options, `item` points at the reusable mapped item destination. If
+ * `item_value` is configured instead, `item` points at that
+ * `lonejson_json_value`.
+ */
+typedef lonejson_status (*lonejson_array_rewrite_item_fn)(
+    void *user, const lonejson_array_rewrite_context *context, void *item,
+    lonejson_array_rewrite_result *result, lonejson_error *error);
+
+/** Called after all existing items in one selected array have been processed.
+ * Use `emit` to append zero or more items; callers never emit array framing or
+ * commas directly.
+ */
+typedef lonejson_status (*lonejson_array_rewrite_append_fn)(
+    void *user, const lonejson_array_rewrite_context *context,
+    lonejson_array_rewrite_emit_fn emit, void *emit_user,
+    lonejson_error *error);
+
+/** Options for selected-array streaming rewrite. `selector == NULL` or `""`
+ * selects a root array. Object paths use dot-separated keys. Array fanout must
+ * be explicit with `[]`, for example `boards[].items`; plain dotted paths do
+ * not implicitly fan out through arrays.
+ *
+ * Output is validated input re-emitted as compact canonical JSON. Unselected
+ * parts are streamed through the visitor pipeline rather than materialized.
+ *
+ * When `item` is configured, configure exactly one item delivery mode:
+ * `item_map`+`item_dst`, or `item_value`. Append-only rewrites may omit `item`
+ * and item delivery. Replacement, inserted, and appended items can be supplied
+ * from mapped structs or rewindable `lonejson_json_value` handles.
+ */
+typedef struct lonejson_array_rewrite_options {
+  const lonejson_parse_options *parse_options;
+  const lonejson_map *item_map;
+  void *item_dst;
+  lonejson_json_value *item_value;
+  const lonejson_array_rewrite_parent *parents;
+  size_t parent_count;
+  lonejson_array_rewrite_item_fn item;
+  lonejson_array_rewrite_append_fn append;
+  void *user;
+} lonejson_array_rewrite_options;
+
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
  * so callers that need to retain an item must copy it here.
@@ -2541,6 +2643,50 @@ const lonejson_error *
 lonejson_array_stream_error(const lonejson_array_stream *stream);
 /** Closes an array-item stream and releases resources it owns. */
 void lonejson_array_stream_close(lonejson_array_stream *stream);
+
+/** Rewrites one selected JSON array from a caller-provided reader to a generic
+ * sink. The document is validated and emitted incrementally; the complete
+ * document and selected arrays are never materialized.
+ */
+lonejson_status lonejson_array_rewrite_reader(
+    const char *selector, lonejson_reader_fn reader, void *reader_user,
+    lonejson_sink_fn sink, void *sink_user,
+    const lonejson_array_rewrite_options *options, lonejson_error *error);
+/** Rewrites one selected array from a caller-provided reader to an open
+ * `FILE *` output.
+ */
+lonejson_status lonejson_array_rewrite_reader_to_filep(
+    const char *selector, lonejson_reader_fn reader, void *reader_user,
+    FILE *output, const lonejson_array_rewrite_options *options,
+    lonejson_error *error);
+/** Rewrites one selected array from a caller-provided reader to a file
+ * descriptor output.
+ */
+lonejson_status lonejson_array_rewrite_reader_to_fd(
+    const char *selector, lonejson_reader_fn reader, void *reader_user, int fd,
+    const lonejson_array_rewrite_options *options, lonejson_error *error);
+/** Rewrites one selected array from an open `FILE *` to a generic sink. */
+lonejson_status lonejson_array_rewrite_filep(
+    const char *selector, FILE *fp, lonejson_sink_fn sink, void *sink_user,
+    const lonejson_array_rewrite_options *options, lonejson_error *error);
+/** Rewrites one selected array from an open `FILE *` to an open `FILE *`. */
+lonejson_status lonejson_array_rewrite_filep_to_filep(
+    const char *selector, FILE *input, FILE *output,
+    const lonejson_array_rewrite_options *options, lonejson_error *error);
+/** Rewrites one selected array from a file descriptor to a generic sink. */
+lonejson_status lonejson_array_rewrite_fd(
+    const char *selector, int fd, lonejson_sink_fn sink, void *sink_user,
+    const lonejson_array_rewrite_options *options, lonejson_error *error);
+/** Rewrites one selected array from a file descriptor to a file descriptor. */
+lonejson_status lonejson_array_rewrite_fd_to_fd(
+    const char *selector, int input_fd, int output_fd,
+    const lonejson_array_rewrite_options *options, lonejson_error *error);
+/** Rewrites one selected array from an input path to an output path. Atomic
+ * rename and transaction boundaries remain caller responsibility.
+ */
+lonejson_status lonejson_array_rewrite_path(
+    const char *selector, const char *input_path, const char *output_path,
+    const lonejson_array_rewrite_options *options, lonejson_error *error);
 
 /** Returns the default SSE parser options. */
 lonejson_sse_options lonejson_default_sse_options(void);
@@ -3096,6 +3242,13 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_ARRAY_STREAM_EOF LONEJSON_ARRAY_STREAM_EOF
 #define LJ_ARRAY_STREAM_WOULD_BLOCK LONEJSON_ARRAY_STREAM_WOULD_BLOCK
 #define LJ_ARRAY_STREAM_ERROR LONEJSON_ARRAY_STREAM_ERROR
+#define LJ_ARRAY_REWRITE_KEEP LONEJSON_ARRAY_REWRITE_KEEP
+#define LJ_ARRAY_REWRITE_DROP LONEJSON_ARRAY_REWRITE_DROP
+#define LJ_ARRAY_REWRITE_REPLACE LONEJSON_ARRAY_REWRITE_REPLACE
+#define LJ_ARRAY_REWRITE_INSERT_BEFORE LONEJSON_ARRAY_REWRITE_INSERT_BEFORE
+#define LJ_ARRAY_REWRITE_INSERT_AFTER LONEJSON_ARRAY_REWRITE_INSERT_AFTER
+#define LJ_ARRAY_REWRITE_REPLACE_AND_INSERT_AFTER                              \
+  LONEJSON_ARRAY_REWRITE_REPLACE_AND_INSERT_AFTER
 
 #define LJ_MAP_DEFINE LONEJSON_MAP_DEFINE
 #define LJ_FIELD_STRING_ALLOC LONEJSON_FIELD_STRING_ALLOC
@@ -3214,6 +3367,15 @@ typedef lonejson_stream lj_stream;
 typedef lonejson_array_stream lj_array_stream;
 typedef lonejson_array_stream_item_fn lj_array_stream_item_fn;
 typedef lonejson_array_stream_string_fn lj_array_stream_string_fn;
+typedef lonejson_array_rewrite_action lj_array_rewrite_action;
+typedef lonejson_array_rewrite_source lj_array_rewrite_source;
+typedef lonejson_array_rewrite_result lj_array_rewrite_result;
+typedef lonejson_array_rewrite_parent lj_array_rewrite_parent;
+typedef lonejson_array_rewrite_context lj_array_rewrite_context;
+typedef lonejson_array_rewrite_emit_fn lj_array_rewrite_emit_fn;
+typedef lonejson_array_rewrite_item_fn lj_array_rewrite_item_fn;
+typedef lonejson_array_rewrite_append_fn lj_array_rewrite_append_fn;
+typedef lonejson_array_rewrite_options lj_array_rewrite_options;
 /** Incremental Server-Sent Events parser. */
 typedef lonejson_sse lj_sse;
 /** Incremental MIME multipart parser. */
@@ -3629,6 +3791,66 @@ lj_array_stream_error(const lj_array_stream *stream) {
 LONEJSON_SHORT_ALIAS_INLINE void
 lj_array_stream_close(lj_array_stream *stream) {
   lonejson_array_stream_close(stream);
+}
+/** Rewrites one selected JSON array from a reader to a sink. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_rewrite_reader(
+    const char *selector, lj_reader_fn reader, void *reader_user,
+    lj_sink_fn sink, void *sink_user, const lj_array_rewrite_options *options,
+    lj_error *error) {
+  return lonejson_array_rewrite_reader(selector, reader, reader_user, sink,
+                                       sink_user, options, error);
+}
+/** Rewrites one selected JSON array from a reader to an open `FILE *`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_rewrite_reader_to_filep(
+    const char *selector, lj_reader_fn reader, void *reader_user, FILE *output,
+    const lj_array_rewrite_options *options, lj_error *error) {
+  return lonejson_array_rewrite_reader_to_filep(selector, reader, reader_user,
+                                                output, options, error);
+}
+/** Rewrites one selected JSON array from a reader to a file descriptor. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_rewrite_reader_to_fd(
+    const char *selector, lj_reader_fn reader, void *reader_user, int fd,
+    const lj_array_rewrite_options *options, lj_error *error) {
+  return lonejson_array_rewrite_reader_to_fd(selector, reader, reader_user, fd,
+                                             options, error);
+}
+/** Rewrites one selected JSON array from an open `FILE *` to a sink. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_rewrite_filep(
+    const char *selector, FILE *fp, lj_sink_fn sink, void *sink_user,
+    const lj_array_rewrite_options *options, lj_error *error) {
+  return lonejson_array_rewrite_filep(selector, fp, sink, sink_user, options,
+                                      error);
+}
+/** Rewrites one selected JSON array from an open `FILE *` to an open `FILE *`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_rewrite_filep_to_filep(
+    const char *selector, FILE *input, FILE *output,
+    const lj_array_rewrite_options *options, lj_error *error) {
+  return lonejson_array_rewrite_filep_to_filep(selector, input, output, options,
+                                               error);
+}
+/** Rewrites one selected JSON array from a file descriptor to a sink. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_rewrite_fd(
+    const char *selector, int fd, lj_sink_fn sink, void *sink_user,
+    const lj_array_rewrite_options *options, lj_error *error) {
+  return lonejson_array_rewrite_fd(selector, fd, sink, sink_user, options,
+                                   error);
+}
+/** Rewrites one selected JSON array from a file descriptor to a file
+ * descriptor.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_rewrite_fd_to_fd(
+    const char *selector, int input_fd, int output_fd,
+    const lj_array_rewrite_options *options, lj_error *error) {
+  return lonejson_array_rewrite_fd_to_fd(selector, input_fd, output_fd, options,
+                                         error);
+}
+/** Rewrites one selected JSON array from an input path to an output path. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_array_rewrite_path(
+    const char *selector, const char *input_path, const char *output_path,
+    const lj_array_rewrite_options *options, lj_error *error) {
+  return lonejson_array_rewrite_path(selector, input_path, output_path, options,
+                                     error);
 }
 /** Returns the default SSE parser options. */
 LONEJSON_SHORT_ALIAS_INLINE lj_sse_options lj_default_sse_options(void) {

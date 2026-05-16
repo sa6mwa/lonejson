@@ -282,8 +282,9 @@ lonejson__mapped_array_stream_finish_item(lonejson_parser *parser,
   return LONEJSON_STATUS_OK;
 }
 
-static void lonejson__mapped_array_stream_reset_item(
-    lonejson_parser *parser, lonejson_mapped_array_stream *stream) {
+static void
+lonejson__mapped_array_stream_reset_item(lonejson_parser *parser,
+                                         lonejson_mapped_array_stream *stream) {
   if (parser == NULL || stream == NULL ||
       stream->_lonejson_magic !=
           lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC) ||
@@ -291,9 +292,8 @@ static void lonejson__mapped_array_stream_reset_item(
     return;
   }
   lonejson__cleanup_map(stream->handler.item_map, stream->handler.item_dst);
-  lonejson__init_map_with_allocator(stream->handler.item_map,
-                                    stream->handler.item_dst,
-                                    &parser->allocator);
+  lonejson__init_map_with_allocator(
+      stream->handler.item_map, stream->handler.item_dst, &parser->allocator);
 }
 
 static void
@@ -331,8 +331,8 @@ lonejson__parser_unwind_active_mapped_array_streams(lonejson_parser *parser) {
         frame->field->kind == LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM &&
         frame->object_ptr != NULL) {
       lonejson_mapped_array_stream *stream =
-          (lonejson_mapped_array_stream *)lonejson__field_ptr(
-              frame->object_ptr, frame->field);
+          (lonejson_mapped_array_stream *)lonejson__field_ptr(frame->object_ptr,
+                                                              frame->field);
       if (stream->_lonejson_magic ==
           lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC)) {
         stream->active = 0;

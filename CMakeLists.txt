@@ -491,6 +491,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/34_protocol_framing_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/35_json_pull_impl.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/bench/lonejson_bench.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_module.inc"
@@ -664,6 +665,7 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/34_protocol_framing_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/35_json_pull_impl.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_single_header.cmake
   VERBATIM
 )

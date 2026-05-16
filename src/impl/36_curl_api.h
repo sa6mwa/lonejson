@@ -64,8 +64,8 @@ lonejson_status lonejson_curl_array_parse_init(
   return ctx->stream ? LONEJSON_STATUS_OK : ctx->error.code;
 }
 
-size_t lonejson_curl_array_write_callback(char *ptr, size_t size,
-                                          size_t nmemb, void *userdata) {
+size_t lonejson_curl_array_write_callback(char *ptr, size_t size, size_t nmemb,
+                                          void *userdata) {
   lonejson_curl_array_parse *ctx = (lonejson_curl_array_parse *)userdata;
   size_t bytes = size * nmemb;
   lonejson_status status;
@@ -76,9 +76,9 @@ size_t lonejson_curl_array_write_callback(char *ptr, size_t size,
   if (bytes != 0u && ptr == NULL) {
     return 0u;
   }
-  status = lonejson_array_stream_push(ctx->stream, ctx->map, ctx->dst, ptr,
-                                      bytes, ctx->callback, ctx->user,
-                                      &ctx->error);
+  status =
+      lonejson_array_stream_push(ctx->stream, ctx->map, ctx->dst, ptr, bytes,
+                                 ctx->callback, ctx->user, &ctx->error);
   return (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED)
              ? bytes
              : 0u;
@@ -111,8 +111,7 @@ lonejson_status lonejson_curl_string_array_parse_init(
   memset(ctx, 0, sizeof(*ctx));
   if (handler == NULL || handler->chunk == NULL) {
     return lonejson__set_error(&ctx->error, LONEJSON_STATUS_INVALID_ARGUMENT,
-                               0u, 0u, 0u,
-                               "string chunk handler is required");
+                               0u, 0u, 0u, "string chunk handler is required");
   }
   ctx->handler = *handler;
   ctx->user = user;
@@ -121,8 +120,7 @@ lonejson_status lonejson_curl_string_array_parse_init(
 }
 
 size_t lonejson_curl_string_array_write_callback(char *ptr, size_t size,
-                                                 size_t nmemb,
-                                                 void *userdata) {
+                                                 size_t nmemb, void *userdata) {
   lonejson_curl_string_array_parse *ctx =
       (lonejson_curl_string_array_parse *)userdata;
   size_t bytes = size * nmemb;
@@ -134,14 +132,13 @@ size_t lonejson_curl_string_array_write_callback(char *ptr, size_t size,
   if (bytes != 0u && ptr == NULL) {
     return 0u;
   }
-  status = lonejson_array_stream_push_string(ctx->stream, ptr, bytes,
-                                             &ctx->handler, ctx->user,
-                                             &ctx->error);
+  status = lonejson_array_stream_push_string(
+      ctx->stream, ptr, bytes, &ctx->handler, ctx->user, &ctx->error);
   return status == LONEJSON_STATUS_OK ? bytes : 0u;
 }
 
-lonejson_status lonejson_curl_string_array_parse_finish(
-    lonejson_curl_string_array_parse *ctx) {
+lonejson_status
+lonejson_curl_string_array_parse_finish(lonejson_curl_string_array_parse *ctx) {
   if (ctx == NULL || ctx->stream == NULL) {
     return LONEJSON_STATUS_INVALID_ARGUMENT;
   }
@@ -168,8 +165,7 @@ lonejson_status lonejson_curl_string_items_parse_init(
   memset(ctx, 0, sizeof(*ctx));
   if (callback == NULL) {
     return lonejson__set_error(&ctx->error, LONEJSON_STATUS_INVALID_ARGUMENT,
-                               0u, 0u, 0u,
-                               "string item callback is required");
+                               0u, 0u, 0u, "string item callback is required");
   }
   ctx->callback = callback;
   ctx->user = user;
@@ -195,13 +191,13 @@ size_t lonejson_curl_string_items_write_callback(char *ptr, size_t size,
   return status == LONEJSON_STATUS_OK ? bytes : 0u;
 }
 
-lonejson_status lonejson_curl_string_items_parse_finish(
-    lonejson_curl_string_items_parse *ctx) {
+lonejson_status
+lonejson_curl_string_items_parse_finish(lonejson_curl_string_items_parse *ctx) {
   if (ctx == NULL || ctx->stream == NULL) {
     return LONEJSON_STATUS_INVALID_ARGUMENT;
   }
-  return lonejson_array_stream_finish_string_items(
-      ctx->stream, ctx->callback, ctx->user, &ctx->error);
+  return lonejson_array_stream_finish_string_items(ctx->stream, ctx->callback,
+                                                   ctx->user, &ctx->error);
 }
 
 void lonejson_curl_string_items_parse_cleanup(
