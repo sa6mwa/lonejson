@@ -8,6 +8,8 @@
 #include "test_json_value_sources.inc"
 #include "test_allocator_visitor.inc"
 #include "test_generator_omit.inc"
+#include "test_writer.inc"
+#include "test_value_rewrite.inc"
 #include "test_curl_misc.inc"
 /* clang-format on */
 
@@ -165,6 +167,28 @@ int main(void) {
   test_generator_pretty_streams_source_field();
   test_generator_streams_json_value_fields();
   test_generator_pretty_streams_json_value_reader();
+  test_writer_dynamic_object_and_values();
+  test_writer_primitive_string_sources();
+  test_writer_invalid_state_and_sink_failure();
+  test_writer_number_text_rejects_non_numbers();
+  test_writer_child_sink_failures();
+  test_writer_generator_streams_producer();
+  test_writer_generator_zero_capacity_read();
+  test_writer_generator_primitive_scalars_resume();
+  test_writer_generator_matches_sink_under_backpressure();
+  test_writer_generator_preserves_event_state_on_backpressure();
+  test_writer_generator_rejects_retry_mismatch();
+  test_writer_generator_rejects_child_retry_mismatch();
+  test_writer_generator_backpressure_matrix();
+  test_writer_generator_streams_source_without_materializing();
+  test_writer_generator_streams_json_value_without_materializing();
+  test_writer_generator_streams_mapped_without_materializing();
+  test_writer_generator_string_reader_preserves_chunks();
+  test_value_rewrite_replace_drop_and_root();
+  test_value_rewrite_callback_replacement();
+  test_value_rewrite_selector_and_source_base64();
+  test_value_rewrite_missing_object_path_and_streaming_string();
+  test_value_rewrite_failures();
   test_serialize_omits_empty_optional_fields();
   test_serialize_omit_layout_failures();
   test_serialize_omit_pretty_and_recursive_invariants();

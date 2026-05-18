@@ -76,6 +76,40 @@ do
 end
 
 do
+  assert_eq(lj.encode_json("a\nb"), [["a\nb"]])
+  assert_eq(lj.encode_value("a\nb"), [["a\nb"]])
+  assert_eq(lj.encode_json(lj.json_null), "null")
+  assert_eq(lj.encode_json({ b = true, a = lj.json_array({ 1, lj.json_null }) }), '{"a":[1,null],"b":true}')
+  do
+    local chunks = {}
+    lj.encode_json_to_sink({ z = "sink", a = lj.json_array({ true, false }) }, function(chunk)
+      chunks[#chunks + 1] = chunk
+    end)
+    assert_eq(table.concat(chunks), '{"a":[true,false],"z":"sink"}')
+  end
+  do
+    local ok, err = pcall(function()
+      lj.encode_value_to_sink({ a = 1 }, function()
+        error("sink boom")
+      end)
+    end)
+    assert_true(not ok)
+    assert_true(tostring(err):find("sink boom", 1, true) ~= nil)
+  end
+  assert_eq(lj.decode_json('"x\\ny"'), "x\ny")
+  assert_eq(lj.decode_value('"x\\ny"'), "x\ny")
+  assert_true(lj.decode_json("null") == lj.json_null)
+  local decoded = lj.decode_json('{"a":[1,null],"b":false}')
+  assert_eq(decoded.a[1], 1)
+  assert_true(decoded.a[2] == lj.json_null)
+  assert_eq(decoded.b, false)
+  local ok = pcall(function()
+    lj.decode_json("true false")
+  end)
+  assert_true(not ok)
+end
+
+do
   local rec = Test:new_record()
   local city_path = Test:compile_path("meta.city")
   local second_num_path = Test:compile_path("nums[2]")

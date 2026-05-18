@@ -134,16 +134,24 @@ static void test_no_realloc_free(void *ctx, void *ptr) {
 
 typedef struct test_realloc_limit_state {
   size_t max_realloc_size;
+  size_t observed_max_realloc_size;
 } test_realloc_limit_state;
 
 static void *test_realloc_limit_malloc(void *ctx, size_t size) {
-  (void)ctx;
+  test_realloc_limit_state *state = (test_realloc_limit_state *)ctx;
+
+  if (state != NULL && size > state->observed_max_realloc_size) {
+    state->observed_max_realloc_size = size;
+  }
   return malloc(size);
 }
 
 static void *test_realloc_limit_realloc(void *ctx, void *ptr, size_t size) {
   test_realloc_limit_state *state = (test_realloc_limit_state *)ctx;
 
+  if (state != NULL && size > state->observed_max_realloc_size) {
+    state->observed_max_realloc_size = size;
+  }
   if (state != NULL && size > state->max_realloc_size) {
     return NULL;
   }

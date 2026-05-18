@@ -407,7 +407,7 @@ static void test_array_stream_skips_do_not_materialize_values(void) {
   size_t pos = 0u;
   size_t i;
   test_reader_state state;
-  test_realloc_limit_state limit = {128u};
+  test_realloc_limit_state limit = {128u, 0u};
   lonejson_allocator allocator = lonejson_default_allocator();
   lonejson_parse_options options = lonejson_default_parse_options();
   lonejson_array_stream *stream;
@@ -1758,7 +1758,7 @@ static void test_array_stream_push_does_not_materialize_response(void) {
   size_t i;
   lonejson_allocator allocator = lonejson_default_allocator();
   lonejson_parse_options options = lonejson_default_parse_options();
-  test_realloc_limit_state limit = {128u};
+  test_realloc_limit_state limit = {128u, 0u};
   lonejson_array_stream *stream;
   lonejson_error error;
   lonejson_status status;

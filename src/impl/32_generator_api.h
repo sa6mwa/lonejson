@@ -4,6 +4,9 @@ typedef enum lonejson__generator_pending_kind {
   LONEJSON__GEN_PENDING_REPEAT = 2
 } lonejson__generator_pending_kind;
 
+#define LONEJSON__GENERATOR_MAGIC 0x4c4a474eu
+#define LONEJSON__WRITER_GENERATOR_MAGIC 0x4c4a5747u
+
 typedef enum lonejson__generator_frame_kind {
   LONEJSON__GEN_FRAME_MAP = 0,
   LONEJSON__GEN_FRAME_STRING = 1,
@@ -75,6 +78,7 @@ typedef struct lonejson__generator_frame {
 } lonejson__generator_frame;
 
 typedef struct lonejson__generator_state {
+  unsigned magic;
   lonejson_allocator allocator;
   lonejson_write_options options;
   lonejson__generator_frame *frames;
@@ -1160,6 +1164,7 @@ lonejson_status lonejson_generator_init(lonejson_generator *generator,
                                "failed to allocate generator state");
   }
   memset(state, 0, sizeof(*state));
+  state->magic = LONEJSON__GENERATOR_MAGIC;
   state->allocator = allocator;
   state->options = options ? *options : lonejson_default_write_options();
   memset(&root, 0, sizeof(root));
@@ -1192,6 +1197,233 @@ static lonejson_status lonejson__measure_sink(void *user, const void *data,
                                "serialized output is too large to measure");
   }
   state->total += len;
+  return LONEJSON_STATUS_OK;
+}
+
+typedef struct lonejson__writer_generator_state {
+  unsigned magic;
+  lonejson_allocator allocator;
+  lonejson_writer writer;
+  lonejson_writer_producer_fn producer;
+  void *producer_user;
+  unsigned char *out;
+  size_t out_capacity;
+  size_t out_length;
+  unsigned char *pending;
+  size_t pending_len;
+  size_t pending_off;
+  size_t pending_alloc;
+  int blocked;
+  int producer_done;
+} lonejson__writer_generator_state;
+
+static lonejson_status lonejson__writer_generator_flush_pending(
+    lonejson__writer_generator_state *state) {
+  size_t writable;
+  size_t remaining;
+  size_t take;
+
+  if (state->pending_off >= state->pending_len) {
+    state->pending_len = 0u;
+    state->pending_off = 0u;
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->out_length >= state->out_capacity) {
+    return LONEJSON_STATUS_OK;
+  }
+  writable = state->out_capacity - state->out_length;
+  remaining = state->pending_len - state->pending_off;
+  take = remaining < writable ? remaining : writable;
+  if (take != 0u) {
+    memcpy(state->out + state->out_length, state->pending + state->pending_off,
+           take);
+    state->out_length += take;
+    state->pending_off += take;
+  }
+  if (state->pending_off == state->pending_len) {
+    state->pending_len = 0u;
+    state->pending_off = 0u;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+lonejson__writer_generator_set_pending(lonejson__writer_generator_state *state,
+                                       const void *data, size_t len,
+                                       lonejson_error *error) {
+  unsigned char *next;
+
+  if (len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (len > state->pending_alloc) {
+    next = (unsigned char *)lonejson__buffer_realloc(
+        &state->allocator, state->pending, state->pending_alloc, len);
+    if (next == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate writer pending output");
+    }
+    state->pending = next;
+    state->pending_alloc = len;
+  }
+  memcpy(state->pending, data, len);
+  state->pending_len = len;
+  state->pending_off = 0u;
+  state->blocked = 1;
+  return LONEJSON_STATUS_OK;
+}
+
+static int lonejson__writer_generator_output_blocked(void *user) {
+  lonejson__writer_generator_state *state;
+
+  state = (lonejson__writer_generator_state *)user;
+  if (state == NULL) {
+    return 0;
+  }
+  return state->blocked || state->pending_len != 0u ||
+         (state->out != NULL && state->out_length >= state->out_capacity);
+}
+
+static size_t lonejson__writer_generator_output_available(void *user) {
+  lonejson__writer_generator_state *state;
+
+  state = (lonejson__writer_generator_state *)user;
+  if (state == NULL || state->blocked || state->pending_len != 0u ||
+      state->out == NULL || state->out_length >= state->out_capacity) {
+    return 0u;
+  }
+  return state->out_capacity - state->out_length;
+}
+
+static lonejson_status lonejson__writer_generator_sink(void *user,
+                                                       const void *data,
+                                                       size_t len,
+                                                       lonejson_error *error) {
+  lonejson__writer_generator_state *state;
+  size_t writable;
+  size_t take;
+  size_t rest;
+
+  state = (lonejson__writer_generator_state *)user;
+  if (state == NULL || (data == NULL && len != 0u)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "writer generator sink data is required");
+  }
+  if (state->blocked) {
+    lonejson__writer_generator_flush_pending(state);
+    if (state->pending_len != 0u || state->out_length >= state->out_capacity) {
+      return LONEJSON_STATUS_TRUNCATED;
+    }
+    state->blocked = 0;
+  }
+  if (len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  writable = state->out_capacity - state->out_length;
+  take = len < writable ? len : writable;
+  if (take != 0u) {
+    memcpy(state->out + state->out_length, data, take);
+    state->out_length += take;
+  }
+  if (take == len) {
+    return LONEJSON_STATUS_OK;
+  }
+  rest = len - take;
+  return lonejson__writer_generator_set_pending(
+      state, (const unsigned char *)data + take, rest, error);
+}
+
+lonejson_status lonejson_writer_generator_init(
+    lonejson_generator *generator, lonejson_writer_producer_fn producer,
+    void *producer_user, const lonejson_write_options *options) {
+  lonejson__writer_generator_state *state;
+  lonejson_allocator allocator;
+  lonejson_status status;
+
+  if (generator == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  memset(generator, 0, sizeof(*generator));
+  if (producer == NULL) {
+    return lonejson__set_error(&generator->error,
+                               LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+                               "writer producer is required");
+  }
+  if (options != NULL &&
+      !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->allocator)) {
+    return lonejson__set_error(
+        &generator->error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "allocator must provide either all callbacks or none");
+  }
+  allocator = lonejson__allocator_resolve(options ? options->allocator : NULL);
+  state = (lonejson__writer_generator_state *)lonejson__buffer_alloc(
+      &allocator, sizeof(*state));
+  if (state == NULL) {
+    return lonejson__set_error(&generator->error,
+                               LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+                               "failed to allocate writer generator state");
+  }
+  memset(state, 0, sizeof(*state));
+  state->magic = LONEJSON__WRITER_GENERATOR_MAGIC;
+  state->allocator = allocator;
+  state->producer = producer;
+  state->producer_user = producer_user;
+  status =
+      lonejson_writer_init_sink(&state->writer, lonejson__writer_generator_sink,
+                                state, options, &generator->error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__buffer_free(&allocator, state, sizeof(*state));
+    return status;
+  }
+  generator->state = state;
+  lonejson__clear_error(&generator->error);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+lonejson__writer_generator_read(lonejson_generator *generator,
+                                unsigned char *buffer, size_t capacity,
+                                size_t *out_len, int *out_eof) {
+  lonejson__writer_generator_state *state;
+  lonejson_status status;
+
+  state = (lonejson__writer_generator_state *)generator->state;
+  state->out = buffer;
+  state->out_capacity = capacity;
+  state->out_length = 0u;
+  while (state->out_length < state->out_capacity) {
+    lonejson__writer_generator_flush_pending(state);
+    if (state->pending_len == 0u) {
+      state->blocked = 0;
+    }
+    if (state->pending_len != 0u || state->out_length == state->out_capacity) {
+      break;
+    }
+    if (state->producer_done) {
+      break;
+    }
+    status = state->producer(&state->writer, state->producer_user,
+                             &generator->error);
+    if (status == LONEJSON_STATUS_TRUNCATED) {
+      continue;
+    }
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    status = lonejson_writer_finish(&state->writer, &generator->error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    state->producer_done = 1;
+  }
+  generator->eof = state->producer_done && state->pending_len == 0u;
+  if (out_len != NULL) {
+    *out_len = state->out_length;
+  }
+  if (out_eof != NULL) {
+    *out_eof = generator->eof;
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -1245,6 +1477,10 @@ lonejson_status lonejson_generator_read(lonejson_generator *generator,
                                "generator read buffer is required");
   }
   state = (lonejson__generator_state *)generator->state;
+  if (state->magic == LONEJSON__WRITER_GENERATOR_MAGIC) {
+    return lonejson__writer_generator_read(generator, buffer, capacity, out_len,
+                                           out_eof);
+  }
   state->out = buffer;
   state->out_capacity = capacity;
   state->out_length = 0u;
@@ -1280,6 +1516,7 @@ lonejson_status lonejson_generator_read(lonejson_generator *generator,
 
 void lonejson_generator_cleanup(lonejson_generator *generator) {
   lonejson__generator_state *state;
+  lonejson__writer_generator_state *writer_state;
   size_t i;
 
   if (generator == NULL) {
@@ -1287,6 +1524,16 @@ void lonejson_generator_cleanup(lonejson_generator *generator) {
   }
   state = (lonejson__generator_state *)generator->state;
   if (state != NULL) {
+    if (state->magic == LONEJSON__WRITER_GENERATOR_MAGIC) {
+      writer_state = (lonejson__writer_generator_state *)generator->state;
+      lonejson_writer_cleanup(&writer_state->writer);
+      lonejson__buffer_free(&writer_state->allocator, writer_state->pending,
+                            writer_state->pending_alloc);
+      lonejson__buffer_free(&writer_state->allocator, writer_state,
+                            sizeof(*writer_state));
+      memset(generator, 0, sizeof(*generator));
+      return;
+    }
     if (state->json_owner_valid) {
       lonejson__json_pull_cleanup(&state->json_pull);
     }

@@ -49,4 +49,8 @@ if [ -z "$src_dir" ] || [ ! -d "$src_dir" ]; then
     exit 1
 fi
 
-make -C "$src_dir" release
+printf '%s\n' 'test_release_from_source.sh: running host C and Lua tests from extracted source'
+make -C "$src_dir" test-host
+
+printf '%s\n' 'test_release_from_source.sh: building Lua release artifacts from extracted source'
+make -C "$src_dir" release-lua-artifacts

@@ -720,16 +720,19 @@ static int ljlua_array_rewrite_encode_source(lua_State *L, int index,
                                              lonejson_json_value *value,
                                              lonejson_error *error) {
   ljlua_json_buf buf;
+  ljlua_json_out out;
   lonejson_status status;
   const void *visited[129];
 
   memset(&buf, 0, sizeof(buf));
+  out.sink = ljlua_json_buf_sink;
+  out.user = &buf;
   memset(visited, 0, sizeof(visited));
   if (!ljlua_array_rewrite_validate_json_value(L, index, visited, 0u, error)) {
     return 0;
   }
   memset(visited, 0, sizeof(visited));
-  if (ljlua_encode_json_value(L, index, &buf, visited, 0u) == 0) {
+  if (ljlua_encode_json_value(L, index, &out, visited, 0u) == 0) {
     free(buf.data);
     return 0;
   }

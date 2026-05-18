@@ -49,6 +49,12 @@ The same pattern applies to:
 `parse_string.c` and `serialize_jsonl.c` are the embedded single-header
 variants in the tree; the rest model linked-library use.
 
+The public API also includes streaming selected-array rewrites
+(`lonejson_array_rewrite_*`), incremental Server-Sent Events parsing
+(`lonejson_sse_*`), and incremental MIME multipart parsing
+(`lonejson_multipart_*`). Those surfaces are covered by the integration tests
+under `tests/` even when there is no dedicated standalone example program yet.
+
 The linked-library examples intentionally use lonejson's public initializers and
 default helpers instead of manual `memset` or `{0}` for public structs:
 `lonejson_init` / `lj_init` for mapped values, `*_init` for handles, and
@@ -92,5 +98,5 @@ eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_binding.lua
 ```
 
 That example shows the schema DSL, reusable record decoding, object-framed
-stream parsing, selected-array stream parsing, and spool-backed text/byte
-fields.
+stream parsing, selected-array stream parsing, selected-array rewrites, native
+`json_value` handling, and spool-backed text/byte fields.

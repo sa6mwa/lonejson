@@ -78,6 +78,9 @@ int luaopen_lonejson_core(lua_State *L) {
       {"compile_schema", ljlua_schema_new},
       {"array_rewrite_string", ljlua_array_rewrite_string},
       {"array_rewrite_path", ljlua_array_rewrite_path},
+      {"encode_json", ljlua_encode_json},
+      {"encode_json_to_sink", ljlua_encode_json_to_sink},
+      {"decode_json", ljlua_decode_json},
       {"json_null", ljlua_json_null},
       {"monotonic_ns", ljlua_monotonic_ns},
       {NULL, NULL}};
@@ -119,5 +122,77 @@ static int ljlua_monotonic_ns(lua_State *L) {
 
 static int ljlua_json_null(lua_State *L) {
   ljlua_push_json_null(L);
+  return 1;
+}
+
+static int ljlua_encode_json(lua_State *L) {
+  ljlua_json_buf buf;
+  ljlua_json_out out;
+  const void *visited[129];
+
+  memset(&buf, 0, sizeof(buf));
+  out.sink = ljlua_json_buf_sink;
+  out.user = &buf;
+  memset(visited, 0, sizeof(visited));
+  if (ljlua_encode_json_value(L, 1, &out, visited, 0u) == 0) {
+    free(buf.data);
+    return luaL_error(L, "failed to encode JSON value");
+  }
+  lua_pushlstring(L, buf.data != NULL ? buf.data : "", buf.len);
+  free(buf.data);
+  return 1;
+}
+
+typedef struct ljlua_json_lua_sink {
+  lua_State *L;
+  int callback_index;
+} ljlua_json_lua_sink;
+
+static lonejson_status ljlua_json_lua_sink_write(void *user, const void *data,
+                                                 size_t len,
+                                                 lonejson_error *error) {
+  ljlua_json_lua_sink *sink = (ljlua_json_lua_sink *)user;
+
+  lua_pushvalue(sink->L, sink->callback_index);
+  lua_pushlstring(sink->L, (const char *)data, len);
+  if (lua_pcall(sink->L, 1, 0, 0) != LUA_OK) {
+    const char *msg = lua_tostring(sink->L, -1);
+    lonejson_status status =
+        lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u, 0u,
+                            "%s", msg != NULL ? msg : "Lua sink failed");
+    lua_pop(sink->L, 1);
+    return status;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static int ljlua_encode_json_to_sink(lua_State *L) {
+  ljlua_json_lua_sink sink;
+  ljlua_json_out out;
+  const void *visited[129];
+
+  luaL_checkany(L, 1);
+  luaL_checktype(L, 2, LUA_TFUNCTION);
+  sink.L = L;
+  sink.callback_index = lua_absindex(L, 2);
+  out.sink = ljlua_json_lua_sink_write;
+  out.user = &sink;
+  memset(visited, 0, sizeof(visited));
+  if (ljlua_encode_json_value(L, 1, &out, visited, 0u) == 0) {
+    return luaL_error(L, "failed to encode JSON value");
+  }
+  return 0;
+}
+
+static int ljlua_decode_json(lua_State *L) {
+  const char *json;
+  size_t len;
+
+  json = luaL_checklstring(L, 1, &len);
+  ljlua_push_json_from_text(L, json, len);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    ljlua_push_json_null(L);
+  }
   return 1;
 }

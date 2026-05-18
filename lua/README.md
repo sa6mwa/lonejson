@@ -294,6 +294,32 @@ other source helpers. `stream:next_value()` returns each selected array item as
 a native Lua JSON value when you need raw pass-through shape instead of the
 schema-mapped record.
 
+## Top-level JSON values
+
+Use `lj.encode_json(value)` / `lj.encode_value(value)` and
+`lj.decode_json(json)` / `lj.decode_value(json)` for schema-free top-level JSON
+values. `lj.json_null` represents JSON null when nil would be ambiguous.
+
+For callback-driven output, `lj.encode_json_to_sink(value, sink)` and
+`lj.encode_value_to_sink(value, sink)` stream encoded chunks to `sink(chunk)`
+without first building the complete JSON string.
+
+```lua
+local parts = {}
+
+lj.encode_value_to_sink({
+  id = "tool-call",
+  arguments = lj.json_object({
+    city = "Uppsala",
+    days = 3,
+  }),
+}, function(chunk)
+  parts[#parts + 1] = chunk
+end)
+
+local json = table.concat(parts)
+```
+
 ## Selected array rewrites
 
 Use `lj.array_rewrite_string(selector, json, options)` or

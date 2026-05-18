@@ -25,7 +25,7 @@ option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "4" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "5" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -316,6 +316,12 @@ if(LONEJSON_BUILD_TESTS)
       -DLONEJSON_SINGLE_HEADER_BUILD_ALIAS=${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_single_header_version.cmake)
   add_test(
+    NAME lonejson_header_abi_version_tests
+    COMMAND ${CMAKE_COMMAND}
+      -DLONEJSON_PUBLIC_HEADER=${CMAKE_CURRENT_SOURCE_DIR}/include/lonejson.h
+      -DLONEJSON_ABI_VERSION=${LONEJSON_ABI_VERSION}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_header_abi_version.cmake)
+  add_test(
     NAME lonejson_single_header_release_version_tests
     COMMAND ${CMAKE_COMMAND}
       -DLONEJSON_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
@@ -450,6 +456,19 @@ if(LONEJSON_BUILD_FUZZERS)
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_reader_stream_generator)
 
+  add_executable(lonejson_fuzz_writer_generator_backpressure
+    fuzz/fuzz_writer_generator_backpressure.c)
+  target_include_directories(lonejson_fuzz_writer_generator_backpressure
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_writer_generator_backpressure
+    PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_writer_generator_backpressure PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_writer_generator_backpressure PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_writer_generator_backpressure)
+
   add_executable(lonejson_fuzz_protocol_framing
     fuzz/fuzz_protocol_framing.c)
   target_include_directories(lonejson_fuzz_protocol_framing
@@ -506,6 +525,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_generator_backpressure.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_protocol_framing.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_visitor.inc"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_stream.inc"

@@ -54,10 +54,17 @@ fields. Arbitrary embedded JSON values can be represented by
 object, array, scalar, or `null` without turning it into a JSON string. The
 same surface also exposes `lonejson_value_visitor` and `lonejson_visit_value_*`
 for streaming one arbitrary JSON value as structured callbacks without
-building a DOM. Short aliases are enabled by default through `lj_*` and
-`LJ_*`. The repository also ships a Lua binding with a schema DSL, reusable
-records, object-framed streaming, selected-array streaming, spool-backed
-fields, and native-Lua `json_value` decoding built on the same visitor model.
+building a DOM.
+
+The streaming surface also includes push-fed selected-array streams for
+write-callback transports, mapped array-stream fields that deliver object array
+items during normal mapped parsing, streaming selected-array rewrites, an
+incremental Server-Sent Events parser, and an incremental MIME multipart
+parser. Short aliases are enabled by default through `lj_*` and `LJ_*`. The
+repository also ships a Lua binding with a schema DSL, reusable records,
+object-framed streaming, selected-array streaming, selected-array rewrites,
+spool-backed fields, and native-Lua `json_value` decoding built on the same
+visitor model.
 
 When you need caller-owned fixed-capacity array backing storage during parse,
 initialize the destination first with `lonejson_init(...)`, configure that
@@ -118,7 +125,11 @@ variants available when syntax validation is all you need. Streaming uses
 `lonejson_stream_close`. Selected-array cursors use
 `lonejson_array_stream_open_*`, `lonejson_array_stream_next`,
 `lonejson_array_stream_next_value`, `lonejson_array_stream_error`, and
-`lonejson_array_stream_close`. Serialization is exposed through
+`lonejson_array_stream_close`. Push-fed selected-array parsing uses
+`lonejson_array_stream_open_push`, `lonejson_array_stream_push*`, and
+`lonejson_array_stream_finish*`. Streaming selected-array rewrite uses
+`lonejson_array_rewrite_*`. Protocol helpers are available through
+`lonejson_sse_*` and `lonejson_multipart_*`. Serialization is exposed through
 `lonejson_serialize_*`, `lonejson_serialize_jsonl_*`, and the pull-style
 `lonejson_generator_init/read/cleanup` trio. Ownership and reuse of mapped
 values is handled by `lonejson_cleanup` and `lonejson_reset`.
@@ -300,6 +311,115 @@ per key-like string item, `lonejson_array_stream_push_string_items` builds only
 the current string through that chunk path under the default string-size cap,
 then invokes the item callback. `lonejson_curl_string_items_parse_*` provides the
 same bounded item-callback shape for `CURLOPT_WRITEFUNCTION`.
+
+Mapped array-stream fields are useful when a normal mapped object contains a
+large array of nested objects that should be consumed while the enclosing
+document is parsed:
+
+```c
+typedef struct envelope_doc {
+  lonejson_mapped_array_stream items;
+} envelope_doc;
+
+static lonejson_status on_item(void *user, void *item, lonejson_error *error) {
+  const user_doc *doc = (const user_doc *)item;
+  (void)user;
+  (void)error;
+  /* process doc */
+  return LONEJSON_STATUS_OK;
+}
+
+static const lonejson_field envelope_fields[] = {
+  LONEJSON_FIELD_MAPPED_ARRAY_STREAM_REQ(envelope_doc, items, "items")
+};
+
+LONEJSON_MAP_DEFINE(envelope_map, envelope_doc, envelope_fields);
+
+envelope_doc envelope;
+user_doc item;
+lonejson_mapped_array_stream_handler handler;
+lonejson_parse_options options = lonejson_default_parse_options();
+
+lonejson_init(&envelope_map, &envelope);
+lonejson_init(&user_doc_map, &item);
+handler.item_map = &user_doc_map;
+handler.item_dst = &item;
+handler.item = on_item;
+handler.user = NULL;
+lonejson_mapped_array_stream_set_handler(&envelope.items, &handler, &error);
+options.clear_destination = 0;
+lonejson_parse_path(&envelope_map, &envelope, "/tmp/envelope.json", &options,
+                    &error);
+lonejson_cleanup(&user_doc_map, &item);
+lonejson_cleanup(&envelope_map, &envelope);
+```
+
+### Rewrite a selected array while streaming
+
+Use `lonejson_array_rewrite_*` when one selected array should be filtered,
+patched, appended to, or rewritten while the surrounding JSON document is
+validated and re-emitted. `NULL` or `""` selects a root array. Object paths use
+dot-separated keys. Fan-out through arrays is explicit with `[]`, for example
+`"boards[].items"`.
+
+```c
+static lonejson_status keep_item(
+    void *user, const lonejson_array_rewrite_context *context, void *item,
+    lonejson_array_rewrite_result *result, lonejson_error *error) {
+  (void)user;
+  (void)context;
+  (void)item;
+  (void)error;
+  result->action = LONEJSON_ARRAY_REWRITE_KEEP;
+  return LONEJSON_STATUS_OK;
+}
+
+lonejson_array_rewrite_options options = {0};
+lonejson_json_value item_value;
+
+lonejson_json_value_init(&item_value);
+options.item_value = &item_value;
+options.item = keep_item;
+
+status = lonejson_array_rewrite_path("items", "input.json", "output.json",
+                                     &options, &error);
+lonejson_json_value_cleanup(&item_value);
+```
+
+Replacement, insertion, and appended values can come from mapped structs or
+rewindable `lonejson_json_value` handles. Output is compact canonical JSON;
+atomic replacement of files remains the caller's responsibility.
+
+### Parse Server-Sent Events and multipart streams
+
+`lonejson_sse_*` incrementally parses Server-Sent Events. `lonejson_sse_push`
+streams `data:` payload chunks through callbacks as bytes arrive, while
+`lonejson_sse_push_json` parses selected event data directly into a mapped
+destination without materializing the full event body.
+
+```c
+lonejson_sse *sse = lonejson_sse_open(NULL, &error);
+lonejson_sse_handler handler = { on_sse_begin, on_sse_data, on_sse_end };
+
+lonejson_sse_push(sse, bytes, len, &handler, user, &error);
+lonejson_sse_finish(sse, &handler, user, &error);
+lonejson_sse_close(sse);
+```
+
+`lonejson_multipart_*` incrementally parses MIME multipart bodies from a
+`Content-Type` value containing a boundary. Headers are retained only for the
+current part, and part bodies are streamed through the callback path.
+
+```c
+lonejson_multipart *mp =
+    lonejson_multipart_open(content_type, NULL, &error);
+lonejson_multipart_handler handler = { on_part_begin, on_part_data,
+                                       on_part_end };
+
+lonejson_multipart_push(mp, bytes, len, &handler, user, &error);
+lonejson_multipart_finish(mp, &handler, user, &error);
+lonejson_multipart_close(mp);
+```
 
 ### Serialize one mapped object
 

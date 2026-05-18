@@ -99,6 +99,12 @@ end
 
 M.array_rewrite_string = core.array_rewrite_string
 M.array_rewrite_path = core.array_rewrite_path
+M.encode_json = core.encode_json
+M.encode_json_to_sink = core.encode_json_to_sink
+M.encode_value = core.encode_json
+M.encode_value_to_sink = core.encode_json_to_sink
+M.decode_json = core.decode_json
+M.decode_value = core.decode_json
 M.core = core
 M.json_null = core.json_null()
 

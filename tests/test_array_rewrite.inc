@@ -861,7 +861,7 @@ static void test_array_rewrite_string_capture_allocation_failures(void) {
       "[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]";
   char input_path[] = "/tmp/lonejson-array-rewrite-string-in-XXXXXX";
   char output_path[] = "/tmp/lonejson-array-rewrite-string-out-XXXXXX";
-  test_realloc_limit_state limit = {64u};
+  test_realloc_limit_state limit = {64u, 0u};
   test_reader_state reader = {json, 0u, 64u};
   lonejson_json_value item_value;
   lonejson_array_rewrite_options options;
