@@ -704,6 +704,46 @@ lonejson_read_result lonejson_default_read_result(void) {
   return result;
 }
 
+void lonejson_buffer_reader_init(lonejson_buffer_reader *reader,
+                                 const void *data, size_t len) {
+  if (reader == NULL) {
+    return;
+  }
+  reader->data = (const unsigned char *)data;
+  reader->len = len;
+  reader->offset = 0u;
+}
+
+lonejson_read_result lonejson_buffer_reader_read(void *user,
+                                                 unsigned char *buffer,
+                                                 size_t capacity) {
+  lonejson_buffer_reader *reader = (lonejson_buffer_reader *)user;
+  lonejson_read_result result;
+  size_t remaining;
+  size_t n;
+
+  memset(&result, 0, sizeof(result));
+  if (reader == NULL || buffer == NULL ||
+      (reader->data == NULL && reader->len != 0u)) {
+    result.error_code = EINVAL;
+    return result;
+  }
+  if (reader->offset >= reader->len) {
+    result.eof = 1;
+    return result;
+  }
+  if (capacity == 0u) {
+    return result;
+  }
+  remaining = reader->len - reader->offset;
+  n = remaining < capacity ? remaining : capacity;
+  memcpy(buffer, reader->data + reader->offset, n);
+  reader->offset += n;
+  result.bytes_read = n;
+  result.eof = reader->offset >= reader->len ? 1 : 0;
+  return result;
+}
+
 lonejson_value_visitor lonejson_default_value_visitor(void) {
   lonejson_value_visitor visitor;
 

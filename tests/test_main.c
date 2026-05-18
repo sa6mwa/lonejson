@@ -186,6 +186,12 @@ int main(void) {
   test_writer_generator_string_reader_preserves_chunks();
   test_value_rewrite_replace_drop_and_root();
   test_value_rewrite_callback_replacement();
+  test_value_rewrite_replace_with_and_buffer_adapters();
+  test_value_rewrite_replace_with_old_value_metadata();
+  test_value_rewrite_replace_with_callback_failures();
+  test_value_rewrite_old_value_visitor_balanced_events();
+  test_value_rewrite_old_value_visitor_failures();
+  test_value_rewrite_adapter_and_sink_failures();
   test_value_rewrite_selector_and_source_base64();
   test_value_rewrite_missing_object_path_and_streaming_string();
   test_value_rewrite_failures();
@@ -193,6 +199,7 @@ int main(void) {
   test_serialize_omit_layout_failures();
   test_serialize_omit_pretty_and_recursive_invariants();
   test_serialize_omit_empty_implies_null();
+  test_serialize_declarative_conditional_helpers();
   test_rewindability_edges_and_measure_preserves_sources();
 #ifdef LONEJSON_WITH_CURL
   test_curl_upload_cleanup_default_allocator();

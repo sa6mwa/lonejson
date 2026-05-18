@@ -10,6 +10,11 @@ repo_root=$1
 stage_dir=$2
 release_version=$3
 
+mapfile -t impl_files < <(
+  cd "$repo_root"
+  find src/impl -maxdepth 1 -type f -name '*.h' | LC_ALL=C sort
+)
+
 files=(
   LICENSE
   README.md
@@ -20,27 +25,7 @@ files=(
   src/lonejson.c
   src/lonejson_impl.h
   src/lonejson_internal.h
-  src/impl/00_prelude.h
-  src/impl/10_source_runtime.h
-  src/impl/11_json_value_io.h
-  src/impl/12_json_value_parse.h
-  src/impl/13_json_value_visit.h
-  src/impl/14_json_value_api.h
-  src/impl/20_parser.h
-  src/impl/20_parser_map.h
-  src/impl/21_parser_values.h
-  src/impl/22_parser_actions.h
-  src/impl/22_parser_engine.h
-  src/impl/23_serializer_io.h
-  src/impl/24_serializer.h
-  src/impl/25_json_pull.h
-  src/impl/30_api.h
-  src/impl/32_generator_api.h
-  src/impl/33_array_stream_api.h
-  src/impl/34_protocol_framing_api.h
-  src/impl/35_json_pull_impl.h
-  src/impl/36_curl_api.h
-  src/impl/37_array_rewrite_api.h
+  "${impl_files[@]}"
   src/lua/lonejson_lua.c
   src/lua/lonejson_lua_module.inc
   src/lua/lonejson_lua_record.inc
@@ -62,6 +47,28 @@ for path in "${files[@]}"; do
   mkdir -p "$stage_dir/$(dirname "$path")"
   cp "$repo_root/$path" "$stage_dir/$path"
 done
+
+missing=0
+while IFS= read -r staged_file; do
+  rel_file=${staged_file#"$stage_dir"/}
+  rel_dir=$(dirname "$rel_file")
+  while IFS= read -r line; do
+    if [[ $line =~ ^[[:space:]]*#[[:space:]]*include[[:space:]]*\"([^\"]+)\" ]]; then
+      include_path=${BASH_REMATCH[1]}
+      if [[ ! -f "$stage_dir/$rel_dir/$include_path" \
+            && ! -f "$stage_dir/include/$include_path" \
+            && ! -f "$stage_dir/src/$include_path" ]]; then
+        printf 'unresolved Lua rock source include: %s includes %s\n' \
+          "$rel_file" "$include_path" >&2
+        missing=1
+      fi
+    fi
+  done <"$staged_file"
+done < <(find "$stage_dir" -type f \( -name '*.c' -o -name '*.h' -o -name '*.inc' \) | LC_ALL=C sort)
+
+if [[ "$missing" -ne 0 ]]; then
+  exit 1
+fi
 
 printf '%s\n' "$release_version" >"$stage_dir/VERSION"
 printf '%s\n' "${files[@]}" VERSION >"$stage_dir/RELEASE_MANIFEST"

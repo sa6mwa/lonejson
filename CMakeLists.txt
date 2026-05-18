@@ -25,7 +25,7 @@ option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "5" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "6" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -347,6 +347,7 @@ if(LONEJSON_BUILD_EXAMPLES)
     source_bytes
     serialize_string
     serialize_file
+    value_rewrite_replace_with
     fixed_storage)
   foreach(example_name IN LISTS LONEJSON_LINKED_EXAMPLES)
     add_executable("example_${example_name}" "examples/${example_name}.c")
@@ -443,6 +444,16 @@ if(LONEJSON_BUILD_FUZZERS)
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_value_visitor)
 
+  add_executable(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
+  target_include_directories(lonejson_fuzz_value_rewrite PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_value_rewrite PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_value_rewrite PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_value_rewrite PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_value_rewrite)
+
   add_executable(lonejson_fuzz_reader_stream_generator
     fuzz/fuzz_reader_stream_generator.c)
   target_include_directories(lonejson_fuzz_reader_stream_generator
@@ -524,6 +535,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_array_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_rewrite.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_generator_backpressure.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_protocol_framing.c"
@@ -554,6 +566,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/serialize_string.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/serialize_file.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/serialize_jsonl.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/examples/value_rewrite_replace_with.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/fixed_storage.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/curl_get.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/curl_put.c"
@@ -632,7 +645,8 @@ foreach(example_name
         source_bytes
         source_text
         spooled_bytes
-        spooled_text)
+        spooled_text
+        value_rewrite_replace_with)
   if(TARGET "example_${example_name}")
     add_dependencies(package-darwin-smoke-bundle "example_${example_name}")
   endif()

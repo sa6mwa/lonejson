@@ -51,6 +51,7 @@ FUZZ_MAPPED_MAX_LEN ?= 262144
 FUZZ_ARRAY_STREAM_MAX_LEN ?= 262144
 FUZZ_JSON_VALUE_MAX_LEN ?= 524288
 FUZZ_VALUE_VISITOR_MAX_LEN ?= 524288
+FUZZ_VALUE_REWRITE_MAX_LEN ?= 524288
 FUZZ_READER_STREAM_GENERATOR_MAX_LEN ?= 262144
 FUZZ_WRITER_GENERATOR_MAX_LEN ?= 262144
 FUZZ_PROTOCOL_FRAMING_MAX_LEN ?= 262144
@@ -64,6 +65,7 @@ FUZZ_MAPPED_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/mapped
 FUZZ_ARRAY_STREAM_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/array_stream
 FUZZ_JSON_VALUE_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/json_value
 FUZZ_VALUE_VISITOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/value_visitor
+FUZZ_VALUE_REWRITE_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/value_rewrite
 FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/reader_stream_generator
 FUZZ_WRITER_GENERATOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/writer_generator
 FUZZ_PROTOCOL_FRAMING_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/protocol_framing
@@ -72,6 +74,7 @@ FUZZ_MAPPED_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/mapped
 FUZZ_ARRAY_STREAM_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/array_stream
 FUZZ_JSON_VALUE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/json_value
 FUZZ_VALUE_VISITOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/value_visitor
+FUZZ_VALUE_REWRITE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/value_rewrite
 FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/reader_stream_generator
 FUZZ_WRITER_GENERATOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/writer_generator
 FUZZ_PROTOCOL_FRAMING_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/protocol_framing
@@ -139,6 +142,7 @@ LUA_ROCK_SOURCES := \
 	deps-armhf-linux-gnu \
 	deps-armhf-linux-musl \
 	deps-arm64-apple-darwin \
+	deps-cross \
 	deps-all \
 	certs \
 	compose-up \
@@ -188,6 +192,7 @@ help:
 		'make deps-armhf-linux-gnu   Download and extract the armhf glibc c.pkt.systems bundle.' \
 		'make deps-armhf-linux-musl  Download and extract the armhf musl c.pkt.systems bundle.' \
 		'make deps-arm64-apple-darwin Download and extract the arm64 Darwin c.pkt.systems bundle.' \
+		'make deps-cross             Download and extract bundles required by make test-cross.' \
 		'make deps-all               Download and extract every supported c.pkt.systems bundle.' \
 		'make certs                  Generate the local self-signed localhost TLS cert for nginx.' \
 		'make compose-up             Start the local nginx + sink HTTP/HTTPS test rig.' \
@@ -208,7 +213,7 @@ build-host:
 	cmake --preset $(HOST_PRESET)
 	cmake --build --preset $(HOST_PRESET)
 
-build-release:
+build-release: deps-all
 	@set -e; for preset in $(RELEASE_BUILD_PRESETS); do \
 		cmake --preset "$$preset"; \
 		cmake --build --preset "$$preset"; \
@@ -234,7 +239,7 @@ $(RELEASE_ROCKSPEC): lonejson.rockspec.in scripts/render_release_rockspec.sh | $
 $(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_PACK_SOURCE_TARBALL)
 	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$(luarocks config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(RELEASE_PACK_SOURCE_TARBALL)" "" "$$lib_ext"
 
-$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC)
+$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/smoke_lua_src_rock.sh
 	rm -f "$(RELEASE_ROCK)"
 	cd "$(RELEASE_PACK_DIR)" && luarocks pack "$(notdir $(RELEASE_PACK_ROCKSPEC))"
 	mv "$(RELEASE_PACK_DIR)/$(notdir $(RELEASE_ROCK))" "$(RELEASE_ROCK)"
@@ -243,6 +248,7 @@ $(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC)
 	lib_ext="$$(luarocks config variables.LIB_EXTENSION)"; \
 	./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$$tmp_dir/$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(notdir $(RELEASE_PACK_SOURCE_TARBALL))" "" "$$lib_ext"; \
 	cd "$$tmp_dir" && zip -q -u "$(RELEASE_ROCK)" "$(notdir $(RELEASE_PACK_ROCKSPEC))"
+	./scripts/smoke_lua_src_rock.sh "$(RELEASE_ROCK)"
 	rm -rf "$(RELEASE_PACK_DIR)"
 
 release-lua-artifacts: $(RELEASE_ROCKSPEC) $(RELEASE_ROCK)
@@ -258,7 +264,7 @@ release-source-smoke: release-source-artifact
 	./scripts/test_release_from_source.sh "$(CURDIR)" "$(DIST_DIR)/lonejson-$(RELEASE_VERSION).tar.gz"
 	cmake --build --preset package-checksums
 
-release-darwin-smoke-bundle:
+release-darwin-smoke-bundle: deps-arm64-apple-darwin
 	cmake --preset arm64-apple-darwin-release
 	cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
 
@@ -336,7 +342,7 @@ test-host-curl:
 	cmake --build --preset host-curl
 	ctest --preset host-curl
 
-test-cross:
+test-cross: deps-cross
 	@set -e; for preset in $(CROSS_RELEASE_PRESETS); do \
 		cmake --preset "$$preset"; \
 		cmake --build --preset "$$preset"; \
@@ -405,15 +411,16 @@ fuzz:
 		./scripts/generate_fuzz_large_seeds.sh; \
 	fi
 	cmake --preset $(FUZZ_PRESET)
-	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_protocol_framing
+	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_protocol_framing
 	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -P cmake/check_fuzz_instrumentation.cmake
-	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)"
-	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)"
+	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)"
+	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)"
 	cmake -E make_directory "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
 	cmake -E make_directory "$(FUZZ_JSON_VALUE_CORPUS_DIR)/json_value" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/mapped" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/value_visitor"
 	cmake -E make_directory "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages"
+	cmake -E make_directory "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/spec"
 	cmake -E make_directory "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/spec" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"
 	cmake -E make_directory "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing"
@@ -432,6 +439,10 @@ fuzz:
 	cp -R fuzz/corpus/value_visitor/. "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor/"
 	cp -R fuzz/corpus/json_value/. "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value/"
 	cp -R tests/fixtures/languages/. "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages/"
+	cp -R fuzz/corpus/value_rewrite/. "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite/"
+	cp -R fuzz/corpus/json_value/. "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value/"
+	cp -R fuzz/corpus/mapped/. "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped/"
+	cp -R tests/fixtures/spec/. "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/spec/"
 	cp -R fuzz/corpus/mapped/. "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/mapped/"
 	cp -R tests/fixtures/spec/. "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/spec/"
 	cp -R tests/fixtures/languages/. "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/languages/"
@@ -444,6 +455,7 @@ fuzz:
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/array_stream"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/json_value"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/value_visitor"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/value_rewrite"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/reader_stream_generator"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/writer_generator"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/protocol_framing"
@@ -452,6 +464,7 @@ fuzz:
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_array_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ARRAY_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/array_stream/ "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_json_value -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_JSON_VALUE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/json_value/ "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/json_value" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/mapped" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/value_visitor"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_value_visitor -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALUE_VISITOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_visitor/ "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_value_rewrite -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALUE_REWRITE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_rewrite/ "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/spec"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_reader_stream_generator -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_READER_STREAM_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/reader_stream_generator/ "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/spec" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/languages"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_generator_backpressure -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_generator/ "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_protocol_framing -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PROTOCOL_FRAMING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/protocol_framing/ "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing"
@@ -494,6 +507,12 @@ deps-armhf-linux-musl:
 deps-arm64-apple-darwin:
 	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=arm64-apple-darwin -P cmake/fetch_c_pkt_systems.cmake
 
+deps-cross: \
+	deps-aarch64-linux-gnu \
+	deps-aarch64-linux-musl \
+	deps-armhf-linux-gnu \
+	deps-armhf-linux-musl
+
 deps-all: \
 	deps-x86_64-linux-gnu \
 	deps-x86_64-linux-musl \
@@ -521,7 +540,7 @@ compose-logs:
 	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
 	$(COMPOSE) -f docker-compose.yml logs -f
 
-curl-examples:
+curl-examples: deps-host
 	./scripts/build_curl_examples.sh
 
 test-curl-e2e: curl-examples

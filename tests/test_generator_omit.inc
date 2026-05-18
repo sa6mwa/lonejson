@@ -494,6 +494,65 @@ static void test_serialize_omit_empty_implies_null(void) {
   free(doc.model);
 }
 
+static void test_serialize_declarative_conditional_helpers(void) {
+  test_conditional_doc doc;
+  lonejson_error error;
+  char buffer[512];
+  lonejson_int64 ints[] = {-1, 2};
+  lonejson_uint64 uints[] = {3u};
+  double nums[] = {1.5};
+  bool bools[] = {true, false};
+  lonejson_status status;
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_spooled_init(&doc.text, NULL);
+  lonejson_spooled_init(&doc.bytes, NULL);
+
+  status = lonejson_serialize_buffer(&test_conditional_doc_map, &doc, buffer,
+                                     sizeof(buffer), NULL, NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(buffer, "{}") == 0);
+
+  doc.dyn = (char *)malloc(1u);
+  EXPECT(doc.dyn != NULL);
+  if (doc.dyn == NULL) {
+    lonejson_spooled_cleanup(&doc.text);
+    lonejson_spooled_cleanup(&doc.bytes);
+    return;
+  }
+  doc.dyn[0] = '\0';
+  status = lonejson_serialize_buffer(&test_conditional_doc_map, &doc, buffer,
+                                     sizeof(buffer), NULL, NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(buffer, "{}") == 0);
+
+  strcpy(doc.fixed, "fx");
+  EXPECT(lonejson_spooled_append(&doc.text, "hi", 2u, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_spooled_append(&doc.bytes, "A", 1u, &error) ==
+         LONEJSON_STATUS_OK);
+  doc.ints.items = ints;
+  doc.ints.count = 2u;
+  doc.uints.items = uints;
+  doc.uints.count = 1u;
+  doc.nums.items = nums;
+  doc.nums.count = 1u;
+  doc.bools.items = bools;
+  doc.bools.count = 2u;
+
+  status = lonejson_serialize_buffer(&test_conditional_doc_map, &doc, buffer,
+                                     sizeof(buffer), NULL, NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(buffer,
+                "{\"fixed\":\"fx\",\"text\":\"hi\",\"bytes\":\"QQ==\","
+                "\"ints\":[-1,2],\"uints\":[3],\"nums\":[1.5],"
+                "\"bools\":[true,false]}") == 0);
+
+  free(doc.dyn);
+  lonejson_spooled_cleanup(&doc.text);
+  lonejson_spooled_cleanup(&doc.bytes);
+}
+
 static void test_rewindability_edges_and_measure_preserves_sources(void) {
   test_source_doc source_doc;
   test_json_value_doc json_doc;

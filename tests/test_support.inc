@@ -331,6 +331,17 @@ typedef struct test_omit_doc {
   lonejson_json_value metadata;
 } test_omit_doc;
 
+typedef struct test_conditional_doc {
+  char *dyn;
+  char fixed[8];
+  lonejson_spooled text;
+  lonejson_spooled bytes;
+  lonejson_i64_array ints;
+  lonejson_u64_array uints;
+  lonejson_f64_array nums;
+  lonejson_bool_array bools;
+} test_conditional_doc;
+
 typedef struct test_reader_state {
   const char *json;
   size_t offset;
@@ -697,6 +708,24 @@ static const lonejson_field test_omit_empty_null_fields[] = {
      0u}};
 LONEJSON_MAP_DEFINE(test_omit_empty_null_map, test_omit_doc,
                     test_omit_empty_null_fields);
+
+static const lonejson_field test_conditional_doc_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC_OMIT_EMPTY(test_conditional_doc, dyn, "dyn"),
+    LONEJSON_FIELD_STRING_FIXED_OMIT_EMPTY(test_conditional_doc, fixed, "fixed",
+                                           LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_STRING_STREAM_OMIT_EMPTY(test_conditional_doc, text, "text"),
+    LONEJSON_FIELD_BASE64_STREAM_OMIT_EMPTY(test_conditional_doc, bytes,
+                                            "bytes"),
+    LONEJSON_FIELD_I64_ARRAY_OMIT_EMPTY(test_conditional_doc, ints, "ints",
+                                        LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_U64_ARRAY_OMIT_EMPTY(test_conditional_doc, uints, "uints",
+                                        LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_F64_ARRAY_OMIT_EMPTY(test_conditional_doc, nums, "nums",
+                                        LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_BOOL_ARRAY_OMIT_EMPTY(test_conditional_doc, bools, "bools",
+                                         LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_conditional_doc_map, test_conditional_doc,
+                    test_conditional_doc_fields);
 
 static const lonejson_field test_person_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC_REQ(test_person, name, "name"),

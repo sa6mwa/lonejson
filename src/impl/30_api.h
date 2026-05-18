@@ -1144,6 +1144,50 @@ void lonejson_owned_buffer_free(lonejson_owned_buffer *buffer) {
   lonejson_owned_buffer_init(buffer);
 }
 
+lonejson_status lonejson_owned_buffer_sink(void *user, const void *data,
+                                           size_t len, lonejson_error *error) {
+  lonejson_owned_buffer *buffer = (lonejson_owned_buffer *)user;
+  char *next;
+  size_t required;
+  size_t next_cap;
+
+  if (buffer == NULL || (data == NULL && len != 0u)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "owned buffer sink arguments are invalid");
+  }
+  if (len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  required = buffer->len + len + 1u;
+  if (required <= buffer->len) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "owned buffer sink size overflow");
+  }
+  if (buffer->alloc_size < required) {
+    next_cap = buffer->alloc_size != 0u ? buffer->alloc_size : 64u;
+    while (next_cap < required) {
+      size_t doubled = next_cap * 2u;
+      if (doubled <= next_cap) {
+        next_cap = required;
+        break;
+      }
+      next_cap = doubled;
+    }
+    next = (char *)lonejson__buffer_realloc(
+        &buffer->allocator, buffer->data, buffer->alloc_size, next_cap);
+    if (next == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to grow owned buffer sink");
+    }
+    buffer->data = next;
+    buffer->alloc_size = next_cap;
+  }
+  memcpy(buffer->data + buffer->len, data, len);
+  buffer->len += len;
+  buffer->data[buffer->len] = '\0';
+  return LONEJSON_STATUS_OK;
+}
+
 char *lonejson_serialize_alloc(const lonejson_map *map, const void *src,
                                size_t *out_len,
                                const lonejson_write_options *options,

@@ -17,6 +17,7 @@ examples=(
   serialize_string
   serialize_file
   serialize_jsonl
+  value_rewrite_replace_with
   fixed_storage
 )
 

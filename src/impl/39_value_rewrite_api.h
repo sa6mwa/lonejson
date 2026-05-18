@@ -20,6 +20,7 @@ typedef struct lonejson__value_rewrite_state {
   lonejson_parse_options parse_options;
   lonejson_allocator allocator;
   lonejson_error *error;
+  lonejson_value_rewrite_old_value old_value;
   lonejson__value_rewrite_frame *frames;
   size_t frame_count;
   size_t frame_cap;
@@ -27,6 +28,9 @@ typedef struct lonejson__value_rewrite_state {
   size_t number_limit;
   int found;
   int current_emit;
+  int current_replace;
+  int replacing;
+  size_t replace_depth;
   int skipping;
   size_t skip_depth;
 } lonejson__value_rewrite_state;
@@ -239,6 +243,56 @@ static lonejson_status lonejson__value_rewrite_emit_source(
                                 state->error);
 }
 
+static lonejson_status
+lonejson__value_rewrite_visit_event(lonejson__value_rewrite_state *state,
+                                    lonejson_value_event_fn fn) {
+  if (fn == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return fn(state->options.old_value_user, state->error);
+}
+
+static lonejson_status
+lonejson__value_rewrite_visit_chunk(lonejson__value_rewrite_state *state,
+                                    lonejson_value_chunk_fn fn,
+                                    const char *data, size_t len) {
+  if (fn == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return fn(state->options.old_value_user, data, len, state->error);
+}
+
+static lonejson_status
+lonejson__value_rewrite_visit_bool(lonejson__value_rewrite_state *state,
+                                   int value) {
+  if (state->options.old_value_visitor == NULL ||
+      state->options.old_value_visitor->boolean_value == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return state->options.old_value_visitor->boolean_value(
+      state->options.old_value_user, value, state->error);
+}
+
+static lonejson_status
+lonejson__value_rewrite_replace_with(lonejson__value_rewrite_state *state) {
+  if (state->options.replace == NULL) {
+    return lonejson__set_error(state->error, LONEJSON_STATUS_INVALID_ARGUMENT,
+                               0u, 0u, 0u,
+                               "value rewrite replace callback is required");
+  }
+  return state->options.replace(&state->writer, &state->old_value,
+                               state->options.replace_user, state->error);
+}
+
+static void lonejson__value_rewrite_begin_replace_with(
+    lonejson__value_rewrite_state *state, lonejson_value_type type) {
+  memset(&state->old_value, 0, sizeof(state->old_value));
+  state->old_value.present = 1;
+  state->old_value.type = type;
+  state->replacing = 1;
+  state->replace_depth = 0u;
+}
+
 static int lonejson__value_rewrite_parent_child_matches(
     lonejson__value_rewrite_state *state,
     const lonejson__value_rewrite_frame *parent) {
@@ -316,7 +370,9 @@ lonejson__value_rewrite_emit_missing_chain(
   size_t open_objects;
   lonejson_status status;
 
-  if (state->found || state->options.action != LONEJSON_VALUE_REWRITE_REPLACE ||
+  if (state->found ||
+      (state->options.action != LONEJSON_VALUE_REWRITE_REPLACE &&
+       state->options.action != LONEJSON_VALUE_REWRITE_REPLACE_WITH) ||
       !frame->prefix_matches ||
       frame->path_len >= state->options.target_segment_count ||
       frame->saw_target_child ||
@@ -333,8 +389,14 @@ lonejson__value_rewrite_emit_missing_chain(
     return status;
   }
   if (frame->path_len + 1u == state->options.target_segment_count) {
-    status =
-        lonejson__value_rewrite_emit_source(state, &state->options.replacement);
+    if (state->options.action == LONEJSON_VALUE_REWRITE_REPLACE_WITH) {
+      memset(&state->old_value, 0, sizeof(state->old_value));
+      state->old_value.type = LONEJSON_VALUE_ABSENT;
+      status = lonejson__value_rewrite_replace_with(state);
+    } else {
+      status = lonejson__value_rewrite_emit_source(state,
+                                                   &state->options.replacement);
+    }
     state->found = status == LONEJSON_STATUS_OK;
     return status;
   }
@@ -359,8 +421,14 @@ lonejson__value_rewrite_emit_missing_chain(
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
-      status = lonejson__value_rewrite_emit_source(
-          state, &state->options.replacement);
+      if (state->options.action == LONEJSON_VALUE_REWRITE_REPLACE_WITH) {
+        memset(&state->old_value, 0, sizeof(state->old_value));
+        state->old_value.type = LONEJSON_VALUE_ABSENT;
+        status = lonejson__value_rewrite_replace_with(state);
+      } else {
+        status = lonejson__value_rewrite_emit_source(
+            state, &state->options.replacement);
+      }
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
@@ -447,6 +515,10 @@ static lonejson_status lonejson__value_rewrite_before_value(
       return lonejson__value_rewrite_emit_source(state,
                                                  &state->options.replacement);
     }
+    if (state->options.action == LONEJSON_VALUE_REWRITE_REPLACE_WITH) {
+      state->current_replace = 1;
+      return LONEJSON_STATUS_OK;
+    }
   } else {
     *emit_original = 1;
     if (parent != NULL &&
@@ -470,6 +542,13 @@ static lonejson_status lonejson__value_rewrite_object_begin(void *user,
   lonejson_status status;
 
   (void)e;
+  if (state->replacing) {
+    state->replace_depth++;
+    return lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->object_begin
+                   : NULL);
+  }
   if (state->skipping) {
     state->skip_depth++;
     return LONEJSON_STATUS_OK;
@@ -480,6 +559,15 @@ static lonejson_status lonejson__value_rewrite_object_begin(void *user,
     return status;
   }
   if (!emit_original) {
+    if (state->current_replace) {
+      lonejson__value_rewrite_begin_replace_with(state, LONEJSON_VALUE_OBJECT);
+      state->replace_depth = 1u;
+      state->current_replace = 0;
+      return lonejson__value_rewrite_visit_event(
+          state, state->options.old_value_visitor
+                     ? state->options.old_value_visitor->object_begin
+                     : NULL);
+    }
     state->skipping = 1;
     state->skip_depth = 1u;
     return LONEJSON_STATUS_OK;
@@ -499,6 +587,23 @@ static lonejson_status lonejson__value_rewrite_object_end(void *user,
   lonejson_status status;
 
   (void)e;
+  if (state->replacing) {
+    status = lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->object_end
+                   : NULL);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    if (state->replace_depth != 0u) {
+      state->replace_depth--;
+    }
+    if (state->replace_depth == 0u) {
+      state->replacing = 0;
+      return lonejson__value_rewrite_replace_with(state);
+    }
+    return LONEJSON_STATUS_OK;
+  }
   if (state->skipping) {
     state->skip_depth--;
     if (state->skip_depth == 0u) {
@@ -532,6 +637,13 @@ static lonejson_status lonejson__value_rewrite_array_begin(void *user,
   lonejson_status status;
 
   (void)e;
+  if (state->replacing) {
+    state->replace_depth++;
+    return lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->array_begin
+                   : NULL);
+  }
   if (state->skipping) {
     state->skip_depth++;
     return LONEJSON_STATUS_OK;
@@ -542,6 +654,15 @@ static lonejson_status lonejson__value_rewrite_array_begin(void *user,
     return status;
   }
   if (!emit_original) {
+    if (state->current_replace) {
+      lonejson__value_rewrite_begin_replace_with(state, LONEJSON_VALUE_ARRAY);
+      state->replace_depth = 1u;
+      state->current_replace = 0;
+      return lonejson__value_rewrite_visit_event(
+          state, state->options.old_value_visitor
+                     ? state->options.old_value_visitor->array_begin
+                     : NULL);
+    }
     state->skipping = 1;
     state->skip_depth = 1u;
     return LONEJSON_STATUS_OK;
@@ -561,6 +682,23 @@ static lonejson_status lonejson__value_rewrite_array_end(void *user,
   lonejson__value_rewrite_frame *frame;
 
   (void)e;
+  if (state->replacing) {
+    status = lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->array_end
+                   : NULL);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    if (state->replace_depth != 0u) {
+      state->replace_depth--;
+    }
+    if (state->replace_depth == 0u) {
+      state->replacing = 0;
+      return lonejson__value_rewrite_replace_with(state);
+    }
+    return LONEJSON_STATUS_OK;
+  }
   if (state->skipping) {
     state->skip_depth--;
     if (state->skip_depth == 0u) {
@@ -586,6 +724,12 @@ static lonejson_status lonejson__value_rewrite_key_begin(void *user,
   lonejson__value_rewrite_frame *frame = lonejson__value_rewrite_top(state);
 
   (void)e;
+  if (state->replacing) {
+    return lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->object_key_begin
+                   : NULL);
+  }
   if (!state->skipping && frame != NULL) {
     frame->key_len = 0u;
   }
@@ -602,6 +746,14 @@ static lonejson_status lonejson__value_rewrite_key_chunk(void *user,
   size_t next_cap;
 
   (void)e;
+  if (state->replacing) {
+    return lonejson__value_rewrite_visit_chunk(
+        state,
+        state->options.old_value_visitor
+            ? state->options.old_value_visitor->object_key_chunk
+            : NULL,
+        data, len);
+  }
   if (state->skipping || frame == NULL || len == 0u) {
     return LONEJSON_STATUS_OK;
   }
@@ -628,8 +780,17 @@ static lonejson_status lonejson__value_rewrite_key_chunk(void *user,
 
 static lonejson_status lonejson__value_rewrite_key_end(void *user,
                                                        lonejson_error *e) {
-  (void)user;
   (void)e;
+  {
+    lonejson__value_rewrite_state *state =
+        (lonejson__value_rewrite_state *)user;
+    if (state->replacing) {
+      return lonejson__value_rewrite_visit_event(
+          state, state->options.old_value_visitor
+                     ? state->options.old_value_visitor->object_key_end
+                     : NULL);
+    }
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -641,12 +802,29 @@ static lonejson_status lonejson__value_rewrite_string_begin(void *user,
   lonejson_status status;
 
   (void)e;
+  if (state->replacing) {
+    return lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->string_begin
+                   : NULL);
+  }
   status = lonejson__value_rewrite_before_value(
       state, &state->current_emit, &prefix_matches, &path_len);
   (void)prefix_matches;
   (void)path_len;
-  if (status != LONEJSON_STATUS_OK || !state->current_emit) {
+  if (status != LONEJSON_STATUS_OK) {
     return status;
+  }
+  if (state->current_replace) {
+    lonejson__value_rewrite_begin_replace_with(state, LONEJSON_VALUE_STRING);
+    state->current_replace = 0;
+    return lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->string_begin
+                   : NULL);
+  }
+  if (!state->current_emit) {
+    return LONEJSON_STATUS_OK;
   }
   return lonejson_writer_string_begin(&state->writer, state->error);
 }
@@ -657,6 +835,14 @@ static lonejson_status lonejson__value_rewrite_string_chunk(void *user,
                                                             lonejson_error *e) {
   lonejson__value_rewrite_state *state = (lonejson__value_rewrite_state *)user;
   (void)e;
+  if (state->replacing) {
+    return lonejson__value_rewrite_visit_chunk(
+        state,
+        state->options.old_value_visitor
+            ? state->options.old_value_visitor->string_chunk
+            : NULL,
+        data, len);
+  }
   if (!state->current_emit) {
     return LONEJSON_STATUS_OK;
   }
@@ -668,6 +854,20 @@ static lonejson_status lonejson__value_rewrite_string_end(void *user,
   lonejson__value_rewrite_state *state = (lonejson__value_rewrite_state *)user;
   lonejson_status status;
   (void)e;
+  if (state->replacing) {
+    status = lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->string_end
+                   : NULL);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    if (state->replace_depth != 0u) {
+      return LONEJSON_STATUS_OK;
+    }
+    state->replacing = 0;
+    return lonejson__value_rewrite_replace_with(state);
+  }
   if (!state->current_emit) {
     state->current_emit = 0;
     return LONEJSON_STATUS_OK;
@@ -686,10 +886,24 @@ static lonejson_status lonejson__value_rewrite_number_begin(void *user,
 
   (void)e;
   lonejson__byte_reset(&state->number);
+  if (state->replacing) {
+    return lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->number_begin
+                   : NULL);
+  }
   status = lonejson__value_rewrite_before_value(
       state, &state->current_emit, &prefix_matches, &path_len);
   (void)prefix_matches;
   (void)path_len;
+  if (status == LONEJSON_STATUS_OK && state->current_replace) {
+    lonejson__value_rewrite_begin_replace_with(state, LONEJSON_VALUE_NUMBER);
+    state->current_replace = 0;
+    status = lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->number_begin
+                   : NULL);
+  }
   return status;
 }
 
@@ -698,7 +912,22 @@ static lonejson_status lonejson__value_rewrite_number_chunk(void *user,
                                                             size_t len,
                                                             lonejson_error *e) {
   lonejson__value_rewrite_state *state = (lonejson__value_rewrite_state *)user;
+  lonejson_status status;
   (void)e;
+  if (state->replacing) {
+    status = lonejson__byte_append(&state->number, data, len,
+                                   state->number_limit, &state->allocator,
+                                   state->error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    return lonejson__value_rewrite_visit_chunk(
+        state,
+        state->options.old_value_visitor
+            ? state->options.old_value_visitor->number_chunk
+            : NULL,
+        data, len);
+  }
   if (!state->current_emit) {
     return LONEJSON_STATUS_OK;
   }
@@ -712,6 +941,25 @@ static lonejson_status lonejson__value_rewrite_number_end(void *user,
   lonejson__value_rewrite_state *state = (lonejson__value_rewrite_state *)user;
   lonejson_status status;
   (void)e;
+  if (state->replacing) {
+    status = lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->number_end
+                   : NULL);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    if (state->replace_depth != 0u) {
+      lonejson__byte_reset(&state->number);
+      return LONEJSON_STATUS_OK;
+    }
+    state->old_value.number = state->number.data;
+    state->old_value.number_len = state->number.len;
+    state->replacing = 0;
+    status = lonejson__value_rewrite_replace_with(state);
+    lonejson__byte_reset(&state->number);
+    return status;
+  }
   if (!state->current_emit) {
     state->current_emit = 0;
     return LONEJSON_STATUS_OK;
@@ -732,12 +980,29 @@ static lonejson_status lonejson__value_rewrite_boolean(void *user, int value,
   lonejson_status status;
 
   (void)e;
+  if (state->replacing) {
+    return lonejson__value_rewrite_visit_bool(state, value);
+  }
   status = lonejson__value_rewrite_before_value(
       state, &emit_original, &prefix_matches, &path_len);
   (void)prefix_matches;
   (void)path_len;
-  if (status != LONEJSON_STATUS_OK || !emit_original) {
+  if (status != LONEJSON_STATUS_OK) {
     return status;
+  }
+  if (state->current_replace) {
+    lonejson__value_rewrite_begin_replace_with(state, LONEJSON_VALUE_BOOL);
+    state->old_value.boolean = value ? 1 : 0;
+    state->current_replace = 0;
+    status = lonejson__value_rewrite_visit_bool(state, value);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    state->replacing = 0;
+    return lonejson__value_rewrite_replace_with(state);
+  }
+  if (!emit_original) {
+    return LONEJSON_STATUS_OK;
   }
   return lonejson_writer_bool(&state->writer, value, state->error);
 }
@@ -751,12 +1016,34 @@ static lonejson_status lonejson__value_rewrite_null(void *user,
   lonejson_status status;
 
   (void)e;
+  if (state->replacing) {
+    return lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->null_value
+                   : NULL);
+  }
   status = lonejson__value_rewrite_before_value(
       state, &emit_original, &prefix_matches, &path_len);
   (void)prefix_matches;
   (void)path_len;
-  if (status != LONEJSON_STATUS_OK || !emit_original) {
+  if (status != LONEJSON_STATUS_OK) {
     return status;
+  }
+  if (state->current_replace) {
+    lonejson__value_rewrite_begin_replace_with(state, LONEJSON_VALUE_NULL);
+    state->current_replace = 0;
+    status = lonejson__value_rewrite_visit_event(
+        state, state->options.old_value_visitor
+                   ? state->options.old_value_visitor->null_value
+                   : NULL);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    state->replacing = 0;
+    return lonejson__value_rewrite_replace_with(state);
+  }
+  if (!emit_original) {
+    return LONEJSON_STATUS_OK;
   }
   return lonejson_writer_null(&state->writer, state->error);
 }
@@ -810,6 +1097,12 @@ static lonejson_status lonejson__value_rewrite_validate_options(
                                0u,
                                "value rewrite replacement source is invalid");
   }
+  if (options->action == LONEJSON_VALUE_REWRITE_REPLACE_WITH &&
+      options->replace == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "value rewrite replace callback is required");
+  }
   if (options->action == LONEJSON_VALUE_REWRITE_DROP &&
       options->target_segment_count == 0u) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -817,7 +1110,8 @@ static lonejson_status lonejson__value_rewrite_validate_options(
   }
   if (options->action != LONEJSON_VALUE_REWRITE_KEEP &&
       options->action != LONEJSON_VALUE_REWRITE_DROP &&
-      options->action != LONEJSON_VALUE_REWRITE_REPLACE) {
+      options->action != LONEJSON_VALUE_REWRITE_REPLACE &&
+      options->action != LONEJSON_VALUE_REWRITE_REPLACE_WITH) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "invalid value rewrite action");
   }
@@ -890,6 +1184,20 @@ lonejson_status lonejson_value_rewrite_reader(
   }
   lonejson__value_rewrite_cleanup(&state);
   return status;
+}
+
+lonejson_status lonejson_value_rewrite_buffer(
+    const void *data, size_t len, lonejson_sink_fn sink, void *sink_user,
+    const lonejson_value_rewrite_options *options, lonejson_error *error) {
+  lonejson_buffer_reader reader;
+
+  if (data == NULL && len != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JSON buffer is required");
+  }
+  lonejson_buffer_reader_init(&reader, data, len);
+  return lonejson_value_rewrite_reader(lonejson_buffer_reader_read, &reader,
+                                       sink, sink_user, options, error);
 }
 
 lonejson_status lonejson_value_rewrite_filep(
@@ -992,6 +1300,10 @@ static lonejson_status lonejson__value_rewrite_selector_to_options(
   options->target_segment_count = selector->segment_count;
   options->action = selector_options->action;
   options->replacement = selector_options->replacement;
+  options->old_value_visitor = selector_options->old_value_visitor;
+  options->old_value_user = selector_options->old_value_user;
+  options->replace = selector_options->replace;
+  options->replace_user = selector_options->replace_user;
   return LONEJSON_STATUS_OK;
 }
 
@@ -1012,6 +1324,21 @@ lonejson_status lonejson_value_rewrite_selector_reader(
   }
   lonejson__value_rewrite_selector_cleanup(&selector);
   return status;
+}
+
+lonejson_status lonejson_value_rewrite_selector_buffer(
+    const void *data, size_t len, lonejson_sink_fn sink, void *sink_user,
+    const lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error) {
+  lonejson_buffer_reader reader;
+
+  if (data == NULL && len != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JSON buffer is required");
+  }
+  lonejson_buffer_reader_init(&reader, data, len);
+  return lonejson_value_rewrite_selector_reader(
+      lonejson_buffer_reader_read, &reader, sink, sink_user, options, error);
 }
 
 lonejson_status lonejson_value_rewrite_selector_filep(

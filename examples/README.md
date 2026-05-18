@@ -42,6 +42,8 @@ The same pattern applies to:
 * `spooled_bytes.c` (forces Base64 decode spill-to-disk and confirms cleanup)
 * `source_text.c` (serializes a caller-declared JSON text field from a filesystem path)
 * `source_bytes.c` (serializes a caller-owned fd as a Base64 JSON field)
+* `value_rewrite_replace_with.c` (rewrites one selected JSON value by
+  inspecting the old value and emitting a replacement through the writer)
 * `serialize_string.c`
 * `serialize_file.c`
 * `fixed_storage.c`
@@ -50,7 +52,8 @@ The same pattern applies to:
 variants in the tree; the rest model linked-library use.
 
 The public API also includes streaming selected-array rewrites
-(`lonejson_array_rewrite_*`), incremental Server-Sent Events parsing
+(`lonejson_array_rewrite_*`), whole-value rewrites
+(`lonejson_value_rewrite_*`), incremental Server-Sent Events parsing
 (`lonejson_sse_*`), and incremental MIME multipart parsing
 (`lonejson_multipart_*`). Those surfaces are covered by the integration tests
 under `tests/` even when there is no dedicated standalone example program yet.

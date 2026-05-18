@@ -442,6 +442,12 @@ static int lonejson__field_is_empty_for_omit(const lonejson_field *field,
     }
     if ((omit_flags & LONEJSON_FIELD_OMIT_EMPTY) != 0u) {
       switch (field->kind) {
+      case LONEJSON_FIELD_KIND_STRING:
+        if (field->storage == LONEJSON_STORAGE_DYNAMIC) {
+          const char *value = *(const char *const *)ptr;
+          return value == NULL || value[0] == '\0';
+        }
+        return field->fixed_capacity == 0u || *(const char *)ptr == '\0';
       case LONEJSON_FIELD_KIND_STRING_STREAM:
       case LONEJSON_FIELD_KIND_BASE64_STREAM:
         return lonejson_spooled_size((const lonejson_spooled *)ptr) == 0u;

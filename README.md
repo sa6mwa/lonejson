@@ -390,6 +390,52 @@ Replacement, insertion, and appended values can come from mapped structs or
 rewindable `lonejson_json_value` handles. Output is compact canonical JSON;
 atomic replacement of files remains the caller's responsibility.
 
+### Replace one selected value from the old value
+
+Use `lonejson_value_rewrite_*` when the selected value itself should be kept,
+dropped, statically replaced, or replaced from a callback. `REPLACE_WITH` is
+for old-value-dependent mutations: lonejson streams and validates the document,
+reports whether the target existed, and gives scalar metadata to the callback.
+The callback emits exactly one replacement through `lonejson_writer`, so JSON
+syntax remains owned by lonejson.
+
+```c
+/* Excerpt only; the complete example includes integer parsing and errors. */
+static lonejson_status increment(
+    lonejson_writer *writer, const lonejson_value_rewrite_old_value *old,
+    void *user, lonejson_error *error) {
+  lonejson_int64 delta = *(const lonejson_int64 *)user;
+
+  if (!old->present) {
+    return lonejson_writer_i64(writer, delta, error);
+  }
+  if (old->type != LONEJSON_VALUE_NUMBER) {
+    return LONEJSON_STATUS_TYPE_MISMATCH;
+  }
+  /* Parse old->number according to the caller's numeric policy. */
+  return lonejson_writer_i64(writer, parsed_old_number + delta, error);
+}
+
+lonejson_value_rewrite_selector_options options = {0};
+lonejson_owned_buffer output;
+lonejson_int64 delta = 5;
+
+lonejson_owned_buffer_init(&output);
+options.selector = "meta.version";
+options.action = LONEJSON_VALUE_REWRITE_REPLACE_WITH;
+options.replace = increment;
+options.replace_user = &delta;
+
+status = lonejson_value_rewrite_selector_buffer(
+    input, input_len, lonejson_owned_buffer_sink, &output, &options, &error);
+lonejson_owned_buffer_free(&output);
+```
+
+Structured old values are observable through `old_value_visitor`; visitor
+events are streamed and balanced, and the complete old value is not materialized.
+See `examples/value_rewrite_replace_with.c` for a complete integer increment
+program.
+
 ### Parse Server-Sent Events and multipart streams
 
 `lonejson_sse_*` incrementally parses Server-Sent Events. `lonejson_sse_push`
