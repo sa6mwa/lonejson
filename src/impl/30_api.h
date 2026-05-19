@@ -512,9 +512,18 @@ lonejson__stream_open_common(const lonejson_map *map,
   stream->parser =
       (lonejson_parser *)(((unsigned char *)stream) + sizeof(*stream));
   workspace = ((unsigned char *)stream->parser) + sizeof(*stream->parser);
-  lonejson__parser_init_state(
-      stream->parser, map, NULL, &stream->options, 0, workspace,
-      LONEJSON_PUSH_PARSER_BUFFER_SIZE + LONEJSON__PARSER_WORKSPACE_SLACK);
+  memset(stream->parser, 0, sizeof(*stream->parser));
+  workspace = lonejson__align_pointer(workspace,
+                                      LONEJSON__PARSER_WORKSPACE_ALIGNMENT);
+  stream->parser->root_map = map;
+  stream->parser->options = stream->options;
+  stream->parser->allocator = stream->allocator;
+  stream->parser->workspace = workspace;
+  stream->parser->workspace_size =
+      (size_t)(((unsigned char *)stream) + sizeof(*stream) + parser_bytes -
+               workspace);
+  stream->parser->workspace_top = stream->parser->workspace_size;
+  stream->parser->frames = (lonejson_frame *)workspace;
   stream->parser->self_alloc_size = parser_bytes;
   stream->parser->owns_self = 0;
   lonejson__clear_error(error);

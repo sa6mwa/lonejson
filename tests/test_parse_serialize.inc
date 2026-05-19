@@ -56,6 +56,61 @@ static void test_zero_alloc_validate_path(void) {
   EXPECT(g_alloc_record_count == 0u);
 }
 
+static void test_f64_boundary_exponents_stay_on_fast_path(void) {
+  double parsed;
+
+  parsed = 0.0;
+  EXPECT(lonejson__parse_f64_fast("0.1e309", strlen("0.1e309"), &parsed));
+  EXPECT(parsed > 9.0e307);
+  EXPECT(parsed < DBL_MAX);
+
+  parsed = 0.0;
+  EXPECT(lonejson__parse_f64_fast("1.5e-309", strlen("1.5e-309"), &parsed));
+  EXPECT(parsed > 0.0);
+  EXPECT(parsed < 1.0e-308);
+}
+
+static void test_f64_boundary_exponents_are_locale_independent(void) {
+  static const char *const locales[] = {"sv_SE.UTF-8", "sv_SE.utf8",
+                                        "de_DE.UTF-8", "de_DE.utf8",
+                                        "fr_FR.UTF-8", "fr_FR.utf8"};
+  char saved_locale[128];
+  const char *current_locale;
+  const char *selected_locale = NULL;
+  size_t i;
+  test_person person;
+  lonejson_error error;
+  lonejson_status status;
+  const char *json =
+      "{\"name\":\"Locale\",\"score\":0.1e309,"
+      "\"address\":{\"city\":\"Malmo\",\"zip\":211},"
+      "\"active\":true,\"lucky_numbers\":[],\"tags\":[],\"items\":[]}";
+
+  current_locale = setlocale(LC_NUMERIC, NULL);
+  snprintf(saved_locale, sizeof(saved_locale), "%s",
+           current_locale != NULL ? current_locale : "C");
+  for (i = 0u; i < sizeof(locales) / sizeof(locales[0]); ++i) {
+    if (setlocale(LC_NUMERIC, locales[i]) != NULL) {
+      selected_locale = locales[i];
+      break;
+    }
+  }
+  if (selected_locale == NULL) {
+    (void)setlocale(LC_NUMERIC, saved_locale);
+    return;
+  }
+
+  poison_bytes(&person, sizeof(person), 0x3Cu);
+  status = lonejson_parse_cstr(&test_person_map, &person, json, NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  if (status == LONEJSON_STATUS_OK) {
+    EXPECT(person.score > 9.0e307);
+    EXPECT(person.score < DBL_MAX);
+    lonejson_cleanup(&test_person_map, &person);
+  }
+  (void)setlocale(LC_NUMERIC, saved_locale);
+}
+
 static void test_parser_workspace_accounting(void) {
   const char *json = "{\"name\":\"workspace-check\",\"codes\":[5,8,13,21]}";
   test_fixed_log log;

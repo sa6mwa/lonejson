@@ -20,6 +20,7 @@ CROSS_RELEASE_PRESETS := \
 	armhf-linux-gnu-release \
 	armhf-linux-musl-release
 LUA ?= lua
+LUAROCKS ?= luarocks
 GENERATED_FIXTURE_DIR := $(CURDIR)/build/generated/fixtures
 COMPOSE := $(shell if command -v nerdctl >/dev/null 2>&1; then printf '%s' 'nerdctl compose'; elif command -v docker >/dev/null 2>&1; then printf '%s' 'docker compose'; fi)
 RELEASE_VERSION := $(shell ./scripts/release_version.sh)
@@ -54,6 +55,7 @@ FUZZ_VALUE_VISITOR_MAX_LEN ?= 524288
 FUZZ_VALUE_REWRITE_MAX_LEN ?= 524288
 FUZZ_READER_STREAM_GENERATOR_MAX_LEN ?= 262144
 FUZZ_WRITER_GENERATOR_MAX_LEN ?= 262144
+FUZZ_WRITER_VALUE_STREAM_MAX_LEN ?= 262144
 FUZZ_PROTOCOL_FRAMING_MAX_LEN ?= 262144
 FUZZ_LARGE_SEEDS := \
 	fuzz/corpus/mapped/person_large_payload.json \
@@ -68,6 +70,7 @@ FUZZ_VALUE_VISITOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/value_visitor
 FUZZ_VALUE_REWRITE_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/value_rewrite
 FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/reader_stream_generator
 FUZZ_WRITER_GENERATOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/writer_generator
+FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/writer_value_stream
 FUZZ_PROTOCOL_FRAMING_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/protocol_framing
 FUZZ_VALIDATE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/validate
 FUZZ_MAPPED_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/mapped
@@ -77,12 +80,13 @@ FUZZ_VALUE_VISITOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/value_visitor
 FUZZ_VALUE_REWRITE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/value_rewrite
 FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/reader_stream_generator
 FUZZ_WRITER_GENERATOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/writer_generator
+FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/writer_value_stream
 FUZZ_PROTOCOL_FRAMING_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/protocol_framing
 LUA_ROCK_TREE := build/luarocks
 LUA_ROCKSPEC := $(LUA_ROCK_TREE)/lonejson-$(RELEASE_VERSION)-1.rockspec
 LUA_ROCK_STAMP := $(LUA_ROCK_TREE)/.installed.stamp
 LUA_ROCK_BUILD_LOCK := $(LUA_ROCK_TREE)/.build.lock
-LUA_ROCK_EXTRA_CFLAGS ?= -O3 -DNDEBUG -fno-semantic-interposition
+LUA_ROCK_EXTRA_CFLAGS ?= -O3 -DNDEBUG -D_FILE_OFFSET_BITS=64 -fno-semantic-interposition
 LUA_ROCK_BUILD_BYPRODUCTS := \
 	$(CURDIR)/lonejson \
 	$(CURDIR)/src/lua/lonejson_lua.o \
@@ -121,6 +125,7 @@ LUA_ROCK_SOURCES := \
 	bench-check \
 	bench-freeze-baseline \
 	bench-compare \
+	bench-baseline-history \
 	bench-gate \
 	test \
 	test-host \
@@ -171,6 +176,7 @@ help:
 		'make bench-check            Run C and Lua benchmark gates using temporary result files, leaving perflogs/ clean.' \
 		'make bench-freeze-baseline  Freeze the last history entry as the current benchmark baseline.' \
 		'make bench-compare          Run a fresh C benchmark, then compare against the committed C baseline.' \
+		'make bench-baseline-history Compare frozen C/Lua benchmark baselines across git history.' \
 		'make bench-gate             Run a fresh C benchmark, then enforce the C benchmark gate against the committed C baseline.' \
 		'make test                   Build and run the debug test preset.' \
 		'make test-host              Build and run the host-native test preset.' \
@@ -234,18 +240,18 @@ $(RELEASE_PACK_SOURCE_TARBALL): $(RELEASE_PACK_STAGE_DIR)
 	gzip -9 -f "$(RELEASE_PACK_DIR)/lonejson-$(RELEASE_VERSION).tar"
 
 $(RELEASE_ROCKSPEC): lonejson.rockspec.in scripts/render_release_rockspec.sh | $(DIST_DIR)
-	lib_ext="$$(luarocks config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(RELEASE_ROCKSPEC)" "" "" "$$lib_ext"
+	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(RELEASE_ROCKSPEC)" "" "" "$$lib_ext"
 
 $(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_PACK_SOURCE_TARBALL)
-	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$(luarocks config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(RELEASE_PACK_SOURCE_TARBALL)" "" "$$lib_ext"
+	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(RELEASE_PACK_SOURCE_TARBALL)" "" "$$lib_ext"
 
 $(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/smoke_lua_src_rock.sh
 	rm -f "$(RELEASE_ROCK)"
-	cd "$(RELEASE_PACK_DIR)" && luarocks pack "$(notdir $(RELEASE_PACK_ROCKSPEC))"
+	cd "$(RELEASE_PACK_DIR)" && $(LUAROCKS) pack "$(notdir $(RELEASE_PACK_ROCKSPEC))"
 	mv "$(RELEASE_PACK_DIR)/$(notdir $(RELEASE_ROCK))" "$(RELEASE_ROCK)"
 	@tmp_dir="$$(mktemp -d)"; \
 	trap 'rm -rf "$$tmp_dir"' EXIT; \
-	lib_ext="$$(luarocks config variables.LIB_EXTENSION)"; \
+	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; \
 	./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$$tmp_dir/$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(notdir $(RELEASE_PACK_SOURCE_TARBALL))" "" "$$lib_ext"; \
 	cd "$$tmp_dir" && zip -q -u "$(RELEASE_ROCK)" "$(notdir $(RELEASE_PACK_ROCKSPEC))"
 	./scripts/smoke_lua_src_rock.sh "$(RELEASE_ROCK)"
@@ -301,15 +307,15 @@ bench-check:
 		./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$$c_retry"; \
 		./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$$c_retry"; \
 	fi && \
-	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && \
-	lua bench/lonejson_lua_bench.lua run "$$c_latest" "$$lua_latest" "$$lua_history" "$$lua_runs" "$(LUA_PERF_ITERATIONS)" && \
-	if ! lua bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$$lua_latest"; then \
-		lua bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$$lua_latest"; \
+	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && \
+	$(LUA) bench/lonejson_lua_bench.lua run "$$c_latest" "$$lua_latest" "$$lua_history" "$$lua_runs" "$(LUA_PERF_ITERATIONS)" && \
+	if ! $(LUA) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$$lua_latest"; then \
+		$(LUA) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$$lua_latest"; \
 		printf '%s\n' 'Lua benchmark gate failed once; rerunning to confirm before failing test-all.' >&2; \
 		lua_retry="$$tmp_dir/lua-latest-retry.json"; \
-		lua bench/lonejson_lua_bench.lua run "$$c_latest" "$$lua_retry" "$$lua_history" "$$lua_runs" "$(LUA_PERF_ITERATIONS)"; \
-		lua bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$$lua_retry"; \
-		lua bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$$lua_retry"; \
+		$(LUA) bench/lonejson_lua_bench.lua run "$$c_latest" "$$lua_retry" "$$lua_history" "$$lua_runs" "$(LUA_PERF_ITERATIONS)"; \
+		$(LUA) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$$lua_retry"; \
+		$(LUA) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$$lua_retry"; \
 	fi
 
 bench-freeze-baseline:
@@ -322,6 +328,11 @@ bench-compare:
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
 	./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$(PERF_LATEST)"
+
+bench-baseline-history:
+	@$(MAKE) --no-print-directory lua-rock >/dev/null
+	@eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && \
+		$(LUA) scripts/bench_baseline_history.lua --repo "$(CURDIR)"
 
 bench-gate:
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
@@ -366,34 +377,34 @@ lua-rock: $(LUA_ROCK_STAMP)
 
 $(LUA_ROCKSPEC): $(LUA_ROCK_SOURCES)
 	mkdir -p "$(LUA_ROCK_TREE)"
-	lib_ext="$$(luarocks config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(LUA_ROCKSPEC)" "git+file://$(CURDIR)" "" "$$lib_ext"
+	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(LUA_ROCKSPEC)" "git+file://$(CURDIR)" "" "$$lib_ext"
 
 $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES)
-	flock "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" luarocks make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"'
+	flock "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"'
 
 lua-test: lua-rock
-	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua tests/test_lua.lua
+	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && $(LUA) tests/test_lua.lua
 
 lua-bench:
 	@$(MAKE) lua-rock
-	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
+	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && $(LUA) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
 	if [ -f "$(LUA_PERF_BASELINE)" ]; then \
-		lua bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)" && \
-		lua bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"; \
+		$(LUA) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)" && \
+		$(LUA) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"; \
 	fi
 
 lua-bench-freeze-baseline: lua-rock
-	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua bench/lonejson_lua_bench.lua freeze-baseline "$(LUA_PERF_HISTORY)" "$(LUA_PERF_BASELINE)"
+	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && $(LUA) bench/lonejson_lua_bench.lua freeze-baseline "$(LUA_PERF_HISTORY)" "$(LUA_PERF_BASELINE)"
 
 lua-bench-compare:
 	@$(MAKE) lua-rock
-	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
-	lua bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
+	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && $(LUA) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
+	$(LUA) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
 
 lua-bench-gate:
 	@$(MAKE) lua-rock
-	eval "$$(luarocks path --tree $(LUA_ROCK_TREE))" && lua bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
-	lua bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
+	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && $(LUA) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
+	$(LUA) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
 
 asan:
 	cmake --preset $(ASAN_PRESET)
@@ -411,10 +422,10 @@ fuzz:
 		./scripts/generate_fuzz_large_seeds.sh; \
 	fi
 	cmake --preset $(FUZZ_PRESET)
-	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_protocol_framing
+	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing
 	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -P cmake/check_fuzz_instrumentation.cmake
-	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)"
-	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)"
+	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)"
+	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)"
 	cmake -E make_directory "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
@@ -423,6 +434,7 @@ fuzz:
 	cmake -E make_directory "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/spec"
 	cmake -E make_directory "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/spec" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"
+	cmake -E make_directory "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/value_visitor" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/spec"
 	cmake -E make_directory "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing"
 	cp -R tests/fixtures/vendor/json_test_suite/test_parsing/. "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor/"
 	cp -R tests/fixtures/spec/. "$(FUZZ_VALIDATE_CORPUS_DIR)/spec/"
@@ -449,6 +461,9 @@ fuzz:
 	cp -R fuzz/corpus/mapped/. "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped/"
 	cp -R fuzz/corpus/json_value/. "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value/"
 	cp -R tests/fixtures/spec/. "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec/"
+	cp -R fuzz/corpus/json_value/. "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/json_value/"
+	cp -R fuzz/corpus/value_visitor/. "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/value_visitor/"
+	cp -R tests/fixtures/spec/. "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/spec/"
 	cp -R fuzz/corpus/protocol_framing/. "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing/"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/validate"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/mapped"
@@ -458,6 +473,7 @@ fuzz:
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/value_rewrite"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/reader_stream_generator"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/writer_generator"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/writer_value_stream"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/protocol_framing"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_validate -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALIDATE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/validate/ "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_MAPPED_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/mapped/ "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
@@ -467,6 +483,7 @@ fuzz:
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_value_rewrite -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALUE_REWRITE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_rewrite/ "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/spec"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_reader_stream_generator -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_READER_STREAM_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/reader_stream_generator/ "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/spec" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/languages"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_generator_backpressure -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_generator/ "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_value_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_VALUE_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_value_stream/ "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/value_visitor" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/spec"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_protocol_framing -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PROTOCOL_FRAMING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/protocol_framing/ "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing"
 
 fuzz-long:

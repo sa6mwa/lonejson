@@ -233,6 +233,24 @@ static lonejson_status lonejson__emit_escaped_bytes(lonejson_sink_fn sink,
                                                     const unsigned char *text,
                                                     size_t len) {
   lonejson_status status;
+  size_t i;
+
+  for (i = 0u; i < len; ++i) {
+    if (text[i] < 0x20u || text[i] == '"' || text[i] == '\\') {
+      break;
+    }
+  }
+  if (i == len) {
+    status = lonejson__emit_cstr(sink, user, error, "\"");
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return status;
+    }
+    status = lonejson__emit(sink, user, error, (const char *)text, len);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return status;
+    }
+    return lonejson__emit_cstr(sink, user, error, "\"");
+  }
 
   status = lonejson__emit_cstr(sink, user, error, "\"");
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {

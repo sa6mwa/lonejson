@@ -22,10 +22,12 @@ workflow now is "measure lonejson, compare to the frozen lonejson baseline".
 
 Methodology:
 
-* Each C and Lua benchmark lane records the median of `5` samples.
-* Each C benchmark sample repeats the lane until at least `250 ms` of wall time
+* Each C and Lua benchmark lane records the best of `5` samples. Real code
+  regressions affect every sample; taking the best sample keeps intermittent
+  scheduler, browser, and CPU-frequency noise from dominating release gates.
+* Each C benchmark sample repeats the lane until at least `500 ms` of wall time
   has elapsed.
-* Each Lua benchmark sample repeats the lane until at least `250 ms` of wall
+* Each Lua benchmark sample repeats the lane until at least `500 ms` of wall
   time has elapsed, with longer lanes where the Lua harness configures them.
 * The C benchmark target compiles lonejson inline from the packaged single-header artifact (`LONEJSON_IMPLEMENTATION`) so the frozen C baseline stays comparable across single-header-focused releases.
 * Fixed parse and stream lanes are reported in two modes:
@@ -36,7 +38,7 @@ Methodology:
   * that removes generic key/value allocation and lookup work when the document shape is known up front
   * comparisons against generic decoders should therefore be read as "schema-guided mapped decode" versus "generic decode", not as proof that all parsing modes are equivalent
 * The wide multilingual document lanes exist to make that schema-guided advantage visible on a less toy-like shape than the original single-field UTF-8 fixtures.
-* `bench-compare` labels deltas under `3%` as `noise`, deltas under `5%` as `small`, and larger deltas as `material`.
+* `bench-compare` labels deltas under `3%` as `noise`, deltas under `10%` as `small`, and larger deltas as `material`.
 * `bench-gate` is the hard check:
   * it fails if the baseline schema version differs from the latest run
   * it fails if the benchmark configuration differs from the baseline

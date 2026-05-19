@@ -1,7 +1,12 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <float.h>
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -205,6 +210,52 @@ static void test_allocator_init(test_allocator_state *state) {
   state->allocator.realloc_fn = test_allocator_realloc;
   state->allocator.free_fn = test_allocator_free;
   state->allocator.stats = &state->stats;
+}
+
+typedef struct test_fail_after_allocator_state {
+  lonejson_allocator allocator;
+  size_t calls;
+  size_t successful_calls_before_failure;
+} test_fail_after_allocator_state;
+
+static void *test_fail_after_allocator_malloc(void *ctx, size_t size) {
+  test_fail_after_allocator_state *state =
+      (test_fail_after_allocator_state *)ctx;
+
+  if (state->calls >= state->successful_calls_before_failure) {
+    return NULL;
+  }
+  state->calls++;
+  return malloc(size);
+}
+
+static void *test_fail_after_allocator_realloc(void *ctx, void *ptr,
+                                               size_t size) {
+  test_fail_after_allocator_state *state =
+      (test_fail_after_allocator_state *)ctx;
+
+  if (state->calls >= state->successful_calls_before_failure) {
+    return NULL;
+  }
+  state->calls++;
+  return realloc(ptr, size);
+}
+
+static void test_fail_after_allocator_free(void *ctx, void *ptr) {
+  (void)ctx;
+  free(ptr);
+}
+
+static void test_fail_after_allocator_init(
+    test_fail_after_allocator_state *state,
+    size_t successful_calls_before_failure) {
+  memset(state, 0, sizeof(*state));
+  state->allocator = lonejson_default_allocator();
+  state->allocator.ctx = state;
+  state->allocator.malloc_fn = test_fail_after_allocator_malloc;
+  state->allocator.realloc_fn = test_fail_after_allocator_realloc;
+  state->allocator.free_fn = test_fail_after_allocator_free;
+  state->successful_calls_before_failure = successful_calls_before_failure;
 }
 
 typedef struct test_address {

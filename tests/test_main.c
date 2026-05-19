@@ -18,6 +18,8 @@ int main(void) {
   test_dynamic_allocation_cleanup_balance();
   test_dynamic_allocation_reset_reparse_balance();
   test_zero_alloc_validate_path();
+  test_f64_boundary_exponents_stay_on_fast_path();
+  test_f64_boundary_exponents_are_locale_independent();
   test_parser_workspace_accounting();
   test_parser_workspace_alignment_regression();
   test_init_does_not_preserve_garbage_array_state();
@@ -171,6 +173,16 @@ int main(void) {
   test_writer_primitive_string_sources();
   test_writer_invalid_state_and_sink_failure();
   test_writer_number_text_rejects_non_numbers();
+  test_writer_value_stream_success_and_commas();
+  test_writer_value_stream_root_scalars();
+  test_writer_value_stream_failure_modes();
+  test_writer_value_stream_state_and_sink_failures();
+  test_writer_json_value_helpers_sources();
+  test_writer_json_value_spooled_preserves_spill_cursor();
+  test_writer_json_value_helpers_failure_modes();
+  test_writer_array_items_helpers_sources();
+  test_writer_array_items_spooled_preserves_spill_cursor();
+  test_writer_array_items_helpers_failure_modes();
   test_writer_child_sink_failures();
   test_writer_generator_streams_producer();
   test_writer_generator_zero_capacity_read();

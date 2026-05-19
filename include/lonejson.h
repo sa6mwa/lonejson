@@ -893,6 +893,16 @@ typedef struct lonejson_generator lonejson_generator;
  * `lonejson_generator_read()`.
  */
 typedef struct lonejson_writer lonejson_writer;
+/** Public state for a push-fed arbitrary JSON value inside a writer.
+ *
+ * Zero-initialize the struct before first use. The `state` pointer is owned by
+ * lonejson after a successful `lonejson_writer_value_stream_open()` call. Feed
+ * chunks with
+ * `lonejson_writer_value_stream_push()`, validate EOF and return the writer to
+ * normal use with `lonejson_writer_value_stream_close()`, and release any
+ * remaining stream resources with `lonejson_writer_value_stream_cleanup()`.
+ */
+typedef struct lonejson_writer_value_stream lonejson_writer_value_stream;
 
 /** Runtime metadata describing one mapped JSON field. Applications normally
  * use the `LONEJSON_FIELD_*` macros instead of writing this struct manually. */
@@ -1435,6 +1445,14 @@ struct lonejson_writer {
   /** Opaque writer state owned by lonejson. */
   void *state;
   /** Last writer error. Cleared by init and cleanup. */
+  lonejson_error error;
+};
+
+/** Public state for a push-fed arbitrary JSON value inside a writer. */
+struct lonejson_writer_value_stream {
+  /** Opaque value-stream state owned by lonejson. */
+  void *state;
+  /** Last value-stream error. Cleared by open and cleanup. */
   lonejson_error error;
 };
 
@@ -3482,6 +3500,148 @@ lonejson_status lonejson_writer_null(lonejson_writer *writer,
 lonejson_status lonejson_writer_json_value(lonejson_writer *writer,
                                            const lonejson_json_value *value,
                                            lonejson_error *error);
+/** Opens one push-fed arbitrary JSON value at the current writer position.
+ *
+ * The writer owns the surrounding root/object/array framing and emits any
+ * required comma or object-key transition before accepting chunks for the
+ * nested value. While the stream is open, unrelated writer events on the same
+ * writer fail. This API is true streaming in sink mode and rejects writer
+ * generator mode instead of buffering a full pushed value. `limits == NULL`
+ * uses `lonejson_default_value_limits()`.
+ */
+lonejson_status lonejson_writer_value_stream_open(
+    lonejson_writer_value_stream *stream, lonejson_writer *writer,
+    const lonejson_value_limits *limits, lonejson_error *error);
+/** Feeds one byte chunk into an open push-fed writer value stream.
+ *
+ * Chunks may split anywhere inside the nested JSON value. lonejson validates
+ * incrementally and forwards compact JSON bytes to the writer sink as parser
+ * events are accepted. Once the nested value is complete, later chunks may
+ * contain only JSON whitespace until close.
+ */
+lonejson_status
+lonejson_writer_value_stream_push(lonejson_writer_value_stream *stream,
+                                  const void *data, size_t len,
+                                  lonejson_error *error);
+/** Finalizes an open push-fed writer value stream at source EOF.
+ *
+ * The call fails for empty input, incomplete values, malformed values, limit
+ * violations, trailing non-whitespace bytes, or sink failures. Any failure
+ * poisons the owning writer so `lonejson_writer_finish()` cannot report
+ * success for a partial document.
+ */
+lonejson_status
+lonejson_writer_value_stream_close(lonejson_writer_value_stream *stream,
+                                   lonejson_error *error);
+/** Releases resources owned by a writer value stream. If the stream is still
+ * open, the owning writer is poisoned because the nested JSON value was not
+ * finalized.
+ */
+void lonejson_writer_value_stream_cleanup(lonejson_writer_value_stream *stream);
+/** Streams exactly one arbitrary JSON value from a reader callback.
+ *
+ * The writer owns the surrounding root/object/array framing. The helper
+ * validates incrementally, allows trailing JSON whitespace, rejects empty
+ * input, multiple top-level values, malformed JSON, limit violations, reader
+ * failure, and trailing non-whitespace, and poisons the writer on failure so
+ * `lonejson_writer_finish()` cannot succeed for partial output. This is a
+ * sink-mode convenience over `lonejson_writer_value_stream_*`; writer
+ * generator producers must use a stable `lonejson_json_value` with
+ * `lonejson_writer_json_value()` or a resumable writer event.
+ */
+lonejson_status lonejson_writer_json_value_reader(
+    lonejson_writer *writer, lonejson_reader_fn reader, void *reader_user,
+    const lonejson_value_limits *limits, lonejson_error *error);
+/** Streams exactly one arbitrary JSON value from a memory buffer.
+ *
+ * The buffer is not retained after the call. Behavior and failure semantics
+ * match `lonejson_writer_json_value_reader()`.
+ */
+lonejson_status lonejson_writer_json_value_buffer(
+    lonejson_writer *writer, const void *data, size_t len,
+    const lonejson_value_limits *limits, lonejson_error *error);
+/** Streams exactly one arbitrary JSON value from the current `FILE *`
+ * position. Behavior and failure semantics match
+ * `lonejson_writer_json_value_reader()`.
+ */
+lonejson_status
+lonejson_writer_json_value_file(lonejson_writer *writer, FILE *fp,
+                                const lonejson_value_limits *limits,
+                                lonejson_error *error);
+/** Streams exactly one arbitrary JSON value from the current file-descriptor
+ * position. Behavior and failure semantics match
+ * `lonejson_writer_json_value_reader()`.
+ */
+lonejson_status
+lonejson_writer_json_value_fd(lonejson_writer *writer, int fd,
+                              const lonejson_value_limits *limits,
+                              lonejson_error *error);
+/** Opens `path`, streams exactly one arbitrary JSON value, and closes the
+ * file before returning. Behavior and failure semantics match
+ * `lonejson_writer_json_value_reader()`.
+ */
+lonejson_status
+lonejson_writer_json_value_path(lonejson_writer *writer, const char *path,
+                                const lonejson_value_limits *limits,
+                                lonejson_error *error);
+/** Streams exactly one arbitrary JSON value from a rewindable spooled byte
+ * container. The spooled value is copied as a read cursor, so the caller's
+ * cursor is preserved. Behavior and failure semantics match
+ * `lonejson_writer_json_value_reader()`.
+ */
+lonejson_status lonejson_writer_json_value_spooled(
+    lonejson_writer *writer, const lonejson_spooled *value,
+    const lonejson_value_limits *limits, lonejson_error *error);
+/** Appends all items from a selected source array into the writer's current
+ * array.
+ *
+ * `selector == NULL` or `""` selects a root array. Non-empty selectors follow
+ * `lonejson_array_stream` v1 behavior and select one direct root-object key.
+ * The writer owns all output commas and array framing; callers must already be
+ * inside a writer array. Source item bytes are validated and streamed directly
+ * into the writer without materializing the complete source document, selected
+ * array, or copied items. This helper is sink-mode only and fails cleanly for
+ * writer-generator producers.
+ */
+lonejson_status lonejson_writer_array_items_reader(
+    lonejson_writer *writer, const char *selector, lonejson_reader_fn reader,
+    void *reader_user, const lonejson_parse_options *options,
+    lonejson_error *error);
+/** Appends all selected source-array items from a memory buffer. Behavior and
+ * failure semantics match `lonejson_writer_array_items_reader()`.
+ */
+lonejson_status lonejson_writer_array_items_buffer(
+    lonejson_writer *writer, const char *selector, const void *data, size_t len,
+    const lonejson_parse_options *options, lonejson_error *error);
+/** Appends all selected source-array items from an open `FILE *`. Behavior and
+ * failure semantics match `lonejson_writer_array_items_reader()`.
+ */
+lonejson_status lonejson_writer_array_items_filep(
+    lonejson_writer *writer, const char *selector, FILE *fp,
+    const lonejson_parse_options *options, lonejson_error *error);
+/** Appends all selected source-array items from a file descriptor. Behavior
+ * and failure semantics match `lonejson_writer_array_items_reader()`.
+ */
+lonejson_status
+lonejson_writer_array_items_fd(lonejson_writer *writer, const char *selector,
+                               int fd, const lonejson_parse_options *options,
+                               lonejson_error *error);
+/** Opens `path`, appends all selected source-array items, and closes the file
+ * before returning. Behavior and failure semantics match
+ * `lonejson_writer_array_items_reader()`.
+ */
+lonejson_status lonejson_writer_array_items_path(
+    lonejson_writer *writer, const char *selector, const char *path,
+    const lonejson_parse_options *options, lonejson_error *error);
+/** Appends all selected source-array items from a rewindable spooled byte
+ * container. The spooled value is copied as a read cursor, so the caller's
+ * cursor is preserved. Behavior and failure semantics match
+ * `lonejson_writer_array_items_reader()`.
+ */
+lonejson_status lonejson_writer_array_items_spooled(
+    lonejson_writer *writer, const char *selector,
+    const lonejson_spooled *value, const lonejson_parse_options *options,
+    lonejson_error *error);
 /** Emits one mapped struct value through lonejson's normal serializer. */
 lonejson_status lonejson_writer_mapped(lonejson_writer *writer,
                                        const lonejson_map *map, const void *src,
@@ -4340,6 +4500,16 @@ typedef lonejson_map lj_map;
  * `lonejson_generator_read()`.
  */
 typedef lonejson_writer lj_writer;
+/** Public state for a push-fed arbitrary JSON value inside a writer.
+ *
+ * Zero-initialize the struct before first use. The `state` pointer is owned by
+ * lonejson after a successful `lonejson_writer_value_stream_open()` call. Feed
+ * chunks with
+ * `lonejson_writer_value_stream_push()`, validate EOF and return the writer to
+ * normal use with `lonejson_writer_value_stream_close()`, and release any
+ * remaining stream resources with `lonejson_writer_value_stream_cleanup()`.
+ */
+typedef lonejson_writer_value_stream lj_writer_value_stream;
 /** Producer callback used by `lonejson_writer_generator_init()`.
  *
  * The callback emits zero or more writer events into `writer`. Return
@@ -5555,6 +5725,178 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_null(lj_writer *writer,
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_json_value(
     lj_writer *writer, const lj_json_value *value, lj_error *error) {
   return lonejson_writer_json_value(writer, value, error);
+}
+/** Opens one push-fed arbitrary JSON value at the current writer position.
+ *
+ * The writer owns the surrounding root/object/array framing and emits any
+ * required comma or object-key transition before accepting chunks for the
+ * nested value. While the stream is open, unrelated writer events on the same
+ * writer fail. This API is true streaming in sink mode and rejects writer
+ * generator mode instead of buffering a full pushed value. `limits == NULL`
+ * uses `lonejson_default_value_limits()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_value_stream_open(lj_writer_value_stream *stream, lj_writer *writer,
+                            const lj_value_limits *limits, lj_error *error) {
+  return lonejson_writer_value_stream_open(stream, writer, limits, error);
+}
+/** Feeds one byte chunk into an open push-fed writer value stream.
+ *
+ * Chunks may split anywhere inside the nested JSON value. lonejson validates
+ * incrementally and forwards compact JSON bytes to the writer sink as parser
+ * events are accepted. Once the nested value is complete, later chunks may
+ * contain only JSON whitespace until close.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_value_stream_push(lj_writer_value_stream *stream, const void *data,
+                            size_t len, lj_error *error) {
+  return lonejson_writer_value_stream_push(stream, data, len, error);
+}
+/** Finalizes an open push-fed writer value stream at source EOF.
+ *
+ * The call fails for empty input, incomplete values, malformed values, limit
+ * violations, trailing non-whitespace bytes, or sink failures. Any failure
+ * poisons the owning writer so `lonejson_writer_finish()` cannot report
+ * success for a partial document.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_value_stream_close(lj_writer_value_stream *stream, lj_error *error) {
+  return lonejson_writer_value_stream_close(stream, error);
+}
+/** Releases resources owned by a writer value stream. If the stream is still
+ * open, the owning writer is poisoned because the nested JSON value was not
+ * finalized.
+ */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_writer_value_stream_cleanup(lj_writer_value_stream *stream) {
+  lonejson_writer_value_stream_cleanup(stream);
+}
+/** Streams exactly one arbitrary JSON value from a reader callback.
+ *
+ * The writer owns the surrounding root/object/array framing. The helper
+ * validates incrementally, allows trailing JSON whitespace, rejects empty
+ * input, multiple top-level values, malformed JSON, limit violations, reader
+ * failure, and trailing non-whitespace, and poisons the writer on failure so
+ * `lonejson_writer_finish()` cannot succeed for partial output. This is a
+ * sink-mode convenience over `lonejson_writer_value_stream_*`; writer
+ * generator producers must use a stable `lonejson_json_value` with
+ * `lonejson_writer_json_value()` or a resumable writer event.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_json_value_reader(
+    lj_writer *writer, lj_reader_fn reader, void *reader_user,
+    const lj_value_limits *limits, lj_error *error) {
+  return lonejson_writer_json_value_reader(writer, reader, reader_user, limits,
+                                           error);
+}
+/** Streams exactly one arbitrary JSON value from a memory buffer.
+ *
+ * The buffer is not retained after the call. Behavior and failure semantics
+ * match `lonejson_writer_json_value_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_json_value_buffer(lj_writer *writer, const void *data, size_t len,
+                            const lj_value_limits *limits, lj_error *error) {
+  return lonejson_writer_json_value_buffer(writer, data, len, limits, error);
+}
+/** Streams exactly one arbitrary JSON value from the current `FILE *`
+ * position. Behavior and failure semantics match
+ * `lonejson_writer_json_value_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_json_value_file(lj_writer *writer, FILE *fp,
+                          const lj_value_limits *limits, lj_error *error) {
+  return lonejson_writer_json_value_file(writer, fp, limits, error);
+}
+/** Streams exactly one arbitrary JSON value from the current file-descriptor
+ * position. Behavior and failure semantics match
+ * `lonejson_writer_json_value_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_json_value_fd(
+    lj_writer *writer, int fd, const lj_value_limits *limits, lj_error *error) {
+  return lonejson_writer_json_value_fd(writer, fd, limits, error);
+}
+/** Opens `path`, streams exactly one arbitrary JSON value, and closes the
+ * file before returning. Behavior and failure semantics match
+ * `lonejson_writer_json_value_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_json_value_path(lj_writer *writer, const char *path,
+                          const lj_value_limits *limits, lj_error *error) {
+  return lonejson_writer_json_value_path(writer, path, limits, error);
+}
+/** Streams exactly one arbitrary JSON value from a rewindable spooled byte
+ * container. The spooled value is copied as a read cursor, so the caller's
+ * cursor is preserved. Behavior and failure semantics match
+ * `lonejson_writer_json_value_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_json_value_spooled(lj_writer *writer, const lj_spooled *value,
+                             const lj_value_limits *limits, lj_error *error) {
+  return lonejson_writer_json_value_spooled(writer, value, limits, error);
+}
+/** Appends all items from a selected source array into the writer's current
+ * array.
+ *
+ * `selector == NULL` or `""` selects a root array. Non-empty selectors follow
+ * `lonejson_array_stream` v1 behavior and select one direct root-object key.
+ * The writer owns all output commas and array framing; callers must already be
+ * inside a writer array. Source item bytes are validated and streamed directly
+ * into the writer without materializing the complete source document, selected
+ * array, or copied items. This helper is sink-mode only and fails cleanly for
+ * writer-generator producers.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_array_items_reader(
+    lj_writer *writer, const char *selector, lj_reader_fn reader,
+    void *reader_user, const lj_parse_options *options, lj_error *error) {
+  return lonejson_writer_array_items_reader(writer, selector, reader,
+                                            reader_user, options, error);
+}
+/** Appends all selected source-array items from a memory buffer. Behavior and
+ * failure semantics match `lonejson_writer_array_items_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_array_items_buffer(
+    lj_writer *writer, const char *selector, const void *data, size_t len,
+    const lj_parse_options *options, lj_error *error) {
+  return lonejson_writer_array_items_buffer(writer, selector, data, len,
+                                            options, error);
+}
+/** Appends all selected source-array items from an open `FILE *`. Behavior and
+ * failure semantics match `lonejson_writer_array_items_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_array_items_filep(lj_writer *writer, const char *selector, FILE *fp,
+                            const lj_parse_options *options, lj_error *error) {
+  return lonejson_writer_array_items_filep(writer, selector, fp, options,
+                                           error);
+}
+/** Appends all selected source-array items from a file descriptor. Behavior
+ * and failure semantics match `lonejson_writer_array_items_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_array_items_fd(lj_writer *writer, const char *selector, int fd,
+                         const lj_parse_options *options, lj_error *error) {
+  return lonejson_writer_array_items_fd(writer, selector, fd, options, error);
+}
+/** Opens `path`, appends all selected source-array items, and closes the file
+ * before returning. Behavior and failure semantics match
+ * `lonejson_writer_array_items_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_array_items_path(
+    lj_writer *writer, const char *selector, const char *path,
+    const lj_parse_options *options, lj_error *error) {
+  return lonejson_writer_array_items_path(writer, selector, path, options,
+                                          error);
+}
+/** Appends all selected source-array items from a rewindable spooled byte
+ * container. The spooled value is copied as a read cursor, so the caller's
+ * cursor is preserved. Behavior and failure semantics match
+ * `lonejson_writer_array_items_reader()`.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_array_items_spooled(
+    lj_writer *writer, const char *selector, const lj_spooled *value,
+    const lj_parse_options *options, lj_error *error) {
+  return lonejson_writer_array_items_spooled(writer, selector, value, options,
+                                             error);
 }
 /** Emits one mapped struct value through lonejson's normal serializer. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_mapped(lj_writer *writer,

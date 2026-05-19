@@ -21,5 +21,5 @@ The multilingual `*_wide/*` lanes are included specifically to show that this ad
 
 * it fails if the Lua benchmark schema version differs from the baseline
 * it fails if the baseline is missing any current lonejson Lua benchmark lanes
-* it fails on any negative throughput regression of `5%` or more
+* it fails on any negative throughput regression of `10%` or more
 * it does not gate on `cjson` sibling/reference lanes

@@ -1,5 +1,6 @@
 /stash/
 /build/
+/build-review/
 /.deps/
 /lonejson/
 /.luarocks-build/

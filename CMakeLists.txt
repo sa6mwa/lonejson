@@ -15,6 +15,7 @@ include(CTest)
 find_program(LONEJSON_LUA_EXECUTABLE
   NAMES lua lua5.5 lua5.4 lua5.3 luajit
   REQUIRED)
+find_program(LONEJSON_LUAROCKS_EXECUTABLE NAMES luarocks)
 find_program(CLANG_FORMAT_BIN NAMES clang-format)
 find_program(LONEJSON_CLANG_EXECUTABLE NAMES clang)
 
@@ -45,7 +46,9 @@ set(LONEJSON_SINGLE_HEADER_DIST_GZ "${CMAKE_CURRENT_SOURCE_DIR}/dist/lonejson-${
 
 function(lonejson_configure_c_target target)
   if(UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-    target_compile_definitions(${target} PRIVATE _POSIX_C_SOURCE=200809L)
+    target_compile_definitions(${target} PRIVATE
+      _POSIX_C_SOURCE=200809L
+      _FILE_OFFSET_BITS=64)
   endif()
   if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_compile_definitions(${target} PRIVATE _DARWIN_C_SOURCE=1)
@@ -78,7 +81,9 @@ set(LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS
 
 function(lonejson_configure_strict_downstream_target target)
   if(UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-    target_compile_definitions(${target} PRIVATE _POSIX_C_SOURCE=200809L)
+    target_compile_definitions(${target} PRIVATE
+      _POSIX_C_SOURCE=200809L
+      _FILE_OFFSET_BITS=64)
   endif()
   if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_compile_definitions(${target} PRIVATE _DARWIN_C_SOURCE=1)
@@ -198,6 +203,18 @@ if(LONEJSON_BUILD_TESTS)
   add_test(NAME lonejson_tests COMMAND lonejson_tests)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_tests)
 
+  find_program(LONEJSON_BASH_EXECUTABLE bash)
+  if(LONEJSON_BASH_EXECUTABLE AND LONEJSON_LUA_EXECUTABLE
+      AND LONEJSON_LUAROCKS_EXECUTABLE)
+    add_test(
+      NAME lonejson_bench_baseline_history_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_baseline_history.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${LONEJSON_LUA_EXECUTABLE}"
+        "${LONEJSON_LUAROCKS_EXECUTABLE}")
+  endif()
+
   add_executable(lonejson_short_names_tests tests/test_short_names.c)
   target_include_directories(lonejson_short_names_tests PRIVATE
     "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}")
@@ -239,6 +256,7 @@ if(LONEJSON_BUILD_TESTS)
       COMMAND "${LONEJSON_CLANG_EXECUTABLE}"
         ${LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS}
         -D_POSIX_C_SOURCE=200809L
+        -D_FILE_OFFSET_BITS=64
         -I "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}"
         -c "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
         -o "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}"
@@ -480,6 +498,17 @@ if(LONEJSON_BUILD_FUZZERS)
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_writer_generator_backpressure)
 
+  add_executable(lonejson_fuzz_writer_value_stream
+    fuzz/fuzz_writer_value_stream.c)
+  target_include_directories(lonejson_fuzz_writer_value_stream
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_writer_value_stream PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_writer_value_stream PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined)
+  target_link_options(lonejson_fuzz_writer_value_stream PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_writer_value_stream)
+
   add_executable(lonejson_fuzz_protocol_framing
     fuzz/fuzz_protocol_framing.c)
   target_include_directories(lonejson_fuzz_protocol_framing
@@ -538,6 +567,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_rewrite.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_generator_backpressure.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_value_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_protocol_framing.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_visitor.inc"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_stream.inc"

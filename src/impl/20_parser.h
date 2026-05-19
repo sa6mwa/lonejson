@@ -234,13 +234,6 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
   parser->lex_escape = 0;
   parser->unicode_pending_high = 0u;
   parser->unicode_digits_needed = 0;
-  if (parser->validate_only) {
-    parser->string_capture_mode = LONEJSON_STRING_CAPTURE_DISCARD;
-    parser->token.data = NULL;
-    parser->token.cap = 0u;
-    parser->token.len = 0u;
-    return LONEJSON_STATUS_OK;
-  }
   if ((field == NULL || field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) &&
       lonejson__json_value_parse_visitor_active(parser)) {
     lonejson_status visitor_status =
@@ -249,6 +242,13 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
       return visitor_status;
     }
     parser->string_capture_mode = LONEJSON_STRING_CAPTURE_JSON_VISITOR;
+    parser->token.data = NULL;
+    parser->token.cap = 0u;
+    parser->token.len = 0u;
+    return LONEJSON_STATUS_OK;
+  }
+  if (parser->validate_only) {
+    parser->string_capture_mode = LONEJSON_STRING_CAPTURE_DISCARD;
     parser->token.data = NULL;
     parser->token.cap = 0u;
     parser->token.len = 0u;

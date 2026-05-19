@@ -1,3 +1,11 @@
+#if !defined(_WIN32) && !defined(_FILE_OFFSET_BITS)
+#define _FILE_OFFSET_BITS 64
+#endif
+
+#if !defined(_WIN32) && !defined(_LARGEFILE_SOURCE)
+#define _LARGEFILE_SOURCE 1
+#endif
+
 #include <errno.h>
 #include <stddef.h>
 #include <stdio.h>

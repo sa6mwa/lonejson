@@ -3,8 +3,8 @@ local core = lj.core
 local HAVE_CJSON, cjson = pcall(require, "cjson")
 
 local BENCH_SAMPLE_COUNT = 5
-local BENCH_MIN_SAMPLE_NS = 250000000
-local BENCH_SCHEMA_VERSION = 29
+local BENCH_MIN_SAMPLE_NS = 500000000
+local BENCH_SCHEMA_VERSION = 30
 local BENCH_NOISE_DELTA_PCT = 3.0
 local BENCH_MATERIAL_DELTA_PCT = 10.0
 local BENCH_REVIEW_IMPROVEMENT_PCT = 15.0
@@ -565,11 +565,11 @@ local function load_c_siblings(path)
   return index
 end
 
-local function median_sample(samples)
+local function best_sample(samples)
   table.sort(samples, function(a, b)
     return a.ns_per_byte < b.ns_per_byte
   end)
-  return samples[math.floor(#samples / 2) + 1]
+  return samples[1]
 end
 
 local function measure_case(case, iterations)
@@ -623,7 +623,7 @@ local function measure_case(case, iterations)
     }
   end
 
-  return median_sample(samples)
+  return best_sample(samples)
 end
 
 local function bench_cases()

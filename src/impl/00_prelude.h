@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -254,7 +255,8 @@ typedef enum lonejson_array_stream_value_mode {
   LONEJSON_ARRAY_STREAM_VALUE_SKIP = 1,
   LONEJSON_ARRAY_STREAM_VALUE_MAPPED = 2,
   LONEJSON_ARRAY_STREAM_VALUE_RAW = 3,
-  LONEJSON_ARRAY_STREAM_VALUE_STRING = 4
+  LONEJSON_ARRAY_STREAM_VALUE_STRING = 4,
+  LONEJSON_ARRAY_STREAM_VALUE_SINK = 5
 } lonejson_array_stream_value_mode;
 
 typedef struct lonejson__array_stream_dup_frame {
@@ -304,6 +306,8 @@ struct lonejson_array_stream {
   const lonejson_map *pending_map;
   void *active_dst;
   void *pending_dst;
+  lonejson_sink_fn active_sink;
+  void *active_sink_user;
   size_t buffered_start;
   size_t buffered_end;
   size_t offset;
@@ -1223,9 +1227,26 @@ lonejson_read_result lonejson_spooled_read(lonejson_spooled *value,
     return result;
   }
   if (value->spill_fp != NULL) {
-    size_t got = fread(buffer, 1u, capacity, value->spill_fp);
-    value->read_offset += got;
-    result.bytes_read = got;
+    size_t spill_offset = value->read_offset - value->memory_len;
+    off_t spill_pos;
+    ssize_t got;
+
+    spill_pos = (off_t)spill_offset;
+    if (spill_pos >= (off_t)0 && (size_t)spill_pos == spill_offset) {
+      got = pread(fileno(value->spill_fp), buffer, capacity, spill_pos);
+      if (got < 0) {
+        result.error_code = errno != 0 ? errno : EIO;
+        return result;
+      }
+      value->read_offset += (size_t)got;
+      result.bytes_read = (size_t)got;
+      result.eof = (value->read_offset >= value->size) ? 1 : 0;
+      return result;
+    }
+
+    got = (ssize_t)fread(buffer, 1u, capacity, value->spill_fp);
+    value->read_offset += (size_t)got;
+    result.bytes_read = (size_t)got;
     result.eof = (value->read_offset >= value->size) ? 1 : 0;
     result.error_code = ferror(value->spill_fp) ? errno : 0;
     return result;

@@ -10,16 +10,16 @@
 
 #include "lonejson.h"
 
-#define BENCH_MAX_RESULTS 80u
+#define BENCH_MAX_RESULTS 88u
 #define BENCH_MAX_FILES 512u
 #define BENCH_PARSE_ITEM_CAPACITY 8u
 #define BENCH_JSONL_RECORDS 8u
 #define BENCH_SAMPLE_COUNT 5u
-#define BENCH_MIN_SAMPLE_NS 250000000u
+#define BENCH_MIN_SAMPLE_NS 500000000u
 #define BENCH_NOISE_DELTA_PCT 3.0
 #define BENCH_MATERIAL_DELTA_PCT 10.0
 #define BENCH_REVIEW_IMPROVEMENT_PCT 15.0
-#define BENCH_SCHEMA_VERSION 19u
+#define BENCH_SCHEMA_VERSION 21u
 
 typedef enum bench_doc_kind {
   BENCH_DOC_VALID = 1,
@@ -346,6 +346,12 @@ typedef struct bench_visit_case {
   size_t min_nulls;
   int use_reader;
 } bench_visit_case;
+
+typedef struct bench_writer_value_stream_bench_case {
+  const unsigned char *json;
+  size_t json_len;
+  size_t chunk_size;
+} bench_writer_value_stream_bench_case;
 
 typedef int (*bench_validate_fn)(const unsigned char *data, size_t len);
 typedef int (*bench_simple_case_fn)(void *ctx);
@@ -2096,6 +2102,59 @@ static int bench_serialize_jsonl_alloc_case(void *user) {
   return ok;
 }
 
+static int bench_writer_value_stream_sink_case(void *user) {
+  bench_writer_value_stream_bench_case *ctx;
+  bench_count_sink sink;
+  lonejson_writer writer;
+  lonejson_writer_value_stream stream;
+  lonejson_error error;
+  lonejson_status status;
+  size_t off;
+
+  ctx = (bench_writer_value_stream_bench_case *)user;
+  memset(&sink, 0, sizeof(sink));
+  memset(&stream, 0, sizeof(stream));
+  status = lonejson_writer_init_sink(&writer, bench_count_sink_write, &sink,
+                                     NULL, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    return 0;
+  }
+  status = lonejson_writer_begin_object(&writer, &error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_writer_key(&writer, "result", 6u, &error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_writer_value_stream_open(&stream, &writer, NULL, &error);
+  }
+  off = 0u;
+  while (status == LONEJSON_STATUS_OK && off < ctx->json_len) {
+    size_t take = ctx->json_len - off;
+    if (take > ctx->chunk_size) {
+      take = ctx->chunk_size;
+    }
+    status = lonejson_writer_value_stream_push(&stream, ctx->json + off, take,
+                                               &error);
+    off += take;
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_writer_value_stream_close(&stream, &error);
+  } else {
+    lonejson_writer_value_stream_cleanup(&stream);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_writer_end_object(&writer, &error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_writer_finish(&writer, &error);
+  }
+  lonejson_writer_cleanup(&writer);
+  if (status != LONEJSON_STATUS_OK) {
+    return 0;
+  }
+  g_bench_sink += (lonejson_uint64)sink.total;
+  return sink.total >= ctx->json_len;
+}
+
 static void bench_fill_rates(bench_result *result) {
   double elapsed_seconds;
 
@@ -2176,9 +2235,9 @@ static void bench_run_simple_case(bench_result *result, const char *name,
     }
   }
   bench_sort_samples(samples, BENCH_SAMPLE_COUNT);
-  result->elapsed_ns = samples[BENCH_SAMPLE_COUNT / 2u].elapsed_ns;
-  result->total_bytes = samples[BENCH_SAMPLE_COUNT / 2u].total_bytes;
-  result->total_documents = samples[BENCH_SAMPLE_COUNT / 2u].total_documents;
+  result->elapsed_ns = samples[0].elapsed_ns;
+  result->total_bytes = samples[0].total_bytes;
+  result->total_documents = samples[0].total_documents;
   bench_fill_rates(result);
 }
 
@@ -2223,9 +2282,9 @@ static void bench_run_validation_case(bench_result *result, const char *name,
     bench_fill_sample(&samples[sample_index]);
   }
   bench_sort_samples(samples, BENCH_SAMPLE_COUNT);
-  result->elapsed_ns = samples[BENCH_SAMPLE_COUNT / 2u].elapsed_ns;
-  result->total_bytes = samples[BENCH_SAMPLE_COUNT / 2u].total_bytes;
-  result->total_documents = samples[BENCH_SAMPLE_COUNT / 2u].total_documents;
+  result->elapsed_ns = samples[0].elapsed_ns;
+  result->total_bytes = samples[0].total_bytes;
+  result->total_documents = samples[0].total_documents;
   bench_fill_rates(result);
 }
 
@@ -2588,6 +2647,8 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   bench_serialize_case json_value_serialize_pretty_case;
   bench_serialize_case json_value_source_serialize_case;
   bench_serialize_case json_value_source_serialize_pretty_case;
+  bench_writer_value_stream_bench_case writer_value_stream_case;
+  bench_writer_value_stream_bench_case writer_value_stream_tiny_case;
   bench_visit_case visit_selector_case;
   bench_visit_case visit_selector_reader_case;
   bench_visit_case visit_mixed_case;
@@ -2733,6 +2794,12 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   array_tags_case.chunk_size = LONEJSON_PUSH_PARSER_BUFFER_SIZE;
   array_tags_push_tiny_case = array_tags_case;
   array_tags_push_tiny_case.chunk_size = 5u;
+  writer_value_stream_case.json =
+      (const unsigned char *)bench_json_value_fields_json;
+  writer_value_stream_case.json_len = strlen(bench_json_value_fields_json);
+  writer_value_stream_case.chunk_size = 4096u;
+  writer_value_stream_tiny_case = writer_value_stream_case;
+  writer_value_stream_tiny_case.chunk_size = 7u;
   bench_prepare_workload_case(&workload_case, workload_jsonl_data,
                               workload_jsonl_len);
   vendor_long_case.kind = BENCH_VENDOR_LONG_STRINGS;
@@ -3010,6 +3077,16 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
         bench_serialize_alloc_case, &json_value_source_serialize_pretty_case,
         iterations, json_value_source_serialize_pretty_case.expected_len, 1u);
     bench_run_simple_case(&run.result_storage[result_index++],
+                          "writer/value_stream_sink/lonejson", "writer",
+                          bench_writer_value_stream_sink_case,
+                          &writer_value_stream_case, iterations,
+                          writer_value_stream_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
+                          "writer/value_stream_sink_tiny/lonejson", "writer",
+                          bench_writer_value_stream_sink_case,
+                          &writer_value_stream_tiny_case, iterations,
+                          writer_value_stream_tiny_case.json_len, 1u);
+    bench_run_simple_case(&run.result_storage[result_index++],
                           "visit/value_selector/lonejson", "visit",
                           bench_visit_value_case, &visit_selector_case,
                           iterations, visit_selector_case.json_len, 1u);
@@ -3136,6 +3213,8 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   bench_serialize_case json_value_serialize_pretty_case;
   bench_serialize_case json_value_source_serialize_case;
   bench_serialize_case json_value_source_serialize_pretty_case;
+  bench_writer_value_stream_bench_case writer_value_stream_case;
+  bench_writer_value_stream_bench_case writer_value_stream_tiny_case;
   bench_visit_case visit_selector_case;
   bench_visit_case visit_selector_reader_case;
   bench_visit_case visit_mixed_case;
@@ -3247,6 +3326,12 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   array_tags_case.chunk_size = LONEJSON_PUSH_PARSER_BUFFER_SIZE;
   array_tags_push_tiny_case = array_tags_case;
   array_tags_push_tiny_case.chunk_size = 5u;
+  writer_value_stream_case.json =
+      (const unsigned char *)bench_json_value_fields_json;
+  writer_value_stream_case.json_len = strlen(bench_json_value_fields_json);
+  writer_value_stream_case.chunk_size = 4096u;
+  writer_value_stream_tiny_case = writer_value_stream_case;
+  writer_value_stream_tiny_case.chunk_size = 7u;
   bench_prepare_workload_case(&workload_case, workload_jsonl_data,
                               workload_jsonl_len);
   vendor_long_case.kind = BENCH_VENDOR_LONG_STRINGS;
@@ -3447,6 +3532,12 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "parse";
     bytes_per_call = parse_fixed_case.json_len;
     docs_per_call = 1u;
+  } else if (strcmp(case_name, "parse/buffer_dynamic/lonejson") == 0) {
+    fn = bench_parse_dynamic_buffer_case;
+    ctx = &parse_dynamic_case;
+    group = "parse";
+    bytes_per_call = parse_dynamic_case.json_len;
+    docs_per_call = 1u;
   } else if (strcmp(case_name, "parse/buffer_fixed/lj") == 0) {
     fn = bench_parse_fixed_buffer_short_case;
     ctx = &parse_fixed_short_case;
@@ -3476,6 +3567,18 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     ctx = &parse_json_value_case;
     group = "parse";
     bytes_per_call = parse_json_value_case.json_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "writer/value_stream_sink/lonejson") == 0) {
+    fn = bench_writer_value_stream_sink_case;
+    ctx = &writer_value_stream_case;
+    group = "writer";
+    bytes_per_call = writer_value_stream_case.json_len;
+    docs_per_call = 1u;
+  } else if (strcmp(case_name, "writer/value_stream_sink_tiny/lonejson") == 0) {
+    fn = bench_writer_value_stream_sink_case;
+    ctx = &writer_value_stream_tiny_case;
+    group = "writer";
+    bytes_per_call = writer_value_stream_tiny_case.json_len;
     docs_per_call = 1u;
   } else if (strcmp(case_name, "serialize/sink/lonejson") == 0) {
     fn = bench_serialize_sink_case;

@@ -217,19 +217,22 @@ static int lonejson__parse_f64_fast(const char *value, size_t len,
   }
   scale = int_part + frac_part;
   if (exponent != 0u) {
-    double base;
+    static const double powers10[] = {1e1,  1e2,  1e4,   1e8,  1e16,
+                                      1e32, 1e64, 1e128, 1e256};
+    static const double neg_powers10[] = {
+        1e-1, 1e-2, 1e-4, 1e-8, 1e-16, 1e-32, 1e-64, 1e-128, 1e-256};
+    const double *powers = exponent_negative ? neg_powers10 : powers10;
+    size_t power_index = 0u;
 
-    base = exponent_negative ? 0.1 : 10.0;
-    while (exponent != 0u) {
+    while (exponent != 0u &&
+           power_index < sizeof(powers10) / sizeof(powers10[0])) {
       if ((exponent & 1u) != 0u) {
-        scale *= base;
+        scale *= powers[power_index];
       }
       exponent >>= 1u;
-      if (exponent != 0u) {
-        base *= base;
-      }
+      power_index++;
     }
-    if (!lonejson__is_finite_f64(scale)) {
+    if (exponent != 0u || !lonejson__is_finite_f64(scale)) {
       return 0;
     }
   }
