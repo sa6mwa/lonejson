@@ -137,6 +137,32 @@ The field constructors mirror the main families in the C library:
 - `lj.spooled_text`
 - `lj.spooled_bytes`
 
+Optional primitive scalar fields can opt into JSON `null` with
+`nullable = true`. This is supported for `lj.i64`, `lj.u64`, `lj.f64`, and
+`lj.bool`. On decode, both a missing field and JSON `null` become Lua `nil`.
+On encode, Lua `nil` or `lj.json_null` omits the field. `nullable = true`
+cannot be combined with `required = true`, and it is intentionally not accepted
+for strings, arrays, objects, spools, or `json_value` fields because those
+families already have their own null/pass-through behavior.
+
+```lua
+local Counters = lj.schema("Counters", {
+  lj.field("name", lj.string { required = true }),
+  lj.field("attempts", lj.u64 { nullable = true }),
+  lj.field("enabled", lj.bool { nullable = true }),
+})
+
+local row = Counters:decode('{"name":"job","attempts":null}')
+assert(row.attempts == nil)
+
+local json = Counters:encode({
+  name = "job",
+  attempts = lj.json_null,
+  enabled = true,
+})
+-- {"name":"job","enabled":true}
+```
+
 `lj.json_value` maps one field to arbitrary nested JSON. In Lua it decodes to
 native Lua values: objects become tables tagged as objects, arrays become
 tables tagged as arrays, strings become Lua strings, numbers become Lua

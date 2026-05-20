@@ -68,11 +68,103 @@ local Merge = lj.schema("Merge", {
   lj.field("fields", lj.json_value()),
 })
 
+local Nullable = lj.schema("Nullable", {
+  lj.field("required_count", lj.i64 { required = true }),
+  lj.field("amount", lj.i64 { nullable = true }),
+  lj.field("seed", lj.u64 { nullable = true }),
+  lj.field("ratio", lj.f64 { nullable = true }),
+  lj.field("enabled", lj.bool { nullable = true }),
+  lj.field("child", lj.object {
+    fields = {
+      lj.field("priority", lj.i64 { nullable = true }),
+    },
+  }),
+})
+
 do
   local obj = Test:decode('{"name":"Alice","age":3,"active":true}')
   assert_eq(obj.name, "Alice")
   assert_eq(obj.age, 3)
   assert_eq(obj.active, true)
+end
+
+do
+  local obj =
+      Nullable:decode('{"required_count":7,"child":{"priority":null}}')
+  assert_eq(obj.required_count, 7)
+  assert_true(obj.amount == nil)
+  assert_true(obj.seed == nil)
+  assert_true(obj.ratio == nil)
+  assert_true(obj.enabled == nil)
+  assert_true(obj.child.priority == nil)
+
+  obj = Nullable:decode(
+      '{"required_count":8,"amount":-12,"seed":42,"ratio":1.25,"enabled":true,"child":{"priority":3}}')
+  assert_eq(obj.amount, -12)
+  assert_eq(obj.seed, 42)
+  assert_eq(obj.ratio, 1.25)
+  assert_eq(obj.enabled, true)
+  assert_eq(obj.child.priority, 3)
+
+  local rec = Nullable:new_record()
+  local amount_get = Nullable:compile_get("amount")
+  local child_get = Nullable:compile_get("child.priority")
+  Nullable:decode_into(rec, '{"required_count":9,"amount":null,"child":{}}')
+  assert_true(rec.amount == nil)
+  assert_true(rec:get("amount") == nil)
+  assert_true(amount_get(rec) == nil)
+  assert_true(rec:get("child.priority") == nil)
+  assert_true(child_get(rec) == nil)
+  Nullable:decode_into(rec, '{"required_count":10,"amount":5,"child":{"priority":6}}')
+  assert_eq(rec.amount, 5)
+  assert_eq(amount_get(rec), 5)
+  assert_eq(child_get(rec), 6)
+
+  local json = Nullable:encode({
+    required_count = 11,
+    amount = lj.json_null,
+    seed = nil,
+    ratio = 2.5,
+    enabled = false,
+    child = { priority = lj.json_null },
+  })
+  assert_true(json:find('"required_count":11', 1, true) ~= nil)
+  assert_true(json:find('"ratio":2.5', 1, true) ~= nil)
+  assert_true(json:find('"enabled":false', 1, true) ~= nil)
+  assert_true(json:find('"amount"', 1, true) == nil)
+  assert_true(json:find('"seed"', 1, true) == nil)
+  assert_true(json:find('"priority"', 1, true) == nil)
+
+  for _, bad in ipairs({
+    '{"required_count":1,"amount":"x"}',
+    '{"required_count":1,"seed":-1}',
+    '{"required_count":1,"ratio":true}',
+    '{"required_count":1,"enabled":0}',
+  }) do
+    local value, err = Nullable:decode(bad)
+    assert_eq(value, bad)
+    assert_true(err ~= nil and err.status == "type_mismatch",
+                "nullable primitive accepted invalid JSON: " .. bad)
+  end
+
+  local ok = pcall(function()
+    lj.schema("BadRequiredNullable", {
+      lj.field("x", lj.i64 { required = true, nullable = true }),
+    })
+  end)
+  assert_true(not ok)
+  ok = pcall(function()
+    lj.schema("BadStringNullable", {
+      lj.field("x", lj.string { nullable = true }),
+    })
+  end)
+  assert_true(not ok)
+  ok = pcall(function()
+    lj.schema("BadArrayNullable", {
+      lj.field("x", lj.i64_array { nullable = true }),
+    })
+  end)
+  assert_true(not ok)
 end
 
 do

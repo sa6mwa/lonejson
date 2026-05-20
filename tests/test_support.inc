@@ -382,6 +382,24 @@ typedef struct test_omit_doc {
   lonejson_json_value metadata;
 } test_omit_doc;
 
+typedef struct test_nullable_child {
+  lonejson_int64 priority;
+  int has_priority;
+} test_nullable_child;
+
+typedef struct test_nullable_primitives_doc {
+  lonejson_int64 count;
+  int has_count;
+  lonejson_uint64 seed;
+  int has_seed;
+  double ratio;
+  int has_ratio;
+  bool enabled;
+  int has_enabled;
+  lonejson_int64 required_count;
+  test_nullable_child child;
+} test_nullable_primitives_doc;
+
 typedef struct test_conditional_doc {
   char *dyn;
   char fixed[8];
@@ -730,6 +748,47 @@ static const lonejson_field test_bad_presence_offset_fields[] = {
      LONEJSON_FIELD_HAS_PRESENCE, 0u, 0u, NULL, NULL, sizeof(test_omit_doc)}};
 LONEJSON_MAP_DEFINE(test_bad_presence_offset_map, test_omit_doc,
                     test_bad_presence_offset_fields);
+
+static const lonejson_field test_nullable_child_fields[] = {
+    LONEJSON_FIELD_I64_PRESENT_NULLABLE(test_nullable_child, priority,
+                                        has_priority, "priority")};
+LONEJSON_MAP_DEFINE(test_nullable_child_map, test_nullable_child,
+                    test_nullable_child_fields);
+
+static const lonejson_field test_nullable_primitives_fields[] = {
+    LONEJSON_FIELD_I64_PRESENT_NULLABLE(test_nullable_primitives_doc, count,
+                                        has_count, "count"),
+    LONEJSON_FIELD_U64_PRESENT_NULLABLE(test_nullable_primitives_doc, seed,
+                                        has_seed, "seed"),
+    LONEJSON_FIELD_F64_PRESENT_NULLABLE(test_nullable_primitives_doc, ratio,
+                                        has_ratio, "ratio"),
+    LONEJSON_FIELD_BOOL_PRESENT_NULLABLE(test_nullable_primitives_doc, enabled,
+                                         has_enabled, "enabled"),
+    LONEJSON_FIELD_I64_REQ(test_nullable_primitives_doc, required_count,
+                           "required_count"),
+    LONEJSON_FIELD_OBJECT(test_nullable_primitives_doc, child, "child",
+                          &test_nullable_child_map)};
+LONEJSON_MAP_DEFINE(test_nullable_primitives_map, test_nullable_primitives_doc,
+                    test_nullable_primitives_fields);
+
+static const lonejson_field test_bad_nullable_without_presence_fields[] = {
+    {"count", LONEJSON__KEY_LEN("count"), LONEJSON__KEY_FIRST("count"),
+     LONEJSON__KEY_LAST("count"), offsetof(test_nullable_primitives_doc, count),
+     LONEJSON_FIELD_KIND_I64, LONEJSON_STORAGE_FIXED, LONEJSON_OVERFLOW_FAIL,
+     LONEJSON_FIELD_ACCEPT_NULL, 0u, 0u, NULL, NULL, 0u}};
+LONEJSON_MAP_DEFINE(test_bad_nullable_without_presence_map,
+                    test_nullable_primitives_doc,
+                    test_bad_nullable_without_presence_fields);
+
+static const lonejson_field test_bad_nullable_kind_fields[] = {
+    {"child", LONEJSON__KEY_LEN("child"), LONEJSON__KEY_FIRST("child"),
+     LONEJSON__KEY_LAST("child"), offsetof(test_nullable_primitives_doc, child),
+     LONEJSON_FIELD_KIND_OBJECT, LONEJSON_STORAGE_FIXED, LONEJSON_OVERFLOW_FAIL,
+     LONEJSON_FIELD_HAS_PRESENCE | LONEJSON_FIELD_ACCEPT_NULL, 0u, 0u,
+     &test_nullable_child_map, NULL,
+     offsetof(test_nullable_primitives_doc, has_count)}};
+LONEJSON_MAP_DEFINE(test_bad_nullable_kind_map, test_nullable_primitives_doc,
+                    test_bad_nullable_kind_fields);
 
 static const lonejson_field test_pretty_omit_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC_OMIT_NULL(test_omit_doc, instructions,

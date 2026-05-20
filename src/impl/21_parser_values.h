@@ -372,6 +372,25 @@ lonejson__mark_field_seen(lonejson_parser *parser, lonejson_frame *frame,
 static lonejson_status lonejson__assign_null(lonejson_parser *parser,
                                              const lonejson_field *field,
                                              void *ptr) {
+  if ((field->flags & LONEJSON_FIELD_ACCEPT_NULL) != 0u &&
+      lonejson__field_has_presence(field)) {
+    switch (field->kind) {
+    case LONEJSON_FIELD_KIND_I64:
+      *(lonejson_int64 *)ptr = 0;
+      return LONEJSON_STATUS_OK;
+    case LONEJSON_FIELD_KIND_U64:
+      *(lonejson_uint64 *)ptr = 0u;
+      return LONEJSON_STATUS_OK;
+    case LONEJSON_FIELD_KIND_F64:
+      *(double *)ptr = 0.0;
+      return LONEJSON_STATUS_OK;
+    case LONEJSON_FIELD_KIND_BOOL:
+      *(bool *)ptr = false;
+      return LONEJSON_STATUS_OK;
+    default:
+      break;
+    }
+  }
   switch (field->kind) {
   case LONEJSON_FIELD_KIND_STRING:
   case LONEJSON_FIELD_KIND_STRING_STREAM:

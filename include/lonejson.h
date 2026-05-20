@@ -451,6 +451,9 @@ extern "C" {
 #define LONEJSON_FIELD_OMIT_EMPTY (1u << 2)
 /** Internal flag used by presence-gated primitive field macros. */
 #define LONEJSON_FIELD_HAS_PRESENCE (1u << 3)
+/** Internal flag allowing JSON `null` to parse as an absent optional primitive
+ * presence field. */
+#define LONEJSON_FIELD_ACCEPT_NULL (1u << 4)
 
 /** Internal/runtime flag indicating that an array container owns its backing
  * allocation. */
@@ -2086,6 +2089,26 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
    NULL,                                                                       \
    offsetof(type, present_member)}
 
+/** Maps a nullable JSON integer field into a `lonejson_int64` member and an
+ * `int` presence member. A JSON integer sets presence to `1`; JSON `null` sets
+ * presence to `0` and resets the integer member to zero. Serialization omits
+ * the field when presence is `0` and emits the integer when presence is `1`. */
+#define LONEJSON_FIELD_I64_PRESENT_NULLABLE(type, member, present_member, key) \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_I64,                                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_HAS_PRESENCE | LONEJSON_FIELD_ACCEPT_NULL,                   \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   offsetof(type, present_member)}
+
 /** Maps a JSON unsigned integer field into a `lonejson_uint64` member. */
 #define LONEJSON_FIELD_U64(type, member, key)                                  \
   {key,                                                                        \
@@ -2133,6 +2156,27 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
    LONEJSON_STORAGE_FIXED,                                                     \
    LONEJSON_OVERFLOW_FAIL,                                                     \
    LONEJSON_FIELD_HAS_PRESENCE,                                                \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   offsetof(type, present_member)}
+
+/** Maps a nullable JSON unsigned integer field into a `lonejson_uint64` member
+ * and an `int` presence member. A JSON unsigned integer sets presence to `1`;
+ * JSON `null` sets presence to `0` and resets the integer member to zero.
+ * Serialization omits the field when presence is `0` and emits the integer
+ * when presence is `1`. */
+#define LONEJSON_FIELD_U64_PRESENT_NULLABLE(type, member, present_member, key) \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_U64,                                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_HAS_PRESENCE | LONEJSON_FIELD_ACCEPT_NULL,                   \
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
@@ -2191,6 +2235,26 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
    NULL,                                                                       \
    offsetof(type, present_member)}
 
+/** Maps a nullable JSON number field into a `double` member and an `int`
+ * presence member. A JSON number sets presence to `1`; JSON `null` sets
+ * presence to `0` and resets the number member to zero. Serialization omits
+ * the field when presence is `0` and emits the number when presence is `1`. */
+#define LONEJSON_FIELD_F64_PRESENT_NULLABLE(type, member, present_member, key) \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_F64,                                                    \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_HAS_PRESENCE | LONEJSON_FIELD_ACCEPT_NULL,                   \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   offsetof(type, present_member)}
+
 /** Maps a JSON boolean field into a `bool` member. */
 #define LONEJSON_FIELD_BOOL(type, member, key)                                 \
   {key,                                                                        \
@@ -2237,6 +2301,28 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
    LONEJSON_STORAGE_FIXED,                                                     \
    LONEJSON_OVERFLOW_FAIL,                                                     \
    LONEJSON_FIELD_HAS_PRESENCE,                                                \
+   0u,                                                                         \
+   0u,                                                                         \
+   NULL,                                                                       \
+   NULL,                                                                       \
+   offsetof(type, present_member)}
+
+/** Maps a nullable JSON boolean field into a `bool` member and an `int`
+ * presence member. A JSON boolean sets presence to `1`; JSON `null` sets
+ * presence to `0` and resets the boolean member to `false`. Serialization
+ * omits the field when presence is `0` and emits the boolean when presence is
+ * `1`. */
+#define LONEJSON_FIELD_BOOL_PRESENT_NULLABLE(type, member, present_member,     \
+                                             key)                              \
+  {key,                                                                        \
+   LONEJSON__KEY_LEN(key),                                                     \
+   LONEJSON__KEY_FIRST(key),                                                   \
+   LONEJSON__KEY_LAST(key),                                                    \
+   offsetof(type, member),                                                     \
+   LONEJSON_FIELD_KIND_BOOL,                                                   \
+   LONEJSON_STORAGE_FIXED,                                                     \
+   LONEJSON_OVERFLOW_FAIL,                                                     \
+   LONEJSON_FIELD_HAS_PRESENCE | LONEJSON_FIELD_ACCEPT_NULL,                   \
    0u,                                                                         \
    0u,                                                                         \
    NULL,                                                                       \
@@ -3957,6 +4043,9 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_OMIT_EMPTY LONEJSON_FIELD_OMIT_EMPTY
 /** Internal flag used by presence-gated primitive field macros. */
 #define LJ_FIELD_HAS_PRESENCE LONEJSON_FIELD_HAS_PRESENCE
+/** Internal flag allowing JSON `null` to parse as an absent optional primitive
+ * presence field. */
+#define LJ_FIELD_ACCEPT_NULL LONEJSON_FIELD_ACCEPT_NULL
 /** Internal/runtime flag indicating that an array container owns its backing
  * allocation. */
 #define LJ_ARRAY_OWNS_ITEMS LONEJSON_ARRAY_OWNS_ITEMS
@@ -4274,6 +4363,11 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 /** Maps a JSON integer field that serializes only when an `int` presence
  * member is non-zero. */
 #define LJ_FIELD_I64_PRESENT LONEJSON_FIELD_I64_PRESENT
+/** Maps a nullable JSON integer field into a `lonejson_int64` member and an
+ * `int` presence member. A JSON integer sets presence to `1`; JSON `null` sets
+ * presence to `0` and resets the integer member to zero. Serialization omits
+ * the field when presence is `0` and emits the integer when presence is `1`. */
+#define LJ_FIELD_I64_PRESENT_NULLABLE LONEJSON_FIELD_I64_PRESENT_NULLABLE
 /** Maps a JSON unsigned integer field into a `lonejson_uint64` member. */
 #define LJ_FIELD_U64 LONEJSON_FIELD_U64
 /** Maps a required JSON unsigned integer field into a `lonejson_uint64` member.
@@ -4282,6 +4376,12 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 /** Maps a JSON unsigned integer field that serializes only when an `int`
  * presence member is non-zero. */
 #define LJ_FIELD_U64_PRESENT LONEJSON_FIELD_U64_PRESENT
+/** Maps a nullable JSON unsigned integer field into a `lonejson_uint64` member
+ * and an `int` presence member. A JSON unsigned integer sets presence to `1`;
+ * JSON `null` sets presence to `0` and resets the integer member to zero.
+ * Serialization omits the field when presence is `0` and emits the integer
+ * when presence is `1`. */
+#define LJ_FIELD_U64_PRESENT_NULLABLE LONEJSON_FIELD_U64_PRESENT_NULLABLE
 /** Maps a JSON number field into a `double` member. */
 #define LJ_FIELD_F64 LONEJSON_FIELD_F64
 /** Maps a required JSON number field into a `double` member. */
@@ -4289,6 +4389,11 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 /** Maps a JSON number field that serializes only when an `int` presence member
  * is non-zero. */
 #define LJ_FIELD_F64_PRESENT LONEJSON_FIELD_F64_PRESENT
+/** Maps a nullable JSON number field into a `double` member and an `int`
+ * presence member. A JSON number sets presence to `1`; JSON `null` sets
+ * presence to `0` and resets the number member to zero. Serialization omits
+ * the field when presence is `0` and emits the number when presence is `1`. */
+#define LJ_FIELD_F64_PRESENT_NULLABLE LONEJSON_FIELD_F64_PRESENT_NULLABLE
 /** Maps a JSON boolean field into a `bool` member. */
 #define LJ_FIELD_BOOL LONEJSON_FIELD_BOOL
 /** Maps a required JSON boolean field into a `bool` member. */
@@ -4296,6 +4401,12 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 /** Maps a JSON boolean field that serializes only when an `int` presence
  * member is non-zero. */
 #define LJ_FIELD_BOOL_PRESENT LONEJSON_FIELD_BOOL_PRESENT
+/** Maps a nullable JSON boolean field into a `bool` member and an `int`
+ * presence member. A JSON boolean sets presence to `1`; JSON `null` sets
+ * presence to `0` and resets the boolean member to `false`. Serialization
+ * omits the field when presence is `0` and emits the boolean when presence is
+ * `1`. */
+#define LJ_FIELD_BOOL_PRESENT_NULLABLE LONEJSON_FIELD_BOOL_PRESENT_NULLABLE
 /** Maps a nested JSON object into a nested struct member using another mapping
  * table. */
 #define LJ_FIELD_OBJECT LONEJSON_FIELD_OBJECT

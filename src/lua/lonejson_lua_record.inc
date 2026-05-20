@@ -186,6 +186,23 @@ static int ljlua_push_spool(lua_State *L, lonejson_spooled *spool, int kind,
 static int ljlua_push_value(lua_State *L, ljlua_schema *schema, void *record,
                             ljlua_field_meta *meta, int owner_index);
 
+static int ljlua_field_is_nullable_presence(const ljlua_field_meta *meta) {
+  return meta != NULL && lonejson__field_has_presence(&meta->field) &&
+         (meta->field.flags & LONEJSON_FIELD_ACCEPT_NULL) != 0u;
+}
+
+static int ljlua_nullable_presence_is_set(void *record,
+                                          const ljlua_field_meta *meta) {
+  const int *present;
+
+  if (!ljlua_field_is_nullable_presence(meta)) {
+    return 1;
+  }
+  present = (const int *)((const unsigned char *)record +
+                          meta->field.presence_offset);
+  return *present != 0;
+}
+
 static int ljlua_schema_has_json_value(ljlua_schema *schema) {
   return schema != NULL && schema->has_json_value;
 }
@@ -343,6 +360,10 @@ static int ljlua_push_value(lua_State *L, ljlua_schema *schema, void *record,
   size_t i;
 
   (void)schema;
+  if (!ljlua_nullable_presence_is_set(record, meta)) {
+    lua_pushnil(L);
+    return 1;
+  }
   ptr = (unsigned char *)record + meta->field.struct_offset;
   switch (meta->lua_kind) {
   case LJLUA_FIELD_STRING:
@@ -733,12 +754,17 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
 
   (void)schema;
   ptr = (unsigned char *)record + meta->field.struct_offset;
-  if (lua_isnil(L, value_index)) {
+  if (lua_isnil(L, value_index) ||
+      (ljlua_field_is_nullable_presence(meta) &&
+       ljlua_is_json_null(L, value_index))) {
     lonejson_parser parser;
 
     ljlua_init_helper_parser(&parser);
     if (lonejson__assign_null(&parser, &meta->field, ptr) ==
         LONEJSON_STATUS_OK) {
+      if (ljlua_field_is_nullable_presence(meta)) {
+        lonejson__field_set_presence(record, &meta->field, 0);
+      }
       return 1;
     }
   }
@@ -768,15 +794,19 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
                                             value_index);
   case LJLUA_FIELD_I64:
     *(lonejson_int64 *)ptr = (lonejson_int64)luaL_checkinteger(L, value_index);
+    lonejson__field_set_presence(record, &meta->field, 1);
     return 1;
   case LJLUA_FIELD_U64:
     *(lonejson_uint64 *)ptr = ljlua_check_u64(L, value_index);
+    lonejson__field_set_presence(record, &meta->field, 1);
     return 1;
   case LJLUA_FIELD_F64:
     *(double *)ptr = (double)luaL_checknumber(L, value_index);
+    lonejson__field_set_presence(record, &meta->field, 1);
     return 1;
   case LJLUA_FIELD_BOOL:
     *(bool *)ptr = lua_toboolean(L, value_index) ? true : false;
+    lonejson__field_set_presence(record, &meta->field, 1);
     return 1;
   case LJLUA_FIELD_OBJECT:
     luaL_checktype(L, value_index, LUA_TTABLE);

@@ -26,6 +26,18 @@ typedef struct fuzz_stream_envelope {
   lonejson_json_value metadata;
 } fuzz_stream_envelope;
 
+typedef struct fuzz_nullable_primitives {
+  lonejson_int64 count;
+  int has_count;
+  lonejson_uint64 seed;
+  int has_seed;
+  double ratio;
+  int has_ratio;
+  bool enabled;
+  int has_enabled;
+  lonejson_int64 required_count;
+} fuzz_nullable_primitives;
+
 typedef struct fuzz_stream_state {
   size_t begins;
   size_t chunks;
@@ -60,6 +72,20 @@ static const lonejson_field fuzz_stream_envelope_fields[] = {
     LONEJSON_FIELD_JSON_VALUE(fuzz_stream_envelope, metadata, "metadata")};
 LONEJSON_MAP_DEFINE(fuzz_stream_envelope_map, fuzz_stream_envelope,
                     fuzz_stream_envelope_fields);
+
+static const lonejson_field fuzz_nullable_primitives_fields[] = {
+    LONEJSON_FIELD_I64_PRESENT_NULLABLE(fuzz_nullable_primitives, count,
+                                        has_count, "count"),
+    LONEJSON_FIELD_U64_PRESENT_NULLABLE(fuzz_nullable_primitives, seed,
+                                        has_seed, "seed"),
+    LONEJSON_FIELD_F64_PRESENT_NULLABLE(fuzz_nullable_primitives, ratio,
+                                        has_ratio, "ratio"),
+    LONEJSON_FIELD_BOOL_PRESENT_NULLABLE(fuzz_nullable_primitives, enabled,
+                                         has_enabled, "enabled"),
+    LONEJSON_FIELD_I64_REQ(fuzz_nullable_primitives, required_count,
+                           "required_count")};
+LONEJSON_MAP_DEFINE(fuzz_nullable_primitives_map, fuzz_nullable_primitives,
+                    fuzz_nullable_primitives_fields);
 
 static lonejson_status fuzz_stream_begin(void *user, lonejson_error *error) {
   fuzz_stream_state *state = (fuzz_stream_state *)user;
@@ -118,12 +144,109 @@ static void fuzz_parse_stream_envelope(const uint8_t *data, size_t size) {
   lonejson_cleanup(&fuzz_stream_envelope_map, &envelope);
 }
 
+static const char *fuzz_nullable_value(unsigned selector, const char *valid,
+                                       const char *wrong) {
+  switch (selector & 3u) {
+  case 0u:
+    return NULL;
+  case 1u:
+    return "null";
+  case 2u:
+    return valid;
+  default:
+    return wrong;
+  }
+}
+
+static int fuzz_append_text(char **out, size_t *remaining, const char *text) {
+  size_t len = strlen(text);
+  if (len >= *remaining) {
+    return 0;
+  }
+  memcpy(*out, text, len);
+  *out += len;
+  *remaining -= len;
+  **out = '\0';
+  return 1;
+}
+
+static int fuzz_append_field(char **out, size_t *remaining, const char *key,
+                             const char *value) {
+  return fuzz_append_text(out, remaining, "\"") &&
+         fuzz_append_text(out, remaining, key) &&
+         fuzz_append_text(out, remaining, "\":") &&
+         fuzz_append_text(out, remaining, value) &&
+         fuzz_append_text(out, remaining, ",");
+}
+
+static void fuzz_parse_nullable_primitives(const uint8_t *data, size_t size) {
+  fuzz_nullable_primitives doc;
+  lonejson_error error;
+  lonejson_status status;
+  char json[256];
+  char *out = json;
+  size_t remaining = sizeof(json);
+  const char *count;
+  const char *seed;
+  const char *ratio;
+  const char *enabled;
+  uint8_t b0 = size > 0u ? data[0] : 0u;
+  uint8_t b1 = size > 1u ? data[1] : 0u;
+  uint8_t b2 = size > 2u ? data[2] : 0u;
+
+  count = fuzz_nullable_value(b0, "-12", "\"bad\"");
+  seed = fuzz_nullable_value(b0 >> 2u, "42", "-1");
+  ratio = fuzz_nullable_value(b1, "1.25", "false");
+  enabled = fuzz_nullable_value(b1 >> 2u, "true", "0");
+
+  if (!fuzz_append_text(&out, &remaining, "{")) {
+    return;
+  }
+  if (count != NULL) {
+    if (!fuzz_append_field(&out, &remaining, "count", count)) {
+      return;
+    }
+  }
+  if (seed != NULL) {
+    if (!fuzz_append_field(&out, &remaining, "seed", seed)) {
+      return;
+    }
+  }
+  if (ratio != NULL) {
+    if (!fuzz_append_field(&out, &remaining, "ratio", ratio)) {
+      return;
+    }
+  }
+  if (enabled != NULL) {
+    if (!fuzz_append_field(&out, &remaining, "enabled", enabled)) {
+      return;
+    }
+  }
+  if (!fuzz_append_text(&out, &remaining, "\"required_count\":") ||
+      !fuzz_append_text(&out, &remaining, (b2 & 1u) != 0u ? "null" : "7") ||
+      !fuzz_append_text(&out, &remaining, "}")) {
+    return;
+  }
+
+  memset(&doc, 0, sizeof(doc));
+  status = lonejson_parse_cstr(&fuzz_nullable_primitives_map, &doc, json, NULL,
+                               &error);
+  if (status == LONEJSON_STATUS_OK) {
+    char buffer[256];
+    size_t needed;
+    (void)lonejson_serialize_buffer(&fuzz_nullable_primitives_map, &doc,
+                                    buffer, sizeof(buffer), &needed, NULL,
+                                    &error);
+  }
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   fuzz_person person;
   lonejson_error error;
   lonejson_status status;
 
   fuzz_parse_stream_envelope(data, size);
+  fuzz_parse_nullable_primitives(data, size);
 
   memset(&person, 0, sizeof(person));
   status = lonejson_parse_buffer(&fuzz_person_map, &person, data, size, NULL,

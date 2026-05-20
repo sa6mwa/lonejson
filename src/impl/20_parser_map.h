@@ -382,6 +382,15 @@ static int lonejson__field_kind_accepts_presence(const lonejson_field *field) {
   }
 }
 
+static int lonejson__field_accepts_nullable_presence(
+    const lonejson_field *field) {
+  if ((field->flags & LONEJSON_FIELD_ACCEPT_NULL) == 0u) {
+    return 1;
+  }
+  return lonejson__field_has_presence(field) &&
+         lonejson__field_kind_accepts_presence(field);
+}
+
 static int lonejson__field_is_empty_for_omit(const lonejson_field *field,
                                              const void *ptr);
 
@@ -648,9 +657,13 @@ static int lonejson__map_layout_is_valid(const lonejson_map *map) {
         !lonejson__field_kind_accepts_presence(field)) {
       return 0;
     }
+    if (!lonejson__field_accepts_nullable_presence(field)) {
+      return 0;
+    }
     if ((field->flags & LONEJSON_FIELD_REQUIRED) != 0u &&
         (field->flags & (LONEJSON_FIELD_OMIT_NULL | LONEJSON_FIELD_OMIT_EMPTY |
-                         LONEJSON_FIELD_HAS_PRESENCE)) != 0u) {
+                         LONEJSON_FIELD_HAS_PRESENCE |
+                         LONEJSON_FIELD_ACCEPT_NULL)) != 0u) {
       return 0;
     }
     if ((field->kind == LONEJSON_FIELD_KIND_OBJECT ||

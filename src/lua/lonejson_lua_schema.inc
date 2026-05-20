@@ -57,6 +57,11 @@ static size_t ljlua_fixed_array_elem_size(const ljlua_field_meta *meta) {
   }
 }
 
+static int ljlua_field_kind_is_nullable_primitive(ljlua_field_kind kind) {
+  return kind == LJLUA_FIELD_I64 || kind == LJLUA_FIELD_U64 ||
+         kind == LJLUA_FIELD_F64 || kind == LJLUA_FIELD_BOOL;
+}
+
 static int ljlua_compile_field(lua_State *L, int index, ljlua_field_meta *meta);
 static int ljlua_finalize_schema(ljlua_schema *schema);
 static FILE *ljlua_check_file(lua_State *L, int index);
@@ -140,6 +145,7 @@ static int ljlua_compile_nested_schema(lua_State *L, int index,
 static int ljlua_compile_field(lua_State *L, int index,
                                ljlua_field_meta *meta) {
   const char *kind_name;
+  int nullable;
   size_t i;
 
   memset(meta, 0, sizeof(*meta));
@@ -168,6 +174,24 @@ static int ljlua_compile_field(lua_State *L, int index,
     meta->field.flags |= LONEJSON_FIELD_REQUIRED;
   }
   lua_pop(L, 1);
+  lua_getfield(L, index, "nullable");
+  nullable = lua_toboolean(L, -1) ? 1 : 0;
+  lua_pop(L, 1);
+  if (nullable) {
+    if (!ljlua_field_kind_is_nullable_primitive(meta->lua_kind)) {
+      return luaL_error(
+          L,
+          "field '%s' nullable is only supported for optional primitive scalar "
+          "fields",
+          meta->name);
+    }
+    if ((meta->field.flags & LONEJSON_FIELD_REQUIRED) != 0u) {
+      return luaL_error(L, "field '%s' cannot be both required and nullable",
+                        meta->name);
+    }
+    meta->field.flags |= LONEJSON_FIELD_HAS_PRESENCE |
+                         LONEJSON_FIELD_ACCEPT_NULL;
+  }
 
   switch (meta->lua_kind) {
   case LJLUA_FIELD_STRING:
@@ -371,6 +395,12 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
       offset = ljlua_align(offset, sizeof(void *));
       meta->fixed_array_offset = offset;
       offset += bytes;
+    }
+    if (lonejson__field_has_presence(&meta->field)) {
+      offset = ljlua_align(offset, sizeof(int));
+      meta->field.presence_offset = offset;
+      schema->fields[i].presence_offset = offset;
+      offset += sizeof(int);
     }
   }
   schema->record_size = ljlua_align(offset, sizeof(void *));

@@ -109,7 +109,12 @@ static lonejson_status lonejson__handle_scalar_for_field(
       return lonejson__assign_json_scalar(parser, (lonejson_json_value *)ptr,
                                           value, len, mode);
     }
-    return lonejson__assign_null(parser, field, ptr);
+    status = lonejson__assign_null(parser, field, ptr);
+    if (status == LONEJSON_STATUS_OK &&
+        (field->flags & LONEJSON_FIELD_ACCEPT_NULL) != 0u) {
+      lonejson__field_set_presence(base, field, 0);
+    }
+    return status;
   default:
     return lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
                                parser->error.offset, parser->error.line,

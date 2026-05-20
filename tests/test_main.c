@@ -123,6 +123,8 @@ int main(void) {
   test_duplicate_key_policy();
   test_public_api_argument_and_serialization_guards();
   test_public_initializers_and_defaults();
+  test_nullable_presence_primitives();
+  test_nullable_presence_primitive_failures();
   test_small_valid_spec_fixtures();
   test_invalid_json_vectors();
   test_fixture_documents();

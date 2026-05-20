@@ -356,6 +356,7 @@ if(LONEJSON_BUILD_EXAMPLES)
     json_value_parse
     json_value_source
     json_value_visitor
+    nullable_fields
     parse_file
     parse_reader
     push_parser
@@ -586,6 +587,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/parse_string.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/array_stream.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/examples/nullable_fields.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/parse_file.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/parse_reader.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/examples/push_parser.c"
@@ -665,6 +667,7 @@ foreach(example_name
         json_value_parse
         json_value_source
         json_value_visitor
+        nullable_fields
         parse_file
         parse_reader
         parse_string

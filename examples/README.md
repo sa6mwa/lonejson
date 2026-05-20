@@ -38,6 +38,8 @@ The same pattern applies to:
 * `json_value_visitor.c` (streams parsed embedded JSON through visitor
   callbacks without retaining raw bytes)
 * `json_value_source.c` (streams embedded JSON values from filesystem paths)
+* `nullable_fields.c` (maps optional nullable primitive fields with explicit
+  presence bits and omits absent/null values on serialization)
 * `spooled_text.c` (forces spill-to-disk, shows temp path, and confirms cleanup)
 * `spooled_bytes.c` (forces Base64 decode spill-to-disk and confirms cleanup)
 * `source_text.c` (serializes a caller-declared JSON text field from a filesystem path)
@@ -103,3 +105,13 @@ eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_binding.lua
 That example shows the schema DSL, reusable record decoding, object-framed
 stream parsing, selected-array stream parsing, selected-array rewrites, native
 `json_value` handling, and spool-backed text/byte fields.
+
+Run the smaller nullable primitive Lua example with:
+
+```sh
+eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_nullable.lua
+```
+
+It shows `nullable = true` on optional `u64`, `f64`, and `bool` fields, where
+missing or JSON `null` decode to Lua `nil` and `nil`/`lj.json_null` values are
+omitted when encoding.

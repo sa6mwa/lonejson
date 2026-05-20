@@ -349,6 +349,133 @@ static void test_serialize_omits_empty_optional_fields(void) {
   free(doc.reasoning.effort);
 }
 
+static void test_nullable_presence_primitives(void) {
+  test_nullable_primitives_doc doc;
+  lonejson_error error;
+  lonejson_status status;
+  char buffer[256];
+  size_t needed;
+
+  memset(&doc, 0x7f, sizeof(doc));
+  doc.has_count = 0;
+  doc.has_seed = 0;
+  doc.has_ratio = 0;
+  doc.has_enabled = 0;
+  doc.child.has_priority = 0;
+  status = lonejson_parse_cstr(&test_nullable_primitives_map, &doc,
+                               "{\"required_count\":7}", NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.required_count == 7);
+  EXPECT(doc.has_count == 0);
+  EXPECT(doc.has_seed == 0);
+  EXPECT(doc.has_ratio == 0);
+  EXPECT(doc.has_enabled == 0);
+  EXPECT(doc.child.has_priority == 0);
+
+  status = lonejson_parse_cstr(
+      &test_nullable_primitives_map, &doc,
+      "{\"count\":null,\"seed\":null,\"ratio\":null,\"enabled\":null,"
+      "\"required_count\":8,\"child\":{\"priority\":null}}",
+      NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.required_count == 8);
+  EXPECT(doc.count == 0);
+  EXPECT(doc.has_count == 0);
+  EXPECT(doc.seed == 0u);
+  EXPECT(doc.has_seed == 0);
+  EXPECT(doc.ratio == 0.0);
+  EXPECT(doc.has_ratio == 0);
+  EXPECT(doc.enabled == false);
+  EXPECT(doc.has_enabled == 0);
+  EXPECT(doc.child.priority == 0);
+  EXPECT(doc.child.has_priority == 0);
+
+  status = lonejson_parse_cstr(
+      &test_nullable_primitives_map, &doc,
+      "{\"count\":-12,\"seed\":42,\"ratio\":1.25,\"enabled\":false,"
+      "\"required_count\":9,\"child\":{\"priority\":3}}",
+      NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.count == -12);
+  EXPECT(doc.has_count == 1);
+  EXPECT(doc.seed == 42u);
+  EXPECT(doc.has_seed == 1);
+  EXPECT(doc.ratio == 1.25);
+  EXPECT(doc.has_ratio == 1);
+  EXPECT(doc.enabled == false);
+  EXPECT(doc.has_enabled == 1);
+  EXPECT(doc.child.priority == 3);
+  EXPECT(doc.child.has_priority == 1);
+
+  status = lonejson_serialize_buffer(&test_nullable_primitives_map, &doc,
+                                     buffer, sizeof(buffer), &needed, NULL,
+                                     &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(buffer,
+                "{\"count\":-12,\"seed\":42,\"ratio\":1.25,"
+                "\"enabled\":false,\"required_count\":9,"
+                "\"child\":{\"priority\":3}}") == 0);
+
+  doc.has_count = 0;
+  doc.has_seed = 0;
+  doc.has_ratio = 0;
+  doc.has_enabled = 0;
+  doc.child.has_priority = 0;
+  status = lonejson_serialize_buffer(&test_nullable_primitives_map, &doc,
+                                     buffer, sizeof(buffer), &needed, NULL,
+                                     &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(buffer, "{\"required_count\":9,\"child\":{}}") == 0);
+}
+
+static void test_nullable_presence_primitive_failures(void) {
+  static const char *wrong_type_json[] = {
+      "{\"count\":\"1\",\"required_count\":1}",
+      "{\"seed\":-1,\"required_count\":1}",
+      "{\"ratio\":false,\"required_count\":1}",
+      "{\"enabled\":0,\"required_count\":1}",
+      "{\"required_count\":1,\"child\":{\"priority\":{}}}"};
+  test_nullable_primitives_doc doc;
+  test_omit_doc omit_doc;
+  lonejson_error error;
+  lonejson_status status;
+  size_t i;
+  char buffer[128];
+
+  for (i = 0u; i < sizeof(wrong_type_json) / sizeof(wrong_type_json[0]); ++i) {
+    memset(&doc, 0, sizeof(doc));
+    status = lonejson_parse_cstr(&test_nullable_primitives_map, &doc,
+                                 wrong_type_json[i], NULL, &error);
+    EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
+  }
+
+  memset(&doc, 0, sizeof(doc));
+  status = lonejson_parse_cstr(&test_nullable_primitives_map, &doc,
+                               "{\"required_count\":null}", NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(strstr(error.message, "null is not allowed") != NULL);
+
+  memset(&omit_doc, 0, sizeof(omit_doc));
+  status = lonejson_parse_cstr(&test_omit_doc_map, &omit_doc,
+                               "{\"model\":\"x\",\"max_output_tokens\":null}",
+                               NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(strstr(error.message, "null is not allowed") != NULL);
+  lonejson_cleanup(&test_omit_doc_map, &omit_doc);
+
+  memset(&doc, 0, sizeof(doc));
+  status = lonejson_serialize_buffer(&test_bad_nullable_without_presence_map,
+                                     &doc, buffer, sizeof(buffer), NULL, NULL,
+                                     &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(strstr(error.message, "invalid map layout") != NULL);
+
+  status = lonejson_serialize_buffer(&test_bad_nullable_kind_map, &doc, buffer,
+                                     sizeof(buffer), NULL, NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(strstr(error.message, "invalid map layout") != NULL);
+}
+
 static void test_serialize_omit_layout_failures(void) {
   test_omit_doc doc;
   lonejson_error error;

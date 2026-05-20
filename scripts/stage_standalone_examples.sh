@@ -19,6 +19,7 @@ examples=(
   serialize_jsonl
   value_rewrite_replace_with
   fixed_storage
+  nullable_fields
 )
 
 mkdir -p "${output_dir}"
