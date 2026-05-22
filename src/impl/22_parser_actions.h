@@ -16,6 +16,72 @@ lonejson__complete_parent_after_value(lonejson_parser *parser) {
   return LONEJSON_STATUS_OK;
 }
 
+static LONEJSON__NOINLINE LONEJSON__COLD lonejson_status
+lonejson__complete_streamed_string_token(lonejson_parser *parser) {
+  lonejson_frame *frame = (parser->frame_count != 0u)
+                              ? &parser->frames[parser->frame_count - 1u]
+                              : NULL;
+
+  if (parser->lex_is_key) {
+    if (frame == NULL || frame->kind != LONEJSON_CONTAINER_OBJECT ||
+        frame->state != LONEJSON_FRAME_OBJECT_KEY_OR_END) {
+      return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
+                                 parser->error.offset, parser->error.line,
+                                 parser->error.column,
+                                 "object key outside object context");
+    }
+    frame->pending_field = NULL;
+    if (parser->json_stream_active) {
+      lonejson_status status = lonejson__json_value_emit(parser, ":", 1u);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+    }
+    frame->state = LONEJSON_FRAME_OBJECT_COLON;
+    return LONEJSON_STATUS_OK;
+  }
+
+  if (frame == NULL) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "unexpected scalar at document root");
+  }
+
+  if (frame->kind == LONEJSON_CONTAINER_OBJECT) {
+    if (frame->pending_field == NULL) {
+      return lonejson__complete_parent_after_value(parser);
+    }
+    if (frame->pending_field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
+      if (!lonejson__mark_field_seen(parser, frame, frame->pending_field)) {
+        return parser->error.code;
+      }
+      lonejson__parser_clear_json_stream_value(parser);
+      parser->json_stream_depth = 0u;
+      return lonejson__complete_parent_after_value(parser);
+    }
+  } else if (frame->kind == LONEJSON_CONTAINER_ARRAY && frame->field == NULL) {
+    return lonejson__complete_parent_after_value(parser);
+  }
+
+  return lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
+                             parser->error.offset, parser->error.line,
+                             parser->error.column,
+                             "invalid streamed string context");
+}
+
+static LONEJSON__INLINE int
+lonejson__streamed_json_value_scalar_field_active(const lonejson_parser *parser) {
+  const lonejson_frame *frame =
+      (parser->frame_count != 0u) ? &parser->frames[parser->frame_count - 1u]
+                                  : NULL;
+
+  return !parser->lex_is_key && frame != NULL &&
+         frame->kind == LONEJSON_CONTAINER_OBJECT &&
+         frame->pending_field != NULL &&
+         frame->pending_field->kind == LONEJSON_FIELD_KIND_JSON_VALUE;
+}
+
 static lonejson_status lonejson__handle_scalar_for_field(
     lonejson_parser *parser, lonejson_frame *frame, const lonejson_field *field,
     const char *value, size_t len, lonejson_lex_mode mode) {

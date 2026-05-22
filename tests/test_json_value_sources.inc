@@ -941,6 +941,213 @@ static void test_json_value_nested_object_parse_capture(void) {
   lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
 }
 
+static lonejson_status test_spooled_append_sink(void *user, const void *data,
+                                                size_t len,
+                                                lonejson_error *error) {
+  return lonejson_spooled_append((lonejson_spooled *)user, data, len, error);
+}
+
+static char *test_make_repeating_json(const char *prefix, size_t payload_len,
+                                      const char *suffix) {
+  char *payload;
+  char *json;
+  size_t prefix_len;
+  size_t suffix_len;
+
+  payload = make_repeating_text(payload_len);
+  if (payload == NULL) {
+    return NULL;
+  }
+  prefix_len = strlen(prefix);
+  suffix_len = strlen(suffix);
+  json = (char *)malloc(prefix_len + payload_len + suffix_len + 1u);
+  if (json == NULL) {
+    free(payload);
+    return NULL;
+  }
+  memcpy(json, prefix, prefix_len);
+  memcpy(json + prefix_len, payload, payload_len);
+  memcpy(json + prefix_len + payload_len, suffix, suffix_len + 1u);
+  free(payload);
+  return json;
+}
+
+static void test_json_value_large_string_scalar_regressions(void) {
+  const size_t lengths[] = {4012u, 4013u, 65537u, 196608u};
+  size_t i;
+  char *json;
+  test_json_value_doc doc;
+  lonejson_spooled selector_storage;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_spool_options spool_options = lonejson_default_spool_options();
+  lonejson_error error;
+  lonejson_status status;
+  unsigned char *read_back;
+
+  options.clear_destination = 0;
+  spool_options.memory_limit = 64u * 1024u;
+
+  for (i = 0u; i < sizeof(lengths) / sizeof(lengths[0]); ++i) {
+    json = test_make_repeating_json("{\"id\":\"big\",\"selector\":\"",
+                                    lengths[i], "\"}");
+    EXPECT(json != NULL);
+    if (json == NULL) {
+      return;
+    }
+
+    lonejson__init_map(&test_json_value_doc_map, &doc);
+    lonejson_spooled_init(&selector_storage, &spool_options);
+    status = lonejson_json_value_set_parse_sink(
+        &doc.selector, test_spooled_append_sink, &selector_storage, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                                 &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(lonejson_spooled_size(&selector_storage) == lengths[i] + 2u);
+    if (lengths[i] > spool_options.memory_limit) {
+      EXPECT(lonejson_spooled_spilled(&selector_storage) != 0);
+    }
+    read_back = (unsigned char *)malloc(lengths[i] + 3u);
+    EXPECT(read_back != NULL);
+    if (read_back != NULL) {
+      size_t got =
+          read_spooled_all(&selector_storage, read_back, lengths[i] + 3u);
+      EXPECT(got == lengths[i] + 2u);
+      EXPECT(read_back[0] == '"');
+      EXPECT(read_back[got - 1u] == '"');
+      EXPECT(memcmp(read_back + 1u, json + strlen("{\"id\":\"big\",\"selector\":\""),
+                    lengths[i]) == 0);
+      free(read_back);
+    }
+    lonejson_spooled_cleanup(&selector_storage);
+    lonejson_cleanup(&test_json_value_doc_map, &doc);
+
+    lonejson__init_map(&test_json_value_doc_map, &doc);
+    status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                                 &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_BUFFER);
+    EXPECT(doc.selector.len == lengths[i] + 2u);
+    EXPECT(doc.selector.json[0] == '"');
+    EXPECT(doc.selector.json[doc.selector.len - 1u] == '"');
+    lonejson_cleanup(&test_json_value_doc_map, &doc);
+
+    free(json);
+  }
+}
+
+static void test_json_value_large_string_object_regressions(void) {
+  const size_t lengths[] = {4013u, 65537u};
+  size_t i;
+  char *json;
+  test_json_value_doc doc;
+  lonejson_spooled selector_storage;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_spool_options spool_options = lonejson_default_spool_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  options.clear_destination = 0;
+  spool_options.memory_limit = 64u * 1024u;
+
+  for (i = 0u; i < sizeof(lengths) / sizeof(lengths[0]); ++i) {
+    json = test_make_repeating_json("{\"id\":\"obj\",\"selector\":{\"text\":\"",
+                                    lengths[i], "\"}}");
+    EXPECT(json != NULL);
+    if (json == NULL) {
+      return;
+    }
+
+    lonejson__init_map(&test_json_value_doc_map, &doc);
+    lonejson_spooled_init(&selector_storage, &spool_options);
+    status = lonejson_json_value_set_parse_sink(
+        &doc.selector, test_spooled_append_sink, &selector_storage, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                                 &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(lonejson_spooled_size(&selector_storage) == lengths[i] + 11u);
+    EXPECT(lonejson_spooled_spilled(&selector_storage) ==
+           (lengths[i] > spool_options.memory_limit));
+    lonejson_spooled_cleanup(&selector_storage);
+    lonejson_cleanup(&test_json_value_doc_map, &doc);
+
+    lonejson__init_map(&test_json_value_doc_map, &doc);
+    status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                                 &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_BUFFER);
+    EXPECT(strncmp(doc.selector.json, "{\"text\":\"", 9u) == 0);
+    EXPECT(doc.selector.len == lengths[i] + 11u);
+    lonejson_cleanup(&test_json_value_doc_map, &doc);
+
+    free(json);
+  }
+}
+
+static void test_json_value_large_string_nested_regressions(void) {
+  const size_t lengths[] = {4013u, 65537u};
+  size_t i;
+  char *json;
+  test_nested_json_value_doc doc;
+  lonejson_spooled payload_storage;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_spool_options spool_options = lonejson_default_spool_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  options.clear_destination = 0;
+  spool_options.memory_limit = 64u * 1024u;
+
+  for (i = 0u; i < sizeof(lengths) / sizeof(lengths[0]); ++i) {
+    json = test_make_repeating_json(
+        "{\"type\":\"response.completed\",\"response\":{\"status\":\"ok\","
+        "\"payload\":{\"text\":\"",
+        lengths[i], "\"}}}");
+    EXPECT(json != NULL);
+    if (json == NULL) {
+      return;
+    }
+
+    poison_bytes(&doc, sizeof(doc), 0xC9u);
+    lonejson__init_map(&test_nested_json_value_doc_map, &doc);
+    lonejson_spooled_init(&payload_storage, &spool_options);
+    status = lonejson_json_value_set_parse_sink(
+        &doc.response.payload, test_spooled_append_sink, &payload_storage,
+        &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    status = lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc, json,
+                                 &options, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(strcmp(doc.type, "response.completed") == 0);
+    EXPECT(strcmp(doc.response.status, "ok") == 0);
+    EXPECT(lonejson_spooled_size(&payload_storage) == lengths[i] + 11u);
+    EXPECT(lonejson_spooled_spilled(&payload_storage) ==
+           (lengths[i] > spool_options.memory_limit));
+    lonejson_spooled_cleanup(&payload_storage);
+    lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+
+    poison_bytes(&doc, sizeof(doc), 0xCAu);
+    lonejson__init_map(&test_nested_json_value_doc_map, &doc);
+    status =
+        lonejson_json_value_enable_parse_capture(&doc.response.payload, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    status = lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc, json,
+                                 &options, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(doc.response.payload.kind == LONEJSON_JSON_VALUE_BUFFER);
+    EXPECT(doc.response.payload.len == lengths[i] + 11u);
+    EXPECT(strcmp(doc.response.status, "ok") == 0);
+    lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+
+    free(json);
+  }
+}
+
 static void test_json_value_parse_visitor_fast_path_regressions(void) {
   const char *json =
       "{"
@@ -975,6 +1182,77 @@ static void test_json_value_parse_visitor_fast_path_regressions(void) {
   EXPECT(state.string_chunk_count >= 5u);
   EXPECT(state.number_begin_count == 0u);
   EXPECT(strcmp(state.last_string, "done") == 0);
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
+}
+
+static void
+test_json_value_parse_visitor_total_byte_reset_for_string_regressions(void) {
+  const char *json =
+      "{"
+      "\"id\":\"visit-total\","
+      "\"selector\":{\"k\":\"abcd\"},"
+      "\"fields\":\"wxyz\""
+      "}";
+  test_json_value_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_visit_state selector_state;
+  test_visit_state fields_state;
+  lonejson_value_visitor visitor = test_value_visitor();
+  lonejson_value_limits limits = lonejson_default_value_limits();
+
+  memset(&selector_state, 0, sizeof(selector_state));
+  memset(&fields_state, 0, sizeof(fields_state));
+  poison_bytes(&doc, sizeof(doc), 0xCDu);
+  lonejson__init_map(&test_json_value_doc_map, &doc);
+  limits.max_total_bytes = 8u;
+  status = lonejson_json_value_set_parse_visitor(
+      &doc.selector, &visitor, &selector_state, &limits, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_json_value_set_parse_visitor(
+      &doc.fields, &visitor, &fields_state, &limits, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+  status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(selector_state.log, "{K(k)S(abcd)}") == 0);
+  EXPECT(strcmp(fields_state.log, "S(wxyz)") == 0);
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
+}
+
+static void test_json_value_parse_visitor_scalar_string_regressions(void) {
+  const char *json =
+      "{"
+      "\"id\":\"visit-scalar\","
+      "\"selector\":null,"
+      "\"fields\":\"abcdefghijklmnopqrstuvwxyz0123456789\""
+      "}";
+  test_json_value_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_visit_chunk_state state;
+  lonejson_value_visitor visitor = test_counting_value_visitor();
+
+  memset(&state, 0, sizeof(state));
+  poison_bytes(&doc, sizeof(doc), 0xCEu);
+  lonejson__init_map(&test_json_value_doc_map, &doc);
+  status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_json_value_set_parse_visitor(&doc.fields, &visitor, &state,
+                                                 NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+  status = lonejson_parse_cstr(&test_json_value_doc_map, &doc, json, &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.string_begin_count == 1u);
+  EXPECT(state.string_end_count == 1u);
+  EXPECT(state.string_chunk_count >= 1u);
+  EXPECT(strcmp(state.last_string, "abcdefghijklmnopqrstuvwxyz0123456789") ==
+         0);
   lonejson_cleanup(&test_json_value_doc_map, &doc);
 }
 

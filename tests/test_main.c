@@ -151,9 +151,14 @@ int main(void) {
   test_json_value_parse_visitor();
   test_json_value_nested_object_parse_visitor();
   test_json_value_parse_visitor_fast_path_regressions();
+  test_json_value_parse_visitor_total_byte_reset_for_string_regressions();
+  test_json_value_parse_visitor_scalar_string_regressions();
   test_json_value_setters_and_failures();
   test_json_value_scalars_null_and_reset();
   test_json_value_nested_object_parse_capture();
+  test_json_value_large_string_scalar_regressions();
+  test_json_value_large_string_object_regressions();
+  test_json_value_large_string_nested_regressions();
   test_json_value_reuse_and_cleanup_ownership();
   test_json_value_source_validation_failures();
   test_json_value_nonseekable_and_sink_failures();

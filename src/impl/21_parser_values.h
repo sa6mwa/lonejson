@@ -583,11 +583,17 @@ static lonejson_status
 lonejson__json_value_string_begin(lonejson_parser *parser, int is_key) {
   lonejson_json_value *value = parser->json_stream_value;
 
-  if (!lonejson__json_value_parse_visitor_active(parser)) {
-    return LONEJSON_STATUS_OK;
+  if (value == NULL) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "JSON value stream has no destination");
   }
   parser->json_stream_text_bytes = 0u;
   parser->json_stream_text_is_key = is_key;
+  if (!lonejson__json_value_parse_visitor_active(parser)) {
+    return lonejson__json_value_emit(parser, "\"", 1u);
+  }
   return lonejson__json_value_visit_event(
       parser, is_key ? value->parse_visitor->object_key_begin
                      : value->parse_visitor->string_begin);
@@ -601,7 +607,11 @@ lonejson__json_value_string_chunk(lonejson_parser *parser, const char *data,
   const char *msg;
 
   if (!lonejson__json_value_parse_visitor_active(parser)) {
-    return LONEJSON_STATUS_OK;
+    return lonejson__emit_escaped_fragment(
+        parser->json_stream_sink_active ? value->parse_sink
+                                        : lonejson__json_buffer_sink,
+        parser->json_stream_sink_active ? value->parse_sink_user : value,
+        &parser->error, (const unsigned char *)data, len);
   }
   limit = parser->json_stream_text_is_key
               ? value->parse_visitor_limits.max_key_bytes
@@ -621,11 +631,11 @@ lonejson__json_value_string_end(lonejson_parser *parser) {
   lonejson_json_value *value = parser->json_stream_value;
   int is_key = parser->json_stream_text_is_key;
 
-  if (!lonejson__json_value_parse_visitor_active(parser)) {
-    return LONEJSON_STATUS_OK;
-  }
   parser->json_stream_text_bytes = 0u;
   parser->json_stream_text_is_key = 0;
+  if (!lonejson__json_value_parse_visitor_active(parser)) {
+    return lonejson__json_value_emit(parser, "\"", 1u);
+  }
   return lonejson__json_value_visit_event(
       parser, is_key ? value->parse_visitor->object_key_end
                      : value->parse_visitor->string_end);

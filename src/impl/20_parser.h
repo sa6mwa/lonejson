@@ -55,6 +55,8 @@ static int lonejson__mark_field_seen(lonejson_parser *parser,
                                      const lonejson_field *field);
 static lonejson_status
 lonejson__complete_parent_after_value(lonejson_parser *parser);
+static lonejson_status
+lonejson__complete_streamed_string_token(lonejson_parser *parser);
 static LONEJSON__INLINE void *lonejson__field_ptr(void *base,
                                                   const lonejson_field *field);
 static lonejson_status lonejson__stream_value_begin(lonejson_parser *parser,
@@ -190,43 +192,60 @@ static int lonejson__field_is_streamed(const lonejson_field *field) {
 
 static LONEJSON__INLINE lonejson_status
 lonejson__begin_string_lex(lonejson_parser *parser, int is_key) {
-  if (lonejson__json_value_parse_visitor_active(parser)) {
-    lonejson_status status = lonejson__json_value_string_begin(parser, is_key);
-    if (status != LONEJSON_STATUS_OK) {
-      return status;
-    }
-  }
   parser->lex_mode = LONEJSON_LEX_STRING;
   parser->lex_is_key = is_key;
   parser->string_capture_mode = LONEJSON_STRING_CAPTURE_TOKEN;
   parser->lex_escape = 0;
   parser->unicode_pending_high = 0u;
   parser->unicode_digits_needed = 0;
-  if (lonejson__json_value_parse_visitor_active(parser)) {
+
+  if (LONEJSON__LIKELY(!parser->json_stream_active)) {
+    if (parser->validate_only) {
+      parser->string_capture_mode = LONEJSON_STRING_CAPTURE_DISCARD;
+      parser->token.data = NULL;
+      parser->token.cap = 0u;
+      parser->token.len = 0u;
+      return LONEJSON_STATUS_OK;
+    }
+    return lonejson__prepare_token(parser)
+               ? LONEJSON_STATUS_OK
+               : lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
+                                     parser->error.offset, parser->error.line,
+                                     parser->error.column,
+                                     "parser workspace exhausted by token");
+  }
+
+  {
+    lonejson_status status = lonejson__json_value_string_begin(parser, is_key);
+    if (status != LONEJSON_STATUS_OK) {
+      parser->json_stream_text_bytes = 0u;
+      parser->json_stream_text_is_key = 0;
+      return status;
+    }
     parser->string_capture_mode = LONEJSON_STRING_CAPTURE_JSON_VISITOR;
     parser->token.data = NULL;
     parser->token.cap = 0u;
     parser->token.len = 0u;
     return LONEJSON_STATUS_OK;
   }
-  if (parser->validate_only) {
-    parser->string_capture_mode = LONEJSON_STRING_CAPTURE_DISCARD;
-    parser->token.data = NULL;
-    parser->token.cap = 0u;
-    parser->token.len = 0u;
-    return LONEJSON_STATUS_OK;
-  }
-  return lonejson__prepare_token(parser)
-             ? LONEJSON_STATUS_OK
-             : lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
-                                   parser->error.offset, parser->error.line,
-                                   parser->error.column,
-                                   "parser workspace exhausted by token");
 }
 
 static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
     lonejson_parser *parser, const lonejson_field *field, void *ptr) {
   lonejson_status status;
+
+  if (field != NULL && field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
+    status = lonejson__json_value_prepare_parse(
+        parser, (lonejson_json_value *)ptr, &parser->error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    lonejson__parser_set_json_stream_value(parser, (lonejson_json_value *)ptr);
+    parser->json_stream_depth = 0u;
+    parser->json_stream_total_bytes = 0u;
+    parser->json_stream_text_bytes = 0u;
+    parser->json_stream_text_is_key = 0;
+  }
 
   parser->lex_mode = LONEJSON_LEX_STRING;
   parser->lex_is_key = 0;
@@ -235,11 +254,13 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
   parser->unicode_pending_high = 0u;
   parser->unicode_digits_needed = 0;
   if ((field == NULL || field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) &&
-      lonejson__json_value_parse_visitor_active(parser)) {
-    lonejson_status visitor_status =
-        lonejson__json_value_string_begin(parser, 0);
-    if (visitor_status != LONEJSON_STATUS_OK) {
-      return visitor_status;
+      parser->json_stream_active) {
+    status = lonejson__json_value_string_begin(parser, 0);
+    if (status != LONEJSON_STATUS_OK) {
+      if (field != NULL && field->kind == LONEJSON_FIELD_KIND_JSON_VALUE) {
+        lonejson__parser_clear_json_stream_value(parser);
+      }
+      return status;
     }
     parser->string_capture_mode = LONEJSON_STRING_CAPTURE_JSON_VISITOR;
     parser->token.data = NULL;
