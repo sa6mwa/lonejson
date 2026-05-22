@@ -696,6 +696,102 @@ static void test_json_value_parse_stream_sink(void) {
   lonejson_cleanup(&test_json_value_doc_map, &doc);
 }
 
+static void test_json_value_nested_object_parse_sink_and_reuse(void) {
+  const char *json =
+      "{\"type\":\"response.completed\","
+      "\"response\":{\"status\":\"ok\",\"payload\":{\"a\":[1,2,3],"
+      "\"b\":\"large\"}}}";
+  const char *json_reuse =
+      "{\"type\":\"response.delta\","
+      "\"response\":{\"payload\":{\"second\":true}}}";
+  test_nested_json_value_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  unsigned char payload_buf[128];
+  test_buffer_sink payload_sink;
+
+  memset(&payload_sink, 0, sizeof(payload_sink));
+  payload_sink.buffer = payload_buf;
+  payload_sink.capacity = sizeof(payload_buf);
+
+  poison_bytes(&doc, sizeof(doc), 0xC1u);
+  lonejson__init_map(&test_nested_json_value_doc_map, &doc);
+  status = lonejson_json_value_set_parse_sink(
+      &doc.response.payload, test_buffer_sink_write, &payload_sink, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+
+  status = lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc, json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.type, "response.completed") == 0);
+  EXPECT(strcmp(doc.response.status, "ok") == 0);
+  EXPECT(strcmp((const char *)payload_buf, "{\"a\":[1,2,3],\"b\":\"large\"}") ==
+         0);
+  EXPECT(doc.response.payload.kind == LONEJSON_JSON_VALUE_NULL);
+
+  payload_sink.length = 0u;
+  payload_buf[0] = '\0';
+  status = lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc,
+                               json_reuse, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.type, "response.delta") == 0);
+  EXPECT(doc.response.status[0] == '\0');
+  EXPECT(strcmp((const char *)payload_buf, "{\"second\":true}") == 0);
+  EXPECT(doc.response.payload.kind == LONEJSON_JSON_VALUE_NULL);
+
+  lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+}
+
+static void test_json_value_nested_object_parse_sink_failure_matrix(void) {
+  const char *broken_json =
+      "{\"type\":\"response.completed\","
+      "\"response\":{\"status\":\"ok\",\"payload\":{\"a\":[1,2,}}}";
+  const char *valid_json =
+      "{\"type\":\"response.completed\","
+      "\"response\":{\"payload\":{\"a\":1}}}";
+  test_nested_json_value_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  unsigned char payload_buf[128];
+  test_buffer_sink payload_sink;
+
+  memset(&payload_sink, 0, sizeof(payload_sink));
+  payload_sink.buffer = payload_buf;
+  payload_sink.capacity = sizeof(payload_buf);
+
+  poison_bytes(&doc, sizeof(doc), 0xC2u);
+  lonejson__init_map(&test_nested_json_value_doc_map, &doc);
+  status = lonejson_json_value_set_parse_sink(
+      &doc.response.payload, test_buffer_sink_write, &payload_sink, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+
+  status = lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc,
+                               broken_json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(strstr((const char *)payload_buf, "{\"a\":[1,2") != NULL);
+
+  payload_sink.length = 0u;
+  payload_buf[0] = '\0';
+  status = lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc,
+                               valid_json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)payload_buf, "{\"a\":1}") == 0);
+
+  lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+
+  poison_bytes(&doc, sizeof(doc), 0xC3u);
+  lonejson__init_map(&test_nested_json_value_doc_map, &doc);
+  status =
+      lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc, valid_json,
+                          NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+}
+
 static void test_json_value_parse_visitor(void) {
   const char *json =
       "{"
@@ -758,6 +854,91 @@ static void test_json_value_parse_visitor(void) {
                 "JSON string exceeds maximum decoded byte limit") != NULL);
 
   lonejson_cleanup(&test_json_value_doc_map, &doc);
+}
+
+static void test_json_value_nested_object_parse_visitor(void) {
+  const char *json =
+      "{\"type\":\"response.completed\","
+      "\"response\":{\"status\":\"ok\",\"payload\":{\"nested\":[true,null,"
+      "3.5]}}}";
+  test_nested_json_value_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_visit_state payload_state;
+  lonejson_value_visitor visitor = test_value_visitor();
+  lonejson_value_limits limits = lonejson_default_value_limits();
+
+  memset(&payload_state, 0, sizeof(payload_state));
+  poison_bytes(&doc, sizeof(doc), 0xC4u);
+  lonejson__init_map(&test_nested_json_value_doc_map, &doc);
+  status = lonejson_json_value_set_parse_visitor(
+      &doc.response.payload, &visitor, &payload_state, &limits, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+  status = lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc, json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.type, "response.completed") == 0);
+  EXPECT(strcmp(doc.response.status, "ok") == 0);
+  EXPECT(strcmp(payload_state.log, "{K(nested)[TZN(3.5)]}") == 0);
+  EXPECT(doc.response.payload.kind == LONEJSON_JSON_VALUE_NULL);
+
+  limits.max_string_bytes = 3u;
+  lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+  memset(&payload_state, 0, sizeof(payload_state));
+  poison_bytes(&doc, sizeof(doc), 0xC5u);
+  lonejson__init_map(&test_nested_json_value_doc_map, &doc);
+  status = lonejson_json_value_set_parse_visitor(
+      &doc.response.payload, &visitor, &payload_state, &limits, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+  status = lonejson_parse_cstr(
+      &test_nested_json_value_doc_map, &doc,
+      "{\"type\":\"response.completed\",\"response\":{\"payload\":"
+      "{\"value\":\"alice\"}}}",
+      &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message,
+                "JSON string exceeds maximum decoded byte limit") != NULL);
+
+  lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+}
+
+static void test_json_value_nested_object_parse_capture(void) {
+  const char *json =
+      "{\"type\":\"response.completed\","
+      "\"response\":{\"status\":\"ok\",\"payload\":{\"x\":1}}}";
+  const char *json_reuse =
+      "{\"type\":\"response.completed\","
+      "\"response\":{\"payload\":[false,null,2]}}";
+  test_nested_json_value_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  poison_bytes(&doc, sizeof(doc), 0xC6u);
+  lonejson__init_map(&test_nested_json_value_doc_map, &doc);
+  status =
+      lonejson_json_value_enable_parse_capture(&doc.response.payload, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+
+  status = lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc, json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.response.payload.kind == LONEJSON_JSON_VALUE_BUFFER);
+  EXPECT(strcmp(doc.response.payload.json, "{\"x\":1}") == 0);
+  EXPECT(strcmp(doc.response.status, "ok") == 0);
+
+  status = lonejson_parse_cstr(&test_nested_json_value_doc_map, &doc,
+                               json_reuse, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.response.payload.kind == LONEJSON_JSON_VALUE_BUFFER);
+  EXPECT(strcmp(doc.response.payload.json, "[false,null,2]") == 0);
+  EXPECT(doc.response.status[0] == '\0');
+
+  lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
 }
 
 static void test_json_value_parse_visitor_fast_path_regressions(void) {

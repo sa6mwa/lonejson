@@ -700,6 +700,84 @@ static void test_dynamic_allocation_reset_reparse_balance(void) {
   EXPECT(g_alloc_record_count == 0u);
 }
 
+static void test_clear_destination_false_present_arrays_replace(void) {
+  const char *json_a =
+      "{\"name\":\"First\",\"nickname\":\"aa\",\"age\":1,\"score\":1.0,"
+      "\"active\":false,\"address\":{\"city\":\"A\",\"zip\":1},"
+      "\"lucky_numbers\":[1,2,3],\"tags\":[\"x\",\"y\"],"
+      "\"items\":[{\"id\":10,\"label\":\"one\"},{\"id\":11,\"label\":\"two\"}]}";
+  const char *json_b =
+      "{\"name\":\"First\",\"address\":{\"city\":\"A\",\"zip\":1},"
+      "\"lucky_numbers\":[7,8],\"tags\":[\"z\"],"
+      "\"items\":[{\"id\":20,\"label\":\"three\"}]}";
+  test_person person;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  poison_bytes(&person, sizeof(person), 0x23u);
+  status = lonejson_parse_cstr(&test_person_map, &person, json_a, NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED);
+
+  options.clear_destination = 0;
+  status =
+      lonejson_parse_cstr(&test_person_map, &person, json_b, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED);
+  EXPECT(person.name != NULL && strcmp(person.name, "First") == 0);
+  EXPECT(person.lucky_numbers.count == 2u);
+  EXPECT(person.lucky_numbers.items[0] == 7);
+  EXPECT(person.lucky_numbers.items[1] == 8);
+  EXPECT(person.tags.count == 1u);
+  EXPECT(strcmp(person.tags.items[0], "z") == 0);
+  EXPECT(person.items.count == 1u);
+  EXPECT(((test_item *)person.items.items)[0].id == 20);
+
+  lonejson_cleanup(&test_person_map, &person);
+}
+
+static void
+test_clear_destination_false_fixed_capacity_string_array_reuse_frees_replaced_entries(
+    void) {
+  const char *json_a =
+      "{\"name\":\"First\",\"address\":{\"city\":\"A\",\"zip\":1},"
+      "\"tags\":[\"old-a\",\"old-b\",\"old-c\"]}";
+  const char *json_b =
+      "{\"name\":\"Second\",\"address\":{\"city\":\"B\",\"zip\":2},"
+      "\"tags\":[\"fresh\"]}";
+  test_person person;
+  char *tag_storage[4];
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&person, 0, sizeof(person));
+  memset(tag_storage, 0, sizeof(tag_storage));
+  test_allocator_init(&alloc);
+  lonejson_init(&test_person_map, &person);
+  person.tags.items = tag_storage;
+  person.tags.capacity = 4u;
+  person.tags.flags = LONEJSON_ARRAY_FIXED_CAPACITY;
+  options.clear_destination = 0;
+  options.allocator = &alloc.allocator;
+
+  status = lonejson_parse_cstr(&test_person_map, &person, json_a, &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(person.tags.count == 3u);
+  EXPECT(alloc.stats.alloc_calls > 0u);
+  EXPECT(alloc.stats.bytes_live > 0u);
+
+  status = lonejson_parse_cstr(&test_person_map, &person, json_b, &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(person.tags.count == 1u);
+  EXPECT(strcmp(person.tags.items[0], "fresh") == 0);
+
+  lonejson_cleanup(&test_person_map, &person);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
 static void test_parse_buffer_basic(void) {
   const char *json = "{"
                      "\"name\":\"Alice\","
@@ -934,4 +1012,58 @@ static void test_object_stream_nonblocking_fd_would_block(void) {
     close(pipe_fds[1]);
   }
   close(pipe_fds[0]);
+}
+
+static void
+test_stream_reuse_fixed_capacity_string_array_frees_replaced_entries(void) {
+  test_reader_state state = {
+      "{\"name\":\"One\",\"address\":{\"city\":\"A\",\"zip\":1},"
+      "\"tags\":[\"old-a\",\"old-b\"]}"
+      "{\"name\":\"Two\",\"address\":{\"city\":\"B\",\"zip\":2},"
+      "\"tags\":[\"fresh\"]}",
+      0u,
+      9u};
+  test_person person;
+  char *tag_storage[4];
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_stream *stream;
+  lonejson_error error;
+  lonejson_stream_result result;
+
+  memset(&person, 0, sizeof(person));
+  memset(tag_storage, 0, sizeof(tag_storage));
+  test_allocator_init(&alloc);
+  lonejson_init(&test_person_map, &person);
+  person.tags.items = tag_storage;
+  person.tags.capacity = 4u;
+  person.tags.flags = LONEJSON_ARRAY_FIXED_CAPACITY;
+  options.clear_destination = 0;
+  options.allocator = &alloc.allocator;
+
+  stream = lonejson_stream_open_reader(&test_person_map, test_framed_reader,
+                                       &state, &options, &error);
+  EXPECT(stream != NULL);
+  if (stream == NULL) {
+    lonejson_cleanup(&test_person_map, &person);
+    return;
+  }
+
+  result = lonejson_stream_next(stream, &person, &error);
+  EXPECT(result == LONEJSON_STREAM_OBJECT);
+  EXPECT(person.tags.count == 2u);
+  EXPECT(alloc.stats.alloc_calls > 0u);
+  EXPECT(alloc.stats.bytes_live > 0u);
+
+  result = lonejson_stream_next(stream, &person, &error);
+  EXPECT(result == LONEJSON_STREAM_OBJECT);
+  EXPECT(person.tags.count == 1u);
+  EXPECT(strcmp(person.tags.items[0], "fresh") == 0);
+
+  result = lonejson_stream_next(stream, &person, &error);
+  EXPECT(result == LONEJSON_STREAM_EOF);
+
+  lonejson_stream_close(stream);
+  lonejson_cleanup(&test_person_map, &person);
+  EXPECT(alloc.stats.bytes_live == 0u);
 }

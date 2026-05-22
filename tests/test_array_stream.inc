@@ -2364,6 +2364,61 @@ static lonejson_status test_alloc_mapped_parent_item(void *user, void *item,
   return LONEJSON_STATUS_OK;
 }
 
+typedef struct test_mapped_json_value_stream_item {
+  char id[16];
+  lonejson_json_value payload;
+} test_mapped_json_value_stream_item;
+
+typedef struct test_mapped_json_value_stream_doc {
+  lonejson_mapped_array_stream items;
+  char tail[16];
+} test_mapped_json_value_stream_doc;
+
+typedef struct test_mapped_json_value_stream_seen {
+  char ids[4][16];
+  char payloads[4][128];
+  size_t count;
+  test_buffer_sink *sink;
+} test_mapped_json_value_stream_seen;
+
+static const lonejson_field test_mapped_json_value_stream_item_fields[] = {
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_mapped_json_value_stream_item, id, "id",
+                                    LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_JSON_VALUE_REQ(test_mapped_json_value_stream_item, payload,
+                                  "payload")};
+LONEJSON_MAP_DEFINE(test_mapped_json_value_stream_item_map,
+                    test_mapped_json_value_stream_item,
+                    test_mapped_json_value_stream_item_fields);
+
+static const lonejson_field test_mapped_json_value_stream_doc_fields[] = {
+    LONEJSON_FIELD_MAPPED_ARRAY_STREAM_REQ(test_mapped_json_value_stream_doc,
+                                           items, "items"),
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_mapped_json_value_stream_doc, tail,
+                                    "tail", LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_mapped_json_value_stream_doc_map,
+                    test_mapped_json_value_stream_doc,
+                    test_mapped_json_value_stream_doc_fields);
+
+static lonejson_status
+test_mapped_json_value_stream_item_cb(void *user, void *item,
+                                      lonejson_error *error) {
+  test_mapped_json_value_stream_seen *seen =
+      (test_mapped_json_value_stream_seen *)user;
+  test_mapped_json_value_stream_item *current =
+      (test_mapped_json_value_stream_item *)item;
+  (void)error;
+
+  if (seen->count >= 4u || seen->sink == NULL) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  strcpy(seen->ids[seen->count], current->id);
+  strcpy(seen->payloads[seen->count], (const char *)seen->sink->buffer);
+  seen->count++;
+  seen->sink->length = 0u;
+  seen->sink->buffer[0] = '\0';
+  return LONEJSON_STATUS_OK;
+}
+
 static void test_array_stream_mapped_field_nested_items(void) {
   static const char json[] =
       "{\"boards\":[{\"name\":\"alpha\",\"items\":[{\"id\":1,"
@@ -2421,6 +2476,57 @@ static void test_array_stream_mapped_field_nested_items(void) {
   lonejson_cleanup(&test_item_map, &item);
   lonejson_cleanup(&test_mapped_stream_board_map, &board);
   lonejson_cleanup(&test_mapped_stream_store_map, &store);
+}
+
+static void test_array_stream_mapped_field_nested_json_value_sink_reuse(void) {
+  static const char json[] =
+      "{\"items\":[{\"id\":\"one\",\"payload\":{\"a\":1}},"
+      "{\"id\":\"two\",\"payload\":[true,null,2]}],\"tail\":\"done\"}";
+  test_mapped_json_value_stream_doc doc;
+  test_mapped_json_value_stream_item item;
+  test_mapped_json_value_stream_seen seen;
+  lonejson_mapped_array_stream_handler handler;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  unsigned char payload_buf[128];
+  test_buffer_sink payload_sink;
+
+  memset(&doc, 0, sizeof(doc));
+  memset(&item, 0, sizeof(item));
+  memset(&seen, 0, sizeof(seen));
+  memset(&handler, 0, sizeof(handler));
+  memset(&payload_sink, 0, sizeof(payload_sink));
+  payload_sink.buffer = payload_buf;
+  payload_sink.capacity = sizeof(payload_buf);
+  seen.sink = &payload_sink;
+
+  lonejson_init(&test_mapped_json_value_stream_doc_map, &doc);
+  lonejson_init(&test_mapped_json_value_stream_item_map, &item);
+  status = lonejson_json_value_set_parse_sink(
+      &item.payload, test_buffer_sink_write, &payload_sink, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+
+  handler.item_map = &test_mapped_json_value_stream_item_map;
+  handler.item_dst = &item;
+  handler.item = test_mapped_json_value_stream_item_cb;
+  handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(&doc.items, &handler, &error) ==
+         LONEJSON_STATUS_OK);
+
+  options.clear_destination = 0;
+  status = lonejson_parse_cstr(&test_mapped_json_value_stream_doc_map, &doc,
+                               json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.tail, "done") == 0);
+  EXPECT(seen.count == 2u);
+  EXPECT(strcmp(seen.ids[0], "one") == 0);
+  EXPECT(strcmp(seen.payloads[0], "{\"a\":1}") == 0);
+  EXPECT(strcmp(seen.ids[1], "two") == 0);
+  EXPECT(strcmp(seen.payloads[1], "[true,null,2]") == 0);
+
+  lonejson_cleanup(&test_mapped_json_value_stream_item_map, &item);
+  lonejson_cleanup(&test_mapped_json_value_stream_doc_map, &doc);
 }
 
 static void test_array_stream_mapped_field_failure_modes(void) {

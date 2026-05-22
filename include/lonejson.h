@@ -454,6 +454,8 @@ extern "C" {
 /** Internal flag allowing JSON `null` to parse as an absent optional primitive
  * presence field. */
 #define LONEJSON_FIELD_ACCEPT_NULL (1u << 4)
+/* Internal-only flag used by implementation-generated maps. */
+#define LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE (1u << 31)
 
 /** Internal/runtime flag indicating that an array container owns its backing
  * allocation. */
@@ -2737,7 +2739,9 @@ lonejson_status lonejson_json_value_set_buffer(lonejson_json_value *value,
 /** Configures an embedded JSON value handle to stream inbound parsed JSON
  * bytes to a caller sink as they are validated. Callers using parse sinks must
  * keep the handle configured across parsing, typically by initializing the
- * destination first and parsing with `clear_destination = 0`.
+ * destination first and parsing with `clear_destination = 0`. This supported
+ * reuse pattern also applies when the `JSON_VALUE` field lives inside nested
+ * mapped objects or mapped-array-stream item structs.
  */
 lonejson_status lonejson_json_value_set_parse_sink(lonejson_json_value *value,
                                                    lonejson_sink_fn sink,
@@ -2746,15 +2750,18 @@ lonejson_status lonejson_json_value_set_parse_sink(lonejson_json_value *value,
 /** Configures an embedded JSON value handle to deliver inbound parsed JSON as
  * structured visitor callbacks. Callers using parse visitors must keep the
  * handle configured across parsing, typically by initializing the destination
- * first and parsing with `clear_destination = 0`. The supplied limits may be
- * `NULL` to use `lonejson_default_value_limits()`.
+ * first and parsing with `clear_destination = 0`. This supported reuse pattern
+ * also applies when the `JSON_VALUE` field lives inside nested mapped objects
+ * or mapped-array-stream item structs. The supplied limits may be `NULL` to
+ * use `lonejson_default_value_limits()`.
  */
 lonejson_status lonejson_json_value_set_parse_visitor(
     lonejson_json_value *value, const lonejson_value_visitor *visitor,
     void *user, const lonejson_value_limits *limits, lonejson_error *error);
 /** Enables explicit parse-time capture of one inbound JSON value into owned
  * compact bytes. This is the opt-in storage path for callers that need to
- * retain a parsed arbitrary JSON value after decoding.
+ * retain a parsed arbitrary JSON value after decoding, including nested
+ * `JSON_VALUE` fields reused with `clear_destination = 0`.
  */
 lonejson_status
 lonejson_json_value_enable_parse_capture(lonejson_json_value *value,
@@ -5043,7 +5050,9 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_buffer(
 /** Configures an embedded JSON value handle to stream inbound parsed JSON
  * bytes to a caller sink as they are validated. Callers using parse sinks must
  * keep the handle configured across parsing, typically by initializing the
- * destination first and parsing with `clear_destination = 0`.
+ * destination first and parsing with `clear_destination = 0`. This supported
+ * reuse pattern also applies when the `JSON_VALUE` field lives inside nested
+ * mapped objects or mapped-array-stream item structs.
  */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_parse_sink(
     lj_json_value *value, lj_sink_fn sink, void *user, lj_error *error) {
@@ -5053,8 +5062,10 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_parse_sink(
 /** Configures an embedded JSON value handle to deliver inbound parsed JSON as
  * structured visitor callbacks. Callers using parse visitors must keep the
  * handle configured across parsing, typically by initializing the destination
- * first and parsing with `clear_destination = 0`. The supplied limits may be
- * `NULL` to use `lonejson_default_value_limits()`.
+ * first and parsing with `clear_destination = 0`. This supported reuse pattern
+ * also applies when the `JSON_VALUE` field lives inside nested mapped objects
+ * or mapped-array-stream item structs. The supplied limits may be `NULL` to
+ * use `lonejson_default_value_limits()`.
  */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_parse_visitor(
     lj_json_value *value, const lj_value_visitor *visitor, void *user,
@@ -5065,7 +5076,8 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_parse_visitor(
 
 /** Enables explicit parse-time capture of one inbound JSON value into owned
  * compact bytes. This is the opt-in storage path for callers that need to
- * retain a parsed arbitrary JSON value after decoding.
+ * retain a parsed arbitrary JSON value after decoding, including nested
+ * `JSON_VALUE` fields reused with `clear_destination = 0`.
  */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_json_value_enable_parse_capture(lj_json_value *value, lj_error *error) {

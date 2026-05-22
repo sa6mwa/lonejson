@@ -353,6 +353,7 @@ if(LONEJSON_BUILD_EXAMPLES)
     array_stream
     generator_pull
     json_value_buffer
+    json_value_nested_parse
     json_value_parse
     json_value_source
     json_value_visitor

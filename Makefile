@@ -384,6 +384,7 @@ $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES)
 
 lua-test: lua-rock
 	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && $(LUA) tests/test_lua.lua
+	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && $(LUA) tests/test_lua_fuzz.lua
 
 lua-bench:
 	@$(MAKE) lua-rock

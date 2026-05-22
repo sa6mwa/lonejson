@@ -68,6 +68,29 @@ local Merge = lj.schema("Merge", {
   lj.field("fields", lj.json_value()),
 })
 
+local NestedQuery = lj.schema("NestedQuery", {
+  lj.field("type", lj.string { required = true }),
+  lj.field("response", lj.object {
+    required = true,
+    fields = {
+      lj.field("status", lj.string()),
+      lj.field("selector", lj.json_value { required = true }),
+      lj.field("fields", lj.json_value()),
+    },
+  }),
+})
+
+local Batch = lj.schema("Batch", {
+  lj.field("batch_id", lj.string()),
+  lj.field("items", lj.object_array {
+    fields = {
+      lj.field("id", lj.string { required = true }),
+      lj.field("payload", lj.json_value { required = true }),
+      lj.field("tags", lj.json_value()),
+    },
+  }),
+})
+
 local Nullable = lj.schema("Nullable", {
   lj.field("required_count", lj.i64 { required = true }),
   lj.field("amount", lj.i64 { nullable = true }),
@@ -399,6 +422,22 @@ do
 end
 
 do
+  local obj = NestedQuery:decode(
+      '{"type":"null-selector","response":{"status":"ok","selector":null,"fields":null}}')
+
+  assert_true(obj.response.selector == nil)
+  assert_true(obj.response.fields == nil)
+end
+
+do
+  local obj = Batch:decode(
+      '{"batch_id":"b-null","items":[{"id":"i1","payload":null,"tags":null}]}')
+
+  assert_true(obj.items[1].payload == nil)
+  assert_true(obj.items[1].tags == nil)
+end
+
+do
   local path = "/tmp/lonejson-lua-query-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
@@ -418,6 +457,52 @@ do
   assert_true(obj.fields[2].deep[3] == lj.json_null)
   assert_eq(obj.last_error.code, "bad")
   assert_eq(obj.last_error.retryable, false)
+  obj, err, status = stream:next()
+  assert_eq(status, "eof")
+  stream:close()
+  os.remove(path)
+end
+
+do
+  local path = "/tmp/lonejson-lua-nested-stream.json"
+  local f = assert(io.open(path, "wb"))
+  local stream
+  local obj, err, status
+
+  f:write('{"type":"stream-1","response":{"status":"ok","selector":{"kind":"term","value":"alice"},"fields":["id",{"deep":[true,null]}]}}')
+  f:close()
+
+  stream = NestedQuery:stream_path(path)
+  obj, err, status = stream:next()
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.response.selector.kind, "term")
+  assert_eq(obj.response.selector.value, "alice")
+  assert_eq(obj.response.fields[1], "id")
+  assert_true(obj.response.fields[2].deep[2] == lj.json_null)
+  obj, err, status = stream:next()
+  assert_eq(status, "eof")
+  stream:close()
+  os.remove(path)
+end
+
+do
+  local path = "/tmp/lonejson-lua-batch-stream.json"
+  local f = assert(io.open(path, "wb"))
+  local stream
+  local obj, err, status
+
+  f:write('{"batch_id":"b1","items":[{"id":"i1","payload":{"k":"v"},"tags":[true,null]},{"id":"i2","payload":[1,2,3]}]}')
+  f:close()
+
+  stream = Batch:stream_path(path)
+  obj, err, status = stream:next()
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.items[1].payload.k, "v")
+  assert_eq(obj.items[1].tags[1], true)
+  assert_true(obj.items[1].tags[2] == lj.json_null)
+  assert_eq(obj.items[2].payload[3], 3)
   obj, err, status = stream:next()
   assert_eq(status, "eof")
   stream:close()
@@ -453,6 +538,74 @@ do
 end
 
 do
+  local obj = NestedQuery:decode(
+      '{"type":"nested","response":{"status":"ok","selector":{"x":[null,1],"y":{"z":null}},"fields":[true,{"deep":[null,4]}]}}')
+  assert_eq(obj.type, "nested")
+  assert_eq(obj.response.status, "ok")
+  assert_true(obj.response.selector.x[1] == lj.json_null)
+  assert_true(obj.response.selector.y.z == lj.json_null)
+  assert_eq(obj.response.fields[1], true)
+  assert_true(obj.response.fields[2].deep[1] == lj.json_null)
+  assert_eq(obj.response.fields[2].deep[2], 4)
+end
+
+do
+  local obj = Batch:decode(
+      '{"batch_id":"b1","items":[{"id":"i1","payload":{"a":[null,1]},"tags":["x",{"deep":true}]},{"id":"i2","payload":[true,null,2]}]}')
+  assert_eq(obj.batch_id, "b1")
+  assert_eq(obj.items[1].id, "i1")
+  assert_true(obj.items[1].payload.a[1] == lj.json_null)
+  assert_eq(obj.items[1].payload.a[2], 1)
+  assert_eq(obj.items[1].tags[1], "x")
+  assert_eq(obj.items[1].tags[2].deep, true)
+  assert_eq(obj.items[2].id, "i2")
+  assert_eq(obj.items[2].payload[1], true)
+  assert_true(obj.items[2].payload[2] == lj.json_null)
+  assert_eq(obj.items[2].payload[3], 2)
+end
+
+do
+  local rec = NestedQuery:new_record()
+
+  NestedQuery:decode_into(rec,
+      '{"type":"first","response":{"status":"ok","selector":{"a":1},"fields":["keep"]}}')
+  assert_eq(rec.type, "first")
+  assert_eq(rec.response.status, "ok")
+  assert_eq(rec.response.selector.a, 1)
+  assert_eq(rec.response.fields[1], "keep")
+
+  NestedQuery:decode_into(rec,
+      '{"type":"second","response":{"selector":{"b":[true,null]},"fields":{"deep":{"v":2}}}}',
+      { clear_destination = false })
+  assert_eq(rec.type, "second")
+  assert_true(rec.response.status == nil)
+  assert_true(rec.response.selector.a == nil)
+  assert_eq(rec.response.selector.b[1], true)
+  assert_true(rec.response.selector.b[2] == lj.json_null)
+  assert_eq(rec.response.fields.deep.v, 2)
+end
+
+do
+  local rec = Batch:new_record()
+
+  Batch:decode_into(rec,
+      '{"batch_id":"b1","items":[{"id":"i1","payload":{"a":1},"tags":["keep"]}]}')
+  assert_eq(rec.batch_id, "b1")
+  assert_eq(rec.items[1].id, "i1")
+  assert_eq(rec.items[1].payload.a, 1)
+  assert_eq(rec.items[1].tags[1], "keep")
+
+  Batch:decode_into(rec,
+      '{"batch_id":"b2","items":[{"id":"i2","payload":[true,null],"tags":{"fresh":2}}]}',
+      { clear_destination = false })
+  assert_eq(rec.batch_id, "b2")
+  assert_eq(rec.items[1].id, "i2")
+  assert_eq(rec.items[1].payload[1], true)
+  assert_true(rec.items[1].payload[2] == lj.json_null)
+  assert_eq(rec.items[1].tags.fresh, 2)
+end
+
+do
   local path = "/tmp/lonejson-lua-merge-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
@@ -480,6 +633,43 @@ do
   assert_true(obj.selector.a == nil)
   assert_eq(obj.selector.b, 2)
   assert_eq(obj.fields[1], "keep")
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "eof")
+  stream:close()
+  os.remove(path)
+end
+
+do
+  local path = "/tmp/lonejson-lua-nested-merge-stream.json"
+  local f = assert(io.open(path, "wb"))
+  local stream
+  local rec = NestedQuery:new_record()
+  local obj, err, status
+
+  f:write('{"type":"stream-old","response":{"status":"ok","selector":{"a":1},"fields":["keep"]}}')
+  f:write('{"type":"stream-new","response":{"selector":{"b":2}}}')
+  f:close()
+
+  stream = NestedQuery:stream_path(path, { clear_destination = false })
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.type, "stream-old")
+  assert_eq(rec.response.status, "ok")
+  assert_eq(rec.response.selector.a, 1)
+  assert_eq(rec.response.fields[1], "keep")
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.type, "stream-new")
+  assert_true(rec.response.status == nil)
+  assert_true(rec.response.selector.a == nil)
+  assert_eq(rec.response.selector.b, 2)
+  assert_true(rec.response.fields == nil)
 
   obj, err, status = stream:next(rec)
   assert_eq(status, "eof")
@@ -565,6 +755,35 @@ end
 
 do
   local stream =
+    NestedQuery:array_stream_string("items", '{"items":[{"type":"q1","response":{"status":"ok","selector":{"x":null},"fields":["id",{"deep":[true,null]}]}},{"type":"q2","response":{"selector":{"ok":true}}}]}')
+  local rec = NestedQuery:new_record()
+  local obj, err, status
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "item")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.type, "q1")
+  assert_eq(rec.response.status, "ok")
+  assert_true(rec.response.selector.x == lj.json_null)
+  assert_eq(rec.response.fields[2].deep[1], true)
+  assert_true(rec.response.fields[2].deep[2] == lj.json_null)
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "item")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.type, "q2")
+  assert_true(rec.response.status == nil)
+  assert_eq(rec.response.selector.ok, true)
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "eof")
+  stream:close()
+end
+
+do
+  local stream =
     Merge:array_stream_string("items", '{"items":[{"id":"stream-old","age":9,"selector":{"a":1},"fields":["keep"]},{"selector":{"b":2}}]}', { clear_destination = false })
   local rec = Merge:new_record()
   local obj, err, status
@@ -587,6 +806,36 @@ do
   assert_true(rec.selector.a == nil)
   assert_eq(rec.selector.b, 2)
   assert_eq(rec.fields[1], "keep")
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "eof")
+  stream:close()
+end
+
+do
+  local stream =
+    Batch:array_stream_string("", '[{"batch_id":"b1","items":[{"id":"i1","payload":{"x":null},"tags":["keep"]}]},{"batch_id":"b2","items":[{"id":"i2","payload":[true,null],"tags":{"fresh":2}}]}]', { clear_destination = false })
+  local rec = Batch:new_record()
+  local obj, err, status
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "item")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.batch_id, "b1")
+  assert_eq(rec.items[1].id, "i1")
+  assert_true(rec.items[1].payload.x == lj.json_null)
+  assert_eq(rec.items[1].tags[1], "keep")
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "item")
+  assert_true(obj == rec)
+  assert_true(err == nil)
+  assert_eq(rec.batch_id, "b2")
+  assert_eq(rec.items[1].id, "i2")
+  assert_true(rec.items[1].payload[1] == true)
+  assert_true(rec.items[1].payload[2] == lj.json_null)
+  assert_eq(rec.items[1].tags.fresh, 2)
 
   obj, err, status = stream:next(rec)
   assert_eq(status, "eof")

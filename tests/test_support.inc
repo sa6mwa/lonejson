@@ -315,6 +315,16 @@ typedef struct test_json_value_doc {
   lonejson_json_value last_error;
 } test_json_value_doc;
 
+typedef struct test_nested_json_value_response {
+  char status[16];
+  lonejson_json_value payload;
+} test_nested_json_value_response;
+
+typedef struct test_nested_json_value_doc {
+  char type[32];
+  test_nested_json_value_response response;
+} test_nested_json_value_doc;
+
 typedef struct test_alloc_parse_doc {
   char *name;
   lonejson_spooled body;
@@ -616,6 +626,23 @@ static const lonejson_field test_json_value_doc_fields[] = {
     LONEJSON_FIELD_JSON_VALUE(test_json_value_doc, last_error, "last_error")};
 LONEJSON_MAP_DEFINE(test_json_value_doc_map, test_json_value_doc,
                     test_json_value_doc_fields);
+
+static const lonejson_field test_nested_json_value_response_fields[] = {
+    LONEJSON_FIELD_STRING_FIXED(test_nested_json_value_response, status,
+                                "status", LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_JSON_VALUE_REQ(test_nested_json_value_response, payload,
+                                  "payload")};
+LONEJSON_MAP_DEFINE(test_nested_json_value_response_map,
+                    test_nested_json_value_response,
+                    test_nested_json_value_response_fields);
+
+static const lonejson_field test_nested_json_value_doc_fields[] = {
+    LONEJSON_FIELD_STRING_FIXED_REQ(test_nested_json_value_doc, type, "type",
+                                    LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_OBJECT_REQ(test_nested_json_value_doc, response, "response",
+                              &test_nested_json_value_response_map)};
+LONEJSON_MAP_DEFINE(test_nested_json_value_doc_map, test_nested_json_value_doc,
+                    test_nested_json_value_doc_fields);
 
 static const lonejson_field test_alloc_parse_doc_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC_REQ(test_alloc_parse_doc, name, "name"),

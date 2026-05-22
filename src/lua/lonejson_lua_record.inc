@@ -207,6 +207,44 @@ static int ljlua_schema_has_json_value(ljlua_schema *schema) {
   return schema != NULL && schema->has_json_value;
 }
 
+static void ljlua_json_value_enable_parse_capture_preserving_runtime(
+    lonejson_json_value *value);
+
+static int ljlua_prepare_record_json_value_capture_recursive(
+    lua_State *L, ljlua_schema *schema, void *record, int preserve_runtime) {
+  size_t i;
+  lonejson_error error;
+
+  if (schema == NULL || record == NULL) {
+    return 1;
+  }
+  for (i = 0u; i < schema->field_count; ++i) {
+    ljlua_field_meta *meta = &schema->metas[i];
+    void *ptr = (unsigned char *)record + meta->field.struct_offset;
+
+    if (meta->lua_kind == LJLUA_FIELD_JSON_VALUE) {
+      lonejson_json_value *value = (lonejson_json_value *)ptr;
+
+      if (preserve_runtime) {
+        ljlua_json_value_enable_parse_capture_preserving_runtime(value);
+      } else if (lonejson_json_value_enable_parse_capture(value, &error) !=
+                 LONEJSON_STATUS_OK) {
+        return luaL_error(L, "failed to enable JSON value capture: %s",
+                          error.message);
+      }
+      continue;
+    }
+    if (meta->lua_kind == LJLUA_FIELD_OBJECT &&
+        ljlua_schema_has_json_value(meta->subschema)) {
+      if (!ljlua_prepare_record_json_value_capture_recursive(
+              L, meta->subschema, ptr, preserve_runtime)) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
 static void ljlua_decode_context_cleanup(ljlua_decode_context *ctx) {
   size_t i;
 
@@ -248,6 +286,9 @@ static int ljlua_decode_context_prepare_table_mode(lua_State *L,
       schema->field_count, sizeof(*ctx->json_values));
   if (ctx->json_values == NULL) {
     return luaL_error(L, "failed to allocate Lua JSON decode state");
+  }
+  if (!ljlua_prepare_record_json_value_capture_recursive(L, schema, record, 0)) {
+    return 0;
   }
   for (i = 0u; i < schema->field_count; ++i) {
     if (schema->metas[i].lua_kind == LJLUA_FIELD_JSON_VALUE) {
@@ -300,24 +341,8 @@ static int ljlua_prepare_record_json_value_capture(lua_State *L,
                                                    ljlua_schema *schema,
                                                    void *record,
                                                    int preserve_runtime) {
-  size_t i;
-  lonejson_error error;
-
-  for (i = 0u; i < schema->field_count; ++i) {
-    if (schema->metas[i].lua_kind == LJLUA_FIELD_JSON_VALUE) {
-      lonejson_json_value *value =
-          (lonejson_json_value *)((unsigned char *)record +
-                                  schema->metas[i].field.struct_offset);
-      if (preserve_runtime) {
-        ljlua_json_value_enable_parse_capture_preserving_runtime(value);
-      } else if (lonejson_json_value_enable_parse_capture(value, &error) !=
-                 LONEJSON_STATUS_OK) {
-        return luaL_error(L, "failed to enable JSON value capture: %s",
-                          error.message);
-      }
-    }
-  }
-  return 1;
+  return ljlua_prepare_record_json_value_capture_recursive(
+      L, schema, record, preserve_runtime);
 }
 
 static int ljlua_record_to_table(lua_State *L, ljlua_schema *schema,

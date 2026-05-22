@@ -17,6 +17,8 @@ int main(void) {
   test_parse_implicit_destination_reset();
   test_dynamic_allocation_cleanup_balance();
   test_dynamic_allocation_reset_reparse_balance();
+  test_clear_destination_false_present_arrays_replace();
+  test_clear_destination_false_fixed_capacity_string_array_reuse_frees_replaced_entries();
   test_zero_alloc_validate_path();
   test_f64_boundary_exponents_stay_on_fast_path();
   test_f64_boundary_exponents_are_locale_independent();
@@ -40,6 +42,7 @@ int main(void) {
   test_chunked_parser_and_missing_required();
   test_object_framed_stream_jsonl();
   test_stream_reuses_and_changes_destination();
+  test_stream_reuse_fixed_capacity_string_array_frees_replaced_entries();
   test_object_stream_nonblocking_fd_would_block();
   test_array_stream_mapped_items_from_root_key();
   test_array_stream_raw_values_from_root_array();
@@ -70,6 +73,7 @@ int main(void) {
   test_array_stream_mapped_string_field_failure_modes();
   test_array_stream_mapped_string_field_serialize_rejected();
   test_array_stream_mapped_field_nested_items();
+  test_array_stream_mapped_field_nested_json_value_sink_reuse();
   test_array_stream_mapped_field_failure_modes();
   test_array_stream_mapped_field_failure_cleans_alloc_items();
   test_array_stream_mapped_field_curl_facade();
@@ -142,10 +146,14 @@ int main(void) {
   test_json_value_parse_and_roundtrip();
   test_json_value_parse_capture_escapes();
   test_json_value_parse_stream_sink();
+  test_json_value_nested_object_parse_sink_and_reuse();
+  test_json_value_nested_object_parse_sink_failure_matrix();
   test_json_value_parse_visitor();
+  test_json_value_nested_object_parse_visitor();
   test_json_value_parse_visitor_fast_path_regressions();
   test_json_value_setters_and_failures();
   test_json_value_scalars_null_and_reset();
+  test_json_value_nested_object_parse_capture();
   test_json_value_reuse_and_cleanup_ownership();
   test_json_value_source_validation_failures();
   test_json_value_nonseekable_and_sink_failures();

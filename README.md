@@ -609,12 +609,18 @@ three inbound behaviors before decoding:
 
 When using inbound parse sinks, parse visitors, or explicit capture, initialize
 the destination first and parse with `clear_destination = 0` so the configured
-`json_value` handles remain attached:
+`json_value` handles remain attached. The same supported pattern applies when a
+`json_value` field lives inside a nested mapped object or a mapped-array-stream
+item:
 
 ```c
 lonejson_parse_options options = lonejson_default_parse_options();
 options.clear_destination = 0;
 ```
+
+That means you can prepare `doc.response.payload` once, then reuse the same
+mapped destination across multiple parses without losing the configured sink,
+visitor, or capture mode.
 
 Visitor mode is the zero-retention parse path for arbitrary embedded JSON:
 
@@ -796,11 +802,30 @@ Run the integration test:
 make lua-test
 ```
 
-Run the Lua example:
+Run the main Lua example:
 
 ```sh
 eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_binding.lua
 ```
+
+Run the nested `json_value` Lua example:
+
+```sh
+eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_json_value_nested.lua
+```
+
+Run the object-array `json_value` Lua example:
+
+```sh
+eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_json_value_object_array.lua
+```
+
+The Lua binding now supports `json_value` fields at top level, inside nested
+object fields, and inside object-array element schemas.
+
+For reusable records with `clear_destination = false`, omitted fields remain as
+they were, while present arrays replace the previous array contents instead of
+silently appending.
 
 ## Example programs
 

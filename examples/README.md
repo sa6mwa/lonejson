@@ -33,6 +33,8 @@ The same pattern applies to:
 * `push_parser.c` (object-framed streaming reader example)
 * `generator_pull.c` (pull-style generator example for transport adapters)
 * `json_value_buffer.c` (embeds selector/fields JSON directly from memory)
+* `json_value_nested_parse.c` (configures a nested mapped `json_value` parse
+  sink once, then reuses the same destination across multiple parses)
 * `json_value_parse.c` (enables explicit parse capture for opaque embedded JSON
   values and re-emits them)
 * `json_value_visitor.c` (streams parsed embedded JSON through visitor
@@ -96,7 +98,7 @@ Build and install the Lua module into the local LuaRocks tree:
 make lua-rock
 ```
 
-Then run the Lua example:
+Then run the main Lua example:
 
 ```sh
 eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_binding.lua
@@ -115,3 +117,22 @@ eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_nullable.lua
 It shows `nullable = true` on optional `u64`, `f64`, and `bool` fields, where
 missing or JSON `null` decode to Lua `nil` and `nil`/`lj.json_null` values are
 omitted when encoding.
+
+Run the nested `json_value` Lua example with:
+
+```sh
+eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_json_value_nested.lua
+```
+
+It shows a nested object `json_value` field decoding into Lua values and being
+reused with `clear_destination = false`.
+
+Run the object-array `json_value` Lua example with:
+
+```sh
+eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_json_value_object_array.lua
+```
+
+It shows `json_value` fields inside object-array element schemas. With
+`clear_destination = false`, omitted arrays are preserved and present arrays are
+replaced, which matches the more idiomatic Lua expectation for record reuse.

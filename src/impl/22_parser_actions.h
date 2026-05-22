@@ -271,9 +271,7 @@ lonejson__mapped_array_stream_finish_item(lonejson_parser *parser,
       parent->object_ptr, parent->field);
   status = stream->handler.item(stream->handler.user, stream->handler.item_dst,
                                 &parser->error);
-  lonejson__cleanup_map(stream->handler.item_map, stream->handler.item_dst);
-  lonejson__init_map_with_allocator(
-      stream->handler.item_map, stream->handler.item_dst, &parser->allocator);
+  lonejson__reset_map(stream->handler.item_map, stream->handler.item_dst);
   if (status != LONEJSON_STATUS_OK) {
     if (parser->error.code == LONEJSON_STATUS_OK) {
       return lonejson__set_error(
@@ -296,9 +294,7 @@ lonejson__mapped_array_stream_reset_item(lonejson_parser *parser,
       stream->handler.item_map == NULL || stream->handler.item_dst == NULL) {
     return;
   }
-  lonejson__cleanup_map(stream->handler.item_map, stream->handler.item_dst);
-  lonejson__init_map_with_allocator(
-      stream->handler.item_map, stream->handler.item_dst, &parser->allocator);
+  lonejson__reset_map(stream->handler.item_map, stream->handler.item_dst);
 }
 
 static void
@@ -423,7 +419,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
         }
         map = field->submap;
         object_ptr = lonejson__field_ptr(parent->object_ptr, field);
-        lonejson__init_map_with_allocator(map, object_ptr, &parser->allocator);
+        lonejson__reset_map(map, object_ptr);
       }
     }
   } else if (parent != NULL && parent->kind == LONEJSON_CONTAINER_ARRAY) {
@@ -441,9 +437,8 @@ lonejson__begin_object_value(lonejson_parser *parser) {
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
-      lonejson__init_map_with_allocator(mapped_stream->handler.item_map,
-                                        mapped_stream->handler.item_dst,
-                                        &parser->allocator);
+      lonejson__reset_map(mapped_stream->handler.item_map,
+                          mapped_stream->handler.item_dst);
       field = parent->field;
       map = mapped_stream->handler.item_map;
       object_ptr = mapped_stream->handler.item_dst;
@@ -585,6 +580,8 @@ lonejson__begin_array_value(lonejson_parser *parser) {
         case LONEJSON_FIELD_KIND_F64_ARRAY:
         case LONEJSON_FIELD_KIND_BOOL_ARRAY:
         case LONEJSON_FIELD_KIND_OBJECT_ARRAY:
+          lonejson__reset_present_array_field(
+              field, lonejson__field_ptr(object_ptr, field));
           break;
         default:
           return lonejson__set_error(

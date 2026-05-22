@@ -242,6 +242,7 @@ static int ljlua_compile_field(lua_State *L, int index,
   case LJLUA_FIELD_JSON_VALUE:
     meta->field.kind = LONEJSON_FIELD_KIND_JSON_VALUE;
     meta->field.storage = LONEJSON_STORAGE_FIXED;
+    meta->field.flags |= LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE;
     break;
   case LJLUA_FIELD_I64:
     meta->field.kind = LONEJSON_FIELD_KIND_I64;
@@ -371,7 +372,10 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
     ljlua_field_meta *meta = &schema->metas[i];
     size_t align = sizeof(void *);
 
-    if (meta->lua_kind == LJLUA_FIELD_JSON_VALUE) {
+    if (meta->lua_kind == LJLUA_FIELD_JSON_VALUE ||
+        ((meta->lua_kind == LJLUA_FIELD_OBJECT ||
+          meta->lua_kind == LJLUA_FIELD_OBJECT_ARRAY) &&
+         meta->subschema != NULL && meta->subschema->has_json_value)) {
       schema->has_json_value = 1;
     }
     if (meta->member_size >= sizeof(void *)) {
