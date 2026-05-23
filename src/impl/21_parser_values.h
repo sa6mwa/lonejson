@@ -11,7 +11,23 @@ static lonejson_status lonejson__assign_string(lonejson_parser *parser,
   }
   if (field->storage == LONEJSON_STORAGE_DYNAMIC) {
     char **dst = (char **)ptr;
-    char *copy = (char *)lonejson__owned_malloc(&parser->allocator, len + 1u);
+    char *copy;
+
+    if (parser->options.max_dynamic_string_bytes != 0u &&
+        len > parser->options.max_dynamic_string_bytes) {
+      return lonejson__set_error(
+          &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
+          parser->error.line, parser->error.column,
+          "string field '%s' exceeds configured max dynamic string bytes",
+          field->json_key);
+    }
+    if (!lonejson__parser_alloc_can_grow(parser, 0u, len + 1u)) {
+      return lonejson__set_error(
+          &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
+          parser->error.line, parser->error.column,
+          "parse allocations exceed configured max bytes");
+    }
+    copy = (char *)lonejson__owned_malloc_parse(parser, len + 1u);
     if (copy == NULL) {
       return lonejson__set_error(
           &parser->error, LONEJSON_STATUS_ALLOCATION_FAILED,
@@ -20,7 +36,7 @@ static lonejson_status lonejson__assign_string(lonejson_parser *parser,
     }
     memcpy(copy, value, len);
     copy[len] = '\0';
-    lonejson__owned_free(*dst);
+    lonejson__owned_free_parse(parser, *dst);
     *dst = copy;
     return LONEJSON_STATUS_OK;
   }
@@ -395,27 +411,28 @@ static lonejson_status lonejson__assign_null(lonejson_parser *parser,
   case LONEJSON_FIELD_KIND_STRING:
   case LONEJSON_FIELD_KIND_STRING_STREAM:
   case LONEJSON_FIELD_KIND_BASE64_STREAM:
-    if (field->storage == LONEJSON_STORAGE_DYNAMIC) {
-      char **dst = (char **)ptr;
-      lonejson__owned_free(*dst);
-      *dst = NULL;
-    } else if (field->kind == LONEJSON_FIELD_KIND_STRING &&
-               field->fixed_capacity != 0u) {
+    if (field->kind == LONEJSON_FIELD_KIND_STRING &&
+        field->storage == LONEJSON_STORAGE_FIXED &&
+        field->fixed_capacity != 0u) {
       ((char *)ptr)[0] = '\0';
     } else {
-      lonejson_spooled_reset((lonejson_spooled *)ptr);
+      lonejson__cleanup_value_parse(parser, field, ptr);
     }
     return LONEJSON_STATUS_OK;
   case LONEJSON_FIELD_KIND_STRING_SOURCE:
   case LONEJSON_FIELD_KIND_BASE64_SOURCE:
-    lonejson_source_reset((lonejson_source *)ptr);
+    lonejson__cleanup_value_parse(parser, field, ptr);
     return LONEJSON_STATUS_OK;
   case LONEJSON_FIELD_KIND_JSON_VALUE:
+    lonejson__parser_alloc_note_release(
+        parser, ((lonejson_json_value *)ptr)->json);
+    lonejson__parser_alloc_note_release(
+        parser, ((lonejson_json_value *)ptr)->path);
     lonejson_json_value_reset((lonejson_json_value *)ptr);
     return LONEJSON_STATUS_OK;
   case LONEJSON_FIELD_KIND_OBJECT:
     if (field->submap != NULL) {
-      lonejson__cleanup_map(field->submap, ptr);
+      lonejson__cleanup_map_parse(parser, field->submap, ptr);
       memset(ptr, 0, field->submap->struct_size);
     }
     return LONEJSON_STATUS_OK;
@@ -425,7 +442,7 @@ static lonejson_status lonejson__assign_null(lonejson_parser *parser,
   case LONEJSON_FIELD_KIND_F64_ARRAY:
   case LONEJSON_FIELD_KIND_BOOL_ARRAY:
   case LONEJSON_FIELD_KIND_OBJECT_ARRAY:
-    lonejson__cleanup_value(field, ptr);
+    lonejson__cleanup_value_parse(parser, field, ptr);
     return LONEJSON_STATUS_OK;
   default:
     return lonejson__set_error(&parser->error, LONEJSON_STATUS_TYPE_MISMATCH,
@@ -458,17 +475,43 @@ static lonejson_status lonejson__json_value_emit(lonejson_parser *parser,
     required = value->len + len + 1u;
     capacity = lonejson__owned_size(value->json);
     if (capacity < required) {
+      size_t available =
+          lonejson__parser_alloc_available(parser,
+                                           lonejson__parser_alloc_counted_bytes(
+                                               parser, value->json));
       next_cap = capacity != 0u ? capacity : 64u;
+      if (available != SIZE_MAX && available < required) {
+        return lonejson__set_error(
+            &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
+            parser->error.line, parser->error.column,
+            "parse allocations exceed configured max bytes");
+      }
+      if (available != SIZE_MAX && next_cap > available) {
+        next_cap = available;
+      }
       while (next_cap < required) {
         size_t doubled = next_cap * 2u;
         if (doubled <= next_cap) {
           next_cap = required;
           break;
         }
+        if (available != SIZE_MAX && doubled > available) {
+          next_cap = available;
+          break;
+        }
         next_cap = doubled;
       }
-      next = (char *)lonejson__owned_realloc(&value->allocator, value->json,
-                                             next_cap);
+      if (!lonejson__parser_alloc_can_grow(
+              parser,
+              lonejson__parser_alloc_counted_bytes(parser, value->json),
+              next_cap)) {
+        return lonejson__set_error(
+            &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
+            parser->error.line, parser->error.column,
+            "parse allocations exceed configured max bytes");
+      }
+      next = (char *)lonejson__owned_realloc_parse_with_allocator(
+          parser, &value->allocator, value->json, next_cap);
       if (next == NULL) {
         return lonejson__set_error(
             &parser->error, LONEJSON_STATUS_ALLOCATION_FAILED,
@@ -487,6 +530,86 @@ static lonejson_status lonejson__json_value_emit(lonejson_parser *parser,
       &parser->error, LONEJSON_STATUS_INVALID_ARGUMENT, parser->error.offset,
       parser->error.line, parser->error.column,
       "JSON value field has no configured parse sink or capture mode");
+}
+
+typedef struct lonejson__json_parse_capture_sink_state {
+  lonejson_parser *parser;
+  lonejson_json_value *value;
+} lonejson__json_parse_capture_sink_state;
+
+static lonejson_status lonejson__json_buffer_sink_parse(void *user,
+                                                        const void *data,
+                                                        size_t len,
+                                                        lonejson_error *error) {
+  lonejson__json_parse_capture_sink_state *state =
+      (lonejson__json_parse_capture_sink_state *)user;
+  size_t required;
+  size_t capacity;
+  size_t next_cap;
+  char *next;
+
+  (void)error;
+  if (state == NULL || state->parser == NULL || state->value == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  required = state->value->len + len + 1u;
+  capacity = lonejson__owned_size(state->value->json);
+  if (capacity < required) {
+    size_t available = lonejson__parser_alloc_available(
+        state->parser, lonejson__parser_alloc_counted_bytes(state->parser,
+                                                            state->value->json));
+    next_cap = capacity != 0u ? capacity : 64u;
+    if (available != SIZE_MAX && available < required) {
+      return lonejson__set_error(
+          &state->parser->error, LONEJSON_STATUS_OVERFLOW,
+          state->parser->error.offset, state->parser->error.line,
+          state->parser->error.column,
+          "parse allocations exceed configured max bytes");
+    }
+    if (available != SIZE_MAX && next_cap > available) {
+      next_cap = available;
+    }
+    while (next_cap < required) {
+      size_t doubled = next_cap * 2u;
+      if (doubled <= next_cap) {
+        next_cap = required;
+        break;
+      }
+      if (available != SIZE_MAX && doubled > available) {
+        next_cap = available;
+        break;
+      }
+      next_cap = doubled;
+    }
+    if (!lonejson__parser_alloc_can_grow(
+            state->parser,
+            lonejson__parser_alloc_counted_bytes(state->parser,
+                                                state->value->json),
+            next_cap)) {
+      return lonejson__set_error(
+          &state->parser->error, LONEJSON_STATUS_OVERFLOW,
+          state->parser->error.offset, state->parser->error.line,
+          state->parser->error.column,
+          "parse allocations exceed configured max bytes");
+    }
+    next = (char *)lonejson__owned_realloc_parse_with_allocator(
+        state->parser, &state->value->allocator, state->value->json, next_cap);
+    if (next == NULL) {
+      return lonejson__set_error(
+          &state->parser->error, LONEJSON_STATUS_ALLOCATION_FAILED,
+          state->parser->error.offset, state->parser->error.line,
+          state->parser->error.column, "failed to grow captured JSON value");
+    }
+    state->value->json = next;
+  }
+  memcpy(state->value->json + state->value->len, data, len);
+  state->value->len += len;
+  state->value->json[state->value->len] = '\0';
+  state->value->kind = LONEJSON_JSON_VALUE_BUFFER;
+  return LONEJSON_STATUS_OK;
 }
 
 static LONEJSON__INLINE int
@@ -603,15 +726,20 @@ static lonejson_status
 lonejson__json_value_string_chunk(lonejson_parser *parser, const char *data,
                                   size_t len) {
   lonejson_json_value *value = parser->json_stream_value;
+  lonejson__json_parse_capture_sink_state capture_state;
   size_t limit;
   const char *msg;
 
   if (!lonejson__json_value_parse_visitor_active(parser)) {
+    capture_state.parser = parser;
+    capture_state.value = value;
     return lonejson__emit_escaped_fragment(
         parser->json_stream_sink_active ? value->parse_sink
-                                        : lonejson__json_buffer_sink,
-        parser->json_stream_sink_active ? value->parse_sink_user : value,
-        &parser->error, (const unsigned char *)data, len);
+                                        : lonejson__json_buffer_sink_parse,
+        parser->json_stream_sink_active ? value->parse_sink_user
+                                        : &capture_state,
+        &parser->error,
+        (const unsigned char *)data, len);
   }
   limit = parser->json_stream_text_is_key
               ? value->parse_visitor_limits.max_key_bytes
@@ -626,8 +754,32 @@ lonejson__json_value_string_chunk(lonejson_parser *parser, const char *data,
       data, len, &parser->json_stream_text_bytes, limit, msg);
 }
 
-static lonejson_status
-lonejson__json_value_string_end(lonejson_parser *parser) {
+static lonejson_status lonejson__json_value_emit_string(lonejson_parser *parser,
+                                                        const char *value,
+                                                        size_t len) {
+  lonejson_status status;
+  lonejson__json_parse_capture_sink_state capture_state;
+
+  status = lonejson__json_value_emit(parser, "\"", 1u);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  capture_state.parser = parser;
+  capture_state.value = parser->json_stream_value;
+  status = lonejson__emit_escaped_fragment(
+      parser->json_stream_sink_active ? parser->json_stream_value->parse_sink
+                                      : lonejson__json_buffer_sink_parse,
+      parser->json_stream_sink_active
+          ? parser->json_stream_value->parse_sink_user
+          : &capture_state,
+      &parser->error, (const unsigned char *)value, len);
+  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    return status;
+  }
+  return lonejson__json_value_emit(parser, "\"", 1u);
+}
+
+static lonejson_status lonejson__json_value_string_end(lonejson_parser *parser) {
   lonejson_json_value *value = parser->json_stream_value;
   int is_key = parser->json_stream_text_is_key;
 
@@ -665,28 +817,6 @@ static lonejson_status lonejson__json_value_number(lonejson_parser *parser,
   }
   return lonejson__json_value_visit_event(parser,
                                           value->parse_visitor->number_end);
-}
-
-static lonejson_status lonejson__json_value_emit_string(lonejson_parser *parser,
-                                                        const char *value,
-                                                        size_t len) {
-  lonejson_status status;
-
-  status = lonejson__json_value_emit(parser, "\"", 1u);
-  if (status != LONEJSON_STATUS_OK) {
-    return status;
-  }
-  status = lonejson__emit_escaped_fragment(
-      parser->json_stream_sink_active ? parser->json_stream_value->parse_sink
-                                      : lonejson__json_buffer_sink,
-      parser->json_stream_sink_active
-          ? parser->json_stream_value->parse_sink_user
-          : parser->json_stream_value,
-      &parser->error, (const unsigned char *)value, len);
-  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
-    return status;
-  }
-  return lonejson__json_value_emit(parser, "\"", 1u);
 }
 
 static lonejson_status lonejson__assign_json_scalar(lonejson_parser *parser,
@@ -775,13 +905,20 @@ static lonejson_status lonejson__array_append_string(
         "array '%s' contains embedded NUL unsupported by C strings",
         field->json_key);
   }
-  if (!lonejson__array_ensure_bytes((void **)&arr->items, &arr->capacity,
-                                    sizeof(char *), &arr->flags,
-                                    arr->count + 1u, &parser->allocator,
-                                    field->overflow_policy, &parser->error)) {
-    return (field->overflow_policy == LONEJSON_OVERFLOW_FAIL)
-               ? parser->error.code
-               : LONEJSON_STATUS_OK;
+  {
+    lonejson__array_ensure_result ensure =
+        lonejson__array_ensure_bytes(parser, (void **)&arr->items,
+                                     &arr->capacity, sizeof(char *),
+                                     &arr->flags, arr->count + 1u,
+                                     field->overflow_policy, &parser->error);
+    if (ensure == LONEJSON__ARRAY_ENSURE_ERROR) {
+      return parser->error.code;
+    }
+    if (ensure == LONEJSON__ARRAY_ENSURE_TRUNCATED) {
+      return (field->overflow_policy == LONEJSON_OVERFLOW_TRUNCATE)
+                 ? LONEJSON_STATUS_TRUNCATED
+                 : LONEJSON_STATUS_OK;
+    }
   }
   if (arr->count >= arr->capacity) {
     parser->error.truncated = 1;
@@ -789,7 +926,21 @@ static lonejson_status lonejson__array_append_string(
                ? LONEJSON_STATUS_TRUNCATED
                : LONEJSON_STATUS_OK;
   }
-  copy = (char *)lonejson__owned_malloc(&parser->allocator, len + 1u);
+  if (parser->options.max_dynamic_string_bytes != 0u &&
+      len > parser->options.max_dynamic_string_bytes) {
+    return lonejson__set_error(
+        &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
+        parser->error.line, parser->error.column,
+        "array '%s' contains a string exceeding configured max dynamic string bytes",
+        field->json_key);
+  }
+  if (!lonejson__parser_alloc_can_grow(parser, 0u, len + 1u)) {
+    return lonejson__set_error(
+        &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
+        parser->error.line, parser->error.column,
+        "parse allocations exceed configured max bytes");
+  }
+  copy = (char *)lonejson__owned_malloc_parse(parser, len + 1u);
   if (copy == NULL) {
     return lonejson__set_error(
         &parser->error, LONEJSON_STATUS_ALLOCATION_FAILED, parser->error.offset,
@@ -806,13 +957,20 @@ static lonejson_status lonejson__array_append_string(
   static lonejson_status name(lonejson_parser *parser,                         \
                               const lonejson_field *field, array_type *arr,    \
                               elem_type value) {                               \
-    if (!lonejson__array_ensure_bytes(                                         \
-            (void **)&arr->items, &arr->capacity, sizeof(elem_type),           \
-            &arr->flags, arr->count + 1u, &parser->allocator,                  \
-            field->overflow_policy, &parser->error)) {                         \
-      return (field->overflow_policy == LONEJSON_OVERFLOW_FAIL)                \
-                 ? parser->error.code                                          \
-                 : LONEJSON_STATUS_OK;                                         \
+    {                                                                          \
+      lonejson__array_ensure_result ensure =                                   \
+          lonejson__array_ensure_bytes(                                        \
+              parser, (void **)&arr->items, &arr->capacity, sizeof(elem_type), \
+              &arr->flags, arr->count + 1u, field->overflow_policy,            \
+              &parser->error);                                                 \
+      if (ensure == LONEJSON__ARRAY_ENSURE_ERROR) {                            \
+        return parser->error.code;                                             \
+      }                                                                        \
+      if (ensure == LONEJSON__ARRAY_ENSURE_TRUNCATED) {                        \
+        return (field->overflow_policy == LONEJSON_OVERFLOW_TRUNCATE)          \
+                   ? LONEJSON_STATUS_TRUNCATED                                 \
+                   : LONEJSON_STATUS_OK;                                       \
+      }                                                                        \
     }                                                                          \
     if (arr->count >= arr->capacity) {                                         \
       parser->error.truncated = 1;                                             \
@@ -841,11 +999,19 @@ static void *lonejson__object_array_append_slot(lonejson_parser *parser,
   if (arr->elem_size == 0u) {
     arr->elem_size = field->elem_size;
   }
-  if (!lonejson__array_ensure_bytes(&arr->items, &arr->capacity, arr->elem_size,
-                                    &arr->flags, arr->count + 1u,
-                                    &parser->allocator, field->overflow_policy,
-                                    &parser->error)) {
-    return NULL;
+  {
+    lonejson__array_ensure_result ensure =
+        lonejson__array_ensure_bytes(parser, &arr->items, &arr->capacity,
+                                     arr->elem_size, &arr->flags,
+                                     arr->count + 1u, field->overflow_policy,
+                                     &parser->error);
+    if (ensure == LONEJSON__ARRAY_ENSURE_ERROR) {
+      return NULL;
+    }
+    if (ensure == LONEJSON__ARRAY_ENSURE_TRUNCATED) {
+      parser->error.truncated = 1;
+      return NULL;
+    }
   }
   if (arr->count >= arr->capacity) {
     parser->error.truncated = 1;

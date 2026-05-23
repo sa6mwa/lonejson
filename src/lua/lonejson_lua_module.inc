@@ -48,6 +48,41 @@ static const luaL_Reg ljlua_spool_methods[] = {
 static const luaL_Reg ljlua_path_methods[] = {
     {"get", ljlua_path_get}, {"count", ljlua_path_count}, {NULL, NULL}};
 
+static int ljlua_fixed_string_scratch_gc(lua_State *L) {
+  ljlua_fixed_string_scratch_ud *ud = ljlua_check_fixed_string_scratch(L, 1);
+  free(ud->data);
+  ud->data = NULL;
+  ud->size = 0u;
+  ud->magic = 0u;
+  return 0;
+}
+
+static int ljlua_fixed_string_scratch_size(lua_State *L) {
+  ljlua_fixed_string_scratch_ud *ud = ljlua_check_fixed_string_scratch(L, 1);
+  lua_pushinteger(L, (lua_Integer)ud->size);
+  return 1;
+}
+
+static int ljlua_fixed_string_scratch_new(lua_State *L) {
+  lua_Integer size = luaL_checkinteger(L, 1);
+  ljlua_fixed_string_scratch_ud *ud;
+
+  luaL_argcheck(L, size > 0, 1, "scratch size must be positive");
+  ud = (ljlua_fixed_string_scratch_ud *)lua_newuserdatauv(L, sizeof(*ud), 0);
+  memset(ud, 0, sizeof(*ud));
+  ud->data = (unsigned char *)malloc((size_t)size);
+  if (ud->data == NULL) {
+    return luaL_error(L, "failed to allocate fixed string scratch");
+  }
+  ud->magic = LJLUA_FIXED_STRING_SCRATCH_MAGIC;
+  ud->size = (size_t)size;
+  luaL_setmetatable(L, LJLUA_FIXED_STRING_SCRATCH_MT);
+  return 1;
+}
+
+static const luaL_Reg ljlua_fixed_string_scratch_methods[] = {
+    {"size", ljlua_fixed_string_scratch_size}, {NULL, NULL}};
+
 static void ljlua_register_metatable(lua_State *L, const char *name,
                                      const luaL_Reg *methods,
                                      lua_CFunction gc_fn,
@@ -81,6 +116,7 @@ int luaopen_lonejson_core(lua_State *L) {
       {"encode_json", ljlua_encode_json},
       {"encode_json_to_sink", ljlua_encode_json_to_sink},
       {"decode_json", ljlua_decode_json},
+      {"fixed_string_scratch", ljlua_fixed_string_scratch_new},
       {"json_null", ljlua_json_null},
       {"monotonic_ns", ljlua_monotonic_ns},
       {NULL, NULL}};
@@ -98,6 +134,9 @@ int luaopen_lonejson_core(lua_State *L) {
                            ljlua_spool_gc, NULL);
   ljlua_register_metatable(L, LJLUA_PATH_MT, ljlua_path_methods, ljlua_path_gc,
                            NULL);
+  ljlua_register_metatable(L, LJLUA_FIXED_STRING_SCRATCH_MT,
+                           ljlua_fixed_string_scratch_methods,
+                           ljlua_fixed_string_scratch_gc, NULL);
   luaL_getmetatable(L, LJLUA_PATH_MT);
   lua_pushcfunction(L, ljlua_path_get);
   lua_setfield(L, -2, "__call");

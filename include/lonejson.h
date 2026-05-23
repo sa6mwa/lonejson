@@ -337,18 +337,21 @@ extern "C" {
  * } blob_doc;
  *
  * static const lonejson_field blob_doc_fields[] = {
- *   LONEJSON_FIELD_STRING_STREAM_REQ(blob_doc, body, "body")
+ * static const lonejson_spool_options blob_spool = {
+ *   64u * 1024u,
+ *   32u * 1024u * 1024u,
+ *   "/tmp"
+ * };
+ *
+ * static const lonejson_field blob_doc_fields[] = {
+ *   LONEJSON_FIELD_STRING_STREAM_OPTS(blob_doc, body, "body", &blob_spool)
  * };
  *
  * LONEJSON_MAP_DEFINE(blob_doc_map, blob_doc, blob_doc_fields);
  *
  * blob_doc doc;
- * lonejson_parse_options options = lonejson_default_parse_options();
  *
- * options.spool.memory_limit = 64u * 1024u;
- * options.spool.temp_dir = "/tmp";
- *
- * lonejson_parse_path(&blob_doc_map, &doc, "input.json", &options, &error);
+ * lonejson_parse_path(&blob_doc_map, &doc, "input.json", NULL, &error);
  * lonejson_spooled_write_to_sink(&doc.body, sink_fn, sink_user);
  * lonejson_cleanup(&blob_doc_map, &doc);
  * ```
@@ -439,7 +442,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 6
+#define LONEJSON_ABI_VERSION 7
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -507,6 +510,22 @@ extern "C" {
  * file. */
 #ifndef LONEJSON_SPOOL_MEMORY_LIMIT
 #define LONEJSON_SPOOL_MEMORY_LIMIT 65536u
+#endif
+/** Default hard cap for spool-backed streamed text/base64 fields. */
+#ifndef LONEJSON_SPOOL_MAX_BYTES
+#define LONEJSON_SPOOL_MAX_BYTES (10u * 1024u * 1024u)
+#endif
+/** Default decoded-byte cap for one dynamically allocated mapped string
+ * field during parse. Zero disables the ceiling when set on parse options.
+ */
+#ifndef LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES
+#define LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES (128u * 1024u)
+#endif
+/** Default hard cap for lonejson-owned heap bytes kept live by one parse call.
+ * Zero disables the ceiling when set on parse options.
+ */
+#ifndef LONEJSON_PARSE_MAX_ALLOC_BYTES
+#define LONEJSON_PARSE_MAX_ALLOC_BYTES (1024u * 1024u)
 #endif
 /** Default hard cap for serializer-owned output buffers. Set explicit
  * `lonejson_write_options.max_output_bytes` when a call needs a larger
@@ -978,6 +997,25 @@ typedef struct lonejson_parse_options {
   int reject_duplicate_keys;
   /** Maximum allowed nesting depth before parsing fails with overflow. */
   size_t max_depth;
+  /** Maximum decoded byte length accepted for one dynamically allocated mapped
+   * string field. Zero disables this ceiling.
+   */
+  size_t max_dynamic_string_bytes;
+  /** Maximum lonejson-owned heap bytes one parse call may keep live at once
+   * across parser-created dynamic fields and parse-time owned buffers. Zero
+   * disables this ceiling. Bytes spilled to spool files do not count.
+   */
+  size_t max_alloc_bytes;
+  /** Optional caller-owned scratch used to stage reused `STRING_FIXED` fields
+   * while parsing with `clear_destination = 0`. When this scratch is large
+   * enough for the field's fixed capacity, lonejson uses it instead of
+   * allocating temporary parse-owned staging storage.
+   */
+  void *fixed_string_scratch;
+  /** Byte size of `fixed_string_scratch`. Zero disables caller-provided fixed
+   * string staging scratch.
+   */
+  size_t fixed_string_scratch_size;
   /** Optional allocator used for parser-owned runtime state and lonejson-owned
    * field allocations created while parsing.
    */
@@ -1006,6 +1044,7 @@ typedef lonejson_read_result (*lonejson_reader_fn)(void *user,
 /** Generic sink callback used by serializer APIs and raw spool writers. */
 typedef lonejson_status (*lonejson_sink_fn)(void *user, const void *data,
                                             size_t len, lonejson_error *error);
+struct lonejson_json_value;
 
 /** Header name/value pair exposed while processing multipart part headers.
  * Pointers are valid only for the duration of the callback currently using
@@ -1095,6 +1134,20 @@ typedef struct lonejson_sse_json_options {
 typedef lonejson_status (*lonejson_sse_json_event_fn)(
     void *user, const lonejson_sse_event *event, void *dst,
     lonejson_error *error);
+
+/** Called after a selected SSE event's streamed JSON data has been decoded
+ * into one configured `lonejson_json_value` handle. Prepare the handle with
+ * `lonejson_json_value_set_parse_sink()`,
+ * `lonejson_json_value_set_parse_visitor()`, or
+ * `lonejson_json_value_enable_parse_capture()` before starting the SSE stream.
+ * The same handle is reused for each selected event; lonejson preserves the
+ * configured parse mode and clears only the per-event runtime payload between
+ * events. `event->data_len` is the number of JSON data bytes streamed to the
+ * parser, including SSE-inserted newlines between multiple `data:` fields.
+ */
+typedef lonejson_status (*lonejson_sse_json_value_event_fn)(
+    void *user, const lonejson_sse_event *event,
+    struct lonejson_json_value *value, lonejson_error *error);
 
 /** Limits and allocator selection for incremental multipart parsing. Zero
  * limit fields use the library defaults. Parts with `Content-Length` stream
@@ -1523,7 +1576,11 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
                                     sizeof(fields_array) /                     \
                                         sizeof((fields_array)[0])}
 
-/** Maps a JSON string field into a dynamically allocated `char *` member. */
+/** Maps a JSON string field into a dynamically allocated `char *` member.
+ *
+ * Parse-time growth is bounded by `lonejson_parse_options.max_dynamic_string_bytes`,
+ * which defaults to `LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES`.
+ */
 #define LONEJSON_FIELD_STRING_ALLOC(type, member, key)                         \
   {key,                                                                        \
    LONEJSON__KEY_LEN(key),                                                     \
@@ -1541,7 +1598,12 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
    0u}
 
 /** Maps a required JSON string field into a dynamically allocated `char *`
- * member. */
+ * member.
+ *
+ * Parse-time growth is bounded by
+ * `lonejson_parse_options.max_dynamic_string_bytes`, which defaults to
+ * `LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES`.
+ */
 #define LONEJSON_FIELD_STRING_ALLOC_REQ(type, member, key)                     \
   {key,                                                                        \
    LONEJSON__KEY_LEN(key),                                                     \
@@ -1596,7 +1658,15 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
    NULL,                                                                       \
    0u}
 
-/** Maps a JSON string field into a fixed-size character array member. */
+/** Maps a JSON string field into a fixed-size character array member.
+ *
+ * One-shot parses write directly into the destination. When parsing with
+ * `lonejson_parse_options.clear_destination = 0` and the destination already
+ * holds a non-empty string, lonejson stages the replacement first. It uses
+ * `lonejson_parse_options.fixed_string_scratch` when that scratch is large
+ * enough for the field capacity; otherwise it allocates temporary staging
+ * storage that counts against `lonejson_parse_options.max_alloc_bytes`.
+ */
 #define LONEJSON_FIELD_STRING_FIXED(type, member, key, policy)                 \
   {key,                                                                        \
    LONEJSON__KEY_LEN(key),                                                     \
@@ -1614,6 +1684,9 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
    0u}
 
 /** Maps a required JSON string field into a fixed-size character array member.
+ *
+ * Reused non-empty destinations follow the same staging rules as
+ * `LONEJSON_FIELD_STRING_FIXED`.
  */
 #define LONEJSON_FIELD_STRING_FIXED_REQ(type, member, key, policy)             \
   {key,                                                                        \
@@ -1633,6 +1706,9 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
 
 /** Maps a fixed-capacity JSON string and omits it when the first byte is NUL
  * during serialization.
+ *
+ * Reused non-empty destinations follow the same staging rules as
+ * `LONEJSON_FIELD_STRING_FIXED`.
  */
 #define LONEJSON_FIELD_STRING_FIXED_OMIT_EMPTY(type, member, key, policy)      \
   {key,                                                                        \
@@ -1652,7 +1728,9 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
 
 /** Maps a JSON string field into a `lonejson_spooled` member that keeps an
  * in-memory prefix and spills excess data to a temporary file using default
- * spool options. */
+ * spool options (`LONEJSON_SPOOL_MEMORY_LIMIT` in memory and
+ * `LONEJSON_SPOOL_MAX_BYTES` total bytes).
+ */
 #define LONEJSON_FIELD_STRING_STREAM(type, member, key)                        \
   {key,                                                                        \
    LONEJSON__KEY_LEN(key),                                                     \
@@ -1670,7 +1748,9 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
    0u}
 
 /** Maps a required JSON string field into a `lonejson_spooled` member using
- * default spool options. */
+ * default spool options (`LONEJSON_SPOOL_MEMORY_LIMIT` in memory and
+ * `LONEJSON_SPOOL_MAX_BYTES` total bytes).
+ */
 #define LONEJSON_FIELD_STRING_STREAM_REQ(type, member, key)                    \
   {key,                                                                        \
    LONEJSON__KEY_LEN(key),                                                     \
@@ -2599,7 +2679,10 @@ typedef lonejson_status (*lonejson_value_rewrite_replace_fn)(
    NULL,                                                                       \
    0u}
 
-/** Returns the library's default spool options. */
+/** Returns the library's default spool options: memory spill threshold
+ * `LONEJSON_SPOOL_MEMORY_LIMIT`, total hard cap `LONEJSON_SPOOL_MAX_BYTES`,
+ * and platform-default temporary-file handling.
+ */
 lonejson_spool_options lonejson_default_spool_options(void);
 /** Initializes an error struct to the empty `OK` state. */
 void lonejson_error_init(lonejson_error *error);
@@ -2797,7 +2880,10 @@ lonejson_json_value_write_to_sink(const lonejson_json_value *value,
 int lonejson_json_value_is_rewindable(const lonejson_json_value *value);
 
 /** Returns the library's default parse options. The current defaults clear the
- * destination, reject duplicate keys, and cap nesting depth at `64`.
+ * destination, reject duplicate keys, cap nesting depth at `64`, cap one
+ * dynamically allocated mapped string at
+ * `LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES`, and cap lonejson-owned live parse
+ * heap at `LONEJSON_PARSE_MAX_ALLOC_BYTES`.
  */
 lonejson_parse_options lonejson_default_parse_options(void);
 /** Returns the library's default limits for arbitrary JSON value visitors.
@@ -3322,6 +3408,24 @@ lonejson_sse_finish_json(lonejson_sse *sse, const lonejson_map *map, void *dst,
                          const lonejson_sse_json_options *options,
                          lonejson_sse_json_event_fn event_cb, void *user,
                          lonejson_error *error);
+/** Pushes SSE bytes, decodes selected event data as one arbitrary JSON value,
+ * and calls `event_cb` after each decoded JSON event. The caller must
+ * configure `value` for parse sink, parse visitor, or explicit capture before
+ * starting the stream. `options->parse_options->clear_destination` has no
+ * effect for this surface; per-event runtime payload is cleared automatically
+ * while the configured parse mode remains attached to `value`.
+ */
+lonejson_status lonejson_sse_push_json_value(
+    lonejson_sse *sse, lonejson_json_value *value, const void *bytes,
+    size_t len, const lonejson_sse_json_options *options,
+    lonejson_sse_json_value_event_fn event_cb, void *user,
+    lonejson_error *error);
+/** Finishes an SSE JSON-value stream. */
+lonejson_status lonejson_sse_finish_json_value(
+    lonejson_sse *sse, lonejson_json_value *value,
+    const lonejson_sse_json_options *options,
+    lonejson_sse_json_value_event_fn event_cb, void *user,
+    lonejson_error *error);
 /** Releases an SSE parser. */
 void lonejson_sse_close(lonejson_sse *sse);
 
@@ -4818,6 +4922,10 @@ typedef lonejson_sse_json_options lj_sse_json_options;
  * including SSE-inserted newlines between multiple `data:` fields.
  */
 typedef lonejson_sse_json_event_fn lj_sse_json_event_fn;
+/** Called after a selected SSE event's streamed JSON data has been decoded
+ * into one configured `lj_json_value` handle.
+ */
+typedef lonejson_sse_json_value_event_fn lj_sse_json_value_event_fn;
 /** Limits and allocator selection for incremental multipart parsing. Zero
  * limit fields use the library defaults. Parts with `Content-Length` stream
  * body bytes directly to `part_data` after headers are parsed; parts without
@@ -4839,7 +4947,10 @@ typedef lonejson_stream_result lj_stream_result;
 /** Result produced by `lonejson_array_stream_next*`. */
 typedef lonejson_array_stream_result lj_array_stream_result;
 
-/** Returns the library's default spool options. */
+/** Returns the library's default spool options: memory spill threshold
+ * `LONEJSON_SPOOL_MEMORY_LIMIT`, total hard cap `LONEJSON_SPOOL_MAX_BYTES`,
+ * and platform-default temporary-file handling.
+ */
 LONEJSON_SHORT_ALIAS_INLINE lj_spool_options lj_default_spool_options(void) {
   return lonejson_default_spool_options();
 }
@@ -5122,7 +5233,10 @@ lj_json_value_is_rewindable(const lj_json_value *value) {
   return lonejson_json_value_is_rewindable(value);
 }
 /** Returns the library's default parse options. The current defaults clear the
- * destination, reject duplicate keys, and cap nesting depth at `64`.
+ * destination, reject duplicate keys, cap nesting depth at `64`, cap one
+ * dynamically allocated mapped string at
+ * `LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES`, and cap lonejson-owned live parse
+ * heap at `LONEJSON_PARSE_MAX_ALLOC_BYTES`.
  */
 LONEJSON_SHORT_ALIAS_INLINE lj_parse_options lj_default_parse_options(void) {
   return lonejson_default_parse_options();
@@ -5493,6 +5607,28 @@ lj_sse_finish_json(lj_sse *sse, const lj_map *map, void *dst,
                    lj_sse_json_event_fn event_cb, void *user, lj_error *error) {
   return lonejson_sse_finish_json(sse, map, dst, options, event_cb, user,
                                   error);
+}
+/** Pushes SSE bytes, decodes selected event data as one arbitrary JSON value,
+ * and calls `event_cb` after each decoded JSON event. Prepare `value` with
+ * `lj_json_value_set_parse_sink()`, `lj_json_value_set_parse_visitor()`, or
+ * `lj_json_value_enable_parse_capture()` before starting the stream.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_sse_push_json_value(lj_sse *sse, lj_json_value *value, const void *bytes,
+                       size_t len, const lj_sse_json_options *options,
+                       lj_sse_json_value_event_fn event_cb, void *user,
+                       lj_error *error) {
+  return lonejson_sse_push_json_value(sse, value, bytes, len, options, event_cb,
+                                      user, error);
+}
+/** Finishes an SSE JSON-value stream. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_sse_finish_json_value(lj_sse *sse, lj_json_value *value,
+                         const lj_sse_json_options *options,
+                         lj_sse_json_value_event_fn event_cb, void *user,
+                         lj_error *error) {
+  return lonejson_sse_finish_json_value(sse, value, options, event_cb, user,
+                                        error);
 }
 /** Releases an SSE parser. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_sse_close(lj_sse *sse) {

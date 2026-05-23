@@ -336,6 +336,12 @@ typedef struct test_alloc_json_value_doc {
   lonejson_json_value selector;
 } test_alloc_json_value_doc;
 
+typedef struct test_sse_large_event_doc {
+  char *type;
+  char *status;
+  char *text;
+} test_sse_large_event_doc;
+
 typedef struct test_fixed_result_row {
   char name[32];
   char group[16];
@@ -420,6 +426,21 @@ typedef struct test_conditional_doc {
   lonejson_f64_array nums;
   lonejson_bool_array bools;
 } test_conditional_doc;
+
+typedef struct test_large_fixed_string_doc {
+  char payload[8192];
+} test_large_fixed_string_doc;
+
+typedef struct test_alloc_fixed_combo_doc {
+  char *dyn;
+  char payload[8192];
+} test_alloc_fixed_combo_doc;
+
+typedef struct test_trunc_array_doc {
+  lonejson_i64_array ints;
+  lonejson_string_array tags;
+  lonejson_object_array items;
+} test_trunc_array_doc;
 
 typedef struct test_reader_state {
   const char *json;
@@ -661,6 +682,13 @@ static const lonejson_field test_alloc_json_value_doc_fields[] = {
 LONEJSON_MAP_DEFINE(test_alloc_json_value_doc_map, test_alloc_json_value_doc,
                     test_alloc_json_value_doc_fields);
 
+static const lonejson_field test_sse_large_event_doc_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC_REQ(test_sse_large_event_doc, type, "type"),
+    LONEJSON_FIELD_STRING_ALLOC(test_sse_large_event_doc, status, "status"),
+    LONEJSON_FIELD_STRING_ALLOC(test_sse_large_event_doc, text, "text")};
+LONEJSON_MAP_DEFINE(test_sse_large_event_doc_map, test_sse_large_event_doc,
+                    test_sse_large_event_doc_fields);
+
 static const lonejson_field test_fixed_result_row_fields[] = {
     LONEJSON_FIELD_STRING_FIXED_REQ(test_fixed_result_row, name, "name",
                                     LONEJSON_OVERFLOW_FAIL),
@@ -863,6 +891,40 @@ static const lonejson_field test_conditional_doc_fields[] = {
                                          LONEJSON_OVERFLOW_FAIL)};
 LONEJSON_MAP_DEFINE(test_conditional_doc_map, test_conditional_doc,
                     test_conditional_doc_fields);
+
+static const lonejson_field test_large_fixed_string_doc_fields[] = {
+    LONEJSON_FIELD_STRING_FIXED(test_large_fixed_string_doc, payload, "payload",
+                                LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_large_fixed_string_doc_map, test_large_fixed_string_doc,
+                    test_large_fixed_string_doc_fields);
+
+static const lonejson_field test_alloc_fixed_combo_doc_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC(test_alloc_fixed_combo_doc, dyn, "dyn"),
+    LONEJSON_FIELD_STRING_FIXED(test_alloc_fixed_combo_doc, payload, "payload",
+                                LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_alloc_fixed_combo_doc_map, test_alloc_fixed_combo_doc,
+                    test_alloc_fixed_combo_doc_fields);
+
+static const lonejson_field test_trunc_array_doc_fields[] = {
+    LONEJSON_FIELD_I64_ARRAY(test_trunc_array_doc, ints, "ints",
+                             LONEJSON_OVERFLOW_TRUNCATE),
+    LONEJSON_FIELD_STRING_ARRAY(test_trunc_array_doc, tags, "tags",
+                                LONEJSON_OVERFLOW_TRUNCATE),
+    LONEJSON_FIELD_OBJECT_ARRAY(test_trunc_array_doc, items, "items", test_item,
+                                &test_item_map, LONEJSON_OVERFLOW_TRUNCATE)};
+LONEJSON_MAP_DEFINE(test_trunc_array_doc_map, test_trunc_array_doc,
+                    test_trunc_array_doc_fields);
+
+static const lonejson_field test_silent_array_doc_fields[] = {
+    LONEJSON_FIELD_I64_ARRAY(test_trunc_array_doc, ints, "ints",
+                             LONEJSON_OVERFLOW_TRUNCATE_SILENT),
+    LONEJSON_FIELD_STRING_ARRAY(test_trunc_array_doc, tags, "tags",
+                                LONEJSON_OVERFLOW_TRUNCATE_SILENT),
+    LONEJSON_FIELD_OBJECT_ARRAY(test_trunc_array_doc, items, "items", test_item,
+                                &test_item_map,
+                                LONEJSON_OVERFLOW_TRUNCATE_SILENT)};
+LONEJSON_MAP_DEFINE(test_silent_array_doc_map, test_trunc_array_doc,
+                    test_silent_array_doc_fields);
 
 static const lonejson_field test_person_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC_REQ(test_person, name, "name"),

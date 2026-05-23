@@ -353,6 +353,17 @@ static void test_public_initializers_and_defaults(void) {
   EXPECT(parse_options.clear_destination == 1);
   EXPECT(parse_options.reject_duplicate_keys == 1);
   EXPECT(parse_options.max_depth == 64u);
+  EXPECT(parse_options.max_dynamic_string_bytes ==
+         LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES);
+  EXPECT(parse_options.max_alloc_bytes == LONEJSON_PARSE_MAX_ALLOC_BYTES);
+
+  {
+    lonejson_spool_options spool_options = lonejson_default_spool_options();
+
+    EXPECT(spool_options.memory_limit == LONEJSON_SPOOL_MEMORY_LIMIT);
+    EXPECT(spool_options.max_bytes == LONEJSON_SPOOL_MAX_BYTES);
+    EXPECT(spool_options.temp_dir == NULL);
+  }
 
   write_options = lonejson_default_write_options();
   EXPECT(write_options.overflow_policy == LONEJSON_OVERFLOW_FAIL);

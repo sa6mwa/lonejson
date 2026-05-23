@@ -1,5 +1,7 @@
 static int ljlua_parse_parse_options(lua_State *L, int index,
                                      lonejson_parse_options *options) {
+  lua_Integer value;
+
   *options = lonejson_default_parse_options();
   if (index == 0 || lua_isnoneornil(L, index)) {
     return 1;
@@ -20,7 +22,46 @@ static int ljlua_parse_parse_options(lua_State *L, int index,
     options->max_depth = (size_t)lua_tointeger(L, -1);
   }
   lua_pop(L, 1);
+  lua_getfield(L, index, "max_dynamic_string_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "max_dynamic_string_bytes must be non-negative");
+    options->max_dynamic_string_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+  lua_getfield(L, index, "max_alloc_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "max_alloc_bytes must be non-negative");
+    options->max_alloc_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+  lua_getfield(L, index, "fixed_string_scratch");
+  if (!lua_isnil(L, -1)) {
+    ljlua_fixed_string_scratch_ud *scratch =
+        ljlua_check_fixed_string_scratch(L, -1);
+    options->fixed_string_scratch = scratch->data;
+    options->fixed_string_scratch_size = scratch->size;
+  }
+  lua_pop(L, 1);
   return 1;
+}
+
+static int ljlua_parse_options_fixed_string_scratch_ref(lua_State *L,
+                                                        int index) {
+  if (index == 0 || lua_isnoneornil(L, index)) {
+    return LUA_NOREF;
+  }
+  luaL_checktype(L, index, LUA_TTABLE);
+  lua_getfield(L, index, "fixed_string_scratch");
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    return LUA_NOREF;
+  }
+  (void)ljlua_check_fixed_string_scratch(L, -1);
+  return luaL_ref(L, LUA_REGISTRYINDEX);
 }
 
 static int ljlua_schema_compile_path(lua_State *L) {

@@ -91,6 +91,10 @@ local Batch = lj.schema("Batch", {
   }),
 })
 
+local FixedLarge = lj.schema("FixedLarge", {
+  lj.field("payload", lj.string { required = true, fixed_capacity = 8192, overflow = "fail" }),
+})
+
 local Nullable = lj.schema("Nullable", {
   lj.field("required_count", lj.i64 { required = true }),
   lj.field("amount", lj.i64 { nullable = true }),
@@ -103,6 +107,78 @@ local Nullable = lj.schema("Nullable", {
     },
   }),
 })
+
+do
+  local function long_text(ch, n)
+    return string.rep(ch, n)
+  end
+
+  local scratch = lj.fixed_string_scratch(8192)
+  local rec = FixedLarge:new_record()
+  local first = long_text("a", 6000)
+  local second = long_text("b", 7000)
+  local third = long_text("c", 6500)
+  local ok, err, stream, obj, status
+
+  assert_eq(scratch:size(), 8192)
+
+  ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. first .. '"}')
+  assert_true(err == nil)
+  assert_eq(rec.payload, first)
+
+  ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. second .. '"}', {
+    clear_destination = false,
+    max_alloc_bytes = 1,
+  })
+  assert_true(err ~= nil and err.status == "overflow")
+  assert_eq(rec.payload, first)
+
+  ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. second .. '"}', {
+    clear_destination = false,
+    max_alloc_bytes = 1,
+    fixed_string_scratch = scratch,
+  })
+  assert_true(err == nil)
+  assert_eq(rec.payload, second)
+
+  ok, err = FixedLarge:decode_into(
+      rec,
+      '{"payload":"' .. second .. '","payload":"' .. third .. '"}',
+      {
+        clear_destination = false,
+        max_alloc_bytes = 1,
+        fixed_string_scratch = scratch,
+      })
+  assert_true(err ~= nil and err.status == "duplicate_field")
+  assert_eq(rec.payload, second)
+
+  ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. third .. '\\u0000tail"}', {
+    clear_destination = false,
+    max_alloc_bytes = 1,
+    fixed_string_scratch = scratch,
+  })
+  assert_true(err ~= nil and err.status == "type_mismatch")
+  assert_eq(rec.payload, second)
+
+  stream = FixedLarge:stream_string(
+      '{"payload":"' .. first .. '"}{"payload":"' .. second .. '"}',
+      {
+        clear_destination = false,
+        max_alloc_bytes = 1,
+        fixed_string_scratch = scratch,
+      })
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.payload, first)
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.payload, second)
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "eof")
+  stream:close()
+end
 
 do
   local obj = Test:decode('{"name":"Alice","age":3,"active":true}')

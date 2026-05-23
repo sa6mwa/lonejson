@@ -57,6 +57,9 @@ static size_t lonejson__required_count_for_map(lonejson_parser *parser,
   return count;
 }
 
+static void lonejson__parser_adopt_existing_map_allocations(
+    lonejson_parser *parser, const lonejson_map *map, void *value);
+
 static void lonejson__parser_init_state(lonejson_parser *parser,
                                         const lonejson_map *map, void *dst,
                                         const lonejson_parse_options *options,
@@ -98,8 +101,11 @@ static void lonejson__parser_init_state(lonejson_parser *parser,
   parser->stream_base64_saw_padding = 0;
   parser->direct_string_active = 0;
   parser->direct_string_ptr = NULL;
+  parser->direct_string_dst = NULL;
+  parser->direct_string_commit_dst = NULL;
   parser->direct_string_len = 0u;
   parser->direct_string_capacity = 0u;
+  parser->direct_string_owned = 0;
   parser->direct_string_truncated = 0;
   parser->direct_string_overflow_policy = LONEJSON_OVERFLOW_FAIL;
   parser->direct_string_field = NULL;
@@ -108,10 +114,15 @@ static void lonejson__parser_init_state(lonejson_parser *parser,
   parser->json_stream_visit_active = 0;
   parser->json_stream_sink_active = 0;
   parser->json_stream_depth = 0u;
+  parser->parse_alloc_bytes_live = 0u;
   if (workspace_size != 0u) {
     parser->token.data = (char *)lonejson__token_base(parser);
     parser->token.cap = lonejson__token_limit(parser);
     parser->token.data[0] = '\0';
+  }
+  if (!validate_only && map != NULL && dst != NULL &&
+      !parser->options.clear_destination) {
+    lonejson__parser_adopt_existing_map_allocations(parser, map, dst);
   }
   lonejson__parser_note_workspace_usage(parser);
 }
@@ -119,6 +130,7 @@ static void lonejson__parser_init_state(lonejson_parser *parser,
 static void lonejson__parser_restart_stream(lonejson_parser *parser,
                                             void *dst) {
   parser->root_dst = dst;
+  lonejson__direct_string_abort(parser);
   memset(&parser->error, 0, sizeof(parser->error));
   parser->error.line = 1u;
   parser->error.column = 0u;
@@ -129,6 +141,7 @@ static void lonejson__parser_restart_stream(lonejson_parser *parser,
   parser->root_started = 0;
   parser->root_finished = 0;
   parser->failed = 0;
+  parser->parse_alloc_bytes_live = 0u;
   parser->lex_mode = LONEJSON_LEX_NONE;
   parser->string_capture_mode = LONEJSON_STRING_CAPTURE_TOKEN;
   parser->lex_is_key = 0;
@@ -141,13 +154,6 @@ static void lonejson__parser_restart_stream(lonejson_parser *parser,
   parser->stream_ptr = NULL;
   parser->stream_base64_quad_len = 0u;
   parser->stream_base64_saw_padding = 0;
-  parser->direct_string_active = 0;
-  parser->direct_string_ptr = NULL;
-  parser->direct_string_len = 0u;
-  parser->direct_string_capacity = 0u;
-  parser->direct_string_truncated = 0;
-  parser->direct_string_overflow_policy = LONEJSON_OVERFLOW_FAIL;
-  parser->direct_string_field = NULL;
   parser->json_stream_value = NULL;
   parser->json_stream_active = 0;
   parser->json_stream_visit_active = 0;
@@ -157,6 +163,11 @@ static void lonejson__parser_restart_stream(lonejson_parser *parser,
   parser->token.data = (char *)lonejson__token_base(parser);
   parser->token.cap = lonejson__token_limit(parser);
   parser->token.data[0] = '\0';
+  if (!parser->validate_only && parser->root_map != NULL && dst != NULL &&
+      !parser->options.clear_destination) {
+    lonejson__parser_adopt_existing_map_allocations(parser, parser->root_map,
+                                                    dst);
+  }
   lonejson__parser_note_workspace_usage(parser);
 }
 
@@ -588,51 +599,70 @@ static void lonejson__pop_frame(lonejson_parser *parser) {
   parser->frame_count--;
 }
 
-static int lonejson__array_ensure_bytes(void **items_ptr, size_t *cap_ptr,
-                                        size_t elem_size, unsigned *flags,
-                                        size_t want,
-                                        const lonejson_allocator *allocator,
-                                        lonejson_overflow_policy policy,
-                                        lonejson_error *error) {
+typedef enum lonejson__array_ensure_result {
+  LONEJSON__ARRAY_ENSURE_OK = 1,
+  LONEJSON__ARRAY_ENSURE_TRUNCATED = 0,
+  LONEJSON__ARRAY_ENSURE_ERROR = -1
+} lonejson__array_ensure_result;
+
+static lonejson__array_ensure_result
+lonejson__array_ensure_bytes(lonejson_parser *parser, void **items_ptr,
+                             size_t *cap_ptr, size_t elem_size,
+                             unsigned *flags, size_t want,
+                             lonejson_overflow_policy policy,
+                             lonejson_error *error) {
   void *next;
   size_t cap;
 
   if (*cap_ptr >= want) {
-    return 1;
+    return LONEJSON__ARRAY_ENSURE_OK;
   }
   if ((*flags & LONEJSON_ARRAY_FIXED_CAPACITY) != 0u) {
     if (policy == LONEJSON_OVERFLOW_FAIL) {
       lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, error->offset,
                           error->line, error->column,
                           "array capacity exceeded");
-      return 0;
+      return LONEJSON__ARRAY_ENSURE_ERROR;
     }
     error->truncated = 1;
-    return 0;
+    return LONEJSON__ARRAY_ENSURE_TRUNCATED;
   }
   cap = (*cap_ptr != 0u) ? *cap_ptr : 4u;
   while (cap < want) {
     if (cap > (SIZE_MAX / 2u)) {
       lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, error->offset,
                           error->line, error->column, "array too large");
-      return 0;
+      return LONEJSON__ARRAY_ENSURE_ERROR;
     }
     cap *= 2u;
   }
-  next = lonejson__owned_realloc(allocator, *items_ptr, cap * elem_size);
+  if (!lonejson__parser_alloc_can_grow(
+          parser, lonejson__parser_alloc_counted_bytes(parser, *items_ptr),
+          cap * elem_size)) {
+    lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, error->offset,
+                        error->line, error->column,
+                        "parse allocations exceed configured max bytes");
+    return LONEJSON__ARRAY_ENSURE_ERROR;
+  }
+  next = lonejson__owned_realloc_parse(parser, *items_ptr, cap * elem_size);
   if (next == NULL) {
     lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, error->offset,
                         error->line, error->column, "failed to grow array");
-    return 0;
+    return LONEJSON__ARRAY_ENSURE_ERROR;
   }
   *items_ptr = next;
   *cap_ptr = cap;
   *flags |= LONEJSON_ARRAY_OWNS_ITEMS;
-  return 1;
+  return LONEJSON__ARRAY_ENSURE_OK;
 }
 
 static void lonejson__cleanup_value(const lonejson_field *field, void *ptr);
 static void lonejson__reset_map(const lonejson_map *map, void *value);
+static void lonejson__cleanup_value_parse(lonejson_parser *parser,
+                                          const lonejson_field *field,
+                                          void *ptr);
+static void lonejson__reset_map_parse(lonejson_parser *parser,
+                                      const lonejson_map *map, void *value);
 static void
 lonejson__init_map_with_allocator(const lonejson_map *map, void *value,
                                   const lonejson_allocator *allocator);
@@ -772,6 +802,318 @@ static void lonejson__cleanup_map_checked(const lonejson_map *map,
   lonejson__cleanup_map(map, value);
 }
 
+static int lonejson__parser_adopt_owned_pointer(lonejson_parser *parser,
+                                                void *ptr) {
+  if (ptr == NULL || parser == NULL || parser->options.max_alloc_bytes == 0u) {
+    return 1;
+  }
+  if (lonejson__parser_alloc_try_adopt(parser, ptr)) {
+    return 1;
+  }
+  lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
+                      parser->error.offset, parser->error.line,
+                      parser->error.column,
+                      "parse allocations exceed configured max bytes");
+  parser->failed = 1;
+  return 0;
+}
+
+static int lonejson__parser_adopt_existing_value_allocations(
+    lonejson_parser *parser, const lonejson_field *field, void *ptr) {
+  size_t i;
+
+  if (parser == NULL || field == NULL || ptr == NULL || parser->failed ||
+      parser->options.max_alloc_bytes == 0u) {
+    return parser == NULL || !parser->failed;
+  }
+
+  switch (field->kind) {
+  case LONEJSON_FIELD_KIND_STRING:
+    if (field->storage == LONEJSON_STORAGE_DYNAMIC) {
+      return lonejson__parser_adopt_owned_pointer(parser, *(void **)ptr);
+    }
+    return 1;
+  case LONEJSON_FIELD_KIND_STRING_STREAM:
+  case LONEJSON_FIELD_KIND_BASE64_STREAM:
+    return lonejson__parser_adopt_owned_pointer(
+        parser, ((lonejson_spooled *)ptr)->memory);
+  case LONEJSON_FIELD_KIND_STRING_SOURCE:
+  case LONEJSON_FIELD_KIND_BASE64_SOURCE:
+    return lonejson__parser_adopt_owned_pointer(
+        parser, ((lonejson_source *)ptr)->path);
+  case LONEJSON_FIELD_KIND_JSON_VALUE: {
+    lonejson_json_value *value = (lonejson_json_value *)ptr;
+    if (!lonejson__parser_adopt_owned_pointer(parser, value->json)) {
+      return 0;
+    }
+    return lonejson__parser_adopt_owned_pointer(parser, value->path);
+  }
+  case LONEJSON_FIELD_KIND_OBJECT:
+    lonejson__parser_adopt_existing_map_allocations(parser, field->submap, ptr);
+    return !parser->failed;
+  case LONEJSON_FIELD_KIND_STRING_ARRAY: {
+    lonejson_string_array *arr = (lonejson_string_array *)ptr;
+    if ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) != 0u &&
+        !lonejson__parser_adopt_owned_pointer(parser, arr->items)) {
+      return 0;
+    }
+    for (i = 0u; i < arr->count; ++i) {
+      if (!lonejson__parser_adopt_owned_pointer(parser, arr->items[i])) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+  case LONEJSON_FIELD_KIND_I64_ARRAY: {
+    lonejson_i64_array *arr = (lonejson_i64_array *)ptr;
+    return ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) == 0u) ||
+           lonejson__parser_adopt_owned_pointer(parser, arr->items);
+  }
+  case LONEJSON_FIELD_KIND_U64_ARRAY: {
+    lonejson_u64_array *arr = (lonejson_u64_array *)ptr;
+    return ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) == 0u) ||
+           lonejson__parser_adopt_owned_pointer(parser, arr->items);
+  }
+  case LONEJSON_FIELD_KIND_F64_ARRAY: {
+    lonejson_f64_array *arr = (lonejson_f64_array *)ptr;
+    return ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) == 0u) ||
+           lonejson__parser_adopt_owned_pointer(parser, arr->items);
+  }
+  case LONEJSON_FIELD_KIND_BOOL_ARRAY: {
+    lonejson_bool_array *arr = (lonejson_bool_array *)ptr;
+    return ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) == 0u) ||
+           lonejson__parser_adopt_owned_pointer(parser, arr->items);
+  }
+  case LONEJSON_FIELD_KIND_OBJECT_ARRAY: {
+    lonejson_object_array *arr = (lonejson_object_array *)ptr;
+    if ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) != 0u &&
+        !lonejson__parser_adopt_owned_pointer(parser, arr->items)) {
+      return 0;
+    }
+    if (field->submap == NULL || arr->items == NULL) {
+      return 1;
+    }
+    for (i = 0u; i < arr->count; ++i) {
+      void *elem = (unsigned char *)arr->items + (i * field->elem_size);
+      lonejson__parser_adopt_existing_map_allocations(parser, field->submap,
+                                                      elem);
+      if (parser->failed) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+  default:
+    return 1;
+  }
+}
+
+static void lonejson__parser_adopt_existing_map_allocations(
+    lonejson_parser *parser, const lonejson_map *map, void *value) {
+  size_t i;
+
+  if (parser == NULL || map == NULL || value == NULL || parser->failed ||
+      parser->options.max_alloc_bytes == 0u) {
+    return;
+  }
+  for (i = 0u; i < map->field_count; ++i) {
+    const lonejson_field *field = &map->fields[i];
+    if (!lonejson__field_fits_map(map, field)) {
+      continue;
+    }
+    if (!lonejson__parser_adopt_existing_value_allocations(
+            parser, field, lonejson__field_ptr(value, field))) {
+      return;
+    }
+  }
+}
+
+static void lonejson__cleanup_map_parse(lonejson_parser *parser,
+                                        const lonejson_map *map, void *value) {
+  size_t i;
+
+  if (map == NULL || value == NULL) {
+    return;
+  }
+  for (i = 0; i < map->field_count; ++i) {
+    const lonejson_field *field = &map->fields[i];
+    lonejson__cleanup_value_parse(parser, field, lonejson__field_ptr(value, field));
+    lonejson__field_set_presence(value, field, 0);
+  }
+}
+
+static void lonejson__cleanup_value_parse(lonejson_parser *parser,
+                                          const lonejson_field *field,
+                                          void *ptr) {
+  size_t i;
+
+  switch (field->kind) {
+  case LONEJSON_FIELD_KIND_STRING:
+    if (field->storage == LONEJSON_STORAGE_DYNAMIC) {
+      char **p = (char **)ptr;
+      lonejson__parser_alloc_note_release(parser, *p);
+      lonejson__owned_free(*p);
+      *p = NULL;
+    } else if (field->fixed_capacity != 0u) {
+      ((char *)ptr)[0] = '\0';
+    }
+    break;
+  case LONEJSON_FIELD_KIND_STRING_STREAM:
+  case LONEJSON_FIELD_KIND_BASE64_STREAM:
+    lonejson__spooled_reset_parse(parser, (lonejson_spooled *)ptr);
+    break;
+  case LONEJSON_FIELD_KIND_STRING_SOURCE:
+  case LONEJSON_FIELD_KIND_BASE64_SOURCE:
+    lonejson__source_reset_parse(parser, (lonejson_source *)ptr);
+    break;
+  case LONEJSON_FIELD_KIND_JSON_VALUE:
+    lonejson__json_value_clear_runtime_parse(parser, (lonejson_json_value *)ptr);
+    break;
+  case LONEJSON_FIELD_KIND_OBJECT:
+    lonejson__cleanup_map_parse(parser, field->submap, ptr);
+    memset(ptr, 0, field->submap ? field->submap->struct_size : 0u);
+    break;
+  case LONEJSON_FIELD_KIND_STRING_ARRAY: {
+    lonejson_string_array *arr = (lonejson_string_array *)ptr;
+    char **items = arr->items;
+    size_t capacity = arr->capacity;
+    unsigned flags = arr->flags;
+    for (i = 0; i < arr->count; ++i) {
+      lonejson__parser_alloc_note_release(parser, arr->items[i]);
+      lonejson__owned_free(arr->items[i]);
+    }
+    if ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) != 0u) {
+      lonejson__parser_alloc_note_release(parser, arr->items);
+      lonejson__owned_free(arr->items);
+    }
+    memset(arr, 0, sizeof(*arr));
+    if ((flags & LONEJSON_ARRAY_FIXED_CAPACITY) != 0u) {
+      arr->items = items;
+      arr->capacity = capacity;
+      arr->flags = flags & LONEJSON_ARRAY_FIXED_CAPACITY;
+    }
+    break;
+  }
+  case LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM: {
+    lonejson_string_array_stream *stream = (lonejson_string_array_stream *)ptr;
+    if (stream->_lonejson_magic !=
+        lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC)) {
+      memset(stream, 0, sizeof(*stream));
+      stream->_lonejson_magic =
+          lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+    }
+    stream->active = 0;
+    break;
+  }
+  case LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM: {
+    lonejson_mapped_array_stream *stream = (lonejson_mapped_array_stream *)ptr;
+    if (stream->_lonejson_magic !=
+        lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC)) {
+      memset(stream, 0, sizeof(*stream));
+      stream->_lonejson_magic =
+          lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
+    }
+    stream->active = 0;
+    break;
+  }
+  case LONEJSON_FIELD_KIND_I64_ARRAY: {
+    lonejson_i64_array *arr = (lonejson_i64_array *)ptr;
+    lonejson_int64 *items = arr->items;
+    size_t capacity = arr->capacity;
+    unsigned flags = arr->flags;
+    if ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) != 0u) {
+      lonejson__parser_alloc_note_release(parser, arr->items);
+      lonejson__owned_free(arr->items);
+    }
+    memset(arr, 0, sizeof(*arr));
+    if ((flags & LONEJSON_ARRAY_FIXED_CAPACITY) != 0u) {
+      arr->items = items;
+      arr->capacity = capacity;
+      arr->flags = flags & LONEJSON_ARRAY_FIXED_CAPACITY;
+    }
+    break;
+  }
+  case LONEJSON_FIELD_KIND_U64_ARRAY: {
+    lonejson_u64_array *arr = (lonejson_u64_array *)ptr;
+    lonejson_uint64 *items = arr->items;
+    size_t capacity = arr->capacity;
+    unsigned flags = arr->flags;
+    if ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) != 0u) {
+      lonejson__parser_alloc_note_release(parser, arr->items);
+      lonejson__owned_free(arr->items);
+    }
+    memset(arr, 0, sizeof(*arr));
+    if ((flags & LONEJSON_ARRAY_FIXED_CAPACITY) != 0u) {
+      arr->items = items;
+      arr->capacity = capacity;
+      arr->flags = flags & LONEJSON_ARRAY_FIXED_CAPACITY;
+    }
+    break;
+  }
+  case LONEJSON_FIELD_KIND_F64_ARRAY: {
+    lonejson_f64_array *arr = (lonejson_f64_array *)ptr;
+    double *items = arr->items;
+    size_t capacity = arr->capacity;
+    unsigned flags = arr->flags;
+    if ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) != 0u) {
+      lonejson__parser_alloc_note_release(parser, arr->items);
+      lonejson__owned_free(arr->items);
+    }
+    memset(arr, 0, sizeof(*arr));
+    if ((flags & LONEJSON_ARRAY_FIXED_CAPACITY) != 0u) {
+      arr->items = items;
+      arr->capacity = capacity;
+      arr->flags = flags & LONEJSON_ARRAY_FIXED_CAPACITY;
+    }
+    break;
+  }
+  case LONEJSON_FIELD_KIND_BOOL_ARRAY: {
+    lonejson_bool_array *arr = (lonejson_bool_array *)ptr;
+    bool *items = arr->items;
+    size_t capacity = arr->capacity;
+    unsigned flags = arr->flags;
+    if ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) != 0u) {
+      lonejson__parser_alloc_note_release(parser, arr->items);
+      lonejson__owned_free(arr->items);
+    }
+    memset(arr, 0, sizeof(*arr));
+    if ((flags & LONEJSON_ARRAY_FIXED_CAPACITY) != 0u) {
+      arr->items = items;
+      arr->capacity = capacity;
+      arr->flags = flags & LONEJSON_ARRAY_FIXED_CAPACITY;
+    }
+    break;
+  }
+  case LONEJSON_FIELD_KIND_OBJECT_ARRAY: {
+    lonejson_object_array *arr = (lonejson_object_array *)ptr;
+    void *items = arr->items;
+    size_t capacity = arr->capacity;
+    size_t elem_size = arr->elem_size;
+    unsigned flags = arr->flags;
+    if (field->submap != NULL && arr->items != NULL) {
+      for (i = 0; i < arr->count; ++i) {
+        void *elem = (unsigned char *)arr->items + (i * field->elem_size);
+        lonejson__cleanup_map_parse(parser, field->submap, elem);
+      }
+    }
+    if ((arr->flags & LONEJSON_ARRAY_OWNS_ITEMS) != 0u) {
+      lonejson__parser_alloc_note_release(parser, arr->items);
+      lonejson__owned_free(arr->items);
+    }
+    memset(arr, 0, sizeof(*arr));
+    if ((flags & LONEJSON_ARRAY_FIXED_CAPACITY) != 0u) {
+      arr->items = items;
+      arr->capacity = capacity;
+      arr->elem_size = elem_size;
+      arr->flags = flags & LONEJSON_ARRAY_FIXED_CAPACITY;
+    }
+    break;
+  }
+  default:
+    break;
+  }
+}
+
 static void lonejson__reset_scalar_field(const lonejson_field *field,
                                          void *ptr) {
   switch (field->kind) {
@@ -848,6 +1190,62 @@ static void lonejson__reset_present_array_field(const lonejson_field *field,
   }
 }
 
+static void lonejson__reset_present_array_field_parse(lonejson_parser *parser,
+                                                      const lonejson_field *field,
+                                                      void *ptr) {
+  if (field == NULL || ptr == NULL) {
+    return;
+  }
+  switch (field->kind) {
+  case LONEJSON_FIELD_KIND_STRING_ARRAY:
+    lonejson__cleanup_value_parse(parser, field, ptr);
+    break;
+  case LONEJSON_FIELD_KIND_I64_ARRAY:
+    if (lonejson__is_exact_fixed_capacity(
+            ((lonejson_i64_array *)ptr)->flags)) {
+      ((lonejson_i64_array *)ptr)->count = 0u;
+      break;
+    }
+    lonejson__cleanup_value_parse(parser, field, ptr);
+    break;
+  case LONEJSON_FIELD_KIND_U64_ARRAY:
+    if (lonejson__is_exact_fixed_capacity(
+            ((lonejson_u64_array *)ptr)->flags)) {
+      ((lonejson_u64_array *)ptr)->count = 0u;
+      break;
+    }
+    lonejson__cleanup_value_parse(parser, field, ptr);
+    break;
+  case LONEJSON_FIELD_KIND_F64_ARRAY:
+    if (lonejson__is_exact_fixed_capacity(
+            ((lonejson_f64_array *)ptr)->flags)) {
+      ((lonejson_f64_array *)ptr)->count = 0u;
+      break;
+    }
+    lonejson__cleanup_value_parse(parser, field, ptr);
+    break;
+  case LONEJSON_FIELD_KIND_BOOL_ARRAY:
+    if (lonejson__is_exact_fixed_capacity(
+            ((lonejson_bool_array *)ptr)->flags)) {
+      ((lonejson_bool_array *)ptr)->count = 0u;
+      break;
+    }
+    lonejson__cleanup_value_parse(parser, field, ptr);
+    break;
+  case LONEJSON_FIELD_KIND_OBJECT_ARRAY:
+    if (lonejson__is_exact_fixed_capacity(
+            ((lonejson_object_array *)ptr)->flags) &&
+        !lonejson__map_may_allocate(field->submap)) {
+      ((lonejson_object_array *)ptr)->count = 0u;
+      break;
+    }
+    lonejson__cleanup_value_parse(parser, field, ptr);
+    break;
+  default:
+    break;
+  }
+}
+
 static void lonejson__reset_map(const lonejson_map *map, void *value) {
   size_t i;
 
@@ -902,6 +1300,66 @@ static void lonejson__reset_map(const lonejson_map *map, void *value) {
       break;
     default:
       lonejson__cleanup_value(field, ptr);
+      break;
+    }
+  }
+}
+
+static void lonejson__reset_map_parse(lonejson_parser *parser,
+                                      const lonejson_map *map, void *value) {
+  size_t i;
+
+  if (map == NULL || value == NULL) {
+    return;
+  }
+  for (i = 0; i < map->field_count; ++i) {
+    const lonejson_field *field = &map->fields[i];
+    void *ptr = lonejson__field_ptr(value, field);
+    switch (field->kind) {
+    case LONEJSON_FIELD_KIND_JSON_VALUE:
+      if (lonejson__json_value_is_initialized((const lonejson_json_value *)ptr)) {
+        lonejson__json_value_clear_runtime_parse(parser,
+                                                 (lonejson_json_value *)ptr);
+      } else {
+        lonejson_json_value_init((lonejson_json_value *)ptr);
+        if ((field->flags & LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE) != 0u) {
+          lonejson_json_value_enable_parse_capture((lonejson_json_value *)ptr,
+                                                   NULL);
+        }
+      }
+      break;
+    case LONEJSON_FIELD_KIND_I64:
+    case LONEJSON_FIELD_KIND_U64:
+    case LONEJSON_FIELD_KIND_F64:
+    case LONEJSON_FIELD_KIND_BOOL:
+      lonejson__reset_scalar_field(field, ptr);
+      lonejson__field_set_presence(value, field, 0);
+      break;
+    case LONEJSON_FIELD_KIND_STRING:
+      if (field->storage == LONEJSON_STORAGE_FIXED &&
+          field->fixed_capacity != 0u) {
+        ((char *)ptr)[0] = '\0';
+        break;
+      }
+      lonejson__cleanup_value_parse(parser, field, ptr);
+      break;
+    case LONEJSON_FIELD_KIND_OBJECT:
+      if (field->submap != NULL) {
+        lonejson__reset_map_parse(parser, field->submap, ptr);
+        break;
+      }
+      lonejson__cleanup_value_parse(parser, field, ptr);
+      break;
+    case LONEJSON_FIELD_KIND_STRING_ARRAY:
+    case LONEJSON_FIELD_KIND_I64_ARRAY:
+    case LONEJSON_FIELD_KIND_U64_ARRAY:
+    case LONEJSON_FIELD_KIND_F64_ARRAY:
+    case LONEJSON_FIELD_KIND_BOOL_ARRAY:
+    case LONEJSON_FIELD_KIND_OBJECT_ARRAY:
+      lonejson__reset_present_array_field_parse(parser, field, ptr);
+      break;
+    default:
+      lonejson__cleanup_value_parse(parser, field, ptr);
       break;
     }
   }

@@ -39,6 +39,8 @@ The same pattern applies to:
   values and re-emits them)
 * `json_value_visitor.c` (streams parsed embedded JSON through visitor
   callbacks without retaining raw bytes)
+* `sse_json_value_stream.c` (filters SSE events by `event:` name and streams
+  selected event bodies as arbitrary JSON values without a schema map)
 * `json_value_source.c` (streams embedded JSON values from filesystem paths)
 * `nullable_fields.c` (maps optional nullable primitive fields with explicit
   presence bits and omits absent/null values on serialization)
@@ -107,6 +109,21 @@ eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_binding.lua
 That example shows the schema DSL, reusable record decoding, object-framed
 stream parsing, selected-array stream parsing, selected-array rewrites, native
 `json_value` handling, and spool-backed text/byte fields.
+
+Current parse defaults to keep in mind while reading the examples:
+
+* `STRING_ALLOC` fields are capped at `128 KiB` per field unless
+  `parse_options.max_dynamic_string_bytes` is raised or set to `0`.
+* lonejson-owned live parse heap is capped at `1 MiB` per parse call unless
+  `parse_options.max_alloc_bytes` is raised or set to `0`.
+* reused non-empty `STRING_FIXED` fields under `clear_destination = 0` stage
+  replacement bytes before commit; provide
+  `parse_options.fixed_string_scratch` to keep that path allocation-free, or
+  let the temporary staging compete under `max_alloc_bytes`.
+* the Lua binding exposes the same surface as
+  `lj.fixed_string_scratch(size)` via parse options.
+* default spool-backed fields keep `64 KiB` in memory and cap total payload at
+  `10 MiB` unless a field uses explicit `lonejson_spool_options`.
 
 Run the smaller nullable primitive Lua example with:
 

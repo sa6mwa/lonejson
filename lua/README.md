@@ -202,6 +202,41 @@ assert(q.fields[3].metrics[2] == lj.json_null)
 The shape is intentionally explicit. A schema is not an afterthought; it is the
 contract that makes the rest of the API efficient and predictable.
 
+## Parse options
+
+Schema decode and stream entrypoints accept an optional parse-options table.
+The Lua binding supports the same main ceilings as the C surface:
+
+- `clear_destination`
+- `reject_duplicate_keys`
+- `max_depth`
+- `max_dynamic_string_bytes`
+- `max_alloc_bytes`
+- `fixed_string_scratch`
+
+Reused non-empty fixed-capacity string fields (`lj.string { fixed_capacity = N
+}` with `clear_destination = false`) stage replacement bytes before commit so a
+parse failure does not clobber the old value. By default the Lua binding uses
+temporary lonejson-owned staging for that path, and that staging competes under
+`max_alloc_bytes`.
+
+When you want that reuse path to stay allocation-free, create a reusable
+scratch object and pass it in parse options:
+
+```lua
+local scratch = lj.fixed_string_scratch(8192)
+local rec = MySchema:new_record()
+
+MySchema:decode_into(rec, json, {
+  clear_destination = false,
+  max_alloc_bytes = 1024,
+  fixed_string_scratch = scratch,
+})
+```
+
+Streams and array streams retain the scratch object for the parser lifetime, so
+the same scratch can be reused safely across repeated `:next(...)` calls.
+
 ## Table mode
 
 Table mode is the most direct way to use the binding. Decode returns a Lua

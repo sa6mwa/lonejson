@@ -251,6 +251,10 @@ local Batch = lj.schema("BatchFuzz", {
   }),
 })
 
+local FixedLarge = lj.schema("FixedLargeFuzz", {
+  lj.field("payload", lj.string { required = true, fixed_capacity = 8192, overflow = "fail" }),
+})
+
 math.randomseed(123456789)
 
 do
@@ -342,6 +346,52 @@ do
     Batch:decode_into(rec, lj.encode_json(second), { clear_destination = false })
     assert_json_equal(rec:to_table(), encode_decode(normalize_batch(second)),
                       "batch replace-on-present mismatch")
+  end
+end
+
+do
+  local function long_text(ch, n)
+    return string.rep(ch, n)
+  end
+
+  local scratch = lj.fixed_string_scratch(8192)
+  local i
+
+  for i = 1, 50 do
+    local first = long_text("a", math.random(5000, 7000))
+    local second = long_text("b", math.random(5000, 7600))
+    local rec = FixedLarge:new_record()
+    local stream
+    local obj, err, status
+    local ok
+
+    FixedLarge:decode_into(rec, '{"payload":"' .. first .. '"}')
+    ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. second .. '"}', {
+      clear_destination = false,
+      max_alloc_bytes = 1,
+      fixed_string_scratch = scratch,
+    })
+    assert_true(err == nil, "fixed scratch decode_into error")
+    assert_true(ok.payload == second, "fixed scratch decode_into mismatch")
+
+    stream = FixedLarge:stream_string(
+        '{"payload":"' .. first .. '"}{"payload":"' .. second .. '"}',
+        {
+          clear_destination = false,
+          max_alloc_bytes = 1,
+          fixed_string_scratch = scratch,
+        })
+    obj, err, status = stream:next(rec)
+    assert_true(err == nil and status == "object",
+                "fixed scratch stream first mismatch")
+    assert_true(obj.payload == first, "fixed scratch stream first payload")
+    obj, err, status = stream:next(rec)
+    assert_true(err == nil and status == "object",
+                "fixed scratch stream second mismatch")
+    assert_true(obj.payload == second, "fixed scratch stream second payload")
+    obj, err, status = stream:next(rec)
+    assert_true(status == "eof", "fixed scratch stream eof mismatch")
+    stream:close()
   end
 end
 

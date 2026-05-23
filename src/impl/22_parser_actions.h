@@ -42,6 +42,13 @@ lonejson__complete_streamed_string_token(lonejson_parser *parser) {
   }
 
   if (frame == NULL) {
+    if (parser->validate_only && parser->json_stream_active) {
+      lonejson__parser_clear_json_stream_value(parser);
+      parser->json_stream_depth = 0u;
+      parser->root_started = 1;
+      parser->root_finished = 1;
+      return LONEJSON_STATUS_OK;
+    }
     return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
                                parser->error.offset, parser->error.line,
                                parser->error.column,
@@ -337,7 +344,8 @@ lonejson__mapped_array_stream_finish_item(lonejson_parser *parser,
       parent->object_ptr, parent->field);
   status = stream->handler.item(stream->handler.user, stream->handler.item_dst,
                                 &parser->error);
-  lonejson__reset_map(stream->handler.item_map, stream->handler.item_dst);
+  lonejson__reset_map_parse(parser, stream->handler.item_map,
+                            stream->handler.item_dst);
   if (status != LONEJSON_STATUS_OK) {
     if (parser->error.code == LONEJSON_STATUS_OK) {
       return lonejson__set_error(
@@ -360,7 +368,8 @@ lonejson__mapped_array_stream_reset_item(lonejson_parser *parser,
       stream->handler.item_map == NULL || stream->handler.item_dst == NULL) {
     return;
   }
-  lonejson__reset_map(stream->handler.item_map, stream->handler.item_dst);
+  lonejson__reset_map_parse(parser, stream->handler.item_map,
+                            stream->handler.item_dst);
 }
 
 static void
@@ -420,6 +429,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
   lonejson_mapped_array_stream *mapped_stream = NULL;
   int started_capture = 0;
   int started_root_visitor = 0;
+  int started_root_value = 0;
 
   if (!parser->root_started) {
     parser->root_started = 1;
@@ -427,6 +437,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
     object_ptr = parser->validate_only ? NULL : parser->root_dst;
     started_root_visitor = parser->validate_only &&
                            lonejson__json_value_parse_visitor_active(parser);
+    started_root_value = parser->validate_only && parser->json_stream_active;
   } else if (parent != NULL && parent->kind == LONEJSON_CONTAINER_OBJECT) {
     parent->after_comma = 0;
     field = parent->pending_field;
@@ -485,7 +496,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
         }
         map = field->submap;
         object_ptr = lonejson__field_ptr(parent->object_ptr, field);
-        lonejson__reset_map(map, object_ptr);
+        lonejson__reset_map_parse(parser, map, object_ptr);
       }
     }
   } else if (parent != NULL && parent->kind == LONEJSON_CONTAINER_ARRAY) {
@@ -503,8 +514,8 @@ lonejson__begin_object_value(lonejson_parser *parser) {
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
-      lonejson__reset_map(mapped_stream->handler.item_map,
-                          mapped_stream->handler.item_dst);
+      lonejson__reset_map_parse(parser, mapped_stream->handler.item_map,
+                                mapped_stream->handler.item_dst);
       field = parent->field;
       map = mapped_stream->handler.item_map;
       object_ptr = mapped_stream->handler.item_dst;
@@ -521,7 +532,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
       object_ptr =
           lonejson__object_array_append_slot(parser, parent->field, arr);
       if (object_ptr == NULL) {
-        if (parent->field->overflow_policy == LONEJSON_OVERFLOW_FAIL) {
+        if (parser->error.code != LONEJSON_STATUS_OK) {
           return parser->error.code;
         }
         parser->error.truncated = 1;
@@ -547,6 +558,10 @@ lonejson__begin_object_value(lonejson_parser *parser) {
     parser->json_stream_depth = 1u;
     return lonejson__json_value_visit_event(
         parser, parser->json_stream_value->parse_visitor->object_begin);
+  }
+  if (started_root_value) {
+    parser->json_stream_depth = 1u;
+    return lonejson__json_value_emit(parser, "{", 1u);
   }
   if (!started_capture && parser->json_stream_active && map == NULL &&
       field == NULL && parent != NULL) {
@@ -578,6 +593,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
   lonejson_frame *frame;
   int started_capture = 0;
   int started_root_visitor = 0;
+  int started_root_value = 0;
 
   if (!parser->root_started) {
     if (!parser->validate_only) {
@@ -588,6 +604,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
     }
     parser->root_started = 1;
     started_root_visitor = lonejson__json_value_parse_visitor_active(parser);
+    started_root_value = parser->json_stream_active;
   }
   if (parent != NULL && parent->kind == LONEJSON_CONTAINER_OBJECT) {
     parent->after_comma = 0;
@@ -710,6 +727,10 @@ lonejson__begin_array_value(lonejson_parser *parser) {
     parser->json_stream_depth = 1u;
     return lonejson__json_value_visit_event(
         parser, parser->json_stream_value->parse_visitor->array_begin);
+  }
+  if (started_root_value) {
+    parser->json_stream_depth = 1u;
+    return lonejson__json_value_emit(parser, "[", 1u);
   }
   if (!started_capture && parser->json_stream_active && field == NULL &&
       parent != NULL) {
@@ -905,18 +926,28 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
                                    parser->error.offset, parser->error.line,
                                    parser->error.column, "invalid JSON number");
       }
-      if (LONEJSON__UNLIKELY(
-              lonejson__json_value_parse_visitor_active(parser))) {
-        if (mode == LONEJSON_LEX_NUMBER) {
-          status = lonejson__json_value_number(parser, token_text,
-                                               parser->token.len);
+      if (parser->json_stream_active) {
+        if (lonejson__json_value_parse_visitor_active(parser)) {
+          if (mode == LONEJSON_LEX_NUMBER) {
+            status = lonejson__json_value_number(parser, token_text,
+                                                 parser->token.len);
+          } else if (mode == LONEJSON_LEX_TRUE) {
+            status = lonejson__json_value_visit_bool(parser, 1);
+          } else if (mode == LONEJSON_LEX_FALSE) {
+            status = lonejson__json_value_visit_bool(parser, 0);
+          } else if (mode == LONEJSON_LEX_NULL) {
+            status = lonejson__json_value_visit_event(
+                parser, parser->json_stream_value->parse_visitor->null_value);
+          }
+        } else if (mode == LONEJSON_LEX_NUMBER) {
+          status = lonejson__json_value_emit(parser, token_text,
+                                             parser->token.len);
         } else if (mode == LONEJSON_LEX_TRUE) {
-          status = lonejson__json_value_visit_bool(parser, 1);
+          status = lonejson__json_value_emit(parser, "true", 4u);
         } else if (mode == LONEJSON_LEX_FALSE) {
-          status = lonejson__json_value_visit_bool(parser, 0);
+          status = lonejson__json_value_emit(parser, "false", 5u);
         } else if (mode == LONEJSON_LEX_NULL) {
-          status = lonejson__json_value_visit_event(
-              parser, parser->json_stream_value->parse_visitor->null_value);
+          status = lonejson__json_value_emit(parser, "null", 4u);
         }
         if (status != LONEJSON_STATUS_OK) {
           return status;

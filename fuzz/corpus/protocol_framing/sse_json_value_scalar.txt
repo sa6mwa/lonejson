@@ -1,0 +1,8 @@
+Jevent: keep
+id: evt-1
+data: "hello"
+
+event: keep
+id: evt-2
+data: [1,true,null]
+

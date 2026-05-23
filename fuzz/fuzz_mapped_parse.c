@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -45,6 +46,12 @@ typedef struct fuzz_stream_state {
   size_t fail_after_chunks;
 } fuzz_stream_state;
 
+typedef struct fuzz_capped_alloc_doc {
+  char *name;
+  lonejson_string_array tags;
+  lonejson_spooled body;
+} fuzz_capped_alloc_doc;
+
 static const lonejson_field fuzz_address_fields[] = {
     LONEJSON_FIELD_STRING_FIXED(fuzz_address, city, "city",
                                 LONEJSON_OVERFLOW_TRUNCATE),
@@ -86,6 +93,14 @@ static const lonejson_field fuzz_nullable_primitives_fields[] = {
                            "required_count")};
 LONEJSON_MAP_DEFINE(fuzz_nullable_primitives_map, fuzz_nullable_primitives,
                     fuzz_nullable_primitives_fields);
+
+static const lonejson_field fuzz_capped_alloc_doc_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC_REQ(fuzz_capped_alloc_doc, name, "name"),
+    LONEJSON_FIELD_STRING_ARRAY(fuzz_capped_alloc_doc, tags, "tags",
+                                LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_STRING_STREAM_REQ(fuzz_capped_alloc_doc, body, "body")};
+LONEJSON_MAP_DEFINE(fuzz_capped_alloc_doc_map, fuzz_capped_alloc_doc,
+                    fuzz_capped_alloc_doc_fields);
 
 static lonejson_status fuzz_stream_begin(void *user, lonejson_error *error) {
   fuzz_stream_state *state = (fuzz_stream_state *)user;
@@ -240,6 +255,93 @@ static void fuzz_parse_nullable_primitives(const uint8_t *data, size_t size) {
   }
 }
 
+static void fuzz_parse_capped_alloc_doc(const uint8_t *data, size_t size) {
+  fuzz_capped_alloc_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  char *json;
+  size_t name_len;
+  size_t body_len;
+  size_t tags;
+  size_t tag_len;
+  size_t cap;
+  char *out;
+  size_t i;
+  size_t remaining;
+
+  name_len = size > 0u ? (size_t)(data[0] & 127u) : 0u;
+  body_len = size > 1u ? (size_t)(data[1] * 64u) : 0u;
+  tags = size > 2u ? (size_t)(data[2] & 7u) : 0u;
+  tag_len = size > 3u ? (size_t)(data[3] & 63u) : 0u;
+  if (size > 4u) {
+    options.max_dynamic_string_bytes =
+        (data[4] & 1u) != 0u ? 0u : (size_t)(1u + (data[4] & 63u));
+  }
+  if (size > 5u) {
+    options.max_alloc_bytes =
+        (data[5] & 1u) != 0u ? 0u : (size_t)(16u + ((size_t)data[5] * 16u));
+  }
+  if (size > 6u) {
+    options.clear_destination = (data[6] & 1u) == 0u ? 1 : 0;
+  }
+
+  cap = 64u + name_len + body_len + (tags * (tag_len + 8u));
+  json = (char *)malloc(cap + 1u);
+  if (json == NULL) {
+    return;
+  }
+  out = json;
+  remaining = cap + 1u;
+  if (!fuzz_append_text(&out, &remaining, "{\"name\":\"")) {
+    free(json);
+    return;
+  }
+  for (i = 0u; i < name_len && remaining > 1u; ++i) {
+    *out++ = (char)('a' + (i % 26u));
+    --remaining;
+  }
+  if (!fuzz_append_text(&out, &remaining, "\",\"tags\":[")) {
+    free(json);
+    return;
+  }
+  for (i = 0u; i < tags; ++i) {
+    size_t j;
+    if (!fuzz_append_text(&out, &remaining, i == 0u ? "\"" : ",\"")) {
+      free(json);
+      return;
+    }
+    for (j = 0u; j < tag_len && remaining > 1u; ++j) {
+      *out++ = (char)('A' + (j % 26u));
+      --remaining;
+    }
+    if (!fuzz_append_text(&out, &remaining, "\"")) {
+      free(json);
+      return;
+    }
+  }
+  if (!fuzz_append_text(&out, &remaining, "],\"body\":\"")) {
+    free(json);
+    return;
+  }
+  for (i = 0u; i < body_len && remaining > 1u; ++i) {
+    *out++ = 'x';
+    --remaining;
+  }
+  if (!fuzz_append_text(&out, &remaining, "\"}")) {
+    free(json);
+    return;
+  }
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&fuzz_capped_alloc_doc_map, &doc);
+  status = lonejson_parse_cstr(&fuzz_capped_alloc_doc_map, &doc, json,
+                               &options, &error);
+  (void)status;
+  lonejson_cleanup(&fuzz_capped_alloc_doc_map, &doc);
+  free(json);
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   fuzz_person person;
   lonejson_error error;
@@ -247,6 +349,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
   fuzz_parse_stream_envelope(data, size);
   fuzz_parse_nullable_primitives(data, size);
+  fuzz_parse_capped_alloc_doc(data, size);
 
   memset(&person, 0, sizeof(person));
   status = lonejson_parse_buffer(&fuzz_person_map, &person, data, size, NULL,

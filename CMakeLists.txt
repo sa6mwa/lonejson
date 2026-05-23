@@ -26,7 +26,7 @@ option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "6" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "7" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -214,6 +214,13 @@ if(LONEJSON_BUILD_TESTS)
         "${LONEJSON_LUA_EXECUTABLE}"
         "${LONEJSON_LUAROCKS_EXECUTABLE}")
   endif()
+  if(LONEJSON_BASH_EXECUTABLE)
+    add_test(
+      NAME lonejson_c_pkt_systems_fetch_retry_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fetch_c_pkt_systems.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+  endif()
 
   add_executable(lonejson_short_names_tests tests/test_short_names.c)
   target_include_directories(lonejson_short_names_tests PRIVATE
@@ -356,6 +363,7 @@ if(LONEJSON_BUILD_EXAMPLES)
     json_value_nested_parse
     json_value_parse
     json_value_source
+    sse_json_value_stream
     json_value_visitor
     nullable_fields
     parse_file
@@ -665,6 +673,7 @@ foreach(example_name
         fixed_storage
         generator_pull
         json_value_buffer
+        sse_json_value_stream
         json_value_parse
         json_value_source
         json_value_visitor

@@ -25,12 +25,14 @@
 #define LJLUA_ARRAY_STREAM_MT "lonejson.array_stream"
 #define LJLUA_SPOOL_MT "lonejson.spool"
 #define LJLUA_PATH_MT "lonejson.path"
+#define LJLUA_FIXED_STRING_SCRATCH_MT "lonejson.fixed_string_scratch"
 #define LJLUA_SCHEMA_MAGIC 0x4c4a5343u
 #define LJLUA_RECORD_MAGIC 0x4c4a5243u
 #define LJLUA_STREAM_MAGIC 0x4c4a5354u
 #define LJLUA_ARRAY_STREAM_MAGIC 0x4c4a4153u
 #define LJLUA_SPOOL_MAGIC 0x4c4a5350u
 #define LJLUA_PATH_MAGIC 0x4c4a5048u
+#define LJLUA_FIXED_STRING_SCRATCH_MAGIC 0x4c4a4653u
 
 typedef enum ljlua_field_kind {
   LJLUA_FIELD_STRING = 1,
@@ -108,6 +110,7 @@ typedef struct ljlua_stream_ud {
   unsigned int magic;
   ljlua_schema *schema;
   int schema_ref;
+  int fixed_string_scratch_ref;
   lonejson_stream *stream;
   int clear_destination;
   unsigned char *owned_input;
@@ -125,6 +128,7 @@ typedef struct ljlua_array_stream_ud {
   unsigned int magic;
   ljlua_schema *schema;
   int schema_ref;
+  int fixed_string_scratch_ref;
   lonejson_array_stream *stream;
   int clear_destination;
   unsigned char *pending_record;
@@ -143,12 +147,30 @@ typedef struct ljlua_spool_ud {
   int kind;
 } ljlua_spool_ud;
 
+typedef struct ljlua_fixed_string_scratch_ud {
+  unsigned int magic;
+  unsigned char *data;
+  size_t size;
+} ljlua_fixed_string_scratch_ud;
+
 typedef struct ljlua_path_ud {
   unsigned int magic;
   ljlua_schema *schema;
   ljlua_compiled_path *compiled;
   int schema_ref;
 } ljlua_path_ud;
+
+static ljlua_fixed_string_scratch_ud *
+ljlua_check_fixed_string_scratch(lua_State *L, int index) {
+  ljlua_fixed_string_scratch_ud *ud =
+      (ljlua_fixed_string_scratch_ud *)luaL_checkudata(
+          L, index, LJLUA_FIXED_STRING_SCRATCH_MT);
+  luaL_argcheck(L, ud != NULL &&
+                       ud->magic == LJLUA_FIXED_STRING_SCRATCH_MAGIC &&
+                       ud->data != NULL && ud->size != 0u,
+                index, "invalid fixed string scratch");
+  return ud;
+}
 
 typedef struct ljlua_json_buf {
   char *data;

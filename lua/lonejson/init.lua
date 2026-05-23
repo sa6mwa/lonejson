@@ -105,6 +105,7 @@ M.encode_value = core.encode_json
 M.encode_value_to_sink = core.encode_json_to_sink
 M.decode_json = core.decode_json
 M.decode_value = core.decode_json
+M.fixed_string_scratch = core.fixed_string_scratch
 M.core = core
 M.json_null = core.json_null()
 

@@ -3,6 +3,10 @@ lonejson_parse_options lonejson_default_parse_options(void) {
   options.clear_destination = 1;
   options.reject_duplicate_keys = 1;
   options.max_depth = 64u;
+  options.max_dynamic_string_bytes = LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES;
+  options.max_alloc_bytes = LONEJSON_PARSE_MAX_ALLOC_BYTES;
+  options.fixed_string_scratch = NULL;
+  options.fixed_string_scratch_size = 0u;
   options.allocator = NULL;
   return options;
 }
@@ -245,6 +249,7 @@ static void lonejson_parser_destroy(lonejson_parser *parser) {
   if (parser == NULL) {
     return;
   }
+  lonejson__direct_string_clear(parser, 0);
   lonejson__parser_unwind_active_mapped_array_streams(parser);
   while (parser->frame_count != 0u) {
     lonejson__pop_frame(parser);
@@ -292,6 +297,7 @@ lonejson_status lonejson_parse_buffer(const lonejson_map *map, void *dst,
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     lonejson__parser_unwind_active_mapped_array_streams(parser);
   }
+  lonejson__direct_string_abort(parser);
   if (error != NULL) {
     *error = parser->error;
   }
@@ -376,6 +382,7 @@ lonejson_status lonejson_parse_reader(const lonejson_map *map, void *dst,
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     lonejson__parser_unwind_active_mapped_array_streams(parser);
   }
+  lonejson__direct_string_abort(parser);
   if (error != NULL) {
     *error = parser->error;
   }

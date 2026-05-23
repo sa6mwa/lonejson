@@ -5,10 +5,13 @@ static int ljlua_schema_stream_string(lua_State *L) {
   lonejson_parse_options options;
   lonejson_error error;
   ljlua_stream_ud *ud;
+  int fixed_string_scratch_ref =
+      ljlua_parse_options_fixed_string_scratch_ref(L, 3);
 
   ljlua_parse_parse_options(L, 3, &options);
   ud = (ljlua_stream_ud *)lua_newuserdatauv(L, sizeof(*ud), 0);
   memset(ud, 0, sizeof(*ud));
+  ud->fixed_string_scratch_ref = LUA_NOREF;
   ud->clear_destination = options.clear_destination ? 1 : 0;
   if (ljlua_schema_has_json_value(schema_ud->schema)) {
     options.clear_destination = 0;
@@ -25,11 +28,15 @@ static int ljlua_schema_stream_string(lua_State *L) {
   if (ud->stream == NULL) {
     free(ud->owned_input);
     ud->owned_input = NULL;
+    if (fixed_string_scratch_ref != LUA_NOREF) {
+      luaL_unref(L, LUA_REGISTRYINDEX, fixed_string_scratch_ref);
+    }
     return ljlua_push_error(L, &error);
   }
   ud->schema = schema_ud->schema;
   lua_pushvalue(L, 1);
   ud->schema_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+  ud->fixed_string_scratch_ref = fixed_string_scratch_ref;
   luaL_setmetatable(L, LJLUA_STREAM_MT);
   return 1;
 }
@@ -45,6 +52,10 @@ static int ljlua_array_stream_gc(lua_State *L) {
   ud->owned_input = NULL;
   ud->owned_input_len = 0u;
   ud->owned_input_offset = 0u;
+  if (ud->fixed_string_scratch_ref != LUA_NOREF) {
+    luaL_unref(L, LUA_REGISTRYINDEX, ud->fixed_string_scratch_ref);
+    ud->fixed_string_scratch_ref = LUA_NOREF;
+  }
   if (ud->schema_ref != LUA_NOREF) {
     luaL_unref(L, LUA_REGISTRYINDEX, ud->schema_ref);
     ud->schema_ref = LUA_NOREF;
@@ -63,10 +74,13 @@ static int ljlua_schema_array_stream_path(lua_State *L) {
   lonejson_parse_options options;
   lonejson_error error;
   ljlua_array_stream_ud *ud;
+  int fixed_string_scratch_ref =
+      ljlua_parse_options_fixed_string_scratch_ref(L, 4);
 
   ljlua_parse_parse_options(L, 4, &options);
   ud = (ljlua_array_stream_ud *)lua_newuserdatauv(L, sizeof(*ud), 0);
   memset(ud, 0, sizeof(*ud));
+  ud->fixed_string_scratch_ref = LUA_NOREF;
   ud->clear_destination = options.clear_destination ? 1 : 0;
   if (ljlua_schema_has_json_value(schema_ud->schema)) {
     options.clear_destination = 0;
@@ -75,11 +89,15 @@ static int ljlua_schema_array_stream_path(lua_State *L) {
   ud->stream =
       lonejson_array_stream_open_path(array_path, path, &options, &error);
   if (ud->stream == NULL) {
+    if (fixed_string_scratch_ref != LUA_NOREF) {
+      luaL_unref(L, LUA_REGISTRYINDEX, fixed_string_scratch_ref);
+    }
     return ljlua_push_error(L, &error);
   }
   ud->schema = schema_ud->schema;
   lua_pushvalue(L, 1);
   ud->schema_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+  ud->fixed_string_scratch_ref = fixed_string_scratch_ref;
   luaL_setmetatable(L, LJLUA_ARRAY_STREAM_MT);
   return 1;
 }
@@ -91,10 +109,13 @@ static int ljlua_schema_array_stream_fd(lua_State *L) {
   lonejson_parse_options options;
   lonejson_error error;
   ljlua_array_stream_ud *ud;
+  int fixed_string_scratch_ref =
+      ljlua_parse_options_fixed_string_scratch_ref(L, 4);
 
   ljlua_parse_parse_options(L, 4, &options);
   ud = (ljlua_array_stream_ud *)lua_newuserdatauv(L, sizeof(*ud), 0);
   memset(ud, 0, sizeof(*ud));
+  ud->fixed_string_scratch_ref = LUA_NOREF;
   ud->clear_destination = options.clear_destination ? 1 : 0;
   if (ljlua_schema_has_json_value(schema_ud->schema)) {
     options.clear_destination = 0;
@@ -102,11 +123,15 @@ static int ljlua_schema_array_stream_fd(lua_State *L) {
   ud->magic = LJLUA_ARRAY_STREAM_MAGIC;
   ud->stream = lonejson_array_stream_open_fd(array_path, fd, &options, &error);
   if (ud->stream == NULL) {
+    if (fixed_string_scratch_ref != LUA_NOREF) {
+      luaL_unref(L, LUA_REGISTRYINDEX, fixed_string_scratch_ref);
+    }
     return ljlua_push_error(L, &error);
   }
   ud->schema = schema_ud->schema;
   lua_pushvalue(L, 1);
   ud->schema_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+  ud->fixed_string_scratch_ref = fixed_string_scratch_ref;
   luaL_setmetatable(L, LJLUA_ARRAY_STREAM_MT);
   return 1;
 }
@@ -118,10 +143,13 @@ static int ljlua_schema_array_stream_file(lua_State *L) {
   lonejson_parse_options options;
   lonejson_error error;
   ljlua_array_stream_ud *ud;
+  int fixed_string_scratch_ref =
+      ljlua_parse_options_fixed_string_scratch_ref(L, 4);
 
   ljlua_parse_parse_options(L, 4, &options);
   ud = (ljlua_array_stream_ud *)lua_newuserdatauv(L, sizeof(*ud), 0);
   memset(ud, 0, sizeof(*ud));
+  ud->fixed_string_scratch_ref = LUA_NOREF;
   ud->clear_destination = options.clear_destination ? 1 : 0;
   if (ljlua_schema_has_json_value(schema_ud->schema)) {
     options.clear_destination = 0;
@@ -130,11 +158,15 @@ static int ljlua_schema_array_stream_file(lua_State *L) {
   ud->stream =
       lonejson_array_stream_open_filep(array_path, fp, &options, &error);
   if (ud->stream == NULL) {
+    if (fixed_string_scratch_ref != LUA_NOREF) {
+      luaL_unref(L, LUA_REGISTRYINDEX, fixed_string_scratch_ref);
+    }
     return ljlua_push_error(L, &error);
   }
   ud->schema = schema_ud->schema;
   lua_pushvalue(L, 1);
   ud->schema_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+  ud->fixed_string_scratch_ref = fixed_string_scratch_ref;
   luaL_setmetatable(L, LJLUA_ARRAY_STREAM_MT);
   return 1;
 }
@@ -147,10 +179,13 @@ static int ljlua_schema_array_stream_string(lua_State *L) {
   lonejson_parse_options options;
   lonejson_error error;
   ljlua_array_stream_ud *ud;
+  int fixed_string_scratch_ref =
+      ljlua_parse_options_fixed_string_scratch_ref(L, 4);
 
   ljlua_parse_parse_options(L, 4, &options);
   ud = (ljlua_array_stream_ud *)lua_newuserdatauv(L, sizeof(*ud), 0);
   memset(ud, 0, sizeof(*ud));
+  ud->fixed_string_scratch_ref = LUA_NOREF;
   ud->clear_destination = options.clear_destination ? 1 : 0;
   if (ljlua_schema_has_json_value(schema_ud->schema)) {
     options.clear_destination = 0;
@@ -169,11 +204,15 @@ static int ljlua_schema_array_stream_string(lua_State *L) {
   if (ud->stream == NULL) {
     free(ud->owned_input);
     ud->owned_input = NULL;
+    if (fixed_string_scratch_ref != LUA_NOREF) {
+      luaL_unref(L, LUA_REGISTRYINDEX, fixed_string_scratch_ref);
+    }
     return ljlua_push_error(L, &error);
   }
   ud->schema = schema_ud->schema;
   lua_pushvalue(L, 1);
   ud->schema_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+  ud->fixed_string_scratch_ref = fixed_string_scratch_ref;
   luaL_setmetatable(L, LJLUA_ARRAY_STREAM_MT);
   return 1;
 }

@@ -1,0 +1,4 @@
+Jevent: keep
+id: evt-1
+data: {"type":"response.completed","status":"ok","text":"payload"}
+

@@ -204,10 +204,16 @@ LONEJSON_MAP_DEFINE(user_doc_map, user_doc, user_doc_fields);
 int main(void) {
   user_doc doc;
   lonejson_error error;
+  lonejson_parse_options options = lonejson_default_parse_options();
   lonejson_status status;
 
+  /* Defaults: 128 KiB per STRING_ALLOC field, 1 MiB live lonejson-owned parse
+   * heap. Set either field to 0 to disable that ceiling for this parse call.
+   */
+  options.max_dynamic_string_bytes = 256u * 1024u;
+
   status = lonejson_parse_cstr(
-    &user_doc_map, &doc, "{\"name\":\"Ada\",\"age\":37}", NULL, &error);
+    &user_doc_map, &doc, "{\"name\":\"Ada\",\"age\":37}", &options, &error);
   if (status != LONEJSON_STATUS_OK) {
     return 1;
   }
@@ -216,6 +222,35 @@ int main(void) {
   return 0;
 }
 ```
+
+For parse calls that use `STRING_ALLOC` or other lonejson-owned dynamic
+destinations, `lonejson_default_parse_options()` currently applies these
+ceilings:
+
+- `max_dynamic_string_bytes = 128 KiB`
+- `max_alloc_bytes = 1 MiB`
+
+Set either option to `0` to disable that specific ceiling for a call.
+
+Reused non-empty `STRING_FIXED` fields under `clear_destination = 0` stage the
+replacement before commit so parse failures do not clobber the old value. If
+you want that path to stay allocation-free, provide caller-owned scratch that
+is at least as large as the fixed field capacity:
+
+```c
+char fixed_scratch[8192];
+
+options.clear_destination = 0;
+options.fixed_string_scratch = fixed_scratch;
+options.fixed_string_scratch_size = sizeof(fixed_scratch);
+```
+
+Without caller scratch, lonejson allocates temporary staging storage for that
+field and counts it against `max_alloc_bytes`.
+
+The Lua binding exposes the same reuse control through
+`lj.fixed_string_scratch(size)`, passed as `fixed_string_scratch` in parse
+options for `decode_into`, `stream_*`, and `array_stream_*`.
 
 ### Read an object-framed stream
 
@@ -443,6 +478,12 @@ streams `data:` payload chunks through callbacks as bytes arrive, while
 `lonejson_sse_push_json` parses selected event data directly into a mapped
 destination without materializing the full event body.
 
+When a schema map is not the right abstraction, `lonejson_sse_push_json_value`
+and `lonejson_sse_finish_json_value` stream selected event bodies as arbitrary
+JSON values through one configured `lonejson_json_value` handle. That reuses
+the existing parse sink, parse visitor, and explicit capture modes without
+forcing a destination struct.
+
 ```c
 lonejson_sse *sse = lonejson_sse_open(NULL, &error);
 lonejson_sse_handler handler = { on_sse_begin, on_sse_data, on_sse_end };
@@ -514,12 +555,17 @@ static const lonejson_field ingest_doc_fields[] = {
 LONEJSON_MAP_DEFINE(ingest_doc_map, ingest_doc, ingest_doc_fields);
 ```
 
-Then configure spill behavior on the field mapping:
+`LONEJSON_FIELD_STRING_STREAM_REQ(...)` uses the library defaults:
+
+- `memory_limit = 64 KiB` before spilling to disk
+- `max_bytes = 10 MiB` total logical payload
+
+To change either threshold, attach explicit spool options to the field mapping:
 
 ```c
 static const lonejson_spool_options ingest_spool = {
   64u * 1024u,
-  0u,
+  32u * 1024u * 1024u,
   "/tmp"
 };
 
@@ -527,6 +573,8 @@ static const lonejson_field ingest_doc_fields[] = {
   LONEJSON_FIELD_STRING_STREAM_OPTS(ingest_doc, body, "body", &ingest_spool)
 };
 ```
+
+Set `max_bytes = 0` to disable the total spool-size ceiling for that field.
 
 The resulting `lonejson_spooled` value remains in memory when it is small and
 spills to a temporary file when it grows past the configured threshold. The

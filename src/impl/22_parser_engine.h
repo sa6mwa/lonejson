@@ -11,6 +11,16 @@ static int lonejson__hex_value(int ch) {
   return -1;
 }
 
+static LONEJSON__INLINE lonejson_status
+lonejson__direct_string_reject_nul(lonejson_parser *parser) {
+  return lonejson__set_error(
+      &parser->error, LONEJSON_STATUS_TYPE_MISMATCH, parser->error.offset,
+      parser->error.line, parser->error.column,
+      "field '%s' contains embedded NUL unsupported by C strings",
+      parser->direct_string_field != NULL ? parser->direct_string_field->json_key
+                                          : "<unknown>");
+}
+
 static LONEJSON__INLINE int
 lonejson__decode_unicode_quad(const unsigned char *src, lonejson_uint32 *out) {
   lonejson_uint32 cp;
@@ -78,6 +88,9 @@ static LONEJSON__INLINE lonejson_status lonejson__append_unicode_codepoint(
         parser->error.line, parser->error.column, "invalid unicode codepoint");
   }
   if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_DIRECT) {
+    if (cp == 0u) {
+      return lonejson__direct_string_reject_nul(parser);
+    }
     return lonejson__direct_string_append_bytes(parser, utf8, utf8_len);
   }
   if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_JSON_VISITOR) {
@@ -112,6 +125,9 @@ lonejson__append_string_byte(lonejson_parser *parser, unsigned char ch) {
                      parser->error.column, "failed to append string");
   }
   if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_DIRECT) {
+    if (ch == '\0') {
+      return lonejson__direct_string_reject_nul(parser);
+    }
     return lonejson__direct_string_append_bytes(parser, &ch, 1u);
   }
   if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_JSON_VISITOR) {
@@ -765,8 +781,7 @@ static lonejson_status lonejson__parser_consume_char(lonejson_parser *parser,
       parser->unicode_pending_high = 0u;
       parser->unicode_digits_needed = 0;
       if (parser->validate_only) {
-        if (LONEJSON__UNLIKELY(
-                lonejson__json_value_parse_visitor_active(parser))) {
+        if (parser->json_stream_active) {
           lonejson_status status = lonejson__json_value_string_begin(parser, 0);
           if (status != LONEJSON_STATUS_OK) {
             return status;

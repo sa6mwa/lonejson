@@ -1,0 +1,4 @@
+Jevent: keep
+id: evt-1
+data: {"type":"response.output_text.done","status":"completed","text":"hello world"}
+

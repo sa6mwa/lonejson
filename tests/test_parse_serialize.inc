@@ -1,3 +1,72 @@
+typedef struct test_generated_json_reader_state {
+  const char *prefix;
+  size_t prefix_len;
+  size_t payload_len;
+  const char *suffix;
+  size_t suffix_len;
+  size_t offset;
+  unsigned char fill;
+  size_t chunk_limit;
+} test_generated_json_reader_state;
+
+static lonejson_read_result
+test_generated_json_reader(void *user, unsigned char *buffer, size_t capacity) {
+  test_generated_json_reader_state *st = (test_generated_json_reader_state *)user;
+  lonejson_read_result rr = lonejson_default_read_result();
+  size_t total_len;
+  size_t remaining;
+  size_t chunk;
+  size_t written;
+
+  total_len = st->prefix_len + st->payload_len + st->suffix_len;
+  if (st->offset >= total_len || capacity == 0u) {
+    rr.eof = (st->offset >= total_len) ? 1 : 0;
+    return rr;
+  }
+  remaining = total_len - st->offset;
+  chunk = remaining < capacity ? remaining : capacity;
+  if (st->chunk_limit != 0u && chunk > st->chunk_limit) {
+    chunk = st->chunk_limit;
+  }
+  written = 0u;
+  while (written < chunk) {
+    if (st->offset < st->prefix_len) {
+      size_t part = st->prefix_len - st->offset;
+      if (part > chunk - written) {
+        part = chunk - written;
+      }
+      memcpy(buffer + written, st->prefix + st->offset, part);
+      st->offset += part;
+      written += part;
+      continue;
+    }
+    if (st->offset < st->prefix_len + st->payload_len) {
+      size_t body_off = st->offset - st->prefix_len;
+      size_t part = st->payload_len - body_off;
+      if (part > chunk - written) {
+        part = chunk - written;
+      }
+      memset(buffer + written, st->fill, part);
+      st->offset += part;
+      written += part;
+      continue;
+    }
+    {
+      size_t suffix_off = st->offset - st->prefix_len - st->payload_len;
+      size_t part = st->suffix_len - suffix_off;
+      if (part > chunk - written) {
+        part = chunk - written;
+      }
+      memcpy(buffer + written, st->suffix + suffix_off, part);
+      st->offset += part;
+      written += part;
+    }
+  }
+  rr.bytes_read = written;
+  rr.eof = (st->offset >= total_len) ? 1 : 0;
+  return rr;
+}
+
 static void test_parse_implicit_destination_reset(void) {
   const char *json =
       "{\"name\":\"Reset\",\"address\":{\"city\":\"Oslo\",\"zip\":42},"
@@ -54,6 +123,1056 @@ static void test_zero_alloc_validate_path(void) {
   EXPECT(g_lonejson_alloc_calls == 0u);
   EXPECT(g_lonejson_free_calls == 0u);
   EXPECT(g_alloc_record_count == 0u);
+}
+
+static void test_parse_dynamic_string_limits_and_fixed_unaffected(void) {
+  size_t text_len = LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES + 1u;
+  char *text = make_repeating_text(text_len);
+  const char *fmt = "{\"name\":\"%s\",\"body\":\"\",\"tags\":[]}";
+  char *json;
+  size_t need;
+  test_alloc_parse_doc alloc_doc;
+  test_fixed_log fixed_log;
+  lonejson_int64 codes_storage[1];
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  EXPECT(text != NULL);
+  if (text == NULL) {
+    return;
+  }
+  need = snprintf(NULL, 0, fmt, text);
+  json = (char *)malloc(need + 1u);
+  EXPECT(json != NULL);
+  if (json == NULL) {
+    free(text);
+    return;
+  }
+  snprintf(json, need + 1u, fmt, text);
+
+  memset(&alloc_doc, 0, sizeof(alloc_doc));
+  lonejson_init(&test_alloc_parse_doc_map, &alloc_doc);
+  status =
+      lonejson_parse_cstr(&test_alloc_parse_doc_map, &alloc_doc, json, NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "max dynamic string bytes") != NULL);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &alloc_doc);
+
+  options.max_dynamic_string_bytes = 0u;
+  memset(&alloc_doc, 0, sizeof(alloc_doc));
+  lonejson_init(&test_alloc_parse_doc_map, &alloc_doc);
+  status = lonejson_parse_cstr(&test_alloc_parse_doc_map, &alloc_doc, json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(alloc_doc.name != NULL && strlen(alloc_doc.name) == text_len);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &alloc_doc);
+
+  memset(&fixed_log, 0, sizeof(fixed_log));
+  lonejson_init(&test_fixed_log_map, &fixed_log);
+  fixed_log.codes.items = codes_storage;
+  fixed_log.codes.capacity = 1u;
+  fixed_log.codes.flags = LONEJSON_ARRAY_FIXED_CAPACITY;
+  options.max_dynamic_string_bytes = 1u;
+  status = lonejson_parse_cstr(&test_fixed_log_map, &fixed_log,
+                               "{\"name\":\"fixed\",\"codes\":[7]}", &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(fixed_log.name, "fixed") == 0);
+  lonejson_cleanup(&test_fixed_log_map, &fixed_log);
+
+  free(json);
+  free(text);
+}
+
+static void test_parse_dynamic_string_limit_mid_token_reader_cleanup(void) {
+  test_generated_json_reader_state reader;
+  test_alloc_parse_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&reader, 0, sizeof(reader));
+  reader.prefix = "{\"name\":\"";
+  reader.prefix_len = strlen(reader.prefix);
+  reader.payload_len = 96u;
+  reader.suffix = "\",\"body\":\"\",\"tags\":[]}";
+  reader.suffix_len = strlen(reader.suffix);
+  reader.fill = 'n';
+  reader.chunk_limit = 7u;
+
+  options.max_dynamic_string_bytes = 48u;
+  reset_lonejson_alloc_stats();
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_alloc_parse_doc_map, &doc);
+  status = lonejson_parse_reader(&test_alloc_parse_doc_map, &doc,
+                                 test_generated_json_reader, &reader, &options,
+                                 &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "max dynamic string bytes") != NULL);
+  EXPECT(doc.name == NULL);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
+  EXPECT(g_alloc_record_count == 0u);
+}
+
+static void test_parse_string_array_element_dynamic_limit(void) {
+  lonejson_parse_options options = lonejson_default_parse_options();
+  size_t text_len = 64u;
+  char *text = make_repeating_text(text_len);
+  const char *fmt = "{\"name\":\"ok\",\"body\":\"\",\"tags\":[\"%s\"]}";
+  char *json;
+  size_t need;
+  test_alloc_parse_doc doc;
+  lonejson_error error;
+  lonejson_status status;
+
+  EXPECT(text != NULL);
+  if (text == NULL) {
+    return;
+  }
+  need = snprintf(NULL, 0, fmt, text);
+  json = (char *)malloc(need + 1u);
+  EXPECT(json != NULL);
+  if (json == NULL) {
+    free(text);
+    return;
+  }
+  snprintf(json, need + 1u, fmt, text);
+  options.max_dynamic_string_bytes = 32u;
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_alloc_parse_doc_map, &doc);
+  status = lonejson_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "max dynamic string bytes") != NULL);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
+
+  free(json);
+  free(text);
+}
+
+static void test_parse_alloc_cap_covers_capture_and_arrays(void) {
+  size_t text_len = LONEJSON_PARSE_MAX_ALLOC_BYTES + 256u;
+  char *text = make_repeating_text(text_len);
+  const char *fmt = "{\"id\":\"capture\",\"selector\":\"%s\"}";
+  char *json;
+  size_t need;
+  test_alloc_json_value_doc capture_doc;
+  test_conditional_doc array_doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  EXPECT(text != NULL);
+  if (text == NULL) {
+    return;
+  }
+  need = snprintf(NULL, 0, fmt, text);
+  json = (char *)malloc(need + 1u);
+  EXPECT(json != NULL);
+  if (json == NULL) {
+    free(text);
+    return;
+  }
+  snprintf(json, need + 1u, fmt, text);
+
+  memset(&capture_doc, 0, sizeof(capture_doc));
+  lonejson_init(&test_alloc_json_value_doc_map, &capture_doc);
+  status =
+      lonejson_json_value_enable_parse_capture(&capture_doc.selector, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+  status = lonejson_parse_cstr(&test_alloc_json_value_doc_map, &capture_doc,
+                               json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+         NULL);
+  lonejson_cleanup(&test_alloc_json_value_doc_map, &capture_doc);
+
+  options.max_alloc_bytes = 0u;
+  memset(&capture_doc, 0, sizeof(capture_doc));
+  lonejson_init(&test_alloc_json_value_doc_map, &capture_doc);
+  status =
+      lonejson_json_value_enable_parse_capture(&capture_doc.selector, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_parse_cstr(&test_alloc_json_value_doc_map, &capture_doc,
+                               json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(capture_doc.selector.kind == LONEJSON_JSON_VALUE_BUFFER);
+  lonejson_cleanup(&test_alloc_json_value_doc_map, &capture_doc);
+
+  memset(&array_doc, 0, sizeof(array_doc));
+  lonejson_init(&test_conditional_doc_map, &array_doc);
+  options = lonejson_default_parse_options();
+  options.max_alloc_bytes = 24u;
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &array_doc,
+                               "{\"ints\":[1]}", &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+         NULL);
+  lonejson_cleanup(&test_conditional_doc_map, &array_doc);
+
+  options.max_alloc_bytes = 64u;
+  memset(&array_doc, 0, sizeof(array_doc));
+  lonejson_init(&test_conditional_doc_map, &array_doc);
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &array_doc,
+                               "{\"ints\":[1]}", &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(array_doc.ints.count == 1u);
+  EXPECT(array_doc.ints.items[0] == 1);
+  lonejson_cleanup(&test_conditional_doc_map, &array_doc);
+
+  free(json);
+  free(text);
+}
+
+static void test_parse_alloc_cap_cumulative_tag_allocations(void) {
+  test_alloc_parse_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  options.max_alloc_bytes = 64u;
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_alloc_parse_doc_map, &doc);
+  status = lonejson_parse_cstr(
+      &test_alloc_parse_doc_map, &doc,
+      "{\"name\":\"ok\",\"body\":\"\",\"tags\":[\"aaaa\",\"bbbb\",\"cccc\","
+      "\"dddd\",\"eeee\",\"ffff\"]}",
+      &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+         NULL);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
+}
+
+static void test_parse_alloc_cap_counts_reused_destination_allocations(void) {
+  test_conditional_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  size_t dyn_bytes;
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_conditional_doc_map, &doc);
+
+  options.clear_destination = 0;
+  options.max_alloc_bytes = 0u;
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &doc,
+                               "{\"dyn\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.dyn != NULL);
+  dyn_bytes = lonejson__owned_size(doc.dyn);
+  EXPECT(dyn_bytes != 0u);
+
+  options.max_alloc_bytes = dyn_bytes + sizeof(lonejson_int64) * 4u - 1u;
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &doc, "{\"ints\":[1]}",
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+         NULL);
+  EXPECT(doc.dyn != NULL);
+  EXPECT(strcmp(doc.dyn, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == 0);
+  EXPECT(doc.ints.count == 0u);
+
+  lonejson_cleanup(&test_conditional_doc_map, &doc);
+}
+
+static void test_parse_alloc_cap_small_budgets_allow_small_values(void) {
+  test_alloc_parse_doc alloc_doc;
+  test_alloc_json_value_doc capture_doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  options.clear_destination = 0;
+  options.max_alloc_bytes = 8u;
+
+  memset(&alloc_doc, 0, sizeof(alloc_doc));
+  lonejson_init(&test_alloc_parse_doc_map, &alloc_doc);
+  status = lonejson_parse_cstr(&test_alloc_parse_doc_map, &alloc_doc,
+                               "{\"name\":\"a\",\"body\":\"\",\"tags\":[]}",
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(alloc_doc.name != NULL && strcmp(alloc_doc.name, "a") == 0);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &alloc_doc);
+
+  memset(&capture_doc, 0, sizeof(capture_doc));
+  lonejson_init(&test_alloc_json_value_doc_map, &capture_doc);
+  status =
+      lonejson_json_value_enable_parse_capture(&capture_doc.selector, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_parse_cstr(&test_alloc_json_value_doc_map, &capture_doc,
+                               "{\"id\":\"c\",\"selector\":\"x\"}", &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(capture_doc.selector.kind == LONEJSON_JSON_VALUE_BUFFER);
+  EXPECT(strcmp(capture_doc.selector.json, "\"x\"") == 0);
+  lonejson_cleanup(&test_alloc_json_value_doc_map, &capture_doc);
+}
+
+static void test_direct_string_duplicate_rejection_preserves_first_value(void) {
+  test_conditional_doc fixed_doc;
+  test_alloc_parse_doc dyn_doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.allocator = &alloc.allocator;
+
+  memset(&dyn_doc, 0, sizeof(dyn_doc));
+  lonejson_init(&test_alloc_parse_doc_map, &dyn_doc);
+  status = lonejson_parse_cstr(&test_alloc_parse_doc_map, &dyn_doc,
+                               "{\"name\":\"keep\",\"body\":\"\",\"tags\":[]}",
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_parse_cstr(
+      &test_alloc_parse_doc_map, &dyn_doc,
+      "{\"name\":\"old\",\"name\":\"new\",\"body\":\"\",\"tags\":[]}",
+      &options, &error);
+  EXPECT(status == LONEJSON_STATUS_DUPLICATE_FIELD);
+  EXPECT(dyn_doc.name != NULL);
+  EXPECT(strcmp(dyn_doc.name, "old") == 0);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &dyn_doc);
+
+  memset(&fixed_doc, 0, sizeof(fixed_doc));
+  lonejson_init(&test_conditional_doc_map, &fixed_doc);
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &fixed_doc,
+                               "{\"fixed\":\"keep\"}", &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &fixed_doc,
+                               "{\"fixed\":\"old\",\"fixed\":\"new\"}",
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_DUPLICATE_FIELD);
+  EXPECT(strcmp(fixed_doc.fixed, "old") == 0);
+  lonejson_cleanup(&test_conditional_doc_map, &fixed_doc);
+
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_direct_string_failure_paths_preserve_existing_values(void) {
+  test_conditional_doc fixed_doc;
+  test_conditional_doc dyn_doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  size_t live_before;
+
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.allocator = &alloc.allocator;
+
+  memset(&dyn_doc, 0, sizeof(dyn_doc));
+  lonejson_init(&test_conditional_doc_map, &dyn_doc);
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &dyn_doc,
+                               "{\"dyn\":\"keep\"}", &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  live_before = alloc.stats.bytes_live;
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &dyn_doc,
+                               "{\"dyn\":\"bad\\u0000tail\"}", &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(dyn_doc.dyn != NULL);
+  EXPECT(strcmp(dyn_doc.dyn, "keep") == 0);
+  EXPECT(alloc.stats.bytes_live == live_before);
+  lonejson_cleanup(&test_conditional_doc_map, &dyn_doc);
+
+  memset(&fixed_doc, 0, sizeof(fixed_doc));
+  lonejson_init(&test_conditional_doc_map, &fixed_doc);
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &fixed_doc,
+                               "{\"fixed\":\"keep\"}", &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  live_before = alloc.stats.bytes_live;
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &fixed_doc,
+                               "{\"fixed\":\"toolong8\"}", &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strcmp(fixed_doc.fixed, "keep") == 0);
+  EXPECT(alloc.stats.bytes_live == live_before);
+  status = lonejson_parse_cstr(&test_conditional_doc_map, &fixed_doc,
+                               "{\"fixed\":\"bad\\u0000tail\"}", &options,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(strcmp(fixed_doc.fixed, "keep") == 0);
+  EXPECT(alloc.stats.bytes_live == live_before);
+  lonejson_cleanup(&test_conditional_doc_map, &fixed_doc);
+
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_direct_string_fixed_large_capacity_stays_valid(void) {
+  test_large_fixed_string_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  char *payload = make_repeating_text(6000u);
+  char *json;
+  char *small_json;
+  size_t need;
+  size_t small_need;
+
+  EXPECT(payload != NULL);
+  if (payload == NULL) {
+    return;
+  }
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_large_fixed_string_doc_map, &doc);
+  need = snprintf(NULL, 0, "{\"payload\":\"%s\"}", payload);
+  json = (char *)malloc(need + 1u);
+  EXPECT(json != NULL);
+  if (json == NULL) {
+    free(payload);
+    return;
+  }
+  snprintf(json, need + 1u, "{\"payload\":\"%s\"}", payload);
+  small_need = snprintf(NULL, 0, "{\"payload\":\"small\"}");
+  small_json = (char *)malloc(small_need + 1u);
+  EXPECT(small_json != NULL);
+  if (small_json == NULL) {
+    free(json);
+    free(payload);
+    return;
+  }
+  snprintf(small_json, small_need + 1u, "{\"payload\":\"small\"}");
+
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, payload) == 0);
+
+  options.clear_destination = 0;
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc,
+                               small_json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, "small") == 0);
+
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, payload) == 0);
+
+  free(small_json);
+  free(json);
+  free(payload);
+}
+
+static void test_parse_dynamic_string_limit_size_max_is_valid(void) {
+  test_alloc_parse_doc doc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  char *text = make_repeating_text(256u);
+  char *json;
+  size_t need;
+
+  EXPECT(text != NULL);
+  if (text == NULL) {
+    return;
+  }
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_alloc_parse_doc_map, &doc);
+  options.max_dynamic_string_bytes = SIZE_MAX;
+  need = snprintf(NULL, 0, "{\"name\":\"%s\",\"body\":\"\",\"tags\":[]}", text);
+  json = (char *)malloc(need + 1u);
+  EXPECT(json != NULL);
+  if (json == NULL) {
+    free(text);
+    lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
+    return;
+  }
+  snprintf(json, need + 1u, "{\"name\":\"%s\",\"body\":\"\",\"tags\":[]}", text);
+  status = lonejson_parse_cstr(&test_alloc_parse_doc_map, &doc,
+                               json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.name != NULL);
+  EXPECT(strcmp(doc.name, text) == 0);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
+  free(json);
+  free(text);
+}
+
+static void test_fixed_string_reuse_alloc_stage_obeys_budget(void) {
+  test_large_fixed_string_doc doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  char *first = make_repeating_text(6000u);
+  char *second = make_repeating_text(7000u);
+  char *json_first;
+  char *json_second;
+  size_t need_first;
+  size_t need_second;
+
+  EXPECT(first != NULL);
+  EXPECT(second != NULL);
+  if (first == NULL || second == NULL) {
+    free(first);
+    free(second);
+    return;
+  }
+
+  need_first = snprintf(NULL, 0, "{\"payload\":\"%s\"}", first);
+  need_second = snprintf(NULL, 0, "{\"payload\":\"%s\"}", second);
+  json_first = (char *)malloc(need_first + 1u);
+  json_second = (char *)malloc(need_second + 1u);
+  EXPECT(json_first != NULL);
+  EXPECT(json_second != NULL);
+  if (json_first == NULL || json_second == NULL) {
+    free(json_first);
+    free(json_second);
+    free(first);
+    free(second);
+    return;
+  }
+  snprintf(json_first, need_first + 1u, "{\"payload\":\"%s\"}", first);
+  snprintf(json_second, need_second + 1u, "{\"payload\":\"%s\"}", second);
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_large_fixed_string_doc_map, &doc);
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_first,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, first) == 0);
+
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.allocator = &alloc.allocator;
+  options.max_alloc_bytes = sizeof(doc.payload) - 1u;
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_second,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strcmp(doc.payload, first) == 0);
+  EXPECT(alloc.stats.bytes_live == 0u);
+
+  options.max_alloc_bytes = sizeof(doc.payload);
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_second,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, second) == 0);
+  EXPECT(alloc.stats.bytes_live == 0u);
+
+  free(json_first);
+  free(json_second);
+  free(first);
+  free(second);
+}
+
+static void test_fixed_string_small_scratch_falls_back_to_budgeted_alloc(void) {
+  test_large_fixed_string_doc doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  char scratch[64];
+  char *first = make_repeating_text(6000u);
+  char *second = make_repeating_text(7000u);
+  char *json_first;
+  char *json_second;
+  size_t need_first;
+  size_t need_second;
+
+  EXPECT(first != NULL);
+  EXPECT(second != NULL);
+  if (first == NULL || second == NULL) {
+    free(first);
+    free(second);
+    return;
+  }
+
+  need_first = snprintf(NULL, 0, "{\"payload\":\"%s\"}", first);
+  need_second = snprintf(NULL, 0, "{\"payload\":\"%s\"}", second);
+  json_first = (char *)malloc(need_first + 1u);
+  json_second = (char *)malloc(need_second + 1u);
+  EXPECT(json_first != NULL);
+  EXPECT(json_second != NULL);
+  if (json_first == NULL || json_second == NULL) {
+    free(json_first);
+    free(json_second);
+    free(first);
+    free(second);
+    return;
+  }
+  snprintf(json_first, need_first + 1u, "{\"payload\":\"%s\"}", first);
+  snprintf(json_second, need_second + 1u, "{\"payload\":\"%s\"}", second);
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_large_fixed_string_doc_map, &doc);
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_first,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, first) == 0);
+
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.allocator = &alloc.allocator;
+  options.fixed_string_scratch = scratch;
+  options.fixed_string_scratch_size = sizeof(scratch);
+  options.max_alloc_bytes = sizeof(doc.payload) - 1u;
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_second,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strcmp(doc.payload, first) == 0);
+  EXPECT(alloc.stats.alloc_calls == 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+
+  options.max_alloc_bytes = sizeof(doc.payload);
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_second,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, second) == 0);
+  EXPECT(alloc.stats.alloc_calls > 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+
+  free(json_first);
+  free(json_second);
+  free(first);
+  free(second);
+}
+
+static void test_fixed_string_reuse_scratch_avoids_alloc_budget(void) {
+  test_large_fixed_string_doc doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  char scratch[8192];
+  char *payload = make_repeating_text(6000u);
+  char *json;
+  size_t need;
+
+  EXPECT(payload != NULL);
+  if (payload == NULL) {
+    return;
+  }
+  need = snprintf(NULL, 0, "{\"payload\":\"%s\"}", payload);
+  json = (char *)malloc(need + 1u);
+  EXPECT(json != NULL);
+  if (json == NULL) {
+    free(payload);
+    return;
+  }
+  snprintf(json, need + 1u, "{\"payload\":\"%s\"}", payload);
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_large_fixed_string_doc_map, &doc);
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.max_alloc_bytes = 1u;
+  options.fixed_string_scratch = scratch;
+  options.fixed_string_scratch_size = sizeof(scratch);
+  options.allocator = &alloc.allocator;
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, payload) == 0);
+  EXPECT(alloc.stats.alloc_calls == 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+
+  free(json);
+  free(payload);
+}
+
+static void test_fixed_string_reuse_alloc_stage_failure_preserves_old_value(void) {
+  test_large_fixed_string_doc doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  char *first = make_repeating_text(6000u);
+  char *bad = make_repeating_text(7000u);
+  char *json_first;
+  char *json_bad;
+  size_t need_first;
+  size_t need_bad;
+
+  EXPECT(first != NULL);
+  EXPECT(bad != NULL);
+  if (first == NULL || bad == NULL) {
+    free(first);
+    free(bad);
+    return;
+  }
+
+  need_first = snprintf(NULL, 0, "{\"payload\":\"%s\"}", first);
+  need_bad = snprintf(NULL, 0, "{\"payload\":\"%s\\u0000tail\"}", bad);
+  json_first = (char *)malloc(need_first + 1u);
+  json_bad = (char *)malloc(need_bad + 1u);
+  EXPECT(json_first != NULL);
+  EXPECT(json_bad != NULL);
+  if (json_first == NULL || json_bad == NULL) {
+    free(json_first);
+    free(json_bad);
+    free(first);
+    free(bad);
+    return;
+  }
+  snprintf(json_first, need_first + 1u, "{\"payload\":\"%s\"}", first);
+  snprintf(json_bad, need_bad + 1u, "{\"payload\":\"%s\\u0000tail\"}", bad);
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_large_fixed_string_doc_map, &doc);
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_first,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, first) == 0);
+
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.allocator = &alloc.allocator;
+  options.max_alloc_bytes = sizeof(doc.payload);
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_bad,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(strcmp(doc.payload, first) == 0);
+  EXPECT(alloc.stats.bytes_live == 0u);
+
+  free(json_first);
+  free(json_bad);
+  free(first);
+  free(bad);
+}
+
+static void test_fixed_string_reuse_exact_scratch_boundary_and_failures(void) {
+  test_large_fixed_string_doc doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  char scratch[8192];
+  char *first = make_repeating_text(6000u);
+  char *second = make_repeating_text(7000u);
+  char *third = make_repeating_text(6500u);
+  char *json_first;
+  char *json_second;
+  char *json_dup;
+  char *json_bad;
+  size_t need_first;
+  size_t need_second;
+  size_t need_dup;
+  size_t need_bad;
+
+  EXPECT(first != NULL);
+  EXPECT(second != NULL);
+  EXPECT(third != NULL);
+  if (first == NULL || second == NULL || third == NULL) {
+    free(first);
+    free(second);
+    free(third);
+    return;
+  }
+
+  need_first = snprintf(NULL, 0, "{\"payload\":\"%s\"}", first);
+  need_second = snprintf(NULL, 0, "{\"payload\":\"%s\"}", second);
+  need_dup = snprintf(NULL, 0, "{\"payload\":\"%s\",\"payload\":\"%s\"}", second,
+                      third);
+  need_bad = snprintf(NULL, 0, "{\"payload\":\"%s\\u0000tail\"}", third);
+  json_first = (char *)malloc(need_first + 1u);
+  json_second = (char *)malloc(need_second + 1u);
+  json_dup = (char *)malloc(need_dup + 1u);
+  json_bad = (char *)malloc(need_bad + 1u);
+  EXPECT(json_first != NULL);
+  EXPECT(json_second != NULL);
+  EXPECT(json_dup != NULL);
+  EXPECT(json_bad != NULL);
+  if (json_first == NULL || json_second == NULL || json_dup == NULL ||
+      json_bad == NULL) {
+    free(json_first);
+    free(json_second);
+    free(json_dup);
+    free(json_bad);
+    free(first);
+    free(second);
+    free(third);
+    return;
+  }
+  snprintf(json_first, need_first + 1u, "{\"payload\":\"%s\"}", first);
+  snprintf(json_second, need_second + 1u, "{\"payload\":\"%s\"}", second);
+  snprintf(json_dup, need_dup + 1u, "{\"payload\":\"%s\",\"payload\":\"%s\"}",
+           second, third);
+  snprintf(json_bad, need_bad + 1u, "{\"payload\":\"%s\\u0000tail\"}", third);
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_large_fixed_string_doc_map, &doc);
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_first,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, first) == 0);
+
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.allocator = &alloc.allocator;
+  options.max_alloc_bytes = 1u;
+  options.fixed_string_scratch = scratch;
+  options.fixed_string_scratch_size = sizeof(scratch);
+
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_second,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.payload, second) == 0);
+  EXPECT(alloc.stats.alloc_calls == 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_dup,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_DUPLICATE_FIELD);
+  EXPECT(strcmp(doc.payload, second) == 0);
+  EXPECT(alloc.stats.alloc_calls == 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+
+  status = lonejson_parse_cstr(&test_large_fixed_string_doc_map, &doc, json_bad,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(strcmp(doc.payload, second) == 0);
+  EXPECT(alloc.stats.alloc_calls == 0u);
+  EXPECT(alloc.stats.bytes_live == 0u);
+
+  free(json_first);
+  free(json_second);
+  free(json_dup);
+  free(json_bad);
+  free(first);
+  free(second);
+  free(third);
+}
+
+static void test_fixed_string_stage_competes_with_existing_alloc_budget(void) {
+  test_alloc_fixed_combo_doc doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  char *payload = make_repeating_text(6000u);
+  char *json;
+  char *payload_only_json;
+  char scratch[8192];
+  size_t need;
+  size_t payload_only_need;
+  size_t dyn_bytes;
+
+  EXPECT(payload != NULL);
+  if (payload == NULL) {
+    return;
+  }
+  need = snprintf(NULL, 0, "{\"dyn\":\"hold\",\"payload\":\"%s\"}", payload);
+  payload_only_need = snprintf(NULL, 0, "{\"payload\":\"%s\"}", payload);
+  json = (char *)malloc(need + 1u);
+  payload_only_json = (char *)malloc(payload_only_need + 1u);
+  EXPECT(json != NULL);
+  EXPECT(payload_only_json != NULL);
+  if (json == NULL || payload_only_json == NULL) {
+    free(payload);
+    free(json);
+    free(payload_only_json);
+    return;
+  }
+  snprintf(json, need + 1u, "{\"dyn\":\"hold\",\"payload\":\"%s\"}", payload);
+  snprintf(payload_only_json, payload_only_need + 1u, "{\"payload\":\"%s\"}",
+           payload);
+
+  test_allocator_init(&alloc);
+  options.allocator = &alloc.allocator;
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_alloc_fixed_combo_doc_map, &doc);
+  status = lonejson_parse_cstr(&test_alloc_fixed_combo_doc_map, &doc, json,
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.dyn != NULL);
+  dyn_bytes = lonejson__owned_size(doc.dyn);
+  EXPECT(dyn_bytes != 0u);
+
+  options.clear_destination = 0;
+  options.max_alloc_bytes = dyn_bytes + sizeof(doc.payload) - 1u;
+  status = lonejson_parse_cstr(&test_alloc_fixed_combo_doc_map, &doc,
+                               payload_only_json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strcmp(doc.dyn, "hold") == 0);
+  EXPECT(strcmp(doc.payload, payload) == 0);
+  EXPECT(alloc.stats.bytes_live == dyn_bytes);
+
+  options.fixed_string_scratch = scratch;
+  options.fixed_string_scratch_size = sizeof(scratch);
+  options.max_alloc_bytes = dyn_bytes;
+  status = lonejson_parse_cstr(&test_alloc_fixed_combo_doc_map, &doc,
+                               payload_only_json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.dyn, "hold") == 0);
+  EXPECT(strcmp(doc.payload, payload) == 0);
+  EXPECT(alloc.stats.bytes_live == dyn_bytes);
+
+  lonejson_cleanup(&test_alloc_fixed_combo_doc_map, &doc);
+  free(json);
+  free(payload_only_json);
+  free(payload);
+}
+
+static void test_parse_alloc_cap_array_truncate_modes_still_fail_hard(void) {
+  static const char ints_json[] = "{\"ints\":[1,2,3,4,5]}";
+  static const char tags_json[] =
+      "{\"tags\":[\"a\",\"b\",\"c\",\"d\",\"e\"]}";
+  static const char items_json[] =
+      "{\"items\":[{\"id\":1},{\"id\":2},{\"id\":3},{\"id\":4},{\"id\":5}]}";
+  const lonejson_map *maps[] = {&test_trunc_array_doc_map,
+                                &test_silent_array_doc_map};
+  size_t i;
+
+  for (i = 0u; i < sizeof(maps) / sizeof(maps[0]); ++i) {
+    test_trunc_array_doc doc;
+    lonejson_parse_options options = lonejson_default_parse_options();
+    lonejson_error error;
+    lonejson_status status;
+
+    memset(&doc, 0, sizeof(doc));
+    lonejson_init(maps[i], &doc);
+    options.max_alloc_bytes = sizeof(lonejson_int64) * 4u - 1u;
+    status = lonejson_parse_cstr(maps[i], &doc, ints_json, &options, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+           NULL);
+    EXPECT(doc.ints.count == 0u);
+    lonejson_cleanup(maps[i], &doc);
+
+    memset(&doc, 0, sizeof(doc));
+    lonejson_init(maps[i], &doc);
+    options.max_alloc_bytes = sizeof(lonejson_int64) * 4u;
+    status = lonejson_parse_cstr(maps[i], &doc, ints_json, &options, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+           NULL);
+    EXPECT(doc.ints.count == 4u);
+    lonejson_cleanup(maps[i], &doc);
+
+    memset(&doc, 0, sizeof(doc));
+    lonejson_init(maps[i], &doc);
+    options.max_alloc_bytes = sizeof(char *) * 4u - 1u;
+    status = lonejson_parse_cstr(maps[i], &doc, tags_json, &options, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+           NULL);
+    EXPECT(doc.tags.count == 0u);
+    lonejson_cleanup(maps[i], &doc);
+
+    memset(&doc, 0, sizeof(doc));
+    lonejson_init(maps[i], &doc);
+    options.max_alloc_bytes = sizeof(char *) * 4u + 8u;
+    status = lonejson_parse_cstr(maps[i], &doc, tags_json, &options, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+           NULL);
+    EXPECT(doc.tags.count == 4u);
+    lonejson_cleanup(maps[i], &doc);
+
+    memset(&doc, 0, sizeof(doc));
+    lonejson_init(maps[i], &doc);
+    options.max_alloc_bytes = sizeof(test_item) * 4u - 1u;
+    status = lonejson_parse_cstr(maps[i], &doc, items_json, &options, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+           NULL);
+    EXPECT(doc.items.count == 0u);
+    lonejson_cleanup(maps[i], &doc);
+
+    memset(&doc, 0, sizeof(doc));
+    lonejson_init(maps[i], &doc);
+    options.max_alloc_bytes = sizeof(test_item) * 4u;
+    status = lonejson_parse_cstr(maps[i], &doc, items_json, &options, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    EXPECT(strstr(error.message, "parse allocations exceed configured max bytes") !=
+           NULL);
+    EXPECT(doc.items.count == 4u);
+    lonejson_cleanup(maps[i], &doc);
+  }
+}
+
+static void test_parse_spool_default_and_unbounded_limits(void) {
+  static const char default_prefix[] = "{\"text\":\"";
+  static const char default_suffix[] = "\"}";
+  static const char explicit_prefix[] = "{\"name\":\"ok\",\"body\":\"";
+  static const char explicit_suffix[] = "\",\"tags\":[]}";
+  test_generated_json_reader_state reader;
+  test_conditional_doc default_doc;
+  test_alloc_parse_doc explicit_doc;
+  lonejson_error error;
+  lonejson_status status;
+  size_t payload_len = LONEJSON_SPOOL_MAX_BYTES + 1u;
+
+  memset(&default_doc, 0, sizeof(default_doc));
+  lonejson_init(&test_conditional_doc_map, &default_doc);
+  memset(&reader, 0, sizeof(reader));
+  reader.prefix = default_prefix;
+  reader.prefix_len = sizeof(default_prefix) - 1u;
+  reader.payload_len = payload_len;
+  reader.suffix = default_suffix;
+  reader.suffix_len = sizeof(default_suffix) - 1u;
+  reader.fill = 'x';
+  reader.chunk_limit = 4096u;
+  status = lonejson_parse_reader(&test_conditional_doc_map, &default_doc,
+                                 test_generated_json_reader, &reader, NULL,
+                                 &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "spooled field exceeds configured max bytes") !=
+         NULL);
+  lonejson_cleanup(&test_conditional_doc_map, &default_doc);
+
+  memset(&explicit_doc, 0, sizeof(explicit_doc));
+  lonejson_init(&test_alloc_parse_doc_map, &explicit_doc);
+  memset(&reader, 0, sizeof(reader));
+  reader.prefix = explicit_prefix;
+  reader.prefix_len = sizeof(explicit_prefix) - 1u;
+  reader.payload_len = payload_len;
+  reader.suffix = explicit_suffix;
+  reader.suffix_len = sizeof(explicit_suffix) - 1u;
+  reader.fill = 'y';
+  reader.chunk_limit = 4096u;
+  status = lonejson_parse_reader(&test_alloc_parse_doc_map, &explicit_doc,
+                                 test_generated_json_reader, &reader, NULL,
+                                 &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_spooled_size(&explicit_doc.body) == payload_len);
+  EXPECT(lonejson_spooled_spilled(&explicit_doc.body) != 0);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &explicit_doc);
+}
+
+static void test_parse_base64_stream_default_limit(void) {
+  static const char prefix[] = "{\"id\":\"b64\",\"text\":\"\",\"bytes\":\"";
+  static const char suffix[] = "\"}";
+  test_generated_json_reader_state reader;
+  test_conditional_doc doc;
+  lonejson_error error;
+  lonejson_status status;
+  size_t decoded_len = LONEJSON_SPOOL_MAX_BYTES + 1u;
+  size_t encoded_len = ((decoded_len + 2u) / 3u) * 4u;
+
+  memset(&reader, 0, sizeof(reader));
+  reader.prefix = prefix;
+  reader.prefix_len = sizeof(prefix) - 1u;
+  reader.payload_len = encoded_len;
+  reader.suffix = suffix;
+  reader.suffix_len = sizeof(suffix) - 1u;
+  reader.fill = 'A';
+  reader.chunk_limit = 4096u;
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(&test_conditional_doc_map, &doc);
+  status = lonejson_parse_reader(&test_conditional_doc_map, &doc,
+                                 test_generated_json_reader, &reader, NULL,
+                                 &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "spooled field exceeds configured max bytes") !=
+         NULL);
+  lonejson_cleanup(&test_conditional_doc_map, &doc);
 }
 
 static void test_f64_boundary_exponents_stay_on_fast_path(void) {
@@ -878,6 +1997,74 @@ static void test_chunked_parser_and_missing_required(void) {
   lonejson_cleanup(&test_person_map, &person);
 }
 
+static void test_incremental_parse_large_dynamic_strings(void) {
+  static const size_t feed_chunks[] = {1u, 7u, 97u};
+  const size_t text_len = 10000u;
+  const char *prefix = "{\"type\":\"doc\",\"text\":\"";
+  const char *suffix = "\"}";
+  size_t json_len;
+  char *json;
+  size_t i;
+
+  json_len = strlen(prefix) + text_len + strlen(suffix);
+  json = (char *)malloc(json_len + 1u);
+  EXPECT(json != NULL);
+  if (json == NULL) {
+    return;
+  }
+  memcpy(json, prefix, strlen(prefix));
+  memset(json + strlen(prefix), 'x', text_len);
+  memcpy(json + strlen(prefix) + text_len, suffix, strlen(suffix) + 1u);
+
+  for (i = 0u; i < sizeof(feed_chunks) / sizeof(feed_chunks[0]); ++i) {
+    test_sse_large_event_doc doc;
+    lonejson_parser parser;
+    unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE +
+                            LONEJSON__PARSER_WORKSPACE_SLACK];
+    lonejson_status status;
+    size_t offset;
+
+    memset(&doc, 0, sizeof(doc));
+    lonejson_init(&test_sse_large_event_doc_map, &doc);
+    lonejson__parser_init_state(&parser, &test_sse_large_event_doc_map, &doc,
+                                NULL, 0, workspace, sizeof(workspace));
+    for (offset = 0u; offset < json_len; offset += feed_chunks[i]) {
+      size_t chunk = json_len - offset;
+      if (chunk > feed_chunks[i]) {
+        chunk = feed_chunks[i];
+      }
+      status = lonejson_parser_feed(&parser, json + offset, chunk);
+      EXPECT(status == LONEJSON_STATUS_OK);
+    }
+    status = lonejson_parser_finish(&parser);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(doc.type != NULL && strcmp(doc.type, "doc") == 0);
+    EXPECT(doc.text != NULL && strlen(doc.text) == text_len);
+    lonejson_parser_destroy(&parser);
+    lonejson_cleanup(&test_sse_large_event_doc_map, &doc);
+  }
+
+  {
+    test_reader_state state;
+    test_sse_large_event_doc doc;
+    lonejson_error error;
+    lonejson_status status;
+
+    state.json = json;
+    state.offset = 0u;
+    state.chunk_size = 13u;
+    memset(&doc, 0, sizeof(doc));
+    status = lonejson_parse_reader(&test_sse_large_event_doc_map, &doc,
+                                   test_state_reader, &state, NULL, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(doc.type != NULL && strcmp(doc.type, "doc") == 0);
+    EXPECT(doc.text != NULL && strlen(doc.text) == text_len);
+    lonejson_cleanup(&test_sse_large_event_doc_map, &doc);
+  }
+
+  free(json);
+}
+
 static void test_object_framed_stream_jsonl(void) {
   test_reader_state state = {
       " \n{\"name\":\"One\",\"address\":{\"city\":\"A\",\"zip\":1},"
@@ -1065,5 +2252,59 @@ test_stream_reuse_fixed_capacity_string_array_frees_replaced_entries(void) {
 
   lonejson_stream_close(stream);
   lonejson_cleanup(&test_person_map, &person);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_stream_reuse_releases_spooled_budget_bytes(void) {
+  test_reader_state state = {
+      "{\"id\":\"one\",\"text\":\"abc\"}{\"id\":\"two\",\"text\":\"def\"}",
+      0u,
+      5u};
+  test_spool_doc doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_stream *stream;
+  lonejson_error error;
+  lonejson_stream_result result;
+  unsigned char text_buf[8];
+  size_t n;
+  char fixed_scratch[16];
+
+  memset(&doc, 0, sizeof(doc));
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.max_alloc_bytes = 5u;
+  options.allocator = &alloc.allocator;
+  options.fixed_string_scratch = fixed_scratch;
+  options.fixed_string_scratch_size = sizeof(fixed_scratch);
+
+  lonejson_init(&test_spool_doc_map, &doc);
+  stream = lonejson_stream_open_reader(&test_spool_doc_map, test_framed_reader,
+                                       &state, &options, &error);
+  EXPECT(stream != NULL);
+  if (stream == NULL) {
+    lonejson_cleanup(&test_spool_doc_map, &doc);
+    return;
+  }
+
+  result = lonejson_stream_next(stream, &doc, &error);
+  EXPECT(result == LONEJSON_STREAM_OBJECT);
+  EXPECT(strcmp(doc.id, "one") == 0);
+  n = read_spooled_all(&doc.text, text_buf, sizeof(text_buf));
+  EXPECT(n == 3u);
+  EXPECT(memcmp(text_buf, "abc", 3u) == 0);
+
+  result = lonejson_stream_next(stream, &doc, &error);
+  EXPECT(result == LONEJSON_STREAM_OBJECT);
+  EXPECT(strcmp(doc.id, "two") == 0);
+  n = read_spooled_all(&doc.text, text_buf, sizeof(text_buf));
+  EXPECT(n == 3u);
+  EXPECT(memcmp(text_buf, "def", 3u) == 0);
+
+  result = lonejson_stream_next(stream, &doc, &error);
+  EXPECT(result == LONEJSON_STREAM_EOF);
+
+  lonejson_stream_close(stream);
+  lonejson_cleanup(&test_spool_doc_map, &doc);
   EXPECT(alloc.stats.bytes_live == 0u);
 }

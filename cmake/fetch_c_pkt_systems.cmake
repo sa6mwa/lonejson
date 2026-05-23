@@ -9,6 +9,10 @@ set(LONEJSON_C_PKT_SYSTEMS_VERSION "0.1.0" CACHE STRING
 set(LONEJSON_C_PKT_SYSTEMS_BASE_URL
     "https://github.com/sa6mwa/c.pkt.systems/releases/download/v${LONEJSON_C_PKT_SYSTEMS_VERSION}"
     CACHE STRING "Base URL for c.pkt.systems release downloads.")
+set(LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES "4" CACHE STRING
+    "Number of download attempts for c.pkt.systems bundles before failing.")
+set(LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS "1" CACHE STRING
+    "Seconds to wait between c.pkt.systems bundle download retries.")
 
 function(lonejson_detect_host_arch out_var)
   execute_process(
@@ -130,6 +134,68 @@ function(lonejson_c_pkt_systems_sha256 target_id out_var)
   set(${out_var} "${_sha256}" PARENT_SCOPE)
 endfunction()
 
+function(lonejson_download_c_pkt_systems_bundle url archive_path expected_sha256)
+  if(NOT LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES MATCHES "^[0-9]+$")
+    message(FATAL_ERROR
+      "LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES must be a non-negative integer.")
+  endif()
+  if(NOT LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS MATCHES "^[0-9]+$")
+    message(FATAL_ERROR
+      "LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS must be a non-negative integer.")
+  endif()
+  if(LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES LESS 1)
+    message(FATAL_ERROR
+      "LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES must be at least 1.")
+  endif()
+
+  set(_last_message "download not attempted")
+  foreach(_attempt RANGE 1 ${LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES})
+    file(REMOVE "${archive_path}")
+
+    if(DEFINED LONEJSON_C_PKT_SYSTEMS_TEST_FAIL_DOWNLOAD_ATTEMPTS AND
+       _attempt LESS_EQUAL LONEJSON_C_PKT_SYSTEMS_TEST_FAIL_DOWNLOAD_ATTEMPTS)
+      set(_download_code 22)
+      set(_download_message "HTTP response code said error")
+    else()
+      file(DOWNLOAD
+        "${url}"
+        "${archive_path}"
+        SHOW_PROGRESS
+        STATUS _download_status
+        TLS_VERIFY ON)
+      list(GET _download_status 0 _download_code)
+      list(GET _download_status 1 _download_message)
+    endif()
+
+    if(_download_code EQUAL 0)
+      file(SHA256 "${archive_path}" _downloaded_sha256)
+      if(_downloaded_sha256 STREQUAL expected_sha256)
+        return()
+      endif()
+      set(_download_code 1)
+      set(_download_message
+        "SHA256 mismatch (expected ${expected_sha256}, got ${_downloaded_sha256})")
+    endif()
+
+    file(REMOVE "${archive_path}")
+    set(_last_message "${_download_message}")
+    if(_attempt LESS LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES)
+      message(WARNING
+        "Download attempt ${_attempt}/${LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES} "
+        "failed for ${url}: ${_download_message}; retrying in "
+        "${LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS}s")
+      if(NOT LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS STREQUAL "0")
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E
+          sleep "${LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS}")
+      endif()
+    endif()
+  endforeach()
+
+  message(FATAL_ERROR
+    "Failed to download ${url} after "
+    "${LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES} attempts: ${_last_message}")
+endfunction()
+
 set(_target_id "${LONEJSON_C_PKT_SYSTEMS_TARGET_ID}")
 set(_bundle_dir_name "c.pkt.systems-${LONEJSON_C_PKT_SYSTEMS_VERSION}-${_target_id}")
 set(_filename "${_bundle_dir_name}.tar.gz")
@@ -140,6 +206,9 @@ set(_extract_root "${_deps_root}/root")
 set(_staging_root "${_deps_root}/extract")
 set(_stamp_path "${_extract_root}/.lonejson-c-pkt-systems-version")
 lonejson_c_pkt_systems_sha256("${_target_id}" _expected_sha256)
+if(DEFINED LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE)
+  set(_expected_sha256 "${LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE}")
+endif()
 
 function(lonejson_validate_c_pkt_systems_bundle extract_root filename target_id curl_version_out openssl_version_out)
   set(_curl_version_header "${extract_root}/include/curl/curlver.h")
@@ -194,18 +263,7 @@ if(EXISTS "${_stamp_path}")
 endif()
 
 message(STATUS "Downloading ${_url}")
-file(DOWNLOAD
-  "${_url}"
-  "${_archive_path}"
-  EXPECTED_HASH "SHA256=${_expected_sha256}"
-  SHOW_PROGRESS
-  STATUS _download_status
-  TLS_VERIFY ON)
-list(GET _download_status 0 _download_code)
-list(GET _download_status 1 _download_message)
-if(NOT _download_code EQUAL 0)
-  message(FATAL_ERROR "Failed to download ${_url}: ${_download_message}")
-endif()
+lonejson_download_c_pkt_systems_bundle("${_url}" "${_archive_path}" "${_expected_sha256}")
 
 file(REMOVE_RECURSE "${_extract_root}")
 file(REMOVE_RECURSE "${_staging_root}")

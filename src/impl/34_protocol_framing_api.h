@@ -309,8 +309,10 @@ lonejson_status lonejson_sse_finish(lonejson_sse *sse,
 typedef struct lonejson__sse_json_ctx {
   const lonejson_map *map;
   void *dst;
+  lonejson_json_value *value;
   const lonejson_sse_json_options *options;
   lonejson_sse_json_event_fn cb;
+  lonejson_sse_json_value_event_fn value_cb;
   void *user;
 } lonejson__sse_json_ctx;
 
@@ -337,12 +339,53 @@ lonejson__sse_json_has_filter(const lonejson_sse_json_options *options) {
          options->event_name_count != 0u;
 }
 
+static void lonejson__sse_json_cleanup_retained_map_destination(
+    lonejson_sse *sse) {
+  if (sse == NULL) {
+    return;
+  }
+  if (sse->json_retained_active && sse->json_retained_map != NULL &&
+      sse->json_retained_dst != NULL) {
+    lonejson__cleanup_map_checked(sse->json_retained_map,
+                                  sse->json_retained_dst);
+  }
+  sse->json_retained_map = NULL;
+  sse->json_retained_dst = NULL;
+  sse->json_retained_active = 0;
+}
+
+static void lonejson__sse_json_cleanup_retained_value_destination(
+    lonejson_sse *sse) {
+  if (sse == NULL) {
+    return;
+  }
+  if (sse->json_retained_value_active && sse->json_retained_value != NULL) {
+    lonejson__json_value_clear_runtime(sse->json_retained_value);
+  }
+  sse->json_retained_value = NULL;
+  sse->json_retained_value_active = 0;
+}
+
+static void lonejson__sse_json_cleanup_current_destination(lonejson_sse *sse) {
+  if (sse == NULL) {
+    return;
+  }
+  if (sse->json_value != NULL) {
+    lonejson__sse_json_cleanup_retained_value_destination(sse);
+    return;
+  }
+  if (sse->json_parser.options.clear_destination) {
+    lonejson__sse_json_cleanup_retained_map_destination(sse);
+  }
+}
+
 static void lonejson__sse_json_reset_event(lonejson_sse *sse) {
   if (sse->json_parser_active) {
     lonejson_parser_destroy(&sse->json_parser);
   }
   sse->json_map = NULL;
   sse->json_dst = NULL;
+  sse->json_value = NULL;
   sse->json_parse_options = NULL;
   sse->json_data_len = 0u;
   sse->json_parser_active = 0;
@@ -364,14 +407,28 @@ lonejson__sse_json_begin_parser(lonejson_sse *sse,
   }
   lonejson__parser_init_state(&sse->json_parser, ctx->map, ctx->dst,
                               ctx->options ? ctx->options->parse_options : NULL,
-                              0, sse->json_workspace,
+                              ctx->value != NULL, sse->json_workspace,
                               sizeof(sse->json_workspace));
-  if (sse->json_parser.options.clear_destination) {
+  if (ctx->value != NULL) {
+    lonejson_status status =
+        lonejson__json_value_prepare_parse(&sse->json_parser, ctx->value, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    lonejson__parser_set_json_stream_value(&sse->json_parser, ctx->value);
+    sse->json_retained_value = ctx->value;
+    sse->json_retained_value_active = 1;
+  } else if (sse->json_parser.options.clear_destination) {
+    lonejson__sse_json_cleanup_retained_map_destination(sse);
     lonejson__init_map_with_allocator(ctx->map, ctx->dst,
                                       &sse->json_parser.allocator);
+    sse->json_retained_map = ctx->map;
+    sse->json_retained_dst = ctx->dst;
+    sse->json_retained_active = 1;
   }
   sse->json_map = ctx->map;
   sse->json_dst = ctx->dst;
+  sse->json_value = ctx->value;
   sse->json_parse_options = ctx->options ? ctx->options->parse_options : NULL;
   sse->json_parser_active = 1;
   lonejson__clear_error(error);
@@ -401,6 +458,7 @@ static lonejson_status lonejson__sse_json_feed_data(
   }
   if (sse->json_parser_active &&
       (sse->json_map != ctx->map || sse->json_dst != ctx->dst ||
+       sse->json_value != ctx->value ||
        sse->json_parse_options !=
            (ctx->options ? ctx->options->parse_options : NULL))) {
     return lonejson__set_error(
@@ -417,6 +475,7 @@ static lonejson_status lonejson__sse_json_feed_data(
       if (error != NULL) {
         *error = sse->json_parser.error;
       }
+      lonejson__sse_json_cleanup_current_destination(sse);
       lonejson__sse_json_reset_event(sse);
       return status;
     }
@@ -427,6 +486,7 @@ static lonejson_status lonejson__sse_json_feed_data(
     if (error != NULL) {
       *error = sse->json_parser.error;
     }
+    lonejson__sse_json_cleanup_current_destination(sse);
     lonejson__sse_json_reset_event(sse);
     return status;
   }
@@ -466,6 +526,7 @@ lonejson__sse_json_emit(lonejson_sse *sse, const lonejson__sse_json_ctx *ctx,
     if (error != NULL) {
       *error = sse->json_parser.error;
     }
+    lonejson__sse_json_cleanup_current_destination(sse);
     lonejson__sse_json_reset_event(sse);
     return status;
   }
@@ -478,6 +539,24 @@ lonejson__sse_json_emit(lonejson_sse *sse, const lonejson__sse_json_ctx *ctx,
     event.has_retry = sse->has_retry;
     status = ctx->cb(ctx->user, &event, ctx->dst, error);
     if (status != LONEJSON_STATUS_OK) {
+      lonejson__sse_json_cleanup_current_destination(sse);
+      lonejson__sse_json_reset_event(sse);
+      if (error != NULL && error->code != LONEJSON_STATUS_OK) {
+        return error->code;
+      }
+      return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
+                                 0u, "SSE JSON callback failed");
+    }
+  } else if (ctx->value_cb != NULL) {
+    memset(&event, 0, sizeof(event));
+    event.event = sse->event.data ? sse->event.data : "";
+    event.id = sse->id.data ? sse->id.data : NULL;
+    event.data_len = sse->json_data_len;
+    event.retry_ms = sse->retry_ms;
+    event.has_retry = sse->has_retry;
+    status = ctx->value_cb(ctx->user, &event, ctx->value, error);
+    if (status != LONEJSON_STATUS_OK) {
+      lonejson__sse_json_cleanup_current_destination(sse);
       lonejson__sse_json_reset_event(sse);
       if (error != NULL && error->code != LONEJSON_STATUS_OK) {
         return error->code;
@@ -627,8 +706,10 @@ LONEJSON__COLD lonejson_status lonejson_sse_push_json(
   }
   ctx.map = map;
   ctx.dst = dst;
+  ctx.value = NULL;
   ctx.options = options;
   ctx.cb = event_cb;
+  ctx.value_cb = NULL;
   ctx.user = user;
   return lonejson__sse_push_json_impl(sse, &ctx, bytes, len, error);
 }
@@ -651,8 +732,89 @@ lonejson_sse_finish_json(lonejson_sse *sse, const lonejson_map *map, void *dst,
   }
   ctx.map = map;
   ctx.dst = dst;
+  ctx.value = NULL;
   ctx.options = options;
   ctx.cb = event_cb;
+  ctx.value_cb = NULL;
+  ctx.user = user;
+  if (sse == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "SSE parser is required");
+  }
+  if (sse->closed) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (sse->saw_cr || sse->line.len != 0u) {
+    sse->saw_cr = 0;
+    {
+      lonejson_status status =
+          lonejson__sse_json_process_line(sse, &ctx, error);
+      lonejson__byte_reset(&sse->line);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+    }
+  }
+  {
+    lonejson_status status = lonejson__sse_json_emit(sse, &ctx, error);
+    if (status == LONEJSON_STATUS_OK) {
+      sse->closed = 1;
+    }
+    return status;
+  }
+}
+
+LONEJSON__NOINLINE
+LONEJSON__COLD lonejson_status lonejson_sse_push_json_value(
+    lonejson_sse *sse, lonejson_json_value *value, const void *bytes,
+    size_t len, const lonejson_sse_json_options *options,
+    lonejson_sse_json_value_event_fn event_cb, void *user,
+    lonejson_error *error) {
+  lonejson__sse_json_ctx ctx;
+
+  if (value == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JSON value handle is required");
+  }
+  if (options != NULL && options->parse_options != NULL &&
+      !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->parse_options->allocator)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "allocator must provide either all callbacks or none");
+  }
+  ctx.map = NULL;
+  ctx.dst = NULL;
+  ctx.value = value;
+  ctx.options = options;
+  ctx.cb = NULL;
+  ctx.value_cb = event_cb;
+  ctx.user = user;
+  return lonejson__sse_push_json_impl(sse, &ctx, bytes, len, error);
+}
+
+lonejson_status lonejson_sse_finish_json_value(
+    lonejson_sse *sse, lonejson_json_value *value,
+    const lonejson_sse_json_options *options,
+    lonejson_sse_json_value_event_fn event_cb, void *user,
+    lonejson_error *error) {
+  lonejson__sse_json_ctx ctx;
+
+  if (value == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JSON value handle is required");
+  }
+  if (options != NULL && options->parse_options != NULL &&
+      !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->parse_options->allocator)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "allocator must provide either all callbacks or none");
+  }
+  ctx.map = NULL;
+  ctx.dst = NULL;
+  ctx.value = value;
+  ctx.options = options;
+  ctx.cb = NULL;
+  ctx.value_cb = event_cb;
   ctx.user = user;
   if (sse == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,

@@ -1,0 +1,11 @@
+Jevent: keep
+id: evt-1
+data: {"type":"response.created","status":"created","text":"alpha"}
+
+event: skip
+data: {"type":"response.output_text.delta","text":"x"}
+
+event: keep
+id: evt-2
+data: {"type":"response.output_item.done","text":"omega"}
+

@@ -635,6 +635,116 @@ static void test_json_value_parse_capture_escapes(void) {
   lonejson_cleanup(&test_json_value_doc_map, &doc);
 }
 
+static void test_json_value_stream_reuse_releases_capture_budget(void) {
+  test_reader_state state = {
+      "{\"id\":\"one\",\"selector\":\"a\"}{\"id\":\"two\",\"selector\":\"b\"}",
+      0u,
+      2u};
+  test_json_value_doc doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_stream *stream;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson_stream_result result;
+  char fixed_scratch[16];
+
+  memset(&doc, 0, sizeof(doc));
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.max_alloc_bytes = 16u;
+  options.allocator = &alloc.allocator;
+  options.fixed_string_scratch = fixed_scratch;
+  options.fixed_string_scratch_size = sizeof(fixed_scratch);
+
+  lonejson__init_map(&test_json_value_doc_map, &doc);
+  status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+
+  stream = lonejson_stream_open_reader(&test_json_value_doc_map,
+                                       test_framed_reader, &state, &options,
+                                       &error);
+  EXPECT(stream != NULL);
+  if (stream == NULL) {
+    lonejson_cleanup(&test_json_value_doc_map, &doc);
+    return;
+  }
+
+  result = lonejson_stream_next(stream, &doc, &error);
+  EXPECT(result == LONEJSON_STREAM_OBJECT);
+  EXPECT(strcmp(doc.id, "one") == 0);
+  EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_BUFFER);
+  EXPECT(strcmp(doc.selector.json, "\"a\"") == 0);
+
+  result = lonejson_stream_next(stream, &doc, &error);
+  EXPECT(result == LONEJSON_STREAM_OBJECT);
+  EXPECT(strcmp(doc.id, "two") == 0);
+  EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_BUFFER);
+  EXPECT(strcmp(doc.selector.json, "\"b\"") == 0);
+
+  result = lonejson_stream_next(stream, &doc, &error);
+  EXPECT(result == LONEJSON_STREAM_EOF);
+
+  lonejson_stream_close(stream);
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
+static void test_nested_json_value_stream_reuse_releases_capture_budget(void) {
+  test_reader_state state = {
+      "{\"type\":\"one\",\"response\":{\"payload\":\"a\"}}"
+      "{\"type\":\"two\",\"response\":{\"payload\":\"b\"}}",
+      0u,
+      3u};
+  test_nested_json_value_doc doc;
+  test_allocator_state alloc;
+  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson_stream *stream;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson_stream_result result;
+  char fixed_scratch[32];
+
+  memset(&doc, 0, sizeof(doc));
+  test_allocator_init(&alloc);
+  options.clear_destination = 0;
+  options.max_alloc_bytes = 16u;
+  options.allocator = &alloc.allocator;
+  options.fixed_string_scratch = fixed_scratch;
+  options.fixed_string_scratch_size = sizeof(fixed_scratch);
+
+  lonejson__init_map(&test_nested_json_value_doc_map, &doc);
+  status =
+      lonejson_json_value_enable_parse_capture(&doc.response.payload, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+
+  stream = lonejson_stream_open_reader(&test_nested_json_value_doc_map,
+                                       test_framed_reader, &state, &options,
+                                       &error);
+  EXPECT(stream != NULL);
+  if (stream == NULL) {
+    lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+    return;
+  }
+
+  result = lonejson_stream_next(stream, &doc, &error);
+  EXPECT(result == LONEJSON_STREAM_OBJECT);
+  EXPECT(strcmp(doc.type, "one") == 0);
+  EXPECT(strcmp(doc.response.payload.json, "\"a\"") == 0);
+
+  result = lonejson_stream_next(stream, &doc, &error);
+  EXPECT(result == LONEJSON_STREAM_OBJECT);
+  EXPECT(strcmp(doc.type, "two") == 0);
+  EXPECT(strcmp(doc.response.payload.json, "\"b\"") == 0);
+
+  result = lonejson_stream_next(stream, &doc, &error);
+  EXPECT(result == LONEJSON_STREAM_EOF);
+
+  lonejson_stream_close(stream);
+  lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+  EXPECT(alloc.stats.bytes_live == 0u);
+}
+
 static void test_json_value_parse_stream_sink(void) {
   const char *json =
       "{"
