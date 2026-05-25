@@ -29,6 +29,17 @@ static const lonejson_field consumer_log_fields[] = {
                                 LONEJSON_OVERFLOW_FAIL)};
 LONEJSON_MAP_DEFINE(consumer_log_map, consumer_log, consumer_log_fields);
 
+static lonejson *consumer_runtime(void) {
+  static lonejson *runtime = NULL;
+
+  if (runtime == NULL) {
+    lonejson_config config = lonejson_default_config();
+    config.write_pretty = 1;
+    runtime = lonejson_new(&config, NULL);
+  }
+  return runtime;
+}
+
 int main(void) {
   static const char json[] =
       "{\"person\":{\"name\":\"Alice\",\"age\":37,\"active\":true},"
@@ -36,14 +47,14 @@ int main(void) {
   consumer_log log_record;
   lonejson_error error;
   lonejson_status status;
-  lonejson_write_options options;
   char buffer[256];
 
-  lonejson_init(&consumer_log_map, &log_record);
+  lonejson_init(consumer_runtime(), &consumer_log_map, &log_record);
   lonejson_error_init(&error);
 
   status =
-      lonejson_parse_cstr(&consumer_log_map, &log_record, json, NULL, &error);
+      lonejson_parse_cstr(consumer_runtime(), &consumer_log_map, &log_record,
+                          json, &error);
   if (status != LONEJSON_STATUS_OK) {
     return 1;
   }
@@ -56,10 +67,9 @@ int main(void) {
     return 1;
   }
 
-  options = lonejson_default_write_options();
-  options.pretty = 1;
-  status = lonejson_serialize_buffer(&consumer_log_map, &log_record, buffer,
-                                     sizeof(buffer), NULL, &options, &error);
+  status = lonejson_serialize_buffer(consumer_runtime(), &consumer_log_map,
+                                     &log_record, buffer, sizeof(buffer), NULL,
+                                     &error);
   lonejson_cleanup(&consumer_log_map, &log_record);
   if (status != LONEJSON_STATUS_OK) {
     return 1;

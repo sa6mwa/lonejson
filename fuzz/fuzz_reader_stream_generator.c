@@ -74,34 +74,46 @@ static lonejson_read_result fuzz_reader(void *user, unsigned char *buffer,
 
 static void fuzz_parse_reader_path(const uint8_t *data, size_t size,
                                    size_t chunk_size) {
+  lonejson *runtime;
   fuzz_reader_state reader;
   fuzz_person person;
   lonejson_error error;
 
   memset(&person, 0, sizeof(person));
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    return;
+  }
   reader.data = data;
   reader.len = size;
   reader.offset = 0u;
   reader.chunk_size = chunk_size;
-  (void)lonejson_parse_reader(&fuzz_person_map, &person, fuzz_reader, &reader,
-                              NULL, &error);
+  (void)lonejson_parse_reader(runtime, &fuzz_person_map, &person, fuzz_reader,
+                              &reader, &error);
   lonejson_cleanup(&fuzz_person_map, &person);
+  lonejson_free(runtime);
 }
 
 static void fuzz_stream_path(const uint8_t *data, size_t size,
                              size_t chunk_size) {
+  lonejson *runtime;
   fuzz_reader_state reader;
   lonejson_stream *stream;
   lonejson_error error;
   size_t i;
 
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    return;
+  }
   reader.data = data;
   reader.len = size;
   reader.offset = 0u;
   reader.chunk_size = chunk_size;
-  stream = lonejson_stream_open_reader(&fuzz_person_map, fuzz_reader, &reader,
-                                       NULL, &error);
+  stream = lonejson_stream_open_reader(runtime, &fuzz_person_map, fuzz_reader,
+                                       &reader, &error);
   if (stream == NULL) {
+    lonejson_free(runtime);
     return;
   }
   for (i = 0u; i < 8u; ++i) {
@@ -118,9 +130,11 @@ static void fuzz_stream_path(const uint8_t *data, size_t size,
     break;
   }
   lonejson_stream_close(stream);
+  lonejson_free(runtime);
 }
 
-static void fuzz_generator_path(const fuzz_person *person, size_t chunk_size) {
+static void fuzz_generator_path(lonejson *runtime, const fuzz_person *person,
+                                size_t chunk_size) {
   lonejson_generator generator;
   unsigned char buffer[32];
   size_t out_len;
@@ -128,11 +142,11 @@ static void fuzz_generator_path(const fuzz_person *person, size_t chunk_size) {
   size_t i;
 
   memset(&generator, 0, sizeof(generator));
-  if (lonejson_generator_init(&generator, &fuzz_person_map, person, NULL) !=
+  if (lonejson_generator_init(runtime, &generator, &fuzz_person_map, person) !=
       LONEJSON_STATUS_OK) {
     return;
   }
-  (void)lonejson_generator_measure(&fuzz_person_map, person, &out_len, NULL,
+  (void)lonejson_generator_measure(runtime, &fuzz_person_map, person, &out_len,
                                    NULL);
   eof = 0;
   for (i = 0u; i < 4096u && !eof; ++i) {
@@ -149,6 +163,7 @@ static void fuzz_generator_path(const fuzz_person *person, size_t chunk_size) {
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  lonejson *runtime;
   fuzz_person person;
   lonejson_error error;
   lonejson_status status;
@@ -162,12 +177,17 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   fuzz_parse_reader_path(data, size, chunk_size);
   fuzz_stream_path(data, size, chunk_size);
 
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    return 0;
+  }
   memset(&person, 0, sizeof(person));
-  status = lonejson_parse_buffer(&fuzz_person_map, &person, data, size, NULL,
-                                 &error);
+  status =
+      lonejson_parse_buffer(runtime, &fuzz_person_map, &person, data, size, &error);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
-    fuzz_generator_path(&person, chunk_size);
+    fuzz_generator_path(runtime, &person, chunk_size);
   }
   lonejson_cleanup(&fuzz_person_map, &person);
+  lonejson_free(runtime);
   return 0;
 }

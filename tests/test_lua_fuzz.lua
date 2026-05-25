@@ -1,4 +1,18 @@
-local lj = require("lonejson")
+local lonejson = require("lonejson")
+
+local function new_runtime(extra)
+  local config = {}
+  local key
+
+  if extra ~= nil then
+    for key, value in pairs(extra) do
+      config[key] = value
+    end
+  end
+  return lonejson.new(config)
+end
+
+local lj = new_runtime()
 
 local function fail(msg)
   error(msg, 0)
@@ -228,32 +242,54 @@ local function normalize_batch(doc)
   return out
 end
 
-local NestedQuery = lj.schema("NestedQueryFuzz", {
-  lj.field("type", lj.string { required = true }),
-  lj.field("response", lj.object {
-    required = true,
-    fields = {
-      lj.field("status", lj.string()),
-      lj.field("selector", lj.json_value { required = true }),
-      lj.field("fields", lj.json_value()),
-    },
-  }),
+local function build_nested_query_schema(runtime, name)
+  return runtime.schema(name, {
+    lj.field("type", lj.string { required = true }),
+    lj.field("response", lj.object {
+      required = true,
+      fields = {
+        lj.field("status", lj.string()),
+        lj.field("selector", lj.json_value { required = true }),
+        lj.field("fields", lj.json_value()),
+      },
+    }),
+  })
+end
+
+local function build_batch_schema(runtime, name)
+  return runtime.schema(name, {
+    lj.field("batch_id", lj.string()),
+    lj.field("items", lj.object_array {
+      fields = {
+        lj.field("id", lj.string { required = true }),
+        lj.field("payload", lj.json_value { required = true }),
+        lj.field("tags", lj.json_value()),
+      },
+    }),
+  })
+end
+
+local function build_fixed_large_schema(runtime, name)
+  return runtime.schema(name, {
+    lj.field("payload", lj.string { required = true, fixed_capacity = 8192, overflow = "fail" }),
+  })
+end
+
+local merge_lj = new_runtime({ clear_destination_by_default = false })
+local fixed_string_scratch = lonejson.fixed_string_scratch(8192)
+local fixed_large_scratch_lj = new_runtime({
+  clear_destination_by_default = false,
+  max_alloc_bytes = 1,
+  fixed_string_scratch = fixed_string_scratch,
 })
 
-local Batch = lj.schema("BatchFuzz", {
-  lj.field("batch_id", lj.string()),
-  lj.field("items", lj.object_array {
-    fields = {
-      lj.field("id", lj.string { required = true }),
-      lj.field("payload", lj.json_value { required = true }),
-      lj.field("tags", lj.json_value()),
-    },
-  }),
-})
-
-local FixedLarge = lj.schema("FixedLargeFuzz", {
-  lj.field("payload", lj.string { required = true, fixed_capacity = 8192, overflow = "fail" }),
-})
+local NestedQuery = build_nested_query_schema(lj, "NestedQueryFuzz")
+local NestedQueryNoClear =
+    build_nested_query_schema(merge_lj, "NestedQueryFuzzNoClear")
+local Batch = build_batch_schema(lj, "BatchFuzz")
+local BatchNoClear = build_batch_schema(merge_lj, "BatchFuzzNoClear")
+local FixedLarge =
+    build_fixed_large_schema(fixed_large_scratch_lj, "FixedLargeFuzz")
 
 math.randomseed(123456789)
 
@@ -293,12 +329,11 @@ do
     local base = random_nested_query_doc()
     local patch = random_nested_query_doc()
     local expected
-    local rec = NestedQuery:new_record()
+    local rec = NestedQueryNoClear:new_record()
 
     patch.type = random_string("evt-")
-    NestedQuery:decode_into(rec, lj.encode_json(base))
-    NestedQuery:decode_into(rec, lj.encode_json(patch),
-                            { clear_destination = false })
+    NestedQueryNoClear:decode_into(rec, lj.encode_json(base))
+    NestedQueryNoClear:decode_into(rec, lj.encode_json(patch))
     expected = normalize_nested_query(merge_nested_query(base, patch))
     assert_json_equal(rec:to_table(), encode_decode(expected),
                       "nested merge mismatch")
@@ -340,10 +375,10 @@ do
   for i = 1, 200 do
     local first = random_batch_doc()
     local second = random_batch_doc()
-    local rec = Batch:new_record()
+    local rec = BatchNoClear:new_record()
 
-    Batch:decode_into(rec, lj.encode_json(first))
-    Batch:decode_into(rec, lj.encode_json(second), { clear_destination = false })
+    BatchNoClear:decode_into(rec, lj.encode_json(first))
+    BatchNoClear:decode_into(rec, lj.encode_json(second))
     assert_json_equal(rec:to_table(), encode_decode(normalize_batch(second)),
                       "batch replace-on-present mismatch")
   end
@@ -354,7 +389,6 @@ do
     return string.rep(ch, n)
   end
 
-  local scratch = lj.fixed_string_scratch(8192)
   local i
 
   for i = 1, 50 do
@@ -366,21 +400,12 @@ do
     local ok
 
     FixedLarge:decode_into(rec, '{"payload":"' .. first .. '"}')
-    ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. second .. '"}', {
-      clear_destination = false,
-      max_alloc_bytes = 1,
-      fixed_string_scratch = scratch,
-    })
+    ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. second .. '"}')
     assert_true(err == nil, "fixed scratch decode_into error")
     assert_true(ok.payload == second, "fixed scratch decode_into mismatch")
 
     stream = FixedLarge:stream_string(
-        '{"payload":"' .. first .. '"}{"payload":"' .. second .. '"}',
-        {
-          clear_destination = false,
-          max_alloc_bytes = 1,
-          fixed_string_scratch = scratch,
-        })
+        '{"payload":"' .. first .. '"}{"payload":"' .. second .. '"}')
     obj, err, status = stream:next(rec)
     assert_true(err == nil and status == "object",
                 "fixed scratch stream first mismatch")

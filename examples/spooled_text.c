@@ -11,11 +11,10 @@ typedef struct large_message {
   lj_spooled body;
 } large_message;
 
-static const lj_spool_options spool_options = {96u, 0u, "/tmp"};
-
 static const lj_field large_message_fields[] = {
     LJ_FIELD_STRING_FIXED_REQ(large_message, id, "id", LJ_OVERFLOW_FAIL),
-    LJ_FIELD_STRING_STREAM_OPTS(large_message, body, "body", &spool_options)};
+    LJ_FIELD_STRING_STREAM_CLASS(large_message, body, "body",
+                                 LONEJSON_SPOOL_CLASS_LARGE_TEXT)};
 LJ_MAP_DEFINE(large_message_map, large_message, large_message_fields);
 
 static char *make_body(size_t len) {
@@ -57,6 +56,8 @@ int main(void) {
   char temp_path[LJ_SPOOL_TEMP_PATH_CAPACITY];
   int before_cleanup_exists;
   int after_cleanup_missing;
+  lj_config config;
+  lj *runtime;
 
   body = make_body(480u);
   if (body == NULL) {
@@ -70,9 +71,22 @@ int main(void) {
     return 1;
   }
 
-  if (lj_parse_cstr(&large_message_map, &message, json, NULL, &error) !=
+  config = lj_default_config();
+  config.spool_large_text.memory_limit = 96u;
+  config.spool_large_text.max_bytes = 0u;
+  config.spool_large_text.temp_dir = "/tmp";
+  runtime = lj_new(&config, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    free(body);
+    LONEJSON_FREE(json);
+    return 1;
+  }
+
+  if (lj_parse_cstr(runtime, &large_message_map, &message, json, &error) !=
       LJ_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
+    lj_free(runtime);
     free(body);
     LONEJSON_FREE(json);
     return 1;
@@ -81,6 +95,7 @@ int main(void) {
   if (!lj_spooled_spilled(&message.body)) {
     fprintf(stderr, "expected the example to spill to disk\n");
     lj_cleanup(&large_message_map, &message);
+    lj_free(runtime);
     free(body);
     LONEJSON_FREE(json);
     return 1;
@@ -94,6 +109,7 @@ int main(void) {
   if (lj_spooled_rewind(&message.body, &error) != LJ_STATUS_OK) {
     fprintf(stderr, "rewind failed: %s\n", error.message);
     lj_cleanup(&large_message_map, &message);
+    lj_free(runtime);
     free(body);
     LONEJSON_FREE(json);
     return 1;
@@ -109,6 +125,7 @@ int main(void) {
   printf("preview=%s\n", (const char *)preview);
 
   lj_cleanup(&large_message_map, &message);
+  lj_free(runtime);
   after_cleanup_missing =
       (temp_path[0] != '\0' && stat(temp_path, &st) != 0 && errno == ENOENT)
           ? 1

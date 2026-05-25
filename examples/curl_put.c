@@ -36,14 +36,23 @@ int main(void) {
   const char *ca_path;
   upload_payload payload = {"from curl_put.c", 77};
   lonejson_curl_upload upload_ctx;
+  lonejson *runtime;
+  lonejson_error error;
   lonejson_status status;
 
-  status = lonejson_curl_upload_init(&upload_ctx, &upload_payload_map, &payload,
-                                     NULL);
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  status = lonejson_curl_upload_init(&upload_ctx, runtime, &upload_payload_map,
+                                     &payload);
   if (status != LONEJSON_STATUS_OK) {
     fprintf(stderr, "upload init failed: %s\n",
             upload_ctx.generator.error.message);
     lonejson_curl_upload_cleanup(&upload_ctx);
+    lonejson_free(runtime);
     return 1;
   }
 
@@ -51,6 +60,7 @@ int main(void) {
   if (curl == NULL) {
     fprintf(stderr, "curl_easy_init failed\n");
     lonejson_curl_upload_cleanup(&upload_ctx);
+    lonejson_free(runtime);
     return 1;
   }
 
@@ -59,6 +69,7 @@ int main(void) {
     fprintf(stderr, "could not locate docker/nginx/certs/server.crt\n");
     curl_easy_cleanup(curl);
     lonejson_curl_upload_cleanup(&upload_ctx);
+    lonejson_free(runtime);
     return 1;
   }
 
@@ -81,6 +92,7 @@ int main(void) {
     }
     curl_easy_cleanup(curl);
     lonejson_curl_upload_cleanup(&upload_ctx);
+    lonejson_free(runtime);
     return 1;
   }
 
@@ -88,5 +100,6 @@ int main(void) {
   puts("upload completed");
   curl_easy_cleanup(curl);
   lonejson_curl_upload_cleanup(&upload_ctx);
+  lonejson_free(runtime);
   return 0;
 }

@@ -1,5 +1,5 @@
-lonejson_parse_options lonejson_default_parse_options(void) {
-  lonejson_parse_options options;
+lonejson__parse_options lonejson__default_parse_options(void) {
+  lonejson__parse_options options;
   options.clear_destination = 1;
   options.reject_duplicate_keys = 1;
   options.max_depth = 64u;
@@ -11,8 +11,8 @@ lonejson_parse_options lonejson_default_parse_options(void) {
   return options;
 }
 
-lonejson_value_limits lonejson_default_value_limits(void) {
-  lonejson_value_limits limits;
+lonejson__value_limits lonejson__default_value_limits(void) {
+  lonejson__value_limits limits;
   limits.max_depth = 64u;
   limits.max_string_bytes = 1024u * 1024u;
   limits.max_number_bytes = 256u;
@@ -21,8 +21,8 @@ lonejson_value_limits lonejson_default_value_limits(void) {
   return limits;
 }
 
-lonejson_write_options lonejson_default_write_options(void) {
-  lonejson_write_options options;
+lonejson__write_options lonejson__default_write_options(void) {
+  lonejson__write_options options;
   options.overflow_policy = LONEJSON_OVERFLOW_FAIL;
   options.pretty = 0;
   options.allocator = NULL;
@@ -31,7 +31,7 @@ lonejson_write_options lonejson_default_write_options(void) {
 }
 
 static size_t
-lonejson__write_max_output_bytes(const lonejson_write_options *options) {
+lonejson__write_max_output_bytes(const lonejson__write_options *options) {
   if (options != NULL && options->max_output_bytes != 0u) {
     return options->max_output_bytes;
   }
@@ -45,6 +45,839 @@ lonejson_owned_buffer lonejson_default_owned_buffer(void) {
   buffer.alloc_size = 0u;
   buffer.allocator = lonejson_default_allocator();
   return buffer;
+}
+
+#define LONEJSON__CONFIG_COOKIE 0x4C4A4346u
+
+lonejson_config lonejson_default_config(void) {
+  lonejson_config config;
+  lonejson__parse_options parse_options = lonejson__default_parse_options();
+  lonejson__value_limits value_limits = lonejson__default_value_limits();
+  lonejson__write_options write_options = lonejson__default_write_options();
+  lonejson__spool_options spool_options = lonejson__default_spool_options();
+
+  config.max_alloc_bytes = parse_options.max_alloc_bytes;
+  config.max_dynamic_string_bytes = parse_options.max_dynamic_string_bytes;
+  config.max_depth = parse_options.max_depth;
+  config.json_value_max_total_bytes = value_limits.max_total_bytes;
+  config.json_value_max_string_bytes = value_limits.max_string_bytes;
+  config.json_value_max_key_bytes = value_limits.max_key_bytes;
+  config.json_value_max_number_bytes = value_limits.max_number_bytes;
+  config.json_value_max_depth = value_limits.max_depth;
+  config.clear_destination_by_default = parse_options.clear_destination;
+  config.reject_duplicate_keys_by_default = parse_options.reject_duplicate_keys;
+  config.write_overflow_policy = write_options.overflow_policy;
+  config.write_pretty = write_options.pretty;
+  config.write_max_output_bytes = write_options.max_output_bytes;
+  config.spool_default.memory_limit = spool_options.memory_limit;
+  config.spool_default.max_bytes = spool_options.max_bytes;
+  config.spool_default.temp_dir = spool_options.temp_dir;
+  config.spool_blob = config.spool_default;
+  config.spool_large_text = config.spool_default;
+  config.fixed_string_scratch = NULL;
+  config.fixed_string_scratch_size = 0u;
+  config.allocator = parse_options.allocator;
+  config._config_cookie = LONEJSON__CONFIG_COOKIE;
+  return config;
+}
+
+#define LONEJSON__RUNTIME_TOKEN 1u
+
+static void lonejson__runtime_free_owned_config(lonejson_runtime *runtime);
+static void lonejson_parser_destroy(lonejson_parser *parser);
+
+#if defined(_WIN32)
+#include <windows.h>
+static volatile LONG g_lonejson_runtime_handle_lock = 0;
+#define LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE()                            \
+  do {                                                                     \
+    while (InterlockedCompareExchange(&g_lonejson_runtime_handle_lock, 1L, \
+                                      0L) != 0L) {                        \
+      Sleep(0);                                                            \
+    }                                                                      \
+  } while (0)
+#define LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE()                            \
+  do {                                                                     \
+    (void)InterlockedExchange(&g_lonejson_runtime_handle_lock, 0L);        \
+  } while (0)
+#define LONEJSON__RUNTIME_HANDLE_WAIT_YIELD() Sleep(0)
+#define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_INC(handle)                    \
+  ((unsigned int)InterlockedIncrement((volatile LONG *)&(handle)->active_pins))
+#define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle)                    \
+  ((unsigned int)InterlockedDecrement((volatile LONG *)&(handle)->active_pins))
+#define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_LOAD(handle)                   \
+  ((unsigned int)InterlockedCompareExchange(                                \
+      (volatile LONG *)&(handle)->active_pins, 0L, 0L))
+#define LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(handle)                       \
+  ((int)InterlockedCompareExchange((volatile LONG *)&(handle)->closing, 0L, \
+                                   0L))
+#define LONEJSON__RUNTIME_HANDLE_CLOSING_STORE(handle, value)             \
+  do {                                                                    \
+    (void)InterlockedExchange((volatile LONG *)&(handle)->closing,        \
+                              (LONG)(value));                             \
+  } while (0)
+#elif defined(__GNUC__) || defined(__clang__)
+#include <sched.h>
+static volatile int g_lonejson_runtime_handle_lock = 0;
+#define LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE()                            \
+  do {                                                                     \
+    while (__sync_lock_test_and_set(&g_lonejson_runtime_handle_lock, 1)) { \
+      while (g_lonejson_runtime_handle_lock) {                             \
+      }                                                                    \
+    }                                                                      \
+  } while (0)
+#define LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE()                            \
+  do {                                                                     \
+    __sync_lock_release(&g_lonejson_runtime_handle_lock);                  \
+  } while (0)
+#define LONEJSON__RUNTIME_HANDLE_WAIT_YIELD() (void)sched_yield()
+#define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_INC(handle) \
+  ((unsigned int)__atomic_add_fetch(&(handle)->active_pins, 1u, __ATOMIC_SEQ_CST))
+#define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle) \
+  ((unsigned int)__atomic_sub_fetch(&(handle)->active_pins, 1u, __ATOMIC_SEQ_CST))
+#define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_LOAD(handle) \
+  ((unsigned int)__atomic_load_n(&(handle)->active_pins, __ATOMIC_SEQ_CST))
+#define LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(handle) \
+  ((int)__atomic_load_n(&(handle)->closing, __ATOMIC_ACQUIRE))
+#define LONEJSON__RUNTIME_HANDLE_CLOSING_STORE(handle, value) \
+  __atomic_store_n(&(handle)->closing, (value), __ATOMIC_RELEASE)
+#else
+#error "lonejson runtime copied-handle safety requires a synchronization primitive"
+#endif
+
+static lonejson__runtime_handle *g_lonejson_runtime_handle_live_list = NULL;
+static unsigned int g_lonejson_runtime_handle_generation = 1u;
+
+#if defined(LONEJSON_TEST_RUNTIME_BORROW_HOOK)
+typedef void (*lonejson__runtime_borrow_hook_fn)(void *user);
+static lonejson__runtime_borrow_hook_fn g_lonejson_runtime_borrow_hook = NULL;
+static void *g_lonejson_runtime_borrow_hook_user = NULL;
+static void lonejson__test_set_runtime_borrow_hook(
+    lonejson__runtime_borrow_hook_fn hook, void *user) {
+  g_lonejson_runtime_borrow_hook = hook;
+  g_lonejson_runtime_borrow_hook_user = user;
+}
+#endif
+
+static unsigned int lonejson__runtime_handle_next_generation(void) {
+  unsigned int generation;
+
+  LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
+  generation = ++g_lonejson_runtime_handle_generation;
+  if (generation == 0u) {
+    generation = ++g_lonejson_runtime_handle_generation;
+  }
+  LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
+  return generation;
+}
+
+static void lonejson__runtime_handle_register(lonejson__runtime_handle *handle,
+                                              lonejson_runtime *runtime_state,
+                                              lonejson *api_owner) {
+  if (handle == NULL) {
+    return;
+  }
+  memset(handle, 0, sizeof(*handle));
+  handle->runtime_state = runtime_state;
+  handle->api_owner = api_owner;
+  handle->generation = lonejson__runtime_handle_next_generation();
+  handle->active_pins = 0u;
+  handle->closing = 0;
+  LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
+  handle->next_live = g_lonejson_runtime_handle_live_list;
+  g_lonejson_runtime_handle_live_list = handle;
+  LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
+}
+
+static const lonejson_runtime *
+lonejson__runtime_handle_lookup_const(const lonejson *runtime) {
+  const lonejson_runtime *runtime_state = NULL;
+  const lonejson__runtime_handle *cursor;
+  const lonejson_runtime *state_ptr;
+
+  if (runtime == NULL || runtime->state == NULL || runtime->_state_token == 0u) {
+    return NULL;
+  }
+  state_ptr = (const lonejson_runtime *)runtime->state;
+  LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
+  cursor = g_lonejson_runtime_handle_live_list;
+  while (cursor != NULL) {
+    if (cursor->generation == runtime->_state_token &&
+        cursor->runtime_state == state_ptr && !cursor->closing) {
+      runtime_state = cursor->runtime_state;
+      break;
+    }
+    cursor = cursor->next_live;
+  }
+  LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
+  return runtime_state;
+}
+
+static lonejson_runtime *lonejson__runtime_handle_lookup_mut(lonejson *runtime) {
+  lonejson_runtime *runtime_state = NULL;
+  lonejson__runtime_handle *cursor;
+  lonejson_runtime *state_ptr;
+
+  if (runtime == NULL || runtime->state == NULL || runtime->_state_token == 0u) {
+    return NULL;
+  }
+  state_ptr = (lonejson_runtime *)runtime->state;
+  LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
+  cursor = g_lonejson_runtime_handle_live_list;
+  while (cursor != NULL) {
+    if (cursor->generation == runtime->_state_token &&
+        cursor->runtime_state == state_ptr && !cursor->closing) {
+      runtime_state = cursor->runtime_state;
+      break;
+    }
+    cursor = cursor->next_live;
+  }
+  LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
+  return runtime_state;
+}
+
+static const lonejson_runtime *lonejson__runtime_borrow_const(
+    const lonejson *runtime, lonejson__runtime_borrow *borrow) {
+  const lonejson_runtime *runtime_state = NULL;
+  lonejson__runtime_handle *cursor;
+  const lonejson_runtime *state_ptr;
+
+  if (borrow != NULL) {
+    memset(borrow, 0, sizeof(*borrow));
+  }
+  if (runtime == NULL || runtime->state == NULL || runtime->_state_token == 0u) {
+    return NULL;
+  }
+  if (runtime->_runtime_owner_self == runtime && runtime->_runtime_owner_data != NULL) {
+    lonejson *owner = runtime->_runtime_owner_self;
+    lonejson__runtime_handle *handle =
+        &((lonejson__runtime_bundle *)owner)->live_handle;
+    (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_INC(handle);
+    if (handle->generation == runtime->_state_token &&
+        !LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(handle)) {
+      runtime_state = (const lonejson_runtime *)runtime->_runtime_owner_data;
+      if (runtime_state != NULL && borrow != NULL) {
+        borrow->runtime = runtime_state;
+        borrow->handle = handle;
+      } else if (runtime_state == NULL) {
+        (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle);
+        runtime_state = NULL;
+      }
+    } else {
+      (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle);
+    }
+#if defined(LONEJSON_TEST_RUNTIME_BORROW_HOOK)
+    if (borrow != NULL && borrow->handle != NULL &&
+        g_lonejson_runtime_borrow_hook != NULL) {
+      g_lonejson_runtime_borrow_hook(g_lonejson_runtime_borrow_hook_user);
+    }
+#endif
+    if (runtime_state != NULL) {
+      return runtime_state;
+    }
+  }
+  state_ptr = (const lonejson_runtime *)runtime->state;
+  LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
+  cursor = g_lonejson_runtime_handle_live_list;
+  while (cursor != NULL) {
+    if (cursor->generation == runtime->_state_token &&
+        cursor->runtime_state == state_ptr &&
+        !LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(cursor)) {
+      (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_INC(cursor);
+      runtime_state = cursor->runtime_state;
+      if (borrow != NULL) {
+        borrow->runtime = runtime_state;
+        borrow->handle = cursor;
+      }
+      break;
+    }
+    cursor = cursor->next_live;
+  }
+  LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
+#if defined(LONEJSON_TEST_RUNTIME_BORROW_HOOK)
+  if (runtime_state != NULL && borrow != NULL && borrow->handle != NULL &&
+      g_lonejson_runtime_borrow_hook != NULL) {
+    g_lonejson_runtime_borrow_hook(g_lonejson_runtime_borrow_hook_user);
+  }
+#endif
+  return runtime_state;
+}
+
+static const lonejson_runtime *
+lonejson__runtime_owner_pin_const_nohook(const lonejson *runtime,
+                                         lonejson__runtime_borrow *borrow) {
+  lonejson__runtime_handle *handle;
+  const lonejson_runtime *runtime_state;
+
+  if (borrow != NULL) {
+    memset(borrow, 0, sizeof(*borrow));
+  }
+  if (runtime == NULL || runtime->state == NULL || runtime->_state_token == 0u ||
+      runtime->_runtime_owner_self != runtime ||
+      runtime->_runtime_owner_data == NULL) {
+    return NULL;
+  }
+
+  handle = &((lonejson__runtime_bundle *)runtime->_runtime_owner_self)->live_handle;
+  (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_INC(handle);
+  if (handle->generation != runtime->_state_token ||
+      LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(handle)) {
+    (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle);
+    return NULL;
+  }
+  runtime_state = (const lonejson_runtime *)runtime->_runtime_owner_data;
+  if (handle->generation != runtime->_state_token ||
+      LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(handle) ||
+      runtime_state == NULL) {
+    (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle);
+    return NULL;
+  }
+#if defined(LONEJSON_TEST_RUNTIME_BORROW_HOOK)
+  if (borrow != NULL && g_lonejson_runtime_borrow_hook != NULL) {
+    g_lonejson_runtime_borrow_hook(g_lonejson_runtime_borrow_hook_user);
+  }
+#endif
+  if (borrow != NULL) {
+    borrow->runtime = runtime_state;
+    borrow->handle = handle;
+  }
+  return runtime_state;
+}
+
+static void lonejson__runtime_borrow_release(lonejson__runtime_borrow *borrow) {
+  if (borrow == NULL || borrow->handle == NULL) {
+    return;
+  }
+  (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(borrow->handle);
+  borrow->runtime = NULL;
+  borrow->handle = NULL;
+}
+
+static const lonejson_runtime *lonejson__require_runtime_borrow(
+    lonejson *runtime, lonejson__runtime_borrow *borrow, lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+
+  runtime_state = lonejson__runtime_borrow_const((const lonejson *)runtime, borrow);
+  if (LONEJSON__UNLIKELY(runtime_state == NULL)) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                              0u, "lonejson runtime is required");
+    return NULL;
+  }
+  return runtime_state;
+}
+
+static lonejson_status lonejson__runtime_snapshot_write_policy(
+    lonejson *runtime, lonejson__write_options *options,
+    lonejson_allocator *allocator_storage, lonejson_error *error) {
+  const lonejson_runtime *runtime_state = NULL;
+  const lonejson__runtime_handle *cursor;
+  const lonejson_runtime *state_ptr;
+
+  if (options == NULL || allocator_storage == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "write runtime policy snapshot is required");
+  }
+  if (runtime == NULL || runtime->state == NULL || runtime->_state_token == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "lonejson runtime is required");
+  }
+
+  LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
+  if (runtime->_runtime_owner_self == runtime &&
+      runtime->_runtime_owner_data != NULL) {
+    lonejson__runtime_handle *handle =
+        &((lonejson__runtime_bundle *)runtime)->live_handle;
+    if (handle->generation == runtime->_state_token &&
+        !LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(handle)) {
+      runtime_state = (const lonejson_runtime *)runtime->_runtime_owner_data;
+    }
+  } else {
+    state_ptr = (const lonejson_runtime *)runtime->state;
+    cursor = g_lonejson_runtime_handle_live_list;
+    while (cursor != NULL) {
+      if (cursor->generation == runtime->_state_token &&
+          cursor->runtime_state == state_ptr &&
+          !LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(cursor)) {
+        runtime_state = cursor->runtime_state;
+        break;
+      }
+      cursor = cursor->next_live;
+    }
+  }
+  if (runtime_state != NULL) {
+    *options = runtime_state->write_options;
+    if (options->allocator != NULL) {
+      *allocator_storage = runtime_state->allocator_storage;
+      options->allocator = allocator_storage;
+    }
+  }
+  LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
+  if (runtime_state == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "lonejson runtime is required");
+  }
+#if defined(LONEJSON_TEST_RUNTIME_BORROW_HOOK)
+  if (g_lonejson_runtime_borrow_hook != NULL) {
+    g_lonejson_runtime_borrow_hook(g_lonejson_runtime_borrow_hook_user);
+  }
+#endif
+  return LONEJSON_STATUS_OK;
+}
+
+#if defined(LONEJSON_TEST_RUNTIME_HANDLE_CACHE_DRAIN)
+static void lonejson__runtime_handle_cache_drain(void) {
+  /* Live-handle registry is embedded in runtime bundles; nothing to drain. */
+}
+#endif
+
+static LONEJSON__INLINE const lonejson_runtime *
+lonejson__runtime_const(const lonejson *runtime) {
+  return lonejson__runtime_data_const(runtime);
+}
+
+static LONEJSON__INLINE lonejson_runtime *lonejson__runtime_mut(
+    lonejson *runtime) {
+  return lonejson__runtime_data_mut(runtime);
+}
+
+static LONEJSON__INLINE const lonejson_runtime *
+lonejson__require_runtime_const(lonejson *runtime, lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+
+  runtime_state = lonejson__runtime_const(runtime);
+  if (LONEJSON__UNLIKELY(runtime_state == NULL)) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                              0u, "lonejson runtime is required");
+    return NULL;
+  }
+  return runtime_state;
+}
+
+static LONEJSON__INLINE lonejson_status lonejson__require_runtime(
+    lonejson *runtime, lonejson_error *error) {
+  return lonejson__require_runtime_const(runtime, error) != NULL
+             ? LONEJSON_STATUS_OK
+             : LONEJSON_STATUS_INVALID_ARGUMENT;
+}
+
+static char *lonejson__runtime_dup_string(const lonejson_allocator *allocator,
+                                          const char *src) {
+  size_t len;
+  char *copy;
+
+  if (src == NULL) {
+    return NULL;
+  }
+  len = strlen(src);
+  copy = (char *)lonejson__owned_malloc(allocator, len + 1u);
+  if (copy == NULL) {
+    return NULL;
+  }
+  memcpy(copy, src, len + 1u);
+  return copy;
+}
+
+static void lonejson__runtime_free_owned_config(lonejson_runtime *runtime) {
+  size_t i;
+
+  if (runtime == NULL) {
+    return;
+  }
+  for (i = 0; i < 3u; ++i) {
+    lonejson__owned_free(runtime->owned_temp_dirs[i]);
+    runtime->owned_temp_dirs[i] = NULL;
+  }
+  lonejson__owned_free(runtime->owned_fixed_string_scratch);
+  runtime->owned_fixed_string_scratch = NULL;
+}
+
+static void lonejson__runtime_apply_config(lonejson_runtime *runtime);
+
+static lonejson_status lonejson__runtime_snapshot_init(
+    lonejson_runtime *snapshot, const lonejson_runtime *runtime,
+    int include_parse_scratch, lonejson_error *error) {
+  size_t i;
+
+  if (snapshot == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "runtime snapshot is required");
+  }
+  snapshot->api_owner = NULL;
+  snapshot->owned_temp_dirs[LONEJSON_SPOOL_CLASS_DEFAULT] = NULL;
+  snapshot->owned_temp_dirs[LONEJSON_SPOOL_CLASS_BLOB] = NULL;
+  snapshot->owned_temp_dirs[LONEJSON_SPOOL_CLASS_LARGE_TEXT] = NULL;
+  snapshot->owned_fixed_string_scratch = NULL;
+  if (runtime == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+
+  snapshot->allocator_storage = runtime->allocator_storage;
+  snapshot->config.allocator = &snapshot->allocator_storage;
+  snapshot->parse_options = runtime->parse_options;
+  snapshot->value_limits = runtime->value_limits;
+  snapshot->write_options = runtime->write_options;
+  for (i = 0u; i < 3u; ++i) {
+    snapshot->spool_options[i] = runtime->spool_options[i];
+  }
+  if ((!include_parse_scratch || runtime->config.fixed_string_scratch == NULL ||
+       runtime->config.fixed_string_scratch_size == 0u) &&
+      runtime->owned_temp_dirs[LONEJSON_SPOOL_CLASS_DEFAULT] == NULL &&
+      runtime->owned_temp_dirs[LONEJSON_SPOOL_CLASS_BLOB] == NULL &&
+      runtime->owned_temp_dirs[LONEJSON_SPOOL_CLASS_LARGE_TEXT] == NULL) {
+    snapshot->config.fixed_string_scratch = NULL;
+    snapshot->config.fixed_string_scratch_size = 0u;
+    snapshot->config.spool_default.temp_dir = NULL;
+    snapshot->config.spool_blob.temp_dir = NULL;
+    snapshot->config.spool_large_text.temp_dir = NULL;
+    snapshot->parse_options.allocator = snapshot->config.allocator;
+    snapshot->parse_options.fixed_string_scratch = NULL;
+    snapshot->parse_options.fixed_string_scratch_size = 0u;
+    snapshot->write_options.allocator = snapshot->config.allocator;
+    snapshot->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT].temp_dir = NULL;
+    snapshot->spool_options[LONEJSON_SPOOL_CLASS_BLOB].temp_dir = NULL;
+    snapshot->spool_options[LONEJSON_SPOOL_CLASS_LARGE_TEXT].temp_dir = NULL;
+    return LONEJSON_STATUS_OK;
+  }
+
+  snapshot->config = runtime->config;
+  snapshot->config.allocator = &snapshot->allocator_storage;
+  if (include_parse_scratch && runtime->config.fixed_string_scratch != NULL &&
+      runtime->config.fixed_string_scratch_size != 0u) {
+    snapshot->owned_fixed_string_scratch = lonejson__owned_malloc(
+        &snapshot->allocator_storage, runtime->config.fixed_string_scratch_size);
+    if (snapshot->owned_fixed_string_scratch == NULL) {
+      lonejson__runtime_free_owned_config(snapshot);
+      return lonejson__set_error(
+          error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+          "failed to allocate runtime fixed string scratch");
+    }
+    memcpy(snapshot->owned_fixed_string_scratch,
+           runtime->config.fixed_string_scratch,
+           runtime->config.fixed_string_scratch_size);
+    snapshot->config.fixed_string_scratch =
+        snapshot->owned_fixed_string_scratch;
+  } else {
+    snapshot->config.fixed_string_scratch = NULL;
+    snapshot->config.fixed_string_scratch_size = 0u;
+  }
+  if (runtime->owned_temp_dirs[LONEJSON_SPOOL_CLASS_DEFAULT] != NULL ||
+      runtime->owned_temp_dirs[LONEJSON_SPOOL_CLASS_BLOB] != NULL ||
+      runtime->owned_temp_dirs[LONEJSON_SPOOL_CLASS_LARGE_TEXT] != NULL) {
+    for (i = 0u; i < 3u; ++i) {
+      snapshot->owned_temp_dirs[i] = lonejson__runtime_dup_string(
+          &snapshot->allocator_storage, runtime->owned_temp_dirs[i]);
+      if (runtime->owned_temp_dirs[i] != NULL &&
+          snapshot->owned_temp_dirs[i] == NULL) {
+        lonejson__runtime_free_owned_config(snapshot);
+        return lonejson__set_error(
+            error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+            "failed to allocate runtime spool temp_dir");
+      }
+    }
+  }
+  snapshot->config.spool_default.temp_dir =
+      snapshot->owned_temp_dirs[LONEJSON_SPOOL_CLASS_DEFAULT];
+  snapshot->config.spool_blob.temp_dir =
+      snapshot->owned_temp_dirs[LONEJSON_SPOOL_CLASS_BLOB];
+  snapshot->config.spool_large_text.temp_dir =
+      snapshot->owned_temp_dirs[LONEJSON_SPOOL_CLASS_LARGE_TEXT];
+  snapshot->parse_options.allocator = snapshot->config.allocator;
+  snapshot->parse_options.fixed_string_scratch =
+      snapshot->config.fixed_string_scratch;
+  snapshot->parse_options.fixed_string_scratch_size =
+      snapshot->config.fixed_string_scratch_size;
+  snapshot->write_options.allocator = snapshot->config.allocator;
+  snapshot->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT].temp_dir =
+      snapshot->config.spool_default.temp_dir;
+  snapshot->spool_options[LONEJSON_SPOOL_CLASS_BLOB].temp_dir =
+      snapshot->config.spool_blob.temp_dir;
+  snapshot->spool_options[LONEJSON_SPOOL_CLASS_LARGE_TEXT].temp_dir =
+      snapshot->config.spool_large_text.temp_dir;
+  return LONEJSON_STATUS_OK;
+}
+
+static void lonejson__runtime_apply_config(lonejson_runtime *runtime) {
+  runtime->parse_options = lonejson__default_parse_options();
+  runtime->value_limits = lonejson__default_value_limits();
+  runtime->write_options = lonejson__default_write_options();
+  runtime->spool_options[0] = lonejson__default_spool_options();
+  runtime->spool_options[1] = runtime->spool_options[0];
+  runtime->spool_options[2] = runtime->spool_options[0];
+
+  runtime->parse_options.clear_destination =
+      runtime->config.clear_destination_by_default;
+  runtime->parse_options.reject_duplicate_keys =
+      runtime->config.reject_duplicate_keys_by_default;
+  runtime->parse_options.max_depth = runtime->config.max_depth;
+  runtime->parse_options.max_dynamic_string_bytes =
+      runtime->config.max_dynamic_string_bytes;
+  runtime->parse_options.max_alloc_bytes = runtime->config.max_alloc_bytes;
+  runtime->parse_options.fixed_string_scratch =
+      runtime->config.fixed_string_scratch;
+  runtime->parse_options.fixed_string_scratch_size =
+      runtime->config.fixed_string_scratch_size;
+  runtime->parse_options.allocator = runtime->config.allocator;
+
+  runtime->value_limits.max_depth = runtime->config.json_value_max_depth;
+  runtime->value_limits.max_string_bytes =
+      runtime->config.json_value_max_string_bytes;
+  runtime->value_limits.max_number_bytes =
+      runtime->config.json_value_max_number_bytes;
+  runtime->value_limits.max_key_bytes = runtime->config.json_value_max_key_bytes;
+  runtime->value_limits.max_total_bytes =
+      runtime->config.json_value_max_total_bytes;
+
+  runtime->write_options.overflow_policy =
+      runtime->config.write_overflow_policy;
+  runtime->write_options.pretty = runtime->config.write_pretty;
+  runtime->write_options.max_output_bytes = runtime->config.write_max_output_bytes;
+  runtime->write_options.allocator = runtime->config.allocator;
+
+  runtime->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT].memory_limit =
+      runtime->config.spool_default.memory_limit;
+  runtime->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT].max_bytes =
+      runtime->config.spool_default.max_bytes;
+  runtime->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT].temp_dir =
+      runtime->config.spool_default.temp_dir;
+  runtime->spool_options[LONEJSON_SPOOL_CLASS_BLOB].memory_limit =
+      runtime->config.spool_blob.memory_limit;
+  runtime->spool_options[LONEJSON_SPOOL_CLASS_BLOB].max_bytes =
+      runtime->config.spool_blob.max_bytes;
+  runtime->spool_options[LONEJSON_SPOOL_CLASS_BLOB].temp_dir =
+      runtime->config.spool_blob.temp_dir;
+  runtime->spool_options[LONEJSON_SPOOL_CLASS_LARGE_TEXT].memory_limit =
+      runtime->config.spool_large_text.memory_limit;
+  runtime->spool_options[LONEJSON_SPOOL_CLASS_LARGE_TEXT].max_bytes =
+      runtime->config.spool_large_text.max_bytes;
+  runtime->spool_options[LONEJSON_SPOOL_CLASS_LARGE_TEXT].temp_dir =
+      runtime->config.spool_large_text.temp_dir;
+}
+
+static lonejson_status lonejson__runtime_parse_buffer(lonejson *runtime,
+                                                      const lonejson_map *map,
+                                                      void *dst,
+                                                      const void *data,
+                                                      size_t len,
+                                                      lonejson_error *error);
+static lonejson_status lonejson__runtime_parse_cstr(lonejson *runtime,
+                                                    const lonejson_map *map,
+                                                    void *dst,
+                                                    const char *json,
+                                                    lonejson_error *error);
+static lonejson_status lonejson__runtime_parse_reader(
+    lonejson *runtime, const lonejson_map *map, void *dst, lonejson_reader_fn reader,
+    void *user, lonejson_error *error);
+static lonejson_status lonejson__runtime_parse_filep(lonejson *runtime,
+                                                     const lonejson_map *map,
+                                                     void *dst, FILE *fp,
+                                                     lonejson_error *error);
+static lonejson_status lonejson__runtime_parse_path(lonejson *runtime,
+                                                    const lonejson_map *map,
+                                                    void *dst,
+                                                    const char *path,
+                                                    lonejson_error *error);
+static lonejson_stream *lonejson__runtime_stream_open_reader(
+    lonejson *runtime, const lonejson_map *map, lonejson_reader_fn reader,
+    void *user, lonejson_error *error);
+static lonejson_stream *lonejson__runtime_stream_open_filep(
+    lonejson *runtime, const lonejson_map *map, FILE *fp, lonejson_error *error);
+static lonejson_stream *lonejson__runtime_stream_open_path(
+    lonejson *runtime, const lonejson_map *map, const char *path,
+    lonejson_error *error);
+static lonejson_stream *lonejson__runtime_stream_open_fd(
+    lonejson *runtime, const lonejson_map *map, int fd, lonejson_error *error);
+static lonejson_array_stream *lonejson__runtime_array_stream_open_reader(
+    lonejson *runtime, const char *path, lonejson_reader_fn reader, void *user,
+    lonejson_error *error);
+static lonejson_array_stream *lonejson__runtime_array_stream_open_filep(
+    lonejson *runtime, const char *path, FILE *fp, lonejson_error *error);
+static lonejson_array_stream *lonejson__runtime_array_stream_open_path(
+    lonejson *runtime, const char *array_path, const char *path,
+    lonejson_error *error);
+static lonejson_array_stream *lonejson__runtime_array_stream_open_fd(
+    lonejson *runtime, const char *path, int fd, lonejson_error *error);
+static lonejson_array_stream *lonejson__runtime_array_stream_open_push(
+    lonejson *runtime, const char *path, lonejson_error *error);
+static void lonejson__runtime_json_value_init(lonejson *runtime,
+                                              lonejson_json_value *value);
+static void lonejson__runtime_json_value_cleanup(lonejson *runtime,
+                                                 lonejson_json_value *value);
+static lonejson_status lonejson__runtime_generator_init(
+    lonejson *runtime, lonejson_generator *generator, const lonejson_map *map,
+    const void *src);
+static lonejson_status lonejson__runtime_writer_init_sink(
+    lonejson *runtime, lonejson_writer *writer, lonejson_sink_fn sink,
+    void *sink_user, lonejson_error *error);
+
+lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
+  lonejson_config resolved = lonejson_default_config();
+  lonejson_allocator allocator_storage =
+      resolved.allocator != NULL ? *resolved.allocator
+                                 : lonejson_default_allocator();
+  const lonejson_allocator *allocator = resolved.allocator;
+  size_t alloc_size = sizeof(lonejson__runtime_bundle);
+  lonejson *runtime;
+  lonejson_runtime *runtime_state;
+  char *spool_default_temp_dir = NULL;
+  char *spool_blob_temp_dir = NULL;
+  char *spool_large_text_temp_dir = NULL;
+
+  if (config != NULL) {
+    if (config->_config_cookie != LONEJSON__CONFIG_COOKIE) {
+      lonejson__set_error(
+          error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+          "lonejson_config must be initialized with lonejson_default_config()");
+      return NULL;
+    }
+    resolved = *config;
+    resolved._config_cookie = LONEJSON__CONFIG_COOKIE;
+    allocator_storage = resolved.allocator != NULL ? *resolved.allocator
+                                                   : lonejson_default_allocator();
+    allocator = resolved.allocator;
+  }
+
+  if (allocator != NULL && !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(allocator)) {
+    lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+                        "allocator must provide either all callbacks or none");
+    return NULL;
+  }
+  runtime = (lonejson *)lonejson__buffer_alloc(allocator, alloc_size);
+  if (runtime == NULL) {
+    lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+                        "failed to allocate lonejson runtime");
+    return NULL;
+  }
+  memset(runtime, 0, alloc_size);
+  runtime_state = &((lonejson__runtime_bundle *)runtime)->state;
+  runtime_state->api_owner = runtime;
+  runtime_state->allocator_storage = allocator_storage;
+  runtime_state->config = resolved;
+  runtime_state->config.allocator =
+      resolved.allocator != NULL ? &runtime_state->allocator_storage : NULL;
+  spool_default_temp_dir = lonejson__runtime_dup_string(
+      &runtime_state->allocator_storage, resolved.spool_default.temp_dir);
+  if (resolved.spool_default.temp_dir != NULL && spool_default_temp_dir == NULL) {
+    lonejson__buffer_free(allocator, runtime, sizeof(lonejson__runtime_bundle));
+    lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+                        "failed to allocate runtime spool temp_dir");
+    return NULL;
+  }
+  spool_blob_temp_dir = lonejson__runtime_dup_string(
+      &runtime_state->allocator_storage, resolved.spool_blob.temp_dir);
+  if (resolved.spool_blob.temp_dir != NULL && spool_blob_temp_dir == NULL) {
+    lonejson__owned_free(spool_default_temp_dir);
+    lonejson__buffer_free(allocator, runtime, sizeof(lonejson__runtime_bundle));
+    lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+                        "failed to allocate runtime spool temp_dir");
+    return NULL;
+  }
+  spool_large_text_temp_dir = lonejson__runtime_dup_string(
+      &runtime_state->allocator_storage, resolved.spool_large_text.temp_dir);
+  if (resolved.spool_large_text.temp_dir != NULL &&
+      spool_large_text_temp_dir == NULL) {
+    lonejson__owned_free(spool_blob_temp_dir);
+    lonejson__owned_free(spool_default_temp_dir);
+    lonejson__buffer_free(allocator, runtime, sizeof(lonejson__runtime_bundle));
+    lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+                        "failed to allocate runtime spool temp_dir");
+    return NULL;
+  }
+  runtime_state->owned_temp_dirs[LONEJSON_SPOOL_CLASS_DEFAULT] =
+      spool_default_temp_dir;
+  runtime_state->owned_temp_dirs[LONEJSON_SPOOL_CLASS_BLOB] =
+      spool_blob_temp_dir;
+  runtime_state->owned_temp_dirs[LONEJSON_SPOOL_CLASS_LARGE_TEXT] =
+      spool_large_text_temp_dir;
+  runtime_state->config.spool_default.temp_dir =
+      runtime_state->owned_temp_dirs[LONEJSON_SPOOL_CLASS_DEFAULT];
+  runtime_state->config.spool_blob.temp_dir =
+      runtime_state->owned_temp_dirs[LONEJSON_SPOOL_CLASS_BLOB];
+  runtime_state->config.spool_large_text.temp_dir =
+      runtime_state->owned_temp_dirs[LONEJSON_SPOOL_CLASS_LARGE_TEXT];
+  lonejson__runtime_apply_config(runtime_state);
+
+  lonejson__runtime_handle_register(
+      &((lonejson__runtime_bundle *)runtime)->live_handle, runtime_state, runtime);
+  runtime->_state_token =
+      ((lonejson__runtime_bundle *)runtime)->live_handle.generation;
+  runtime->state = runtime_state;
+  runtime->_runtime_owner_self = runtime;
+  runtime->_runtime_owner_data = runtime_state;
+  runtime->parse_cstr = lonejson__runtime_parse_cstr;
+  runtime->parse_buffer = lonejson__runtime_parse_buffer;
+  runtime->parse_reader = lonejson__runtime_parse_reader;
+  runtime->parse_filep = lonejson__runtime_parse_filep;
+  runtime->parse_path = lonejson__runtime_parse_path;
+  runtime->stream_open_reader = lonejson__runtime_stream_open_reader;
+  runtime->stream_open_filep = lonejson__runtime_stream_open_filep;
+  runtime->stream_open_path = lonejson__runtime_stream_open_path;
+  runtime->stream_open_fd = lonejson__runtime_stream_open_fd;
+  runtime->array_stream_open_reader = lonejson__runtime_array_stream_open_reader;
+  runtime->array_stream_open_filep = lonejson__runtime_array_stream_open_filep;
+  runtime->array_stream_open_path = lonejson__runtime_array_stream_open_path;
+  runtime->array_stream_open_fd = lonejson__runtime_array_stream_open_fd;
+  runtime->array_stream_open_push = lonejson__runtime_array_stream_open_push;
+  runtime->json_value_init = lonejson__runtime_json_value_init;
+  runtime->json_value_cleanup = lonejson__runtime_json_value_cleanup;
+  runtime->generator_init = lonejson__runtime_generator_init;
+  runtime->writer_init_sink = lonejson__runtime_writer_init_sink;
+  runtime->free = lonejson_free;
+
+  lonejson__clear_error(error);
+  return runtime;
+}
+
+void lonejson_free(lonejson *runtime) {
+  lonejson_runtime *runtime_state;
+  const lonejson_allocator *allocator = NULL;
+  lonejson__runtime_handle *live_handle;
+  int drained;
+
+  if (runtime == NULL) {
+    return;
+  }
+  if (runtime->state == NULL || runtime->_state_token == 0u) {
+    return;
+  }
+  if (runtime->_runtime_owner_self != runtime ||
+      runtime->_runtime_owner_data == NULL) {
+    runtime->state = NULL;
+    runtime->_state_token = 0u;
+    runtime->_runtime_owner_self = NULL;
+    runtime->_runtime_owner_data = NULL;
+    return;
+  }
+  runtime_state = (lonejson_runtime *)runtime->_runtime_owner_data;
+  allocator = &runtime_state->allocator_storage;
+  runtime_state->api_owner = NULL;
+  live_handle = &((lonejson__runtime_bundle *)runtime)->live_handle;
+  LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
+  LONEJSON__RUNTIME_HANDLE_CLOSING_STORE(live_handle, 1);
+  {
+    lonejson__runtime_handle **link = &g_lonejson_runtime_handle_live_list;
+    while (*link != NULL) {
+      if (*link == live_handle) {
+        *link = live_handle->next_live;
+        break;
+      }
+      link = &(*link)->next_live;
+    }
+  }
+  live_handle->next_live = NULL;
+  LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
+  for (;;) {
+    drained = LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_LOAD(live_handle) == 0u;
+    if (drained) {
+      break;
+    }
+    LONEJSON__RUNTIME_HANDLE_WAIT_YIELD();
+  }
+  runtime->state = NULL;
+  runtime->_state_token = 0u;
+  runtime->_runtime_owner_self = NULL;
+  runtime->_runtime_owner_data = NULL;
+  lonejson__runtime_free_owned_config(runtime_state);
+  lonejson__buffer_free(allocator, runtime, sizeof(lonejson__runtime_bundle));
 }
 
 static int lonejson__string_array_stream_is_initialized(
@@ -164,10 +997,12 @@ const char *lonejson_status_string(lonejson_status status) {
 #ifdef LONEJSON_WITH_CURL
 static lonejson_parser *
 lonejson__parser_create_ex(const lonejson_map *map, void *dst,
-                           const lonejson_parse_options *options,
+                           const lonejson__parse_options *options,
+                           const lonejson_runtime *runtime,
                            lonejson_error *error, int validate_only) {
   lonejson_parser *parser;
   unsigned char *workspace;
+  lonejson__map_analysis analysis;
 
   if ((!validate_only && (map == NULL || dst == NULL)) ||
       (validate_only && (map != NULL || dst != NULL))) {
@@ -175,6 +1010,17 @@ lonejson__parser_create_ex(const lonejson_map *map, void *dst,
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 1u, 0u,
         validate_only ? "validation parser does not accept mapping arguments"
                       : "map and destination are required");
+    return NULL;
+  }
+  analysis.valid = 1;
+  analysis.may_allocate = 0;
+  analysis.adopt_mask = 0u;
+  if (!validate_only) {
+    analysis = lonejson__map_analysis_cached(map);
+  }
+  if (!validate_only && !analysis.valid) {
+    lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+                        "invalid field layout");
     return NULL;
   }
   if (options != NULL &&
@@ -194,13 +1040,21 @@ lonejson__parser_create_ex(const lonejson_map *map, void *dst,
   }
   workspace = ((unsigned char *)parser) + sizeof(*parser);
   lonejson__parser_init_state(
-      parser, map, dst, options, validate_only, workspace,
+      parser, map, dst, options, runtime, validate_only, !validate_only,
+      analysis.may_allocate, analysis.adopt_mask, workspace,
       LONEJSON_PUSH_PARSER_BUFFER_SIZE + LONEJSON__PARSER_WORKSPACE_SLACK);
   parser->self_alloc_size = sizeof(*parser) + LONEJSON_PUSH_PARSER_BUFFER_SIZE +
                             LONEJSON__PARSER_WORKSPACE_SLACK;
   parser->owns_self = 1;
   if (!validate_only && parser->options.clear_destination) {
-    lonejson__init_map_with_allocator(map, dst, &parser->allocator);
+    lonejson__init_map_parse(parser, map, dst);
+    if (parser->failed) {
+      if (error != NULL) {
+        *error = parser->error;
+      }
+      lonejson_parser_destroy(parser);
+      return NULL;
+    }
   }
   lonejson__clear_error(error);
   return parser;
@@ -259,15 +1113,18 @@ static void lonejson_parser_destroy(lonejson_parser *parser) {
   }
 }
 
-lonejson_status lonejson_parse_buffer(const lonejson_map *map, void *dst,
-                                      const void *data, size_t len,
-                                      const lonejson_parse_options *options,
-                                      lonejson_error *error) {
+static lonejson_status
+lonejson__parse_buffer_with_options(const lonejson_map *map, void *dst,
+                                    const void *data, size_t len,
+                                    const lonejson__parse_options *options,
+                                    const lonejson_runtime *runtime,
+                                    lonejson_error *error) {
   lonejson_parser *parser;
   lonejson_status status;
   lonejson_parser parser_storage;
   unsigned char parser_workspace[LONEJSON_PARSER_BUFFER_SIZE +
                                  LONEJSON__PARSER_WORKSPACE_SLACK];
+  lonejson__map_analysis analysis;
 
   if (map == NULL || dst == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -277,6 +1134,11 @@ lonejson_status lonejson_parse_buffer(const lonejson_map *map, void *dst,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "buffer is required");
   }
+  analysis = lonejson__map_analysis_cached(map);
+  if (!analysis.valid) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "invalid field layout");
+  }
   if (options != NULL &&
       !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->allocator)) {
     return lonejson__set_error(
@@ -284,10 +1146,17 @@ lonejson_status lonejson_parse_buffer(const lonejson_map *map, void *dst,
         "allocator must provide either all callbacks or none");
   }
   parser = &parser_storage;
-  lonejson__parser_init_state(parser, map, dst, options, 0, parser_workspace,
-                              sizeof(parser_workspace));
+  lonejson__parser_init_state(parser, map, dst, options, runtime, 0, 1,
+                              analysis.may_allocate, analysis.adopt_mask,
+                              parser_workspace, sizeof(parser_workspace));
   if (parser->options.clear_destination) {
-    lonejson__init_map_with_allocator(map, dst, &parser->allocator);
+    lonejson__init_map_parse(parser, map, dst);
+    if (parser->failed) {
+      if (error != NULL) {
+        *error = parser->error;
+      }
+      return parser->error.code;
+    }
   }
   lonejson__clear_error(error);
   status = lonejson_parser_feed(parser, data, len);
@@ -304,15 +1173,61 @@ lonejson_status lonejson_parse_buffer(const lonejson_map *map, void *dst,
   return status;
 }
 
-lonejson_status lonejson_parse_cstr(const lonejson_map *map, void *dst,
-                                    const char *json,
-                                    const lonejson_parse_options *options,
+lonejson_status lonejson_parse_buffer(lonejson *runtime, const lonejson_map *map,
+                                      void *dst, const void *data, size_t len,
+                                      lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  lonejson_status status;
+
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__parse_buffer_with_options(map, dst, data, len,
+                                               &runtime_state->parse_options,
+                                               runtime_state, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
+}
+
+static lonejson_status lonejson__runtime_parse_buffer(lonejson *runtime,
+                                                      const lonejson_map *map,
+                                                      void *dst,
+                                                      const void *data,
+                                                      size_t len,
+                                                      lonejson_error *error) {
+  return lonejson_parse_buffer(runtime, map, dst, data, len, error);
+}
+
+lonejson_status lonejson_parse_cstr(lonejson *runtime, const lonejson_map *map,
+                                    void *dst, const char *json,
                                     lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  lonejson_status status;
+
   if (json == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "json string is required");
   }
-  return lonejson_parse_buffer(map, dst, json, strlen(json), options, error);
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__parse_buffer_with_options(map, dst, json, strlen(json),
+                                               &runtime_state->parse_options,
+                                               runtime_state, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
+}
+
+static lonejson_status lonejson__runtime_parse_cstr(lonejson *runtime,
+                                                    const lonejson_map *map,
+                                                    void *dst,
+                                                    const char *json,
+                                                    lonejson_error *error) {
+  return lonejson_parse_cstr(runtime, map, dst, json, error);
 }
 
 static lonejson_read_result
@@ -327,16 +1242,19 @@ lonejson__file_reader(void *user, unsigned char *buffer, size_t capacity) {
   return result;
 }
 
-lonejson_status lonejson_parse_reader(const lonejson_map *map, void *dst,
-                                      lonejson_reader_fn reader, void *user,
-                                      const lonejson_parse_options *options,
-                                      lonejson_error *error) {
+static lonejson_status
+lonejson__parse_reader_with_options(const lonejson_map *map, void *dst,
+                                    lonejson_reader_fn reader, void *user,
+                                    const lonejson__parse_options *options,
+                                    const lonejson_runtime *runtime,
+                                    lonejson_error *error) {
   lonejson_parser *parser;
   unsigned char buffer[LONEJSON_READER_BUFFER_SIZE];
   lonejson_status status = LONEJSON_STATUS_OK;
   lonejson_parser parser_storage;
   unsigned char parser_workspace[LONEJSON_PARSER_BUFFER_SIZE +
                                  LONEJSON__PARSER_WORKSPACE_SLACK];
+  lonejson__map_analysis analysis;
 
   if (reader == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -346,6 +1264,11 @@ lonejson_status lonejson_parse_reader(const lonejson_map *map, void *dst,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "map and destination are required");
   }
+  analysis = lonejson__map_analysis_cached(map);
+  if (!analysis.valid) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "invalid field layout");
+  }
   if (options != NULL &&
       !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->allocator)) {
     return lonejson__set_error(
@@ -353,10 +1276,17 @@ lonejson_status lonejson_parse_reader(const lonejson_map *map, void *dst,
         "allocator must provide either all callbacks or none");
   }
   parser = &parser_storage;
-  lonejson__parser_init_state(parser, map, dst, options, 0, parser_workspace,
-                              sizeof(parser_workspace));
+  lonejson__parser_init_state(parser, map, dst, options, runtime, 0, 1,
+                              analysis.may_allocate, analysis.adopt_mask,
+                              parser_workspace, sizeof(parser_workspace));
   if (parser->options.clear_destination) {
-    lonejson__init_map_with_allocator(map, dst, &parser->allocator);
+    lonejson__init_map_parse(parser, map, dst);
+    if (parser->failed) {
+      if (error != NULL) {
+        *error = parser->error;
+      }
+      return parser->error.code;
+    }
   }
   lonejson__clear_error(error);
   for (;;) {
@@ -389,21 +1319,61 @@ lonejson_status lonejson_parse_reader(const lonejson_map *map, void *dst,
   return status;
 }
 
-lonejson_status lonejson_parse_filep(const lonejson_map *map, void *dst,
-                                     FILE *fp,
-                                     const lonejson_parse_options *options,
+lonejson_status lonejson_parse_reader(lonejson *runtime, const lonejson_map *map,
+                                      void *dst, lonejson_reader_fn reader,
+                                      void *user, lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  lonejson_status status;
+
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__parse_reader_with_options(map, dst, reader, user,
+                                               &runtime_state->parse_options,
+                                               runtime_state, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
+}
+
+static lonejson_status lonejson__runtime_parse_reader(
+    lonejson *runtime, const lonejson_map *map, void *dst, lonejson_reader_fn reader,
+    void *user, lonejson_error *error) {
+  return lonejson_parse_reader(runtime, map, dst, reader, user, error);
+}
+
+lonejson_status lonejson_parse_filep(lonejson *runtime, const lonejson_map *map,
+                                     void *dst, FILE *fp,
                                      lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  lonejson_status status;
+
   if (fp == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "file pointer is required");
   }
-  return lonejson_parse_reader(map, dst, lonejson__file_reader, fp, options,
-                               error);
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__parse_reader_with_options(map, dst, lonejson__file_reader,
+                                               fp, &runtime_state->parse_options,
+                                               runtime_state, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
 }
 
-lonejson_status lonejson_parse_path(const lonejson_map *map, void *dst,
-                                    const char *path,
-                                    const lonejson_parse_options *options,
+static lonejson_status lonejson__runtime_parse_filep(lonejson *runtime,
+                                                     const lonejson_map *map,
+                                                     void *dst, FILE *fp,
+                                                     lonejson_error *error) {
+  return lonejson_parse_filep(runtime, map, dst, fp, error);
+}
+
+lonejson_status lonejson_parse_path(lonejson *runtime, const lonejson_map *map,
+                                    void *dst, const char *path,
                                     lonejson_error *error) {
   FILE *fp;
   lonejson_status status;
@@ -420,9 +1390,17 @@ lonejson_status lonejson_parse_path(const lonejson_map *map, void *dst,
     return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
                                "failed to open '%s'", path);
   }
-  status = lonejson_parse_filep(map, dst, fp, options, error);
+  status = lonejson_parse_filep(runtime, map, dst, fp, error);
   fclose(fp);
   return status;
+}
+
+static lonejson_status lonejson__runtime_parse_path(lonejson *runtime,
+                                                    const lonejson_map *map,
+                                                    void *dst,
+                                                    const char *path,
+                                                    lonejson_error *error) {
+  return lonejson_parse_path(runtime, map, dst, path, error);
 }
 
 static void lonejson__stream_prepare_parser(lonejson_stream *stream,
@@ -430,9 +1408,9 @@ static void lonejson__stream_prepare_parser(lonejson_stream *stream,
   lonejson__parser_restart_stream(stream->parser, dst);
   if (stream->parser->options.clear_destination) {
     if (stream->prepared_dst == dst) {
-      lonejson__reset_map(stream->map, dst);
+      lonejson__reset_map_parse(stream->parser, stream->map, dst);
     } else {
-      lonejson__init_map_with_allocator(stream->map, dst, &stream->allocator);
+      lonejson__init_map_parse(stream->parser, stream->map, dst);
       stream->prepared_dst = dst;
     }
   }
@@ -472,7 +1450,8 @@ static lonejson_read_result lonejson__stream_read(lonejson_stream *stream) {
 
 static lonejson_stream *
 lonejson__stream_open_common(const lonejson_map *map,
-                             const lonejson_parse_options *options,
+                             const lonejson__parse_options *options,
+                             const lonejson_runtime *runtime,
                              lonejson_error *error) {
   lonejson_stream *stream;
   size_t parser_bytes;
@@ -499,7 +1478,7 @@ lonejson__stream_open_common(const lonejson_map *map,
     return NULL;
   }
   stream->map = map;
-  stream->options = options ? *options : lonejson_default_parse_options();
+  stream->options = options ? *options : lonejson__default_parse_options();
   stream->allocator = lonejson__allocator_resolve(stream->options.allocator);
   stream->self_alloc_size = sizeof(*stream) + parser_bytes;
   lonejson__clear_error(&stream->error);
@@ -507,6 +1486,9 @@ lonejson__stream_open_common(const lonejson_map *map,
   stream->reader_user = NULL;
   stream->fp = NULL;
   stream->fd = -1;
+  stream->memory_input = NULL;
+  stream->memory_input_len = 0u;
+  stream->memory_input_offset = 0u;
   stream->owns_fp = 0;
   stream->owns_fd = 0;
   stream->saw_eof = 0;
@@ -516,6 +1498,24 @@ lonejson__stream_open_common(const lonejson_map *map,
   stream->source_kind = 0;
   stream->current_dst = NULL;
   stream->prepared_dst = NULL;
+  if (lonejson__runtime_snapshot_init(&stream->runtime_storage, runtime, 1,
+                                      error) != LONEJSON_STATUS_OK) {
+    lonejson__buffer_free(&stream->allocator, stream, stream->self_alloc_size);
+    return NULL;
+  }
+  stream->runtime =
+      runtime != NULL ? &stream->runtime_storage : (const lonejson_runtime *)NULL;
+  if (runtime != NULL && stream->options.allocator == runtime->config.allocator) {
+    stream->options.allocator = stream->runtime->config.allocator;
+  }
+  if (runtime != NULL &&
+      stream->options.fixed_string_scratch ==
+          runtime->config.fixed_string_scratch) {
+    stream->options.fixed_string_scratch =
+        stream->runtime->parse_options.fixed_string_scratch;
+    stream->options.fixed_string_scratch_size =
+        stream->runtime->parse_options.fixed_string_scratch_size;
+  }
   stream->parser =
       (lonejson_parser *)(((unsigned char *)stream) + sizeof(*stream));
   workspace = ((unsigned char *)stream->parser) + sizeof(*stream->parser);
@@ -523,6 +1523,7 @@ lonejson__stream_open_common(const lonejson_map *map,
   workspace = lonejson__align_pointer(workspace,
                                       LONEJSON__PARSER_WORKSPACE_ALIGNMENT);
   stream->parser->root_map = map;
+  stream->parser->runtime = stream->runtime;
   stream->parser->options = stream->options;
   stream->parser->allocator = stream->allocator;
   stream->parser->workspace = workspace;
@@ -537,10 +1538,10 @@ lonejson__stream_open_common(const lonejson_map *map,
   return stream;
 }
 
-lonejson_stream *
-lonejson_stream_open_reader(const lonejson_map *map, lonejson_reader_fn reader,
-                            void *user, const lonejson_parse_options *options,
-                            lonejson_error *error) {
+static lonejson_stream *lonejson__stream_open_reader_with_options(
+    const lonejson_map *map, lonejson_reader_fn reader, void *user,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error) {
   lonejson_stream *stream;
 
   if (reader == NULL) {
@@ -548,7 +1549,7 @@ lonejson_stream_open_reader(const lonejson_map *map, lonejson_reader_fn reader,
                         "reader callback is required");
     return NULL;
   }
-  stream = lonejson__stream_open_common(map, options, error);
+  stream = lonejson__stream_open_common(map, options, runtime, error);
   if (stream == NULL) {
     return NULL;
   }
@@ -558,10 +1559,11 @@ lonejson_stream_open_reader(const lonejson_map *map, lonejson_reader_fn reader,
   return stream;
 }
 
-lonejson_stream *
-lonejson_stream_open_filep(const lonejson_map *map, FILE *fp,
-                           const lonejson_parse_options *options,
-                           lonejson_error *error) {
+static lonejson_stream *
+lonejson__stream_open_filep_with_options(const lonejson_map *map, FILE *fp,
+                                         const lonejson__parse_options *options,
+                                         const lonejson_runtime *runtime,
+                                         lonejson_error *error) {
   lonejson_stream *stream;
 
   if (fp == NULL) {
@@ -569,7 +1571,7 @@ lonejson_stream_open_filep(const lonejson_map *map, FILE *fp,
                         "file pointer is required");
     return NULL;
   }
-  stream = lonejson__stream_open_common(map, options, error);
+  stream = lonejson__stream_open_common(map, options, runtime, error);
   if (stream == NULL) {
     return NULL;
   }
@@ -578,10 +1580,12 @@ lonejson_stream_open_filep(const lonejson_map *map, FILE *fp,
   return stream;
 }
 
-lonejson_stream *
-lonejson_stream_open_path(const lonejson_map *map, const char *path,
-                          const lonejson_parse_options *options,
-                          lonejson_error *error) {
+static lonejson_stream *
+lonejson__stream_open_path_with_options(const lonejson_map *map,
+                                        const char *path,
+                                        const lonejson__parse_options *options,
+                                        const lonejson_runtime *runtime,
+                                        lonejson_error *error) {
   lonejson_stream *stream;
   FILE *fp;
 
@@ -599,7 +1603,8 @@ lonejson_stream_open_path(const lonejson_map *map, const char *path,
                         "failed to open '%s'", path);
     return NULL;
   }
-  stream = lonejson_stream_open_filep(map, fp, options, error);
+  stream = lonejson__stream_open_filep_with_options(map, fp, options, runtime,
+                                                    error);
   if (stream == NULL) {
     fclose(fp);
     return NULL;
@@ -608,9 +1613,11 @@ lonejson_stream_open_path(const lonejson_map *map, const char *path,
   return stream;
 }
 
-lonejson_stream *lonejson_stream_open_fd(const lonejson_map *map, int fd,
-                                         const lonejson_parse_options *options,
-                                         lonejson_error *error) {
+static lonejson_stream *
+lonejson__stream_open_fd_with_options(const lonejson_map *map, int fd,
+                                      const lonejson__parse_options *options,
+                                      const lonejson_runtime *runtime,
+                                      lonejson_error *error) {
   lonejson_stream *stream;
 
   if (fd < 0) {
@@ -618,13 +1625,123 @@ lonejson_stream *lonejson_stream_open_fd(const lonejson_map *map, int fd,
                         "fd must be non-negative");
     return NULL;
   }
-  stream = lonejson__stream_open_common(map, options, error);
+  stream = lonejson__stream_open_common(map, options, runtime, error);
   if (stream == NULL) {
     return NULL;
   }
   stream->source_kind = LONEJSON_STREAM_SOURCE_FD;
   stream->fd = fd;
   return stream;
+}
+
+lonejson_stream *
+lonejson_stream_open_reader(lonejson *runtime, const lonejson_map *map,
+                            lonejson_reader_fn reader, void *user,
+                            lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  lonejson_stream *stream;
+
+  runtime_state =
+      lonejson__runtime_owner_pin_const_nohook((const lonejson *)runtime, &borrow);
+  if (runtime_state == NULL) {
+    runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+    if (runtime_state == NULL) {
+      return NULL;
+    }
+  }
+  stream = lonejson__stream_open_reader_with_options(
+      map, reader, user, &runtime_state->parse_options, runtime_state, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return stream;
+}
+
+static lonejson_stream *lonejson__runtime_stream_open_reader(
+    lonejson *runtime, const lonejson_map *map, lonejson_reader_fn reader,
+    void *user, lonejson_error *error) {
+  return lonejson_stream_open_reader(runtime, map, reader, user, error);
+}
+
+lonejson_stream *
+lonejson_stream_open_filep(lonejson *runtime, const lonejson_map *map, FILE *fp,
+                           lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  lonejson_stream *stream;
+
+  runtime_state =
+      lonejson__runtime_owner_pin_const_nohook((const lonejson *)runtime, &borrow);
+  if (runtime_state == NULL) {
+    runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+    if (runtime_state == NULL) {
+      return NULL;
+    }
+  }
+  stream = lonejson__stream_open_filep_with_options(map, fp,
+                                                    &runtime_state->parse_options,
+                                                    runtime_state, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return stream;
+}
+
+static lonejson_stream *lonejson__runtime_stream_open_filep(
+    lonejson *runtime, const lonejson_map *map, FILE *fp, lonejson_error *error) {
+  return lonejson_stream_open_filep(runtime, map, fp, error);
+}
+
+lonejson_stream *
+lonejson_stream_open_path(lonejson *runtime, const lonejson_map *map,
+                          const char *path, lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  lonejson_stream *stream;
+
+  runtime_state =
+      lonejson__runtime_owner_pin_const_nohook((const lonejson *)runtime, &borrow);
+  if (runtime_state == NULL) {
+    runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+    if (runtime_state == NULL) {
+      return NULL;
+    }
+  }
+  stream = lonejson__stream_open_path_with_options(map, path,
+                                                   &runtime_state->parse_options,
+                                                   runtime_state, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return stream;
+}
+
+static lonejson_stream *lonejson__runtime_stream_open_path(
+    lonejson *runtime, const lonejson_map *map, const char *path,
+    lonejson_error *error) {
+  return lonejson_stream_open_path(runtime, map, path, error);
+}
+
+lonejson_stream *lonejson_stream_open_fd(lonejson *runtime,
+                                         const lonejson_map *map, int fd,
+                                         lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  lonejson_stream *stream;
+
+  runtime_state =
+      lonejson__runtime_owner_pin_const_nohook((const lonejson *)runtime, &borrow);
+  if (runtime_state == NULL) {
+    runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+    if (runtime_state == NULL) {
+      return NULL;
+    }
+  }
+  stream = lonejson__stream_open_fd_with_options(map, fd,
+                                                 &runtime_state->parse_options,
+                                                 runtime_state, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return stream;
+}
+
+static lonejson_stream *lonejson__runtime_stream_open_fd(
+    lonejson *runtime, const lonejson_map *map, int fd, lonejson_error *error) {
+  return lonejson_stream_open_fd(runtime, map, fd, error);
 }
 
 lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
@@ -638,6 +1755,15 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
   }
   if (!stream->object_in_progress) {
     lonejson__stream_prepare_parser(stream, dst);
+    if (stream->parser->failed) {
+      stream->object_in_progress = 0;
+      stream->current_dst = NULL;
+      stream->error = stream->parser->error;
+      if (error != NULL) {
+        *error = stream->error;
+      }
+      return LONEJSON_STREAM_ERROR;
+    }
   } else if (stream->current_dst != dst) {
     lonejson__set_error(&stream->error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                         0u, 0u, "resume the stream with the same destination");
@@ -667,6 +1793,85 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
         *error = stream->error;
       }
       return LONEJSON_STREAM_OBJECT;
+    }
+
+    if (stream->source_kind == LONEJSON_STREAM_SOURCE_MEMORY) {
+      if (stream->memory_input_offset >= stream->memory_input_len) {
+        stream->saw_eof = 1;
+        if (!stream->parser->root_started) {
+          if (error != NULL) {
+            *error = stream->error;
+          }
+          return LONEJSON_STREAM_EOF;
+        }
+        stream->error.code = lonejson_parser_finish(stream->parser);
+        stream->error = stream->parser->error;
+        stream->object_in_progress = 0;
+        stream->current_dst = NULL;
+        if (error != NULL) {
+          *error = stream->error;
+        }
+        return LONEJSON_STREAM_ERROR;
+      }
+
+      if (!stream->parser->root_started) {
+        while (stream->memory_input_offset < stream->memory_input_len &&
+               lonejson__is_json_space(
+                   stream->memory_input[stream->memory_input_offset])) {
+          stream->memory_input_offset++;
+        }
+        if (stream->memory_input_offset >= stream->memory_input_len) {
+          continue;
+        }
+        if (stream->memory_input[stream->memory_input_offset] != '{') {
+          lonejson__set_error(&stream->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                              0u, 0u, "expected top-level object");
+          if (error != NULL) {
+            *error = stream->error;
+          }
+          return LONEJSON_STREAM_ERROR;
+        }
+      }
+
+      {
+        size_t consumed;
+
+        status = lonejson__parser_feed_bytes(
+            stream->parser, stream->memory_input + stream->memory_input_offset,
+            stream->memory_input_len - stream->memory_input_offset, &consumed,
+            1);
+        stream->memory_input_offset += consumed;
+      }
+      if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+        stream->error = stream->parser->error;
+        stream->object_in_progress = 0;
+        stream->current_dst = NULL;
+        if (error != NULL) {
+          *error = stream->error;
+        }
+        return LONEJSON_STREAM_ERROR;
+      }
+      if (lonejson__parser_root_complete(stream->parser)) {
+        if (stream->parser->error.code == LONEJSON_STATUS_OK &&
+            !stream->parser->error.truncated) {
+          stream->error.code = LONEJSON_STATUS_OK;
+          stream->error.line = 0u;
+          stream->error.column = 0u;
+          stream->error.offset = 0u;
+          stream->error.system_errno = 0;
+          stream->error.truncated = 0;
+          stream->error.message[0] = '\0';
+        } else {
+          stream->error = stream->parser->error;
+        }
+        stream->object_in_progress = 0;
+        stream->current_dst = NULL;
+        if (error != NULL) {
+          *error = stream->error;
+        }
+        return LONEJSON_STREAM_OBJECT;
+      }
+      continue;
     }
 
     if (stream->buffered_start == stream->buffered_end) {
@@ -783,45 +1988,121 @@ void lonejson_stream_close(lonejson_stream *stream) {
   if (stream->owns_fd && stream->fd >= 0) {
     close(stream->fd);
   }
+  lonejson__runtime_free_owned_config(&stream->runtime_storage);
   lonejson__buffer_free(&stream->allocator, stream, stream->self_alloc_size);
 }
 
-lonejson_status lonejson_validate_buffer(const void *data, size_t len,
-                                         lonejson_error *error) {
-  lonejson_parser *parser;
+static lonejson_array_stream *lonejson__runtime_array_stream_open_reader(
+    lonejson *runtime, const char *path, lonejson_reader_fn reader, void *user,
+    lonejson_error *error) {
+  return lonejson_array_stream_open_reader(runtime, path, reader, user, error);
+}
+
+static lonejson_array_stream *lonejson__runtime_array_stream_open_filep(
+    lonejson *runtime, const char *path, FILE *fp, lonejson_error *error) {
+  return lonejson_array_stream_open_filep(runtime, path, fp, error);
+}
+
+static lonejson_array_stream *lonejson__runtime_array_stream_open_path(
+    lonejson *runtime, const char *array_path, const char *path,
+    lonejson_error *error) {
+  return lonejson_array_stream_open_path(runtime, array_path, path, error);
+}
+
+static lonejson_array_stream *lonejson__runtime_array_stream_open_fd(
+    lonejson *runtime, const char *path, int fd, lonejson_error *error) {
+  return lonejson_array_stream_open_fd(runtime, path, fd, error);
+}
+
+static lonejson_array_stream *lonejson__runtime_array_stream_open_push(
+    lonejson *runtime, const char *path, lonejson_error *error) {
+  return lonejson_array_stream_open_push(runtime, path, error);
+}
+
+static void lonejson__runtime_json_value_init(lonejson *runtime,
+                                              lonejson_json_value *value) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+
+  runtime_state =
+      lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+  lonejson_json_value_init_with_allocator(
+      value, runtime_state != NULL ? runtime_state->config.allocator : NULL);
+  if (value != NULL && runtime_state != NULL) {
+    value->parse_visitor_limits = runtime_state->value_limits;
+    value->runtime_parse_visitor_limits = runtime_state->value_limits;
+    value->parse_limits_follow_runtime = 1;
+  }
+  lonejson__runtime_borrow_release(&borrow);
+}
+
+static void lonejson__runtime_json_value_cleanup(lonejson *runtime,
+                                                 lonejson_json_value *value) {
+  (void)runtime;
+  lonejson_json_value_cleanup(value);
+}
+
+static lonejson_status lonejson__runtime_generator_init(
+    lonejson *runtime, lonejson_generator *generator, const lonejson_map *map,
+    const void *src) {
+  return lonejson_generator_init(runtime, generator, map, src);
+}
+
+static lonejson_status lonejson__runtime_writer_init_sink(
+    lonejson *runtime, lonejson_writer *writer, lonejson_sink_fn sink,
+    void *sink_user, lonejson_error *error) {
+  return lonejson_writer_init_sink(runtime, writer, sink, sink_user, error);
+}
+
+lonejson_status lonejson_validate_buffer(lonejson *runtime, const void *data,
+                                         size_t len, lonejson_error *error) {
   lonejson_status status;
   lonejson_parser parser_storage;
   unsigned char parser_workspace[LONEJSON_PARSER_BUFFER_SIZE +
                                  LONEJSON__PARSER_WORKSPACE_SLACK];
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
 
   if (data == NULL && len != 0u) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "buffer is required");
   }
-  parser = &parser_storage;
-  lonejson__parser_init_state(parser, NULL, NULL, NULL, 1, parser_workspace,
-                              sizeof(parser_workspace));
-  lonejson__clear_error(error);
-  status = lonejson_parser_feed(parser, data, len);
+  runtime_state = lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+  if (LONEJSON__UNLIKELY(runtime_state == NULL)) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                              0u, "lonejson runtime is required");
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  lonejson__parser_init_state(&parser_storage, NULL, NULL,
+                              &runtime_state->parse_options,
+                              runtime_state,
+                              1,
+                              0,
+                              0,
+                              0u,
+                              parser_workspace, sizeof(parser_workspace));
+  status = lonejson_parser_feed(&parser_storage, data, len);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
-    status = lonejson_parser_finish(parser);
+    status = lonejson_parser_finish(&parser_storage);
   }
   if (error != NULL) {
-    *error = parser->error;
+    *error = parser_storage.error;
   }
+  lonejson__runtime_borrow_release(&borrow);
   return status;
 }
 
-lonejson_status lonejson_validate_cstr(const char *json,
+lonejson_status lonejson_validate_cstr(lonejson *runtime, const char *json,
                                        lonejson_error *error) {
   if (json == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "json string is required");
   }
-  return lonejson_validate_buffer(json, strlen(json), error);
+  return lonejson_validate_buffer(runtime, json, strlen(json), error);
 }
 
-lonejson_status lonejson_validate_reader(lonejson_reader_fn reader, void *user,
+lonejson_status lonejson_validate_reader(lonejson *runtime,
+                                         lonejson_reader_fn reader, void *user,
                                          lonejson_error *error) {
   lonejson_parser *parser;
   unsigned char buffer[LONEJSON_READER_BUFFER_SIZE];
@@ -829,14 +2110,22 @@ lonejson_status lonejson_validate_reader(lonejson_reader_fn reader, void *user,
   lonejson_parser parser_storage;
   unsigned char parser_workspace[LONEJSON_PARSER_BUFFER_SIZE +
                                  LONEJSON__PARSER_WORKSPACE_SLACK];
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
 
   if (reader == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "reader callback is required");
   }
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
   parser = &parser_storage;
-  lonejson__parser_init_state(parser, NULL, NULL, NULL, 1, parser_workspace,
-                              sizeof(parser_workspace));
+  lonejson__parser_init_state(parser, NULL, NULL,
+                              &runtime_state->parse_options, runtime_state, 1,
+                              0, 0, 0u,
+                              parser_workspace, sizeof(parser_workspace));
   lonejson__clear_error(error);
   for (;;) {
     lonejson_read_result chunk = reader(user, buffer, sizeof(buffer));
@@ -861,18 +2150,20 @@ lonejson_status lonejson_validate_reader(lonejson_reader_fn reader, void *user,
   if (error != NULL) {
     *error = parser->error;
   }
+  lonejson__runtime_borrow_release(&borrow);
   return status;
 }
 
-lonejson_status lonejson_validate_filep(FILE *fp, lonejson_error *error) {
+lonejson_status lonejson_validate_filep(lonejson *runtime, FILE *fp,
+                                        lonejson_error *error) {
   if (fp == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "file pointer is required");
   }
-  return lonejson_validate_reader(lonejson__file_reader, fp, error);
+  return lonejson_validate_reader(runtime, lonejson__file_reader, fp, error);
 }
 
-lonejson_status lonejson_validate_path(const char *path,
+lonejson_status lonejson_validate_path(lonejson *runtime, const char *path,
                                        lonejson_error *error) {
   FILE *fp;
   lonejson_status status;
@@ -889,7 +2180,7 @@ lonejson_status lonejson_validate_path(const char *path,
     return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 1u, 0u,
                                "failed to open '%s'", path);
   }
-  status = lonejson_validate_filep(fp, error);
+  status = lonejson_validate_filep(runtime, fp, error);
   fclose(fp);
   return status;
 }
@@ -911,9 +2202,10 @@ lonejson__fd_reader(void *user, unsigned char *buffer, size_t capacity) {
   return result;
 }
 
-lonejson_status lonejson_visit_value_buffer(
+static lonejson_status lonejson__visit_value_buffer_with_limits(
     const void *data, size_t len, const lonejson_value_visitor *visitor,
-    void *user, const lonejson_value_limits *limits, lonejson_error *error) {
+    void *user, const lonejson__value_limits *limits,
+    const lonejson_allocator *allocator, lonejson_error *error) {
   lonejson__json_cursor cursor;
 
   if (data == NULL || visitor == NULL) {
@@ -923,58 +2215,169 @@ lonejson_status lonejson_visit_value_buffer(
   memset(&cursor, 0, sizeof(cursor));
   cursor.buffer = (const unsigned char *)data;
   cursor.buffer_len = len;
-  return lonejson__json_visit_cursor(&cursor, NULL, visitor, user, limits,
+  return lonejson__json_visit_cursor(&cursor, allocator, visitor, user, limits,
                                      error);
 }
 
-lonejson_status lonejson_visit_value_cstr(const char *json,
-                                          const lonejson_value_visitor *visitor,
-                                          void *user,
-                                          const lonejson_value_limits *limits,
-                                          lonejson_error *error) {
+static lonejson_status lonejson__visit_value_cstr_with_limits(
+    const char *json, const lonejson_value_visitor *visitor, void *user,
+    const lonejson__value_limits *limits, const lonejson_allocator *allocator,
+    lonejson_error *error) {
   if (json == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "json string and visitor are required");
   }
-  return lonejson_visit_value_buffer(json, strlen(json), visitor, user, limits,
-                                     error);
+  return lonejson__visit_value_buffer_with_limits(
+      json, strlen(json), visitor, user, limits, allocator, error);
 }
 
-lonejson_status
-lonejson_visit_value_reader(lonejson_reader_fn reader, void *reader_user,
-                            const lonejson_value_visitor *visitor, void *user,
-                            const lonejson_value_limits *limits,
-                            lonejson_error *error) {
-  lonejson_json_value value;
+static lonejson_status lonejson__visit_value_reader_with_limits(
+    lonejson_reader_fn reader, void *reader_user,
+    const lonejson_value_visitor *visitor, void *user,
+    const lonejson__value_limits *limits,
+    const lonejson_allocator *allocator, lonejson_error *error) {
+  lonejson__json_cursor cursor;
 
   if (reader == NULL || visitor == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "reader and visitor are required");
   }
-  lonejson_json_value_init(&value);
-  value.kind = LONEJSON_JSON_VALUE_READER;
-  value.reader = reader;
-  value.reader_user = reader_user;
-  return lonejson__json_visit(&value, visitor, user, limits, error);
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.reader = reader;
+  cursor.reader_user = reader_user;
+  return lonejson__json_visit_cursor(&cursor, allocator, visitor, user, limits,
+                                     error);
+}
+
+static lonejson_status lonejson__runtime_snapshot_visit_policy(
+    lonejson *runtime, lonejson__value_limits *limits,
+    lonejson_allocator *allocator_storage,
+    const lonejson_allocator **allocator, lonejson_error *error) {
+  const lonejson_runtime *runtime_state = NULL;
+  const lonejson__runtime_handle *cursor;
+  const lonejson_runtime *state_ptr;
+
+  if (limits == NULL || allocator_storage == NULL || allocator == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "visit runtime policy snapshot is required");
+  }
+  *allocator = NULL;
+  if (runtime == NULL || runtime->state == NULL || runtime->_state_token == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "lonejson runtime is required");
+  }
+  if (runtime->_runtime_owner_self == runtime &&
+      runtime->_runtime_owner_data != NULL) {
+    lonejson__runtime_handle *handle =
+        &((lonejson__runtime_bundle *)runtime)->live_handle;
+    (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_INC(handle);
+    if (handle->generation == runtime->_state_token &&
+        !LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(handle)) {
+      runtime_state = (const lonejson_runtime *)runtime->_runtime_owner_data;
+      *limits = runtime_state->value_limits;
+      if (runtime_state->config.allocator != NULL) {
+        *allocator_storage = runtime_state->allocator_storage;
+        *allocator = allocator_storage;
+      }
+      (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle);
+      return LONEJSON_STATUS_OK;
+    }
+    (void)LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle);
+  } else {
+    LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
+    state_ptr = (const lonejson_runtime *)runtime->state;
+    cursor = g_lonejson_runtime_handle_live_list;
+    while (cursor != NULL) {
+      if (cursor->generation == runtime->_state_token &&
+          cursor->runtime_state == state_ptr &&
+          !LONEJSON__RUNTIME_HANDLE_CLOSING_LOAD(cursor)) {
+        runtime_state = cursor->runtime_state;
+        break;
+      }
+      cursor = cursor->next_live;
+    }
+    if (runtime_state != NULL) {
+      *limits = runtime_state->value_limits;
+      if (runtime_state->config.allocator != NULL) {
+        *allocator_storage = runtime_state->allocator_storage;
+        *allocator = allocator_storage;
+      }
+    }
+    LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
+  }
+  if (runtime_state != NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                             0u, "lonejson runtime is required");
+}
+
+lonejson_status lonejson_visit_value_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lonejson_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  lonejson__value_limits limits;
+  lonejson_allocator allocator_storage;
+  const lonejson_allocator *allocator = NULL;
+
+  if (lonejson__runtime_snapshot_visit_policy(
+          runtime, &limits, &allocator_storage, &allocator,
+          error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  return lonejson__visit_value_buffer_with_limits(data, len, visitor, user,
+                                                  &limits, allocator, error);
+}
+
+lonejson_status lonejson_visit_value_cstr(lonejson *runtime, const char *json,
+                                          const lonejson_value_visitor *visitor,
+                                          void *user, lonejson_error *error) {
+  lonejson__value_limits limits;
+  lonejson_allocator allocator_storage;
+  const lonejson_allocator *allocator = NULL;
+
+  if (lonejson__runtime_snapshot_visit_policy(
+          runtime, &limits, &allocator_storage, &allocator,
+          error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  return lonejson__visit_value_cstr_with_limits(json, visitor, user, &limits,
+                                                allocator, error);
 }
 
 lonejson_status
-lonejson_visit_value_filep(FILE *fp, const lonejson_value_visitor *visitor,
-                           void *user, const lonejson_value_limits *limits,
+lonejson_visit_value_reader(lonejson *runtime, lonejson_reader_fn reader,
+                            void *reader_user,
+                            const lonejson_value_visitor *visitor, void *user,
+                            lonejson_error *error) {
+  lonejson__value_limits limits;
+  lonejson_allocator allocator_storage;
+  const lonejson_allocator *allocator = NULL;
+
+  if (lonejson__runtime_snapshot_visit_policy(
+          runtime, &limits, &allocator_storage, &allocator,
+          error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  return lonejson__visit_value_reader_with_limits(
+      reader, reader_user, visitor, user, &limits, allocator, error);
+}
+
+lonejson_status
+lonejson_visit_value_filep(lonejson *runtime, FILE *fp,
+                           const lonejson_value_visitor *visitor, void *user,
                            lonejson_error *error) {
   if (fp == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "file pointer and visitor are required");
   }
-  return lonejson_visit_value_reader(lonejson__file_reader, fp, visitor, user,
-                                     limits, error);
+  return lonejson_visit_value_reader(runtime, lonejson__file_reader, fp, visitor,
+                                     user, error);
 }
 
-lonejson_status lonejson_visit_value_path(const char *path,
+lonejson_status lonejson_visit_value_path(lonejson *runtime, const char *path,
                                           const lonejson_value_visitor *visitor,
-                                          void *user,
-                                          const lonejson_value_limits *limits,
-                                          lonejson_error *error) {
+                                          void *user, lonejson_error *error) {
   FILE *fp;
   lonejson_status status;
 
@@ -990,29 +2393,25 @@ lonejson_status lonejson_visit_value_path(const char *path,
     return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 1u, 0u,
                                "failed to open '%s'", path);
   }
-  status = lonejson_visit_value_filep(fp, visitor, user, limits, error);
+  status = lonejson_visit_value_filep(runtime, fp, visitor, user, error);
   fclose(fp);
   return status;
 }
 
-lonejson_status lonejson_visit_value_fd(int fd,
+lonejson_status lonejson_visit_value_fd(lonejson *runtime, int fd,
                                         const lonejson_value_visitor *visitor,
-                                        void *user,
-                                        const lonejson_value_limits *limits,
-                                        lonejson_error *error) {
+                                        void *user, lonejson_error *error) {
   if (fd < 0 || visitor == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "fd and visitor are required");
   }
-  return lonejson_visit_value_reader(lonejson__fd_reader, &fd, visitor, user,
-                                     limits, error);
+  return lonejson_visit_value_reader(runtime, lonejson__fd_reader, &fd, visitor,
+                                     user, error);
 }
 
-lonejson_status lonejson_serialize_sink(const lonejson_map *map,
-                                        const void *src, lonejson_sink_fn sink,
-                                        void *user,
-                                        const lonejson_write_options *options,
-                                        lonejson_error *error) {
+static lonejson_status lonejson__serialize_sink_with_options(
+    const lonejson_map *map, const void *src, lonejson_sink_fn sink,
+    void *user, const lonejson__write_options *options, lonejson_error *error) {
   lonejson_status status;
   lonejson__write_state state;
 
@@ -1038,20 +2437,37 @@ lonejson_status lonejson_serialize_sink(const lonejson_map *map,
   return status;
 }
 
-lonejson_status lonejson_serialize_buffer(const lonejson_map *map,
-                                          const void *src, char *buffer,
-                                          size_t capacity, size_t *needed,
-                                          const lonejson_write_options *options,
-                                          lonejson_error *error) {
+lonejson_status lonejson_serialize_sink(lonejson *runtime, const lonejson_map *map,
+                                        const void *src, lonejson_sink_fn sink,
+                                        void *user,
+                                        lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status =
+      lonejson__serialize_sink_with_options(map, src, sink, user, &options, error);
+  return status;
+}
+
+static lonejson_status lonejson__serialize_buffer_with_options(
+    const lonejson_map *map, const void *src, char *buffer, size_t capacity,
+    size_t *needed, const lonejson__write_options *options,
+    lonejson_error *error) {
   lonejson_buffer_sink sink;
-  lonejson_write_options local_options;
+  lonejson__write_options local_options;
   lonejson_status status;
 
   if (buffer == NULL || capacity == 0u) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "output buffer and capacity are required");
   }
-  local_options = options ? *options : lonejson_default_write_options();
+  local_options = options ? *options : lonejson__default_write_options();
   sink.buffer = buffer;
   sink.capacity = capacity;
   sink.length = 0u;
@@ -1076,7 +2492,7 @@ lonejson_status lonejson_serialize_buffer(const lonejson_map *map,
           lonejson__serialize_map_compact_buffer_exact(map, src, &sink, error);
     }
   } else {
-    status = lonejson_serialize_sink(
+    status = lonejson__serialize_sink_with_options(
         map, src,
         (local_options.overflow_policy == LONEJSON_OVERFLOW_FAIL)
             ? lonejson__sink_buffer_exact
@@ -1095,11 +2511,27 @@ lonejson_status lonejson_serialize_buffer(const lonejson_map *map,
   return status;
 }
 
-lonejson_status lonejson_serialize_owned(const lonejson_map *map,
-                                         const void *src,
-                                         lonejson_owned_buffer *out,
-                                         const lonejson_write_options *options,
-                                         lonejson_error *error) {
+lonejson_status lonejson_serialize_buffer(lonejson *runtime, const lonejson_map *map,
+                                          const void *src, char *buffer,
+                                          size_t capacity, size_t *needed,
+                                          lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__serialize_buffer_with_options(map, src, buffer, capacity,
+                                                   needed, &options, error);
+  return status;
+}
+
+static lonejson_status lonejson__serialize_owned_with_options(
+    const lonejson_map *map, const void *src, lonejson_owned_buffer *out,
+    const lonejson__write_options *options, lonejson_error *error) {
   lonejson_buffer_sink sink;
   lonejson_status status;
   lonejson_allocator resolved;
@@ -1132,8 +2564,8 @@ lonejson_status lonejson_serialize_owned(const lonejson_map *map,
           lonejson__serialize_map_compact_buffer_grow(map, src, &sink, error);
     }
   } else {
-    status = lonejson_serialize_sink(map, src, lonejson__sink_grow, &sink,
-                                     options, error);
+    status = lonejson__serialize_sink_with_options(map, src, lonejson__sink_grow,
+                                                   &sink, options, error);
   }
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     lonejson__buffer_free(sink.allocator, sink.buffer, sink.alloc_size);
@@ -1147,6 +2579,23 @@ lonejson_status lonejson_serialize_owned(const lonejson_map *map,
   if (out->data != NULL) {
     out->data[out->len] = '\0';
   }
+  return status;
+}
+
+lonejson_status lonejson_serialize_owned(lonejson *runtime, const lonejson_map *map,
+                                         const void *src,
+                                         lonejson_owned_buffer *out,
+                                         lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__serialize_owned_with_options(map, src, out, &options, error);
   return status;
 }
 
@@ -1204,12 +2653,11 @@ lonejson_status lonejson_owned_buffer_sink(void *user, const void *data,
   return LONEJSON_STATUS_OK;
 }
 
-char *lonejson_serialize_alloc(const lonejson_map *map, const void *src,
-                               size_t *out_len,
-                               const lonejson_write_options *options,
-                               lonejson_error *error) {
+static char *lonejson__serialize_alloc_with_options(
+    const lonejson_map *map, const void *src, size_t *out_len,
+    const lonejson__write_options *options, lonejson_error *error) {
   lonejson_owned_buffer buffer;
-  lonejson_write_options local_options;
+  lonejson__write_options local_options;
   lonejson_status status;
 
   if (options != NULL &&
@@ -1225,9 +2673,10 @@ char *lonejson_serialize_alloc(const lonejson_map *map, const void *src,
                         "serialize_owned for custom allocators");
     return NULL;
   }
-  local_options = options ? *options : lonejson_default_write_options();
+  local_options = options ? *options : lonejson__default_write_options();
   local_options.allocator = NULL;
-  status = lonejson_serialize_owned(map, src, &buffer, &local_options, error);
+  status = lonejson__serialize_owned_with_options(map, src, &buffer,
+                                                  &local_options, error);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return NULL;
   }
@@ -1237,22 +2686,53 @@ char *lonejson_serialize_alloc(const lonejson_map *map, const void *src,
   return buffer.data;
 }
 
-lonejson_status lonejson_serialize_filep(const lonejson_map *map,
-                                         const void *src, FILE *fp,
-                                         const lonejson_write_options *options,
-                                         lonejson_error *error) {
+char *lonejson_serialize_alloc(lonejson *runtime, const lonejson_map *map,
+                               const void *src, size_t *out_len,
+                               lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  char *result;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return NULL;
+  }
+  result = lonejson__serialize_alloc_with_options(map, src, out_len, &options,
+                                                  error);
+  return result;
+}
+
+static lonejson_status lonejson__serialize_filep_with_options(
+    const lonejson_map *map, const void *src, FILE *fp,
+    const lonejson__write_options *options, lonejson_error *error) {
   if (fp == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "file pointer is required");
   }
-  return lonejson_serialize_sink(map, src, lonejson__sink_file, fp, options,
-                                 error);
+  return lonejson__serialize_sink_with_options(map, src, lonejson__sink_file,
+                                               fp, options, error);
 }
 
-lonejson_status lonejson_serialize_path(const lonejson_map *map,
-                                        const void *src, const char *path,
-                                        const lonejson_write_options *options,
-                                        lonejson_error *error) {
+lonejson_status lonejson_serialize_filep(lonejson *runtime, const lonejson_map *map,
+                                         const void *src, FILE *fp,
+                                         lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__serialize_filep_with_options(map, src, fp, &options, error);
+  return status;
+}
+
+static lonejson_status lonejson__serialize_path_with_options(
+    const lonejson_map *map, const void *src, const char *path,
+    const lonejson__write_options *options, lonejson_error *error) {
   FILE *fp;
   lonejson_status status;
 
@@ -1268,14 +2748,30 @@ lonejson_status lonejson_serialize_path(const lonejson_map *map,
     return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
                                "failed to open '%s' for writing", path);
   }
-  status = lonejson_serialize_filep(map, src, fp, options, error);
+  status = lonejson__serialize_filep_with_options(map, src, fp, options, error);
   fclose(fp);
   return status;
 }
 
-lonejson_status lonejson_serialize_jsonl_sink(
+lonejson_status lonejson_serialize_path(lonejson *runtime, const lonejson_map *map,
+                                        const void *src, const char *path,
+                                        lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__serialize_path_with_options(map, src, path, &options, error);
+  return status;
+}
+
+static lonejson_status lonejson__serialize_jsonl_sink_with_options(
     const lonejson_map *map, const void *items, size_t count, size_t stride,
-    lonejson_sink_fn sink, void *user, const lonejson_write_options *options,
+    lonejson_sink_fn sink, void *user, const lonejson__write_options *options,
     lonejson_error *error) {
   lonejson_status status;
   lonejson__write_state state;
@@ -1311,19 +2807,37 @@ lonejson_status lonejson_serialize_jsonl_sink(
   return status;
 }
 
-lonejson_status lonejson_serialize_jsonl_buffer(
+lonejson_status lonejson_serialize_jsonl_sink(
+    lonejson *runtime, const lonejson_map *map, const void *items, size_t count,
+    size_t stride, lonejson_sink_fn sink, void *user, lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__serialize_jsonl_sink_with_options(map, items, count, stride,
+                                                       sink, user, &options,
+                                                       error);
+  return status;
+}
+
+static lonejson_status lonejson__serialize_jsonl_buffer_with_options(
     const lonejson_map *map, const void *items, size_t count, size_t stride,
     char *buffer, size_t capacity, size_t *needed,
-    const lonejson_write_options *options, lonejson_error *error) {
+    const lonejson__write_options *options, lonejson_error *error) {
   lonejson_buffer_sink sink;
-  lonejson_write_options local_options;
+  lonejson__write_options local_options;
   lonejson_status status;
 
   if (buffer == NULL || capacity == 0u) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "output buffer and capacity are required");
   }
-  local_options = options ? *options : lonejson_default_write_options();
+  local_options = options ? *options : lonejson__default_write_options();
   sink.buffer = buffer;
   sink.capacity = capacity;
   sink.length = 0u;
@@ -1372,7 +2886,7 @@ lonejson_status lonejson_serialize_jsonl_buffer(
       }
     }
   } else {
-    status = lonejson_serialize_jsonl_sink(
+    status = lonejson__serialize_jsonl_sink_with_options(
         map, items, count, stride,
         (local_options.overflow_policy == LONEJSON_OVERFLOW_FAIL)
             ? lonejson__sink_buffer_exact
@@ -1391,9 +2905,27 @@ lonejson_status lonejson_serialize_jsonl_buffer(
   return status;
 }
 
-lonejson_status lonejson_serialize_jsonl_owned(
+lonejson_status lonejson_serialize_jsonl_buffer(
+    lonejson *runtime, const lonejson_map *map, const void *items, size_t count,
+    size_t stride, char *buffer, size_t capacity, size_t *needed,
+    lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__serialize_jsonl_buffer_with_options(
+      map, items, count, stride, buffer, capacity, needed, &options, error);
+  return status;
+}
+
+static lonejson_status lonejson__serialize_jsonl_owned_with_options(
     const lonejson_map *map, const void *items, size_t count, size_t stride,
-    lonejson_owned_buffer *out, const lonejson_write_options *options,
+    lonejson_owned_buffer *out, const lonejson__write_options *options,
     lonejson_error *error) {
   lonejson_buffer_sink sink;
   lonejson_status status;
@@ -1451,7 +2983,7 @@ lonejson_status lonejson_serialize_jsonl_owned(
       }
     }
   } else {
-    status = lonejson_serialize_jsonl_sink(
+    status = lonejson__serialize_jsonl_sink_with_options(
         map, items, count, stride, lonejson__sink_grow, &sink, options, error);
   }
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
@@ -1469,13 +3001,29 @@ lonejson_status lonejson_serialize_jsonl_owned(
   return status;
 }
 
-char *lonejson_serialize_jsonl_alloc(const lonejson_map *map, const void *items,
-                                     size_t count, size_t stride,
-                                     size_t *out_len,
-                                     const lonejson_write_options *options,
-                                     lonejson_error *error) {
+lonejson_status lonejson_serialize_jsonl_owned(
+    lonejson *runtime, const lonejson_map *map, const void *items, size_t count,
+    size_t stride, lonejson_owned_buffer *out, lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__serialize_jsonl_owned_with_options(map, items, count, stride,
+                                                        out, &options, error);
+  return status;
+}
+
+static char *lonejson__serialize_jsonl_alloc_with_options(
+    const lonejson_map *map, const void *items, size_t count, size_t stride,
+    size_t *out_len, const lonejson__write_options *options,
+    lonejson_error *error) {
   lonejson_owned_buffer buffer;
-  lonejson_write_options local_options;
+  lonejson__write_options local_options;
   lonejson_status status;
 
   if (options != NULL &&
@@ -1492,10 +3040,10 @@ char *lonejson_serialize_jsonl_alloc(const lonejson_map *map, const void *items,
         "serialize_jsonl_owned for custom allocators");
     return NULL;
   }
-  local_options = options ? *options : lonejson_default_write_options();
+  local_options = options ? *options : lonejson__default_write_options();
   local_options.allocator = NULL;
-  status = lonejson_serialize_jsonl_owned(map, items, count, stride, &buffer,
-                                          &local_options, error);
+  status = lonejson__serialize_jsonl_owned_with_options(
+      map, items, count, stride, &buffer, &local_options, error);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return NULL;
   }
@@ -1505,22 +3053,56 @@ char *lonejson_serialize_jsonl_alloc(const lonejson_map *map, const void *items,
   return buffer.data;
 }
 
-lonejson_status lonejson_serialize_jsonl_filep(
+char *lonejson_serialize_jsonl_alloc(lonejson *runtime, const lonejson_map *map,
+                                     const void *items, size_t count,
+                                     size_t stride, size_t *out_len,
+                                     lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  char *result;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return NULL;
+  }
+  result = lonejson__serialize_jsonl_alloc_with_options(
+      map, items, count, stride, out_len, &options, error);
+  return result;
+}
+
+static lonejson_status lonejson__serialize_jsonl_filep_with_options(
     const lonejson_map *map, const void *items, size_t count, size_t stride,
-    FILE *fp, const lonejson_write_options *options, lonejson_error *error) {
+    FILE *fp, const lonejson__write_options *options, lonejson_error *error) {
   if (fp == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "file pointer is required");
   }
-  return lonejson_serialize_jsonl_sink(map, items, count, stride,
-                                       lonejson__sink_file, fp, options, error);
+  return lonejson__serialize_jsonl_sink_with_options(
+      map, items, count, stride, lonejson__sink_file, fp, options, error);
 }
 
-lonejson_status
-lonejson_serialize_jsonl_path(const lonejson_map *map, const void *items,
-                              size_t count, size_t stride, const char *path,
-                              const lonejson_write_options *options,
-                              lonejson_error *error) {
+lonejson_status lonejson_serialize_jsonl_filep(
+    lonejson *runtime, const lonejson_map *map, const void *items, size_t count,
+    size_t stride, FILE *fp, lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__serialize_jsonl_filep_with_options(map, items, count, stride,
+                                                        fp, &options, error);
+  return status;
+}
+
+static lonejson_status lonejson__serialize_jsonl_path_with_options(
+    const lonejson_map *map, const void *items, size_t count, size_t stride,
+    const char *path, const lonejson__write_options *options,
+    lonejson_error *error) {
   FILE *fp;
   lonejson_status status;
 
@@ -1536,9 +3118,27 @@ lonejson_serialize_jsonl_path(const lonejson_map *map, const void *items,
     return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
                                "failed to open '%s' for writing", path);
   }
-  status = lonejson_serialize_jsonl_filep(map, items, count, stride, fp,
-                                          options, error);
+  status = lonejson__serialize_jsonl_filep_with_options(map, items, count,
+                                                        stride, fp, options,
+                                                        error);
   fclose(fp);
+  return status;
+}
+
+lonejson_status lonejson_serialize_jsonl_path(
+    lonejson *runtime, const lonejson_map *map, const void *items, size_t count,
+    size_t stride, const char *path, lonejson_error *error) {
+  lonejson__write_options options;
+  lonejson_allocator allocator_storage;
+  lonejson_status status;
+
+  if (lonejson__runtime_snapshot_write_policy(runtime, &options,
+                                              &allocator_storage,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__serialize_jsonl_path_with_options(map, items, count, stride,
+                                                       path, &options, error);
   return status;
 }
 
@@ -1546,10 +3146,32 @@ void lonejson_cleanup(const lonejson_map *map, void *value) {
   lonejson__cleanup_map_checked(map, value);
 }
 
-void lonejson_init(const lonejson_map *map, void *value) {
-  lonejson__init_map(map, value);
+void lonejson_init(lonejson *runtime, const lonejson_map *map, void *value) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+
+  runtime_state =
+      lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+  if (runtime_state == NULL) {
+    lonejson__init_map_with_allocator(map, value, NULL, NULL);
+    return;
+  }
+  lonejson__init_map_with_allocator(map, value,
+                                    runtime_state->config.allocator,
+                                    runtime_state);
+  lonejson__runtime_borrow_release(&borrow);
 }
 
-void lonejson_reset(const lonejson_map *map, void *value) {
-  lonejson__reset_map(map, value);
+void lonejson_reset(lonejson *runtime, const lonejson_map *map, void *value) {
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+
+  runtime_state =
+      lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+  if (runtime_state == NULL) {
+    lonejson__reset_map(map, value, NULL);
+    return;
+  }
+  lonejson__reset_map(map, value, runtime_state);
+  lonejson__runtime_borrow_release(&borrow);
 }

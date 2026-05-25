@@ -17,6 +17,7 @@ LONEJSON_MAP_DEFINE(export_record_map, export_record, export_record_fields);
 
 int main(void) {
   char path[] = "/tmp/lonejson-example-write-XXXXXX";
+  lonejson *lj;
   export_record record = {"INV-1001", 42.5};
   lonejson_error error;
   int fd = mkstemp(path);
@@ -34,16 +35,26 @@ int main(void) {
     return 1;
   }
 
-  if (lonejson_serialize_filep(&export_record_map, &record, fp, NULL, &error) !=
+  lj = lonejson_new(NULL, &error);
+  if (lj == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    fclose(fp);
+    unlink(path);
+    return 1;
+  }
+
+  if (lonejson_serialize_filep(lj, &export_record_map, &record, fp, &error) !=
       LONEJSON_STATUS_OK) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
     fclose(fp);
     unlink(path);
+    lonejson_free(lj);
     return 1;
   }
   fclose(fp);
 
   printf("wrote %s\n", path);
   unlink(path);
+  lonejson_free(lj);
   return 0;
 }

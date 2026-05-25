@@ -10,14 +10,14 @@ static void test_writer_dynamic_object_and_values(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  lonejson_json_value_init(&raw);
+  lonejson_json_value_init(test_default_runtime(), &raw);
   EXPECT(lonejson_json_value_set_buffer(&raw, "{\"z\":[true,null]}", 17u,
                                         &error) == LONEJSON_STATUS_OK);
   memset(&event, 0, sizeof(event));
   strcpy(event.id, "e1");
   event.ok = true;
 
-  status = lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  status = test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_object(&writer, &error) == LONEJSON_STATUS_OK);
@@ -50,7 +50,7 @@ static void test_writer_primitive_string_sources(void) {
   test_buffer_sink sink;
   test_reader_state reader;
   lonejson_spooled spool;
-  lonejson_spool_options spool_options;
+  lonejson__spool_options spool_options;
   lonejson_source source;
   lonejson_error error;
   lonejson_status status;
@@ -65,7 +65,7 @@ static void test_writer_primitive_string_sources(void) {
   reader.json = "ab\"\\\ncd";
   reader.offset = 0u;
   reader.chunk_size = 2u;
-  status = lonejson_write_json_string_sink(test_state_reader, &reader,
+  status = test_write_json_string_sink(test_state_reader, &reader,
                                            test_buffer_sink_write, &sink, NULL,
                                            &error);
   EXPECT(status == LONEJSON_STATUS_OK);
@@ -77,11 +77,11 @@ static void test_writer_primitive_string_sources(void) {
   memset(&spool_options, 0, sizeof(spool_options));
   spool_options.memory_limit = 4u;
   spool_options.temp_dir = "/tmp";
-  lonejson_spooled_init(&spool, &spool_options);
+  lonejson_spooled_init_with_allocator(&spool, &spool_options, NULL);
   EXPECT(lonejson_spooled_append(&spool, "hello\nworld", 11u, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_spooled_spilled(&spool) != 0);
-  status = lonejson_write_json_string_spooled_sink(
+  status = test_write_json_string_spooled_sink(
       &spool, test_buffer_sink_write, &sink, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out, "\"hello\\nworld\"") == 0);
@@ -98,7 +98,7 @@ static void test_writer_primitive_string_sources(void) {
     memset(&sink, 0, sizeof(sink));
     sink.buffer = out;
     sink.capacity = sizeof(out);
-    EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+    EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      NULL, &error) == LONEJSON_STATUS_OK);
     EXPECT(lonejson_writer_begin_array(&writer, &error) ==
            LONEJSON_STATUS_OK);
@@ -127,7 +127,7 @@ static void test_writer_invalid_state_and_sink_failure(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_key(&writer, "x", 1u, &error) ==
          LONEJSON_STATUS_INVALID_JSON);
@@ -135,7 +135,7 @@ static void test_writer_invalid_state_and_sink_failure(void) {
 
   memset(&failing, 0, sizeof(failing));
   failing.fail_after = 2u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_failing_sink_write, &failing,
+  EXPECT(test_writer_init_sink(&writer, test_failing_sink_write, &failing,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_string(&writer, "abc", 3u, &error) ==
          LONEJSON_STATUS_CALLBACK_FAILED);
@@ -155,7 +155,7 @@ static void test_writer_number_text_rejects_non_numbers(void) {
     memset(&sink, 0, sizeof(sink));
     sink.buffer = out;
     sink.capacity = sizeof(out);
-    EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+    EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      NULL, &error) == LONEJSON_STATUS_OK);
     EXPECT(lonejson_writer_number_text(&writer, invalid_values[i],
                                        strlen(invalid_values[i]), &error) ==
@@ -167,7 +167,7 @@ static void test_writer_number_text_rejects_non_numbers(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink, NULL,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink, NULL,
                                    &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_number_text(&writer, "-12.5e+2", 8u, &error) ==
          LONEJSON_STATUS_OK);
@@ -207,13 +207,13 @@ static lonejson_status test_writer_value_stream_generator_producer(
 
   (void)user;
   memset(&stream, 0, sizeof(stream));
-  return lonejson_writer_value_stream_open(&stream, writer, NULL, error);
+  return test_writer_value_stream_open(&stream, writer, NULL, error);
 }
 
 static lonejson_status test_writer_json_value_helper_generator_producer(
     lonejson_writer *writer, void *user, lonejson_error *error) {
   (void)user;
-  return lonejson_writer_json_value_buffer(writer, "true", 4u, NULL, error);
+  return test_writer_json_value_buffer(writer, "true", 4u, NULL, error);
 }
 
 static lonejson_status test_writer_array_items_generator_producer(
@@ -222,7 +222,7 @@ static lonejson_status test_writer_array_items_generator_producer(
   if (lonejson_writer_begin_array(writer, error) != LONEJSON_STATUS_OK) {
     return error != NULL ? error->code : LONEJSON_STATUS_INVALID_JSON;
   }
-  return lonejson_writer_array_items_buffer(writer, NULL, "[1]", 3u, NULL,
+  return test_writer_array_items_buffer(writer, NULL, "[1]", 3u, NULL,
                                             error);
 }
 
@@ -236,7 +236,7 @@ static void test_writer_value_stream_success_and_commas(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_object(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_key(&writer, "content", 7u, &error) ==
@@ -245,7 +245,7 @@ static void test_writer_value_stream_success_and_commas(void) {
   EXPECT(lonejson_writer_string(&writer, "before", 6u, &error) ==
          LONEJSON_STATUS_OK);
   memset(&stream, 0, sizeof(stream));
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(test_writer_value_stream_feed(
              &stream,
@@ -255,7 +255,7 @@ static void test_writer_value_stream_success_and_commas(void) {
   EXPECT(lonejson_writer_end_array(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_key(&writer, "scalar", 6u, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(test_writer_value_stream_feed(&stream, "\"tail\"", 2u, &error) ==
          LONEJSON_STATUS_OK);
@@ -264,7 +264,7 @@ static void test_writer_value_stream_success_and_commas(void) {
   EXPECT(strcmp((const char *)out,
                 "{\"content\":[\"before\",{\"b\":[1,true,false,null,"
                 "\"x\\n\",{\"k\":\"v\"}]},-7],\"scalar\":\"tail\"}") == 0);
-  EXPECT(lonejson_validate_buffer(out, sink.length, &error) ==
+  EXPECT(test_validate_buffer(out, sink.length, &error) ==
          LONEJSON_STATUS_OK);
   lonejson_writer_cleanup(&writer);
 }
@@ -286,9 +286,9 @@ static void test_writer_value_stream_root_scalars(void) {
     sink.buffer = out;
     sink.capacity = sizeof(out);
     memset(&stream, 0, sizeof(stream));
-    EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+    EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      NULL, &error) == LONEJSON_STATUS_OK);
-    EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+    EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
            LONEJSON_STATUS_OK);
     EXPECT(test_writer_value_stream_feed(&stream, values[i], 1u, &error) ==
            LONEJSON_STATUS_OK);
@@ -313,12 +313,12 @@ static void test_writer_value_stream_failure_modes(void) {
     memset(&sink, 0, sizeof(sink));
     sink.buffer = out;
     sink.capacity = sizeof(out);
-    EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+    EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      NULL, &error) == LONEJSON_STATUS_OK);
     EXPECT(lonejson_writer_begin_array(&writer, &error) ==
            LONEJSON_STATUS_OK);
     memset(&stream, 0, sizeof(stream));
-    EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+    EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
            LONEJSON_STATUS_OK);
     status = test_writer_value_stream_feed(&stream, bad_values[i], 1u, &error);
     EXPECT(status != LONEJSON_STATUS_OK);
@@ -338,23 +338,23 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   lonejson_writer_value_stream stream;
   lonejson_writer_value_stream stream2;
   lonejson_error error;
-  lonejson_value_limits limits;
+  lonejson__value_limits limits;
   size_t out_len;
   int eof;
 
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
   memset(&stream, 0, sizeof(stream));
   memset(&stream2, 0, sizeof(stream2));
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream2, &writer, NULL, &error) !=
+  EXPECT(test_writer_value_stream_open(&stream2, &writer, NULL, &error) !=
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) !=
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) !=
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_null(&writer, &error) != LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "[1]", 3u, &error) ==
@@ -372,12 +372,12 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   sink.buffer = out;
   sink.capacity = sizeof(out);
   memset(&stream, 0, sizeof(stream));
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_buffer(&writer, "true", 4u, NULL, NULL) ==
+  EXPECT(test_writer_json_value_buffer(&writer, "true", 4u, NULL, NULL) ==
          LONEJSON_STATUS_INVALID_JSON);
   EXPECT(writer.error.code == LONEJSON_STATUS_INVALID_JSON);
   lonejson_writer_value_stream_cleanup(&stream);
@@ -395,13 +395,13 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
     sink2.buffer = out2;
     sink2.capacity = sizeof(out2);
     memset(&stream, 0, sizeof(stream));
-    EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+    EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      NULL, &error) == LONEJSON_STATUS_OK);
-    EXPECT(lonejson_writer_init_sink(&writer2, test_buffer_sink_write, &sink2,
+    EXPECT(test_writer_init_sink(&writer2, test_buffer_sink_write, &sink2,
                                      NULL, &error) == LONEJSON_STATUS_OK);
-    EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+    EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
            LONEJSON_STATUS_OK);
-    EXPECT(lonejson_writer_value_stream_open(&stream, &writer2, NULL, &error) ==
+    EXPECT(test_writer_value_stream_open(&stream, &writer2, NULL, &error) ==
            LONEJSON_STATUS_INVALID_JSON);
     EXPECT(lonejson_writer_value_stream_push(&stream, "true", 4u, &error) ==
            LONEJSON_STATUS_OK);
@@ -416,10 +416,10 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   sink.buffer = out;
   sink.capacity = sizeof(out);
   memset(&stream, 0, sizeof(stream));
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_object(&writer, NULL) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, NULL) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, NULL) ==
          LONEJSON_STATUS_INVALID_JSON);
   EXPECT(stream.error.code == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(writer.error.code == LONEJSON_STATUS_INVALID_JSON);
@@ -429,15 +429,15 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   sink.buffer = out;
   sink.capacity = 4u;
   memset(&stream, 0, sizeof(stream));
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_string(&writer, "abcdef", 6u, &error) ==
          LONEJSON_STATUS_TRUNCATED);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
          LONEJSON_STATUS_INVALID_JSON);
   lonejson_writer_cleanup(&writer);
 
-  EXPECT(lonejson_writer_generator_init(
+  EXPECT(test_writer_generator_init(
              &generator, test_writer_value_stream_generator_producer, NULL,
              NULL) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_generator_read(&generator, chunk, sizeof(chunk), &out_len,
@@ -450,7 +450,7 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
     for (successful_allocs = 0u; successful_allocs <= 1u;
          ++successful_allocs) {
       test_fail_after_allocator_state alloc;
-      lonejson_write_options options = lonejson_default_write_options();
+      lonejson__write_options options = lonejson__default_write_options();
 
       memset(&sink, 0, sizeof(sink));
       memset(out, 0, sizeof(out));
@@ -459,7 +459,7 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
       memset(&stream, 0, sizeof(stream));
       test_fail_after_allocator_init(&alloc, SIZE_MAX);
       options.allocator = &alloc.allocator;
-      EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+      EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                        &options, &error) ==
              LONEJSON_STATUS_OK);
       EXPECT(lonejson_writer_begin_array(&writer, &error) ==
@@ -467,7 +467,7 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
       EXPECT(lonejson_writer_i64(&writer, 1, &error) == LONEJSON_STATUS_OK);
       alloc.calls = 0u;
       alloc.successful_calls_before_failure = successful_allocs;
-      EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL,
+      EXPECT(test_writer_value_stream_open(&stream, &writer, NULL,
                                                &error) ==
              LONEJSON_STATUS_ALLOCATION_FAILED);
       EXPECT(stream.state == NULL);
@@ -485,7 +485,7 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
     char json[24004];
     test_allocator_state alloc;
     test_fail_after_allocator_state fail_alloc;
-    lonejson_write_options options = lonejson_default_write_options();
+    lonejson__write_options options = lonejson__default_write_options();
     size_t i;
     size_t pos;
 
@@ -496,14 +496,14 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
     memset(&stream, 0, sizeof(stream));
     test_allocator_init(&alloc);
     options.allocator = &alloc.allocator;
-    EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+    EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      &options, &error) == LONEJSON_STATUS_OK);
     test_fail_after_allocator_init(&fail_alloc, 0u);
     alloc.allocator.ctx = &fail_alloc;
     alloc.allocator.malloc_fn = test_fail_after_allocator_malloc;
     alloc.allocator.realloc_fn = test_fail_after_allocator_realloc;
     alloc.allocator.free_fn = test_fail_after_allocator_free;
-    EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+    EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
            LONEJSON_STATUS_OK);
     pos = 0u;
     json[pos++] = '"';
@@ -527,9 +527,9 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   sink.buffer = out;
   sink.capacity = sizeof(out);
   memset(&stream, 0, sizeof(stream));
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
          LONEJSON_STATUS_OK);
   lonejson_writer_value_stream_cleanup(&stream);
   EXPECT(lonejson_writer_finish(&writer, &error) != LONEJSON_STATUS_OK);
@@ -539,9 +539,9 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   sink.buffer = out;
   sink.capacity = sizeof(out);
   memset(&stream, 0, sizeof(stream));
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_path(
+  EXPECT(test_writer_json_value_path(
              &writer, "/tmp/lonejson-definitely-missing-json-value", NULL,
              NULL) == LONEJSON_STATUS_IO_ERROR);
   EXPECT(writer.error.code == LONEJSON_STATUS_IO_ERROR);
@@ -551,11 +551,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_null(&writer, &error) == LONEJSON_STATUS_OK);
   lonejson_error_init(&error);
-  EXPECT(lonejson_writer_json_value_path(
+  EXPECT(test_writer_json_value_path(
              &writer, "/tmp/lonejson-definitely-missing-json-value", NULL,
              &error) == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(error.system_errno == 0);
@@ -564,11 +564,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_depth = 1u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "[[1]]", 5u, &error) ==
          LONEJSON_STATUS_OVERFLOW);
@@ -576,11 +576,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   lonejson_writer_value_stream_cleanup(&stream);
   lonejson_writer_cleanup(&writer);
 
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_string_bytes = 2u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "\"abc\"", 5u, &error) ==
          LONEJSON_STATUS_OVERFLOW);
@@ -588,11 +588,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   lonejson_writer_value_stream_cleanup(&stream);
   lonejson_writer_cleanup(&writer);
 
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_key_bytes = 1u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "{\"ab\":1}", 8u,
                                            &error) ==
@@ -601,11 +601,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   lonejson_writer_value_stream_cleanup(&stream);
   lonejson_writer_cleanup(&writer);
 
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_number_bytes = 2u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "123", 3u, &error) ==
          LONEJSON_STATUS_OK);
@@ -615,11 +615,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   lonejson_writer_value_stream_cleanup(&stream);
   lonejson_writer_cleanup(&writer);
 
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_total_bytes = 2u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "\"abc\"", 5u, &error) ==
          LONEJSON_STATUS_OVERFLOW);
@@ -630,11 +630,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_total_bytes = 9u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, " \n true \n", 9u,
                                            &error) == LONEJSON_STATUS_OK);
@@ -648,12 +648,12 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_total_bytes = 1u;
   memset(&stream, 0, sizeof(stream));
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "1", 1u, &error) ==
          LONEJSON_STATUS_OK);
@@ -666,11 +666,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_total_bytes = 8u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, " \ntrue", 6u, &error) ==
          LONEJSON_STATUS_OK);
@@ -686,11 +686,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_total_bytes = 2u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "{}", 2u, &error) ==
          LONEJSON_STATUS_OK);
@@ -703,11 +703,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_total_bytes = 1u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "12 ", 3u, &error) ==
          LONEJSON_STATUS_OVERFLOW);
@@ -718,11 +718,11 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_total_bytes = 5u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, &limits, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, &limits, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "\"\\u0061\"", 8u,
                                            &error) ==
@@ -734,9 +734,9 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = 4u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "[1,2]", 5u, &error) ==
          LONEJSON_STATUS_OVERFLOW);
@@ -746,9 +746,9 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
 
   memset(&failing, 0, sizeof(failing));
   failing.fail_after = 4u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_failing_sink_write, &failing,
+  EXPECT(test_writer_init_sink(&writer, test_failing_sink_write, &failing,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_value_stream_open(&stream, &writer, NULL, &error) ==
+  EXPECT(test_writer_value_stream_open(&stream, &writer, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_value_stream_push(&stream, "{\"abcdef\":1}", 12u,
                                            &error) ==
@@ -813,7 +813,7 @@ static void test_writer_json_value_helpers_sources(void) {
   test_buffer_sink sink;
   test_reader_state reader;
   lonejson_spooled spool;
-  lonejson_spool_options spool_options;
+  lonejson__spool_options spool_options;
   lonejson_writer writer;
   lonejson_error error;
   FILE *fp;
@@ -856,7 +856,7 @@ static void test_writer_json_value_helpers_sources(void) {
 
   memset(&spool_options, 0, sizeof(spool_options));
   spool_options.memory_limit = 4u;
-  lonejson_spooled_init(&spool, &spool_options);
+  lonejson_spooled_init_with_allocator(&spool, &spool_options, NULL);
   EXPECT(lonejson_spooled_append(&spool, spool_json, sizeof(spool_json) - 1u,
                                  &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_spooled_spilled(&spool));
@@ -867,22 +867,22 @@ static void test_writer_json_value_helpers_sources(void) {
   reader.json = reader_json;
   reader.offset = 0u;
   reader.chunk_size = 1u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_object(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_key(&writer, "reader", 6u, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_reader(&writer, test_state_reader, &reader,
+  EXPECT(test_writer_json_value_reader(&writer, test_state_reader, &reader,
                                            NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_key(&writer, "buffer", 6u, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_buffer(
+  EXPECT(test_writer_json_value_buffer(
              &writer, buffer_json, sizeof(buffer_json) - 1u, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_key(&writer, "file", 4u, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_file(&writer, fp, NULL, &error) ==
+  EXPECT(test_writer_json_value_file(&writer, fp, NULL, &error) ==
          LONEJSON_STATUS_OK);
 #if defined(__GLIBC__)
   EXPECT(lonejson_writer_key(&writer, "short_file", 10u, &error) ==
@@ -894,7 +894,7 @@ static void test_writer_json_value_helpers_sources(void) {
   short_fp = fopencookie(&short_file, "r", short_file_io);
   EXPECT(short_fp != NULL);
   if (short_fp != NULL) {
-    EXPECT(lonejson_writer_json_value_file(&writer, short_fp, NULL, &error) ==
+    EXPECT(test_writer_json_value_file(&writer, short_fp, NULL, &error) ==
            LONEJSON_STATUS_OK);
     fclose(short_fp);
   }
@@ -905,7 +905,7 @@ static void test_writer_json_value_helpers_sources(void) {
   EXPECT(write(fd, fd_json, sizeof(fd_json) - 1u) ==
          (ssize_t)(sizeof(fd_json) - 1u));
   EXPECT(lseek(fd, 0, SEEK_SET) == 0);
-  EXPECT(lonejson_writer_json_value_fd(&writer, fd, NULL, &error) ==
+  EXPECT(test_writer_json_value_fd(&writer, fd, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_key(&writer, "path", 4u, &error) ==
          LONEJSON_STATUS_OK);
@@ -913,16 +913,16 @@ static void test_writer_json_value_helpers_sources(void) {
   EXPECT(lseek(fd, 0, SEEK_SET) == 0);
   EXPECT(write(fd, path_json, sizeof(path_json) - 1u) ==
          (ssize_t)(sizeof(path_json) - 1u));
-  EXPECT(lonejson_writer_json_value_path(&writer, path, NULL, &error) ==
+  EXPECT(test_writer_json_value_path(&writer, path, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_key(&writer, "spool", 5u, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_spooled(&writer, &spool, NULL, &error) ==
+  EXPECT(test_writer_json_value_spooled(&writer, &spool, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_end_object(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_finish(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out, expected_json) == 0);
-  EXPECT(lonejson_validate_buffer(out, sink.length, &error) ==
+  EXPECT(test_validate_buffer(out, sink.length, &error) ==
          LONEJSON_STATUS_OK);
   lonejson_writer_cleanup(&writer);
   fclose(fp);
@@ -938,14 +938,14 @@ static void test_writer_json_value_spooled_preserves_spill_cursor(void) {
   test_buffer_sink sink;
   lonejson_spooled spool;
   lonejson_spooled cursor;
-  lonejson_spool_options spool_options;
+  lonejson__spool_options spool_options;
   lonejson_writer writer;
   lonejson_error error;
   lonejson_read_result chunk;
 
   memset(&spool_options, 0, sizeof(spool_options));
   spool_options.memory_limit = 4u;
-  lonejson_spooled_init(&spool, &spool_options);
+  lonejson_spooled_init_with_allocator(&spool, &spool_options, NULL);
   EXPECT(lonejson_spooled_append(&spool, spool_json, sizeof(spool_json) - 1u,
                                  &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_spooled_spilled(&spool));
@@ -967,9 +967,9 @@ static void test_writer_json_value_spooled_preserves_spill_cursor(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink, NULL,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink, NULL,
                                    &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_spooled(&writer, &spool, NULL, &error) ==
+  EXPECT(test_writer_json_value_spooled(&writer, &spool, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_finish(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out, spool_json) == 0);
@@ -1000,7 +1000,7 @@ static void test_writer_json_value_helpers_failure_modes(void) {
   lonejson_writer writer;
   lonejson_generator generator;
   lonejson_error error;
-  lonejson_value_limits limits;
+  lonejson__value_limits limits;
   size_t i;
   size_t out_len;
   int eof;
@@ -1014,11 +1014,11 @@ static void test_writer_json_value_helpers_failure_modes(void) {
     reader.json = bad_values[i];
     reader.offset = 0u;
     reader.chunk_size = 1u;
-    EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+    EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      NULL, &error) == LONEJSON_STATUS_OK);
     EXPECT(lonejson_writer_begin_array(&writer, &error) ==
            LONEJSON_STATUS_OK);
-    EXPECT(lonejson_writer_json_value_reader(&writer, test_state_reader,
+    EXPECT(test_writer_json_value_reader(&writer, test_state_reader,
                                              &reader, NULL, &error) !=
            LONEJSON_STATUS_OK);
     EXPECT(lonejson_writer_finish(&writer, &error) != LONEJSON_STATUS_OK);
@@ -1028,11 +1028,11 @@ static void test_writer_json_value_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   limits.max_total_bytes = 2u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_buffer(&writer, "[1]", 3u, &limits,
+  EXPECT(test_writer_json_value_buffer(&writer, "[1]", 3u, &limits,
                                            &error) == LONEJSON_STATUS_OVERFLOW);
   EXPECT(lonejson_writer_finish(&writer, &error) != LONEJSON_STATUS_OK);
   lonejson_writer_cleanup(&writer);
@@ -1040,9 +1040,9 @@ static void test_writer_json_value_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_buffer(&writer, "true", 4u, NULL,
+  EXPECT(test_writer_json_value_buffer(&writer, "true", 4u, NULL,
                                            &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson__writer_json_value_path_close_failed(&writer, &error, EIO) ==
          LONEJSON_STATUS_IO_ERROR);
@@ -1056,9 +1056,9 @@ static void test_writer_json_value_helpers_failure_modes(void) {
       memset(&sink, 0, sizeof(sink));
       sink.buffer = out;
       sink.capacity = sizeof(out);
-      EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+      EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                        NULL, &error) == LONEJSON_STATUS_OK);
-      EXPECT(lonejson_writer_json_value_fd(&writer, pipe_fds[0], NULL,
+      EXPECT(test_writer_json_value_fd(&writer, pipe_fds[0], NULL,
                                            &error) ==
              LONEJSON_STATUS_CALLBACK_FAILED);
       EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
@@ -1072,10 +1072,10 @@ static void test_writer_json_value_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = 4u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(&writer, NULL, "[12345]", 7u, NULL,
+  EXPECT(test_writer_array_items_buffer(&writer, NULL, "[12345]", 7u, NULL,
                                             &error) ==
          LONEJSON_STATUS_OVERFLOW);
   EXPECT(lonejson_writer_finish(&writer, &error) != LONEJSON_STATUS_OK);
@@ -1089,9 +1089,9 @@ static void test_writer_json_value_helpers_failure_modes(void) {
   would_block.chunk_size = 1u;
   would_block.block_after = 2u;
   would_block.blocked = 0;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_reader(&writer,
+  EXPECT(test_writer_json_value_reader(&writer,
                                            test_would_block_once_reader,
                                            &would_block, NULL, &error) ==
          LONEJSON_STATUS_CALLBACK_FAILED);
@@ -1104,9 +1104,9 @@ static void test_writer_json_value_helpers_failure_modes(void) {
   error_reader.json = "{\"x\":1}";
   error_reader.offset = 0u;
   error_reader.fail_after = 3u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_reader(&writer,
+  EXPECT(test_writer_json_value_reader(&writer,
                                            test_writer_json_value_error_reader,
                                            &error_reader, NULL, &error) ==
          LONEJSON_STATUS_IO_ERROR);
@@ -1119,9 +1119,9 @@ static void test_writer_json_value_helpers_failure_modes(void) {
   error_reader.json = "{\"x\":1}";
   error_reader.offset = 0u;
   error_reader.fail_after = 3u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_json_value_reader(&writer,
+  EXPECT(test_writer_json_value_reader(&writer,
                                            test_writer_json_value_error_reader,
                                            &error_reader, NULL, NULL) ==
          LONEJSON_STATUS_IO_ERROR);
@@ -1130,7 +1130,7 @@ static void test_writer_json_value_helpers_failure_modes(void) {
   EXPECT(lonejson_writer_finish(&writer, NULL) != LONEJSON_STATUS_OK);
   lonejson_writer_cleanup(&writer);
 
-  EXPECT(lonejson_writer_generator_init(
+  EXPECT(test_writer_generator_init(
              &generator, test_writer_json_value_helper_generator_producer, NULL,
              NULL) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_generator_read(&generator, out, sizeof(out), &out_len,
@@ -1143,7 +1143,7 @@ static void test_writer_array_items_helpers_sources(void) {
   test_buffer_sink sink;
   test_reader_state reader;
   lonejson_spooled spool;
-  lonejson_spool_options spool_options;
+  lonejson__spool_options spool_options;
   lonejson_writer writer;
   lonejson_error error;
   FILE *fp;
@@ -1170,7 +1170,7 @@ static void test_writer_array_items_helpers_sources(void) {
 
   memset(&spool_options, 0, sizeof(spool_options));
   spool_options.memory_limit = 4u;
-  lonejson_spooled_init(&spool, &spool_options);
+  lonejson_spooled_init_with_allocator(&spool, &spool_options, NULL);
   EXPECT(lonejson_spooled_append(&spool, spool_json, sizeof(spool_json) - 1u,
                                  &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_spooled_spilled(&spool));
@@ -1181,44 +1181,44 @@ static void test_writer_array_items_helpers_sources(void) {
   reader.json = reader_json;
   reader.offset = 0u;
   reader.chunk_size = 1u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_i64(&writer, 0, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_reader(&writer, NULL, test_state_reader,
+  EXPECT(test_writer_array_items_reader(&writer, NULL, test_state_reader,
                                             &reader, NULL, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(
+  EXPECT(test_writer_array_items_buffer(
              &writer, "items", selected_json, sizeof(selected_json) - 1u, NULL,
              &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(&writer, NULL, "[]", 2u, NULL,
+  EXPECT(test_writer_array_items_buffer(&writer, NULL, "[]", 2u, NULL,
                                             &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_bool(&writer, 1, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_filep(&writer, NULL, fp, NULL, &error) ==
+  EXPECT(test_writer_array_items_filep(&writer, NULL, fp, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(ftruncate(fd, 0) == 0);
   EXPECT(lseek(fd, 0, SEEK_SET) == 0);
   EXPECT(write(fd, fd_json, sizeof(fd_json) - 1u) ==
          (ssize_t)(sizeof(fd_json) - 1u));
   EXPECT(lseek(fd, 0, SEEK_SET) == 0);
-  EXPECT(lonejson_writer_array_items_fd(&writer, NULL, fd, NULL, &error) ==
+  EXPECT(test_writer_array_items_fd(&writer, NULL, fd, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(ftruncate(fd, 0) == 0);
   EXPECT(lseek(fd, 0, SEEK_SET) == 0);
   EXPECT(write(fd, path_json, sizeof(path_json) - 1u) ==
          (ssize_t)(sizeof(path_json) - 1u));
-  EXPECT(lonejson_writer_array_items_path(&writer, NULL, path, NULL, &error) ==
+  EXPECT(test_writer_array_items_path(&writer, NULL, path, NULL, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_spooled(&writer, "items", &spool, NULL,
+  EXPECT(test_writer_array_items_spooled(&writer, "items", &spool, NULL,
                                              &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(&writer, NULL, "[]", 2u, NULL,
+  EXPECT(test_writer_array_items_buffer(&writer, NULL, "[]", 2u, NULL,
                                             &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_end_array(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_finish(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out,
                 "[0,1,{\"r\":true},\"a\",null,true,{\"file\":2},false,"
                 "{\"path\":3},\"spooled\"]") == 0);
-  EXPECT(lonejson_validate_buffer(out, sink.length, &error) ==
+  EXPECT(test_validate_buffer(out, sink.length, &error) ==
          LONEJSON_STATUS_OK);
   lonejson_writer_cleanup(&writer);
   fclose(fp);
@@ -1233,14 +1233,14 @@ static void test_writer_array_items_spooled_preserves_spill_cursor(void) {
   unsigned char read_back[sizeof(spool_json)];
   test_buffer_sink sink;
   lonejson_spooled spool;
-  lonejson_spool_options spool_options;
+  lonejson__spool_options spool_options;
   lonejson_writer writer;
   lonejson_error error;
   lonejson_read_result chunk;
 
   memset(&spool_options, 0, sizeof(spool_options));
   spool_options.memory_limit = 4u;
-  lonejson_spooled_init(&spool, &spool_options);
+  lonejson_spooled_init_with_allocator(&spool, &spool_options, NULL);
   EXPECT(lonejson_spooled_append(&spool, spool_json, sizeof(spool_json) - 1u,
                                  &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_spooled_spilled(&spool));
@@ -1257,12 +1257,12 @@ static void test_writer_array_items_spooled_preserves_spill_cursor(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink, NULL,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink, NULL,
                                    &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_string(&writer, "prefix", 6u, &error) ==
          LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_spooled(&writer, "items", &spool, NULL,
+  EXPECT(test_writer_array_items_spooled(&writer, "items", &spool, NULL,
                                              &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_end_array(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_finish(&writer, &error) == LONEJSON_STATUS_OK);
@@ -1302,12 +1302,12 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(&writer, NULL, "[1]", 3u, NULL,
+  EXPECT(test_writer_array_items_buffer(&writer, NULL, "[1]", 3u, NULL,
                                             &error) != LONEJSON_STATUS_OK);
   lonejson_error_init(&error);
-  EXPECT(lonejson_writer_array_items_path(
+  EXPECT(test_writer_array_items_path(
              &writer, NULL, "/tmp/lonejson-definitely-missing-array-items",
              NULL, &error) == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(error.system_errno == 0);
@@ -1316,10 +1316,10 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_path(
+  EXPECT(test_writer_array_items_path(
              &writer, NULL, "/tmp/lonejson-definitely-missing-array-items",
              NULL, NULL) == LONEJSON_STATUS_IO_ERROR);
   EXPECT(writer.error.code == LONEJSON_STATUS_IO_ERROR);
@@ -1329,10 +1329,10 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_filep(&writer, NULL, NULL, NULL, NULL) ==
+  EXPECT(test_writer_array_items_filep(&writer, NULL, NULL, NULL, NULL) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(writer.error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
   lonejson_writer_cleanup(&writer);
@@ -1340,10 +1340,10 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(&writer, NULL, "{", 1u, NULL,
+  EXPECT(test_writer_array_items_buffer(&writer, NULL, "{", 1u, NULL,
                                             &error) != LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_i64(&writer, 7, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_end_array(&writer, &error) == LONEJSON_STATUS_OK);
@@ -1358,11 +1358,11 @@ static void test_writer_array_items_helpers_failure_modes(void) {
     reader.json = bad_values[i];
     reader.offset = 0u;
     reader.chunk_size = 1u;
-    EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+    EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      NULL, &error) == LONEJSON_STATUS_OK);
     EXPECT(lonejson_writer_begin_array(&writer, &error) ==
            LONEJSON_STATUS_OK);
-    EXPECT(lonejson_writer_array_items_reader(&writer,
+    EXPECT(test_writer_array_items_reader(&writer,
                                               strcmp(bad_values[i],
                                                      "{\"items\":1}") == 0 ||
                                                       strcmp(bad_values[i],
@@ -1378,10 +1378,10 @@ static void test_writer_array_items_helpers_failure_modes(void) {
 
   memset(&failing, 0, sizeof(failing));
   failing.fail_after = 4u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_failing_sink_write, &failing,
+  EXPECT(test_writer_init_sink(&writer, test_failing_sink_write, &failing,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(
+  EXPECT(test_writer_array_items_buffer(
              &writer, NULL, "[{\"abcdef\":1}]", 14u, NULL, &error) !=
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_finish(&writer, &error) != LONEJSON_STATUS_OK);
@@ -1390,10 +1390,10 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(
+  EXPECT(test_writer_array_items_buffer(
              &writer, NULL, "[{\"k\":1,\"k\":2}]",
              strlen("[{\"k\":1,\"k\":2}]"), NULL, &error) ==
          LONEJSON_STATUS_DUPLICATE_FIELD);
@@ -1403,10 +1403,10 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(
+  EXPECT(test_writer_array_items_buffer(
              &writer, NULL, "[{\"k\":1,\"k\":2}]",
              strlen("[{\"k\":1,\"k\":2}]"), NULL, NULL) ==
          LONEJSON_STATUS_DUPLICATE_FIELD);
@@ -1417,10 +1417,10 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
   sink.capacity = sizeof(out);
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_buffer(
+  EXPECT(test_writer_array_items_buffer(
              &writer, NULL, "[{\"outer\":{\"k\":1,\"k\":2}}]",
              strlen("[{\"outer\":{\"k\":1,\"k\":2}}]"), NULL, &error) ==
          LONEJSON_STATUS_DUPLICATE_FIELD);
@@ -1428,15 +1428,15 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   lonejson_writer_cleanup(&writer);
 
   {
-    lonejson_parse_options options = lonejson_default_parse_options();
+    lonejson__parse_options options = lonejson__default_parse_options();
     options.reject_duplicate_keys = 0;
     memset(&sink, 0, sizeof(sink));
     sink.buffer = out;
     sink.capacity = sizeof(out);
-    EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+    EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                      NULL, &error) == LONEJSON_STATUS_OK);
     EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-    EXPECT(lonejson_writer_array_items_buffer(
+    EXPECT(test_writer_array_items_buffer(
                &writer, NULL, "[{\"k\":1,\"k\":2}]",
                strlen("[{\"k\":1,\"k\":2}]"), &options, &error) ==
            LONEJSON_STATUS_OK);
@@ -1451,10 +1451,10 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   error_reader.json = "[{\"x\":1}]";
   error_reader.offset = 0u;
   error_reader.fail_after = 4u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_reader(
+  EXPECT(test_writer_array_items_reader(
              &writer, NULL, test_writer_json_value_error_reader, &error_reader,
              NULL, &error) == LONEJSON_STATUS_IO_ERROR);
   EXPECT(lonejson_writer_finish(&writer, &error) != LONEJSON_STATUS_OK);
@@ -1466,10 +1466,10 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   error_reader.json = "[{\"x\":1}]";
   error_reader.offset = 0u;
   error_reader.fail_after = 4u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_reader(
+  EXPECT(test_writer_array_items_reader(
              &writer, NULL, test_writer_json_value_error_reader, &error_reader,
              NULL, NULL) == LONEJSON_STATUS_IO_ERROR);
   EXPECT(writer.error.code == LONEJSON_STATUS_IO_ERROR);
@@ -1485,17 +1485,17 @@ static void test_writer_array_items_helpers_failure_modes(void) {
   would_block.chunk_size = 8u;
   would_block.block_after = 0u;
   would_block.blocked = 0;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_writer_array_items_reader(
+  EXPECT(test_writer_array_items_reader(
              &writer, NULL, test_would_block_once_reader, &would_block, NULL,
              &error) == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(lonejson_writer_finish(&writer, &error) != LONEJSON_STATUS_OK);
   lonejson_writer_cleanup(&writer);
 
-  EXPECT(lonejson_writer_generator_init(
+  EXPECT(test_writer_generator_init(
              &generator, test_writer_array_items_generator_producer, NULL,
              NULL) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_generator_read(&generator, out, sizeof(out), &out_len,
@@ -2303,7 +2303,7 @@ static void test_writer_equivalence_ctx_init(void *raw_ctx, void *user) {
   static const char b64_payload[] = "abc";
   test_writer_equivalence_ctx *ctx;
   test_writer_equivalence_init *init;
-  lonejson_spool_options spool_options;
+  lonejson__spool_options spool_options;
   size_t i;
 
   ctx = (test_writer_equivalence_ctx *)raw_ctx;
@@ -2314,8 +2314,8 @@ static void test_writer_equivalence_ctx_init(void *raw_ctx, void *user) {
   memset(&spool_options, 0, sizeof(spool_options));
   spool_options.memory_limit = 4u;
   spool_options.temp_dir = "/tmp";
-  lonejson_spooled_init(&ctx->text_spool, &spool_options);
-  lonejson_spooled_init(&ctx->b64_spool, &spool_options);
+  lonejson_spooled_init_with_allocator(&ctx->text_spool, &spool_options, NULL);
+  lonejson_spooled_init_with_allocator(&ctx->b64_spool, &spool_options, NULL);
   EXPECT(lonejson_source_set_path(&ctx->text_source, init->text_source_path,
                                   NULL) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_source_set_path(&ctx->b64_source, init->b64_source_path,
@@ -2327,7 +2327,7 @@ static void test_writer_equivalence_ctx_init(void *raw_ctx, void *user) {
                                  sizeof(b64_payload) - 1u,
                                  NULL) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_spooled_spilled(&ctx->text_spool) != 0);
-  lonejson_json_value_init(&ctx->json_value);
+  lonejson_json_value_init(test_default_runtime(), &ctx->json_value);
   EXPECT(lonejson_json_value_set_buffer(&ctx->json_value, raw_json,
                                         sizeof(raw_json) - 1u,
                                         NULL) == LONEJSON_STATUS_OK);
@@ -2372,7 +2372,7 @@ static size_t test_writer_generator_model_render_sink(
   memset(&sink, 0, sizeof(sink));
   sink.buffer = all;
   sink.capacity = all_capacity;
-  EXPECT(lonejson_writer_init_sink(&writer, test_buffer_sink_write, &sink,
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(model->producer(&writer, ctx, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_finish(&writer, &error) == LONEJSON_STATUS_OK);
@@ -2411,7 +2411,7 @@ test_writer_generator_model_check(const test_writer_generator_model *model) {
         test_writer_generator_model_render_sink(model, ctx, expected,
                                                 model->output_capacity);
     EXPECT(model->step(ctx) == (int)model->completed_step);
-    EXPECT(lonejson_validate_buffer(expected, expected_len, NULL) ==
+    EXPECT(test_validate_buffer(expected, expected_len, NULL) ==
            LONEJSON_STATUS_OK);
     model->cleanup(ctx);
     free(ctx);
@@ -2425,7 +2425,7 @@ test_writer_generator_model_check(const test_writer_generator_model *model) {
     const int *calls;
     test_realloc_limit_state realloc_limit;
     lonejson_allocator allocator;
-    lonejson_write_options options;
+    lonejson__write_options options;
 
     ctx = malloc(model->ctx_size);
     EXPECT(ctx != NULL);
@@ -2440,9 +2440,9 @@ test_writer_generator_model_check(const test_writer_generator_model *model) {
     allocator.realloc_fn = test_realloc_limit_realloc;
     allocator.free_fn = test_realloc_limit_free;
     allocator.ctx = &realloc_limit;
-    options = lonejson_default_write_options();
+    options = lonejson__default_write_options();
     options.allocator = &allocator;
-    EXPECT(lonejson_writer_generator_init(&generator, model->producer, ctx,
+    EXPECT(test_writer_generator_init(&generator, model->producer, ctx,
                                           &options) == LONEJSON_STATUS_OK);
     realloc_limit.observed_max_realloc_size = 0u;
     all_len = test_writer_generator_read_all_pattern(
@@ -2450,7 +2450,7 @@ test_writer_generator_model_check(const test_writer_generator_model *model) {
         all, model->output_capacity);
     EXPECT(all_len == expected_len);
     EXPECT(memcmp(all, expected, expected_len) == 0);
-    EXPECT(lonejson_validate_buffer(all, all_len, NULL) == LONEJSON_STATUS_OK);
+    EXPECT(test_validate_buffer(all, all_len, NULL) == LONEJSON_STATUS_OK);
     EXPECT(model->step(ctx) == (int)model->completed_step);
     EXPECT(realloc_limit.observed_max_realloc_size < 12288u);
     calls = model->calls(ctx);
@@ -2478,13 +2478,13 @@ test_writer_generator_model_check(const test_writer_generator_model *model) {
       return;
     }
     model->init(ctx, model->init_user);
-    EXPECT(lonejson_writer_generator_init(&generator, model->producer, ctx,
+    EXPECT(test_writer_generator_init(&generator, model->producer, ctx,
                                           NULL) == LONEJSON_STATUS_OK);
     all_len = test_writer_generator_read_all(&generator, p, all,
                                              model->output_capacity);
     EXPECT(all_len == expected_len);
     EXPECT(memcmp(all, expected, expected_len) == 0);
-    EXPECT(lonejson_validate_buffer(all, all_len, NULL) == LONEJSON_STATUS_OK);
+    EXPECT(test_validate_buffer(all, all_len, NULL) == LONEJSON_STATUS_OK);
     EXPECT(model->step(ctx) == (int)model->completed_step);
     lonejson_generator_cleanup(&generator);
     model->cleanup(ctx);
@@ -2512,7 +2512,7 @@ static void test_writer_generator_streams_producer(void) {
   lonejson_status status;
 
   memset(&ctx, 0, sizeof(ctx));
-  status = lonejson_writer_generator_init(&generator,
+  status = test_writer_generator_init(&generator,
                                           test_writer_generator_producer, &ctx,
                                           NULL);
   EXPECT(status == LONEJSON_STATUS_OK);
@@ -2541,7 +2541,7 @@ static void test_writer_generator_streams_producer(void) {
   lonejson_generator_cleanup(&generator);
 
   memset(&ctx, 0, sizeof(ctx));
-  status = lonejson_writer_generator_init(
+  status = test_writer_generator_init(
       &generator, test_writer_generator_producer, &ctx, NULL);
   EXPECT(status == LONEJSON_STATUS_OK);
   all_len = 0u;
@@ -2577,7 +2577,7 @@ static void test_writer_generator_preserves_event_state_on_backpressure(void) {
   size_t i;
 
   memset(&root_ctx, 0, sizeof(root_ctx));
-  status = lonejson_writer_generator_init(
+  status = test_writer_generator_init(
       &generator, test_writer_root_string_generator_producer, &root_ctx, NULL);
   EXPECT(status == LONEJSON_STATUS_OK);
   test_writer_generator_read_all(&generator, 2u, all, sizeof(all));
@@ -2587,7 +2587,7 @@ static void test_writer_generator_preserves_event_state_on_backpressure(void) {
   lonejson_generator_cleanup(&generator);
 
   memset(&object_ctx, 0, sizeof(object_ctx));
-  status = lonejson_writer_generator_init(
+  status = test_writer_generator_init(
       &generator, test_writer_object_generator_producer, &object_ctx, NULL);
   EXPECT(status == LONEJSON_STATUS_OK);
   test_writer_generator_read_all(&generator, 1u, all, sizeof(all));
@@ -2614,7 +2614,7 @@ static void test_writer_generator_rejects_retry_mismatch(void) {
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.kind = (int)kind;
-    status = lonejson_writer_generator_init(
+    status = test_writer_generator_init(
         &generator, test_writer_retry_mismatch_producer, &ctx, NULL);
     EXPECT(status == LONEJSON_STATUS_OK);
     status = lonejson_generator_read(&generator, chunk, sizeof(chunk),
@@ -2640,15 +2640,15 @@ static void test_writer_generator_rejects_child_retry_mismatch(void) {
   lonejson_status status;
 
   memset(&ctx, 0, sizeof(ctx));
-  lonejson_json_value_init(&ctx.first);
-  lonejson_json_value_init(&ctx.second);
+  lonejson_json_value_init(test_default_runtime(), &ctx.first);
+  lonejson_json_value_init(test_default_runtime(), &ctx.second);
   EXPECT(lonejson_json_value_set_buffer(
              &ctx.first, "\"abcdefghijklmnopqrstuvwxyz\"", 28u, NULL) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_json_value_set_buffer(
              &ctx.second, "\"ABCDEFGHIJKLMNOPQRSTUVWXYZ\"", 28u, NULL) ==
          LONEJSON_STATUS_OK);
-  status = lonejson_writer_generator_init(
+  status = test_writer_generator_init(
       &generator, test_writer_child_retry_mismatch_producer, &ctx, NULL);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(lonejson_generator_read(&generator, chunk, sizeof(chunk), &out_len,
@@ -2667,7 +2667,7 @@ static void test_writer_generator_rejects_child_retry_mismatch(void) {
   ctx.use_mapped = 1;
   strcpy(ctx.first_doc.payload, "abcdefghijklmnopqrstuvwxyz");
   strcpy(ctx.second_doc.payload, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-  status = lonejson_writer_generator_init(
+  status = test_writer_generator_init(
       &generator, test_writer_child_retry_mismatch_producer, &ctx, NULL);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(lonejson_generator_read(&generator, chunk, sizeof(chunk), &out_len,
@@ -2690,7 +2690,7 @@ static void test_writer_generator_zero_capacity_read(void) {
   lonejson_status status;
 
   memset(&ctx, 0, sizeof(ctx));
-  status = lonejson_writer_generator_init(&generator,
+  status = test_writer_generator_init(&generator,
                                           test_writer_generator_producer, &ctx,
                                           NULL);
   EXPECT(status == LONEJSON_STATUS_OK);
@@ -2718,7 +2718,7 @@ static void test_writer_generator_primitive_scalars_resume(void) {
     size_t j;
 
     memset(&ctx, 0, sizeof(ctx));
-    EXPECT(lonejson_writer_generator_init(
+    EXPECT(test_writer_generator_init(
                &generator, test_writer_primitive_generator_producer, &ctx,
                NULL) == LONEJSON_STATUS_OK);
     test_writer_generator_read_all(&generator, chunk_sizes[i], all,
@@ -2775,13 +2775,13 @@ static void test_writer_child_sink_failures(void) {
   lonejson_writer writer;
   lonejson_error error;
 
-  lonejson_json_value_init(&value);
+  lonejson_json_value_init(test_default_runtime(), &value);
   EXPECT(lonejson_json_value_set_buffer(
              &value, "\"abcdefghijklmnopqrstuvwxyz\"", 28u, &error) ==
          LONEJSON_STATUS_OK);
   memset(&failing, 0, sizeof(failing));
   failing.fail_after = 4u;
-  EXPECT(lonejson_writer_init_sink(&writer, test_failing_sink_write, &failing,
+  EXPECT(test_writer_init_sink(&writer, test_failing_sink_write, &failing,
                                    NULL, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_json_value(&writer, &value, &error) ==
          LONEJSON_STATUS_CALLBACK_FAILED);
@@ -2836,7 +2836,7 @@ static void test_writer_generator_backpressure_matrix(void) {
 
     memset(&ctx, 0, sizeof(ctx));
     lonejson_source_init(&ctx.source);
-    lonejson_json_value_init(&ctx.json_value);
+    lonejson_json_value_init(test_default_runtime(), &ctx.json_value);
     ctx.json_reader.json = raw_payload;
     ctx.json_reader.offset = 0u;
     ctx.json_reader.chunk_size = 3u;
@@ -2860,7 +2860,7 @@ static void test_writer_generator_backpressure_matrix(void) {
     EXPECT(lonejson_source_set_fd(&ctx.source, fd, NULL) ==
            LONEJSON_STATUS_OK);
 
-    EXPECT(lonejson_writer_generator_init(
+    EXPECT(test_writer_generator_init(
                &generator, test_writer_backpressure_producer, &ctx, NULL) ==
            LONEJSON_STATUS_OK);
     all_len = test_writer_generator_read_all_pattern(
@@ -2888,7 +2888,7 @@ static void test_writer_generator_streams_source_without_materializing(void) {
   test_writer_source_generator_ctx ctx;
   test_realloc_limit_state realloc_limit;
   lonejson_allocator allocator;
-  lonejson_write_options options;
+  lonejson__write_options options;
   unsigned char all[TEST_WRITER_STREAM_PAYLOAD_LEN + 8u];
   unsigned char expected[TEST_WRITER_STREAM_PAYLOAD_LEN + 8u];
   size_t all_len;
@@ -2917,10 +2917,10 @@ static void test_writer_generator_streams_source_without_materializing(void) {
   allocator.realloc_fn = test_realloc_limit_realloc;
   allocator.free_fn = test_realloc_limit_free;
   allocator.ctx = &realloc_limit;
-  options = lonejson_default_write_options();
+  options = lonejson__default_write_options();
   options.allocator = &allocator;
 
-  EXPECT(lonejson_writer_generator_init(
+  EXPECT(test_writer_generator_init(
              &generator, test_writer_source_generator_producer, &ctx,
              &options) == LONEJSON_STATUS_OK);
   realloc_limit.observed_max_realloc_size = 0u;
@@ -2950,7 +2950,7 @@ test_writer_generator_streams_json_value_without_materializing(void) {
   test_writer_json_value_generator_ctx ctx;
   test_realloc_limit_state realloc_limit;
   lonejson_allocator allocator;
-  lonejson_write_options options;
+  lonejson__write_options options;
   unsigned char json[TEST_WRITER_STREAM_PAYLOAD_LEN + 4u];
   unsigned char expected[TEST_WRITER_STREAM_PAYLOAD_LEN + 8u];
   unsigned char all[TEST_WRITER_STREAM_PAYLOAD_LEN + 8u];
@@ -2958,7 +2958,7 @@ test_writer_generator_streams_json_value_without_materializing(void) {
   size_t i;
 
   memset(&ctx, 0, sizeof(ctx));
-  lonejson_json_value_init(&ctx.value);
+  lonejson_json_value_init(test_default_runtime(), &ctx.value);
   json[0] = '"';
   expected[0] = '[';
   expected[1] = '"';
@@ -2982,10 +2982,10 @@ test_writer_generator_streams_json_value_without_materializing(void) {
   allocator.realloc_fn = test_realloc_limit_realloc;
   allocator.free_fn = test_realloc_limit_free;
   allocator.ctx = &realloc_limit;
-  options = lonejson_default_write_options();
+  options = lonejson__default_write_options();
   options.allocator = &allocator;
 
-  EXPECT(lonejson_writer_generator_init(
+  EXPECT(test_writer_generator_init(
              &generator, test_writer_json_value_generator_producer, &ctx,
              &options) == LONEJSON_STATUS_OK);
   realloc_limit.observed_max_realloc_size = 0u;
@@ -3006,7 +3006,7 @@ static void test_writer_generator_streams_mapped_without_materializing(void) {
   test_writer_mapped_generator_ctx ctx;
   test_realloc_limit_state realloc_limit;
   lonejson_allocator allocator;
-  lonejson_write_options options;
+  lonejson__write_options options;
   unsigned char expected[TEST_WRITER_STREAM_PAYLOAD_LEN + sizeof(prefix) +
                          sizeof(suffix)];
   unsigned char all[TEST_WRITER_STREAM_PAYLOAD_LEN + sizeof(prefix) +
@@ -3033,10 +3033,10 @@ static void test_writer_generator_streams_mapped_without_materializing(void) {
   allocator.realloc_fn = test_realloc_limit_realloc;
   allocator.free_fn = test_realloc_limit_free;
   allocator.ctx = &realloc_limit;
-  options = lonejson_default_write_options();
+  options = lonejson__default_write_options();
   options.allocator = &allocator;
 
-  EXPECT(lonejson_writer_generator_init(
+  EXPECT(test_writer_generator_init(
              &generator, test_writer_mapped_generator_producer, &ctx,
              &options) == LONEJSON_STATUS_OK);
   realloc_limit.observed_max_realloc_size = 0u;
@@ -3059,7 +3059,7 @@ static void test_writer_generator_string_reader_preserves_chunks(void) {
   ctx.reader.json = "ab\"\\\ncd";
   ctx.reader.offset = 0u;
   ctx.reader.chunk_size = 2u;
-  status = lonejson_writer_generator_init(
+  status = test_writer_generator_init(
       &generator, test_writer_string_reader_generator_producer, &ctx, NULL);
   EXPECT(status == LONEJSON_STATUS_OK);
   test_writer_generator_read_all(&generator, 3u, all, sizeof(all));

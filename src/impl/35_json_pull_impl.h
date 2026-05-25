@@ -699,10 +699,10 @@ lonejson__json_pull_init(lonejson__json_pull_state *state,
                          const lonejson_json_value *value, int pretty,
                          size_t base_depth, lonejson_error *error) {
   lonejson_status status;
-  lonejson_value_limits defaults;
+  lonejson__value_limits defaults;
 
   memset(state, 0, sizeof(*state));
-  defaults = lonejson_default_value_limits();
+  defaults = lonejson__default_value_limits();
   state->pretty = pretty;
   state->base_depth = base_depth;
   state->allocator =

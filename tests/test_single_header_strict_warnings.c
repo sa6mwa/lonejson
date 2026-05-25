@@ -41,6 +41,7 @@ strict_array_reader(void *user, unsigned char *buffer, size_t capacity) {
 
 int main(void) {
   strict_reader_state state;
+  lonejson *runtime;
   lonejson_array_stream *stream;
   lonejson_array_stream_result result;
   lonejson_error error;
@@ -49,21 +50,28 @@ int main(void) {
   state.json = "[{\"id\":\"ok\"}]";
   state.offset = 0u;
   lonejson_error_init(&error);
-  stream = lonejson_array_stream_open_reader("", strict_array_reader, &state,
-                                             NULL, &error);
-  if (stream == NULL) {
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
     return 1;
   }
-  lonejson_init(&strict_item_map, &item);
+  stream = lonejson_array_stream_open_reader(runtime, "", strict_array_reader,
+                                             &state, &error);
+  if (stream == NULL) {
+    lonejson_free(runtime);
+    return 1;
+  }
+  lonejson_init(runtime, &strict_item_map, &item);
   result = lonejson_array_stream_next(stream, &strict_item_map, &item, &error);
   if (result != LONEJSON_ARRAY_STREAM_ITEM || item.id[0] != 'o' ||
       item.id[1] != 'k' || item.id[2] != '\0') {
     lonejson_cleanup(&strict_item_map, &item);
     lonejson_array_stream_close(stream);
+    lonejson_free(runtime);
     return 1;
   }
   result = lonejson_array_stream_next(stream, &strict_item_map, &item, &error);
   lonejson_cleanup(&strict_item_map, &item);
   lonejson_array_stream_close(stream);
+  lonejson_free(runtime);
   return result == LONEJSON_ARRAY_STREAM_EOF ? 0 : 1;
 }

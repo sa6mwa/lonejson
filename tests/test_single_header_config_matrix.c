@@ -123,6 +123,15 @@ static int config_expect_item(const config_item *item) {
   return strcmp(item->id, "cfg") == 0 && item->count == 7 && item->ok;
 }
 
+static lonejson *config_runtime(void) {
+  static lonejson *runtime = NULL;
+
+  if (runtime == NULL) {
+    runtime = lonejson_new(NULL, NULL);
+  }
+  return runtime;
+}
+
 static int config_test_parse_and_serialize(void) {
   static const char json[] = "{\"id\":\"cfg\",\"count\":7,\"ok\":true}";
   config_item item;
@@ -131,14 +140,15 @@ static int config_test_parse_and_serialize(void) {
   char out[128];
 
   lonejson_error_init(&error);
-  lonejson_init(&config_item_map, &item);
-  status = lonejson_parse_cstr(&config_item_map, &item, json, NULL, &error);
+  lonejson_init(config_runtime(), &config_item_map, &item);
+  status = lonejson_parse_cstr(config_runtime(), &config_item_map, &item, json,
+                               &error);
   if (status != LONEJSON_STATUS_OK || !config_expect_item(&item)) {
     lonejson_cleanup(&config_item_map, &item);
     return 1;
   }
-  status = lonejson_serialize_buffer(&config_item_map, &item, out, sizeof(out),
-                                     NULL, NULL, &error);
+  status = lonejson_serialize_buffer(config_runtime(), &config_item_map, &item,
+                                     out, sizeof(out), NULL, &error);
   lonejson_cleanup(&config_item_map, &item);
   if (status != LONEJSON_STATUS_OK) {
     return 1;
@@ -157,12 +167,12 @@ static int config_test_array_stream(void) {
       "{\"meta\":1,\"items\":[{\"id\":\"cfg\",\"count\":7,\"ok\":true}]}";
   state.offset = 0u;
   lonejson_error_init(&error);
-  stream = lonejson_array_stream_open_reader("items", config_reader, &state,
-                                             NULL, &error);
+  stream = lonejson_array_stream_open_reader(config_runtime(), "items",
+                                             config_reader, &state, &error);
   if (stream == NULL) {
     return 1;
   }
-  lonejson_init(&config_item_map, &item);
+  lonejson_init(config_runtime(), &config_item_map, &item);
   result = lonejson_array_stream_next(stream, &config_item_map, &item, &error);
   if (result != LONEJSON_ARRAY_STREAM_ITEM || !config_expect_item(&item)) {
     lonejson_cleanup(&config_item_map, &item);
@@ -215,24 +225,27 @@ static int config_test_protocol_framing(void) {
 #if defined(TEST_USE_SHORT_NAMES)
 static int config_test_short_aliases(void) {
   lj_error error;
-  lj_write_options options;
   char out[128];
   config_item item;
   lj_status status;
+  lonejson *runtime = lj_new(NULL, NULL);
+  int ok;
 
   lj_error_init(&error);
-  options = lj_default_write_options();
-  lj_init(&config_item_map, &item);
+  if (runtime == NULL) {
+    return 1;
+  }
+  lj_init(runtime, &config_item_map, &item);
   strcpy(item.id, "cfg");
   item.count = 7;
   item.ok = true;
-  status = lj_serialize_buffer(&config_item_map, &item, out, sizeof(out), NULL,
-                               &options, &error);
+  status = lj_serialize_buffer(runtime, &config_item_map, &item, out,
+                               sizeof(out), NULL, &error);
   lj_cleanup(&config_item_map, &item);
-  return status == LJ_STATUS_OK &&
-                 strcmp(out, "{\"id\":\"cfg\",\"count\":7,\"ok\":true}") == 0
-             ? 0
-             : 1;
+  ok = status == LJ_STATUS_OK &&
+       strcmp(out, "{\"id\":\"cfg\",\"count\":7,\"ok\":true}") == 0;
+  lj_free(runtime);
+  return ok ? 0 : 1;
 }
 #endif
 

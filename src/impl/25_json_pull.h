@@ -41,7 +41,7 @@ typedef struct lonejson__json_pull_frame {
 typedef struct lonejson__json_pull_state {
   lonejson__json_cursor cursor;
   lonejson_allocator allocator;
-  lonejson_value_limits limits;
+  lonejson__value_limits limits;
   lonejson__json_pull_frame *frames;
   size_t frame_count;
   size_t frame_capacity;

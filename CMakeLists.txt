@@ -26,7 +26,7 @@ option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "7" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "12" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -193,7 +193,8 @@ if(LONEJSON_BUILD_TESTS)
   target_include_directories(lonejson_tests PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_compile_definitions(lonejson_tests PRIVATE
     LONEJSON_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-    LONEJSON_GENERATED_FIXTURE_DIR="${LONEJSON_GENERATED_FIXTURE_DIR}")
+    LONEJSON_GENERATED_FIXTURE_DIR="${LONEJSON_GENERATED_FIXTURE_DIR}"
+    LONEJSON_TEST_RUNTIME_HANDLE_CACHE_DRAIN=1)
   if(LONEJSON_BUILD_WITH_CURL)
     target_compile_definitions(lonejson_tests PRIVATE LONEJSON_WITH_CURL)
     target_link_libraries(lonejson_tests PRIVATE CURL::libcurl)
@@ -202,6 +203,19 @@ if(LONEJSON_BUILD_TESTS)
   add_dependencies(lonejson_tests lonejson_generate_fixtures)
   add_test(NAME lonejson_tests COMMAND lonejson_tests)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_tests)
+
+  add_executable(lonejson_map_cache_no_tls_tests
+    tests/test_map_cache_no_tls.c)
+  target_include_directories(lonejson_map_cache_no_tls_tests PRIVATE
+    "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_compile_definitions(lonejson_map_cache_no_tls_tests PRIVATE
+    LONEJSON_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    LONEJSON_GENERATED_FIXTURE_DIR="${LONEJSON_GENERATED_FIXTURE_DIR}"
+    LONEJSON_TEST_RUNTIME_HANDLE_CACHE_DRAIN=1)
+  lonejson_configure_c_target(lonejson_map_cache_no_tls_tests)
+  add_test(NAME lonejson_map_cache_no_tls_tests
+    COMMAND lonejson_map_cache_no_tls_tests)
+  list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_map_cache_no_tls_tests)
 
   find_program(LONEJSON_BASH_EXECUTABLE bash)
   if(LONEJSON_BASH_EXECUTABLE AND LONEJSON_LUA_EXECUTABLE
@@ -213,12 +227,45 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${LONEJSON_LUA_EXECUTABLE}"
         "${LONEJSON_LUAROCKS_EXECUTABLE}")
+    add_test(
+      NAME lonejson_bench_retry_confirm_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_retry_confirm.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${LONEJSON_LUA_EXECUTABLE}"
+        "${LONEJSON_LUAROCKS_EXECUTABLE}")
+    add_test(
+      NAME lonejson_lua_legacy_uservalue_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_legacy_uservalue.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${LONEJSON_LUA_EXECUTABLE}"
+        "${LONEJSON_LUAROCKS_EXECUTABLE}")
+    add_test(
+      NAME lonejson_lua_schema_cache_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${LONEJSON_LUA_EXECUTABLE}"
+        "${LONEJSON_LUAROCKS_EXECUTABLE}")
+    add_test(
+      NAME lonejson_lua_encode_stats_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${LONEJSON_LUA_EXECUTABLE}"
+        "${LONEJSON_LUAROCKS_EXECUTABLE}")
   endif()
   if(LONEJSON_BASH_EXECUTABLE)
     add_test(
       NAME lonejson_c_pkt_systems_fetch_retry_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fetch_c_pkt_systems.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_cmake_threads_optional_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_threads_optional.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 
@@ -743,6 +790,8 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/35_json_pull_impl.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/38_writer_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_value_rewrite_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_single_header.cmake
   VERBATIM
 )

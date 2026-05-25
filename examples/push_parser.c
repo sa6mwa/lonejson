@@ -41,17 +41,26 @@ static lonejson_read_result build_reader(void *user, unsigned char *buffer,
 
 int main(void) {
   build_reader_state state = {"{\"version\":\"1.2.3\",\"ok\":true}", 0u};
+  lonejson *lj;
   build_info info;
   lonejson_error error;
   lonejson_stream *stream;
   lonejson_stream_result result;
 
-  lonejson_init(&build_info_map, &info);
+  lj = lonejson_new(NULL, &error);
+  if (lj == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
 
-  stream = lonejson_stream_open_reader(&build_info_map, build_reader, &state,
-                                       NULL, &error);
+  lonejson_init(lj, &build_info_map, &info);
+
+  stream =
+      lonejson_stream_open_reader(lj, &build_info_map, build_reader, &state,
+                                  &error);
   if (stream == NULL) {
     fprintf(stderr, "stream open failed: %s\n", error.message);
+    lonejson_free(lj);
     return 1;
   }
 
@@ -59,10 +68,12 @@ int main(void) {
   if (result != LONEJSON_STREAM_OBJECT) {
     fprintf(stderr, "stream parse failed: %s\n", error.message);
     lonejson_stream_close(stream);
+    lonejson_free(lj);
     return 1;
   }
 
   printf("version=%s ok=%s\n", info.version, info.ok ? "true" : "false");
   lonejson_stream_close(stream);
+  lonejson_free(lj);
   return 0;
 }

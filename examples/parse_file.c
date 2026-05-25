@@ -19,6 +19,7 @@ LONEJSON_MAP_DEFINE(inventory_item_map, inventory_item, inventory_item_fields);
 int main(void) {
   char path[] = "/tmp/lonejson-example-file-XXXXXX";
   const char *json = "{\n  \"sku\": \"ABC-42\",\n  \"quantity\": 19\n}\n";
+  lonejson *lj;
   inventory_item item;
   lonejson_error error;
   int fd = mkstemp(path);
@@ -38,14 +39,25 @@ int main(void) {
   fputs(json, fp);
   fclose(fp);
 
-  if (lonejson_parse_path(&inventory_item_map, &item, path, NULL, &error) !=
+  lj = lonejson_new(NULL, &error);
+  if (lj == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    unlink(path);
+    return 1;
+  }
+
+  lonejson_init(lj, &inventory_item_map, &item);
+  if (lonejson_parse_path(lj, &inventory_item_map, &item, path, &error) !=
       LONEJSON_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
+    lonejson_free(lj);
     unlink(path);
     return 1;
   }
 
   printf("sku=%s quantity=%ld\n", item.sku, (long)item.quantity);
+  lonejson_cleanup(&inventory_item_map, &item);
+  lonejson_free(lj);
   unlink(path);
   return 0;
 }

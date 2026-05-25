@@ -7,6 +7,14 @@ typedef enum lonejson__generator_pending_kind {
 #define LONEJSON__GENERATOR_MAGIC 0x4c4a474eu
 #define LONEJSON__WRITER_GENERATOR_MAGIC 0x4c4a5747u
 
+static lonejson_status lonejson__serialize_sink_with_options(
+    const lonejson_map *map, const void *src, lonejson_sink_fn sink,
+    void *user, const lonejson__write_options *options, lonejson_error *error);
+static lonejson_status lonejson__writer_init_sink_with_options(
+    lonejson_writer *writer, lonejson_sink_fn sink, void *sink_user,
+    const lonejson__write_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error);
+
 typedef enum lonejson__generator_frame_kind {
   LONEJSON__GEN_FRAME_MAP = 0,
   LONEJSON__GEN_FRAME_STRING = 1,
@@ -80,7 +88,7 @@ typedef struct lonejson__generator_frame {
 typedef struct lonejson__generator_state {
   unsigned magic;
   lonejson_allocator allocator;
-  lonejson_write_options options;
+  lonejson__write_options options;
   lonejson__generator_frame *frames;
   size_t frame_count;
   size_t frame_capacity;
@@ -1127,10 +1135,9 @@ lonejson__generator_step_frame(lonejson__generator_state *state,
   }
 }
 
-lonejson_status lonejson_generator_init(lonejson_generator *generator,
-                                        const lonejson_map *map,
-                                        const void *src,
-                                        const lonejson_write_options *options) {
+static lonejson_status lonejson__generator_init_with_options(
+    lonejson_generator *generator, const lonejson_map *map, const void *src,
+    const lonejson__write_options *options) {
   lonejson__generator_state *state;
   lonejson_allocator allocator;
   lonejson__generator_frame root;
@@ -1166,7 +1173,7 @@ lonejson_status lonejson_generator_init(lonejson_generator *generator,
   memset(state, 0, sizeof(*state));
   state->magic = LONEJSON__GENERATOR_MAGIC;
   state->allocator = allocator;
-  state->options = options ? *options : lonejson_default_write_options();
+  state->options = options ? *options : lonejson__default_write_options();
   memset(&root, 0, sizeof(root));
   root.kind = LONEJSON__GEN_FRAME_MAP;
   root.u.map.map = map;
@@ -1180,6 +1187,26 @@ lonejson_status lonejson_generator_init(lonejson_generator *generator,
   generator->eof = 0;
   lonejson__clear_error(&generator->error);
   return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_generator_init(lonejson *runtime,
+                                        lonejson_generator *generator,
+                                        const lonejson_map *map,
+                                        const void *src) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  const lonejson__write_options *options;
+  lonejson_error *error = generator != NULL ? &generator->error : NULL;
+  lonejson_status status;
+
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  options = &runtime_state->write_options;
+  status = lonejson__generator_init_with_options(generator, map, src, options);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
 }
 
 typedef struct lonejson__measure_sink_state {
@@ -1334,9 +1361,10 @@ static lonejson_status lonejson__writer_generator_sink(void *user,
       state, (const unsigned char *)data + take, rest, error);
 }
 
-lonejson_status lonejson_writer_generator_init(
+static lonejson_status lonejson__writer_generator_init_with_options(
     lonejson_generator *generator, lonejson_writer_producer_fn producer,
-    void *producer_user, const lonejson_write_options *options) {
+    void *producer_user, const lonejson__write_options *options,
+    const lonejson_runtime *runtime) {
   lonejson__writer_generator_state *state;
   lonejson_allocator allocator;
   lonejson_status status;
@@ -1369,9 +1397,9 @@ lonejson_status lonejson_writer_generator_init(
   state->allocator = allocator;
   state->producer = producer;
   state->producer_user = producer_user;
-  status =
-      lonejson_writer_init_sink(&state->writer, lonejson__writer_generator_sink,
-                                state, options, &generator->error);
+  status = lonejson__writer_init_sink_with_options(
+      &state->writer, lonejson__writer_generator_sink, state, options,
+      runtime, &generator->error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson__buffer_free(&allocator, state, sizeof(*state));
     return status;
@@ -1379,6 +1407,26 @@ lonejson_status lonejson_writer_generator_init(
   generator->state = state;
   lonejson__clear_error(&generator->error);
   return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_writer_generator_init(
+    lonejson *runtime, lonejson_generator *generator,
+    lonejson_writer_producer_fn producer, void *producer_user) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  const lonejson__write_options *options;
+  lonejson_error *error = generator != NULL ? &generator->error : NULL;
+  lonejson_status status;
+
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  options = &runtime_state->write_options;
+  status = lonejson__writer_generator_init_with_options(
+      generator, producer, producer_user, options, runtime_state);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
 }
 
 static lonejson_status
@@ -1427,9 +1475,9 @@ lonejson__writer_generator_read(lonejson_generator *generator,
   return LONEJSON_STATUS_OK;
 }
 
-lonejson_status lonejson_generator_measure(
+static lonejson_status lonejson__generator_measure_with_options(
     const lonejson_map *map, const void *src, size_t *out_len,
-    const lonejson_write_options *options, lonejson_error *error) {
+    const lonejson__write_options *options, lonejson_error *error) {
   lonejson__measure_sink_state state;
   lonejson_status status;
 
@@ -1448,11 +1496,31 @@ lonejson_status lonejson_generator_measure(
                                "cannot measure non-rewindable JSON document");
   }
   state.total = 0u;
-  status = lonejson_serialize_sink(map, src, lonejson__measure_sink, &state,
-                                   options, error);
+  status = lonejson__serialize_sink_with_options(map, src, lonejson__measure_sink,
+                                                 &state, options, error);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     *out_len = state.total;
   }
+  return status;
+}
+
+lonejson_status lonejson_generator_measure(lonejson *runtime,
+                                           const lonejson_map *map,
+                                           const void *src, size_t *out_len,
+                                           lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  const lonejson__write_options *options;
+  lonejson_status status;
+
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  options = &runtime_state->write_options;
+  status = lonejson__generator_measure_with_options(map, src, out_len, options,
+                                                    error);
+  lonejson__runtime_borrow_release(&borrow);
   return status;
 }
 

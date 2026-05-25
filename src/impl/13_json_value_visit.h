@@ -84,6 +84,9 @@ lonejson__json_visit_plain_chunk(lonejson__json_io *io, int is_key,
                                       : "JSON string exceeds maximum decoded "
                                         "byte limit");
   }
+  if (*plain_len == 0u) {
+    return lonejson__json_visit_chunk(io, fn, (const char *)data, len);
+  }
   while (offset < len) {
     take = len - offset;
     if (take > 256u) {
@@ -536,11 +539,12 @@ static lonejson_status lonejson__json_visit_object(lonejson__json_io *io) {
                                    0u, 0u, "expected ',' in object");
       }
     }
-    ch = lonejson__json_cursor_getc(io);
+    ch = lonejson__json_peek_nonspace(io);
     if (ch != '"') {
       return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
                                  0u, 0u, "expected object key");
     }
+    (void)lonejson__json_cursor_getc(io);
     status = lonejson__json_visit_string_value(io, 1);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
@@ -598,8 +602,9 @@ lonejson__json_visit_value(lonejson__json_io *io) {
 static lonejson_status lonejson__json_visit_cursor(
     lonejson__json_cursor *cursor, const lonejson_allocator *allocator,
     const lonejson_value_visitor *visitor, void *user,
-    const lonejson_value_limits *limits, lonejson_error *error) {
+    const lonejson__value_limits *limits, lonejson_error *error) {
   lonejson__json_io io;
+  lonejson__value_limits defaults;
   lonejson_status status;
   int ch;
 
@@ -614,20 +619,26 @@ static lonejson_status lonejson__json_visit_cursor(
   io.visitor_user = user;
   io.error = error;
   io.allocator = allocator;
-  io.limits = limits ? *limits : lonejson_default_value_limits();
-  if (io.limits.max_depth == 0u) {
-    io.limits.max_depth = lonejson_default_value_limits().max_depth;
-  }
-  if (io.limits.max_string_bytes == 0u) {
-    io.limits.max_string_bytes =
-        lonejson_default_value_limits().max_string_bytes;
-  }
-  if (io.limits.max_number_bytes == 0u) {
-    io.limits.max_number_bytes =
-        lonejson_default_value_limits().max_number_bytes;
-  }
-  if (io.limits.max_key_bytes == 0u) {
-    io.limits.max_key_bytes = lonejson_default_value_limits().max_key_bytes;
+  if (limits != NULL && limits->max_depth != 0u &&
+      limits->max_string_bytes != 0u &&
+      limits->max_number_bytes != 0u &&
+      limits->max_key_bytes != 0u) {
+    io.limits = *limits;
+  } else {
+    defaults = lonejson__default_value_limits();
+    io.limits = limits ? *limits : defaults;
+    if (io.limits.max_depth == 0u) {
+      io.limits.max_depth = defaults.max_depth;
+    }
+    if (io.limits.max_string_bytes == 0u) {
+      io.limits.max_string_bytes = defaults.max_string_bytes;
+    }
+    if (io.limits.max_number_bytes == 0u) {
+      io.limits.max_number_bytes = defaults.max_number_bytes;
+    }
+    if (io.limits.max_key_bytes == 0u) {
+      io.limits.max_key_bytes = defaults.max_key_bytes;
+    }
   }
   status = lonejson__json_visit_value(&io);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
@@ -643,7 +654,7 @@ static lonejson_status lonejson__json_visit_cursor(
 
 static lonejson_status lonejson__json_visit(
     const lonejson_json_value *value, const lonejson_value_visitor *visitor,
-    void *user, const lonejson_value_limits *limits, lonejson_error *error) {
+    void *user, const lonejson__value_limits *limits, lonejson_error *error) {
   lonejson__json_cursor cursor;
   lonejson_status status;
 

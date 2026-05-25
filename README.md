@@ -134,18 +134,27 @@ variants available when syntax validation is all you need. Streaming uses
 `lonejson_generator_init/read/cleanup` trio. Ownership and reuse of mapped
 values is handled by `lonejson_cleanup` and `lonejson_reset`.
 
-Large-value handling is expressed explicitly. `lonejson_spooled` and
-`lonejson_spool_options` are for inbound values that may spill to disk.
-`lonejson_source` and the corresponding `lonejson_source_set_*` helpers are for
-outbound values that should be serialized directly from an existing path,
-`FILE *`, or file descriptor. `lonejson_json_value` covers the related case
-where a typed envelope needs to embed one already-formed JSON value directly,
-and `lonejson_visit_value_*` covers the lower-level case where one arbitrary
-JSON value should be visited without a schema. Parse and write behavior is
-configured through `lonejson_parse_options` and `lonejson_write_options`.
+Large-value handling is expressed explicitly. `lonejson_spooled` is for inbound
+values that may spill to disk, with thresholds chosen from the runtime's named
+spool classes. `lonejson_source` and the corresponding
+`lonejson_source_set_*` helpers are for outbound values that should be
+serialized directly from an existing path, `FILE *`, or file descriptor.
+`lonejson_json_value` covers the related case where a typed envelope needs to
+embed one already-formed JSON value directly, and `lonejson_visit_value_*`
+covers the lower-level case where one arbitrary JSON value should be visited
+without a schema. Parse, write, and arbitrary-value limits are configured on
+the instantiated `lonejson` runtime through `lonejson_config`.
+
+Every public operation hangs off one instantiated runtime. You can call the
+free functions such as `lonejson_parse_cstr(lj, ...)` or the equivalent method
+pointer route `lj->parse_cstr(lj, ...)`; they are intentionally the same API
+surface. Treat `lonejson *` as an owner-only handle: do not copy `struct
+lonejson` by value, and only free the original pointer returned by
+`lonejson_new()`.
+
 Serializer-owned output APIs such as `lonejson_serialize_alloc()` and
-`lonejson_serialize_owned()` are materializing APIs and are capped by
-`lonejson_write_options.max_output_bytes`, which defaults to
+`lonejson_serialize_owned()` are materializing APIs and are capped by the
+runtime's `write_max_output_bytes`, which defaults to
 `LONEJSON_WRITE_MAX_OUTPUT_BYTES` (8 MiB). Fixed caller buffers are bounded by
 their explicit capacity, and sink/file/generator serializers remain streaming
 or caller-bounded rather than using this materialized-output cap.
@@ -158,14 +167,16 @@ mapped serializer surface plus `lonejson_source`, `lonejson_spooled`, and
 generator directly instead of silently falling back to buffered serialization.
 
 ```c
+lonejson *lj = lonejson_new(NULL, &error);
 lonejson_generator generator;
 unsigned char chunk[4096];
 size_t out_len;
 int eof;
 
-status = lonejson_generator_init(&generator, &event_map, &event, NULL);
+status = lonejson_generator_init(lj, &generator, &event_map, &event);
 if (status != LONEJSON_STATUS_OK) {
   fprintf(stderr, "generator init failed: %s\n", generator.error.message);
+  lonejson_free(lj);
   return 1;
 }
 
@@ -180,6 +191,7 @@ while (!eof) {
   fwrite(chunk, 1u, out_len, stdout);
 }
 lonejson_generator_cleanup(&generator);
+lonejson_free(lj);
 ```
 
 ## Quick start
@@ -202,55 +214,60 @@ static const lonejson_field user_doc_fields[] = {
 LONEJSON_MAP_DEFINE(user_doc_map, user_doc, user_doc_fields);
 
 int main(void) {
+  lonejson *lj;
+  lonejson_config config;
   user_doc doc;
   lonejson_error error;
-  lonejson_parse_options options = lonejson_default_parse_options();
   lonejson_status status;
 
-  /* Defaults: 128 KiB per STRING_ALLOC field, 1 MiB live lonejson-owned parse
-   * heap. Set either field to 0 to disable that ceiling for this parse call.
-   */
-  options.max_dynamic_string_bytes = 256u * 1024u;
+  config = lonejson_default_config();
+  config.max_dynamic_string_bytes = 256u * 1024u;
+  lj = lonejson_new(&config, &error);
+  if (lj == NULL) {
+    return 1;
+  }
 
+  lonejson_init(lj, &user_doc_map, &doc);
   status = lonejson_parse_cstr(
-    &user_doc_map, &doc, "{\"name\":\"Ada\",\"age\":37}", &options, &error);
+    lj, &user_doc_map, &doc, "{\"name\":\"Ada\",\"age\":37}", &error);
   if (status != LONEJSON_STATUS_OK) {
+    lonejson_free(lj);
     return 1;
   }
 
   lonejson_cleanup(&user_doc_map, &doc);
+  lonejson_free(lj);
   return 0;
 }
 ```
 
-For parse calls that use `STRING_ALLOC` or other lonejson-owned dynamic
-destinations, `lonejson_default_parse_options()` currently applies these
+For runtimes that use `STRING_ALLOC` or other lonejson-owned dynamic
+destinations, `lonejson_default_config()` currently applies these
 ceilings:
 
 - `max_dynamic_string_bytes = 128 KiB`
 - `max_alloc_bytes = 1 MiB`
 
-Set either option to `0` to disable that specific ceiling for a call.
+Set either field to `0` to disable that specific ceiling for one runtime.
 
 Reused non-empty `STRING_FIXED` fields under `clear_destination = 0` stage the
 replacement before commit so parse failures do not clobber the old value. If
-you want that path to stay allocation-free, provide caller-owned scratch that
-is at least as large as the fixed field capacity:
+you want that path to stay allocation-free, provide caller-owned scratch in the
+runtime config that is at least as large as the fixed field capacity:
 
 ```c
 char fixed_scratch[8192];
 
-options.clear_destination = 0;
-options.fixed_string_scratch = fixed_scratch;
-options.fixed_string_scratch_size = sizeof(fixed_scratch);
+config.clear_destination_by_default = 0;
+config.fixed_string_scratch = fixed_scratch;
+config.fixed_string_scratch_size = sizeof(fixed_scratch);
 ```
 
 Without caller scratch, lonejson allocates temporary staging storage for that
 field and counts it against `max_alloc_bytes`.
 
 The Lua binding exposes the same reuse control through
-`lj.fixed_string_scratch(size)`, passed as `fixed_string_scratch` in parse
-options for `decode_into`, `stream_*`, and `array_stream_*`.
+`lonejson.fixed_string_scratch(size)`, passed into `lonejson.new({...})`.
 
 ### Read an object-framed stream
 
@@ -261,11 +278,18 @@ fit the same model.
 
 ```c
 lonejson_stream *stream;
+lonejson *lj;
 user_doc doc;
 lonejson_error error;
 
-stream = lonejson_stream_open_fd(&user_doc_map, fd, NULL, &error);
+lj = lonejson_new(NULL, &error);
+if (lj == NULL) {
+  return 1;
+}
+
+stream = lonejson_stream_open_fd(lj, &user_doc_map, fd, &error);
 if (stream == NULL) {
+  lonejson_free(lj);
   return 1;
 }
 
@@ -284,6 +308,7 @@ for (;;) {
 }
 
 lonejson_stream_close(stream);
+lonejson_free(lj);
 ```
 
 ### Read a selected array stream
@@ -297,12 +322,19 @@ Mapped item delivery parses each item directly into the destination map:
 
 ```c
 lonejson_array_stream *items;
+lonejson *lj;
 user_doc doc;
 lonejson_error error;
 
-items = lonejson_array_stream_open_path("items", "/tmp/users.json", NULL,
+lj = lonejson_new(NULL, &error);
+if (lj == NULL) {
+  return 1;
+}
+
+items = lonejson_array_stream_open_path(lj, "items", "/tmp/users.json",
                                         &error);
 if (items == NULL) {
+  lonejson_free(lj);
   return 1;
 }
 
@@ -322,21 +354,25 @@ for (;;) {
 }
 
 lonejson_array_stream_close(items);
+lonejson_free(lj);
 ```
 
 With an open array cursor, raw item delivery explicitly captures each selected
 item as a `lonejson_json_value`:
 
 ```c
+lonejson *lj;
 lonejson_json_value value;
 
-lonejson_json_value_init(&value);
+lj = lonejson_new(NULL, &error);
+lonejson_json_value_init(lj, &value);
 while (lonejson_array_stream_next_value(items, &value, &error) ==
        LONEJSON_ARRAY_STREAM_ITEM) {
   lonejson_json_value_write_to_sink(&value, sink_fn, user, &error);
   lonejson_json_value_reset(&value);
 }
 lonejson_json_value_cleanup(&value);
+lonejson_free(lj);
 ```
 
 Push-fed selected-array streams fit write-callback transports such as libcurl.
@@ -371,22 +407,26 @@ static const lonejson_field envelope_fields[] = {
 LONEJSON_MAP_DEFINE(envelope_map, envelope_doc, envelope_fields);
 
 envelope_doc envelope;
+lonejson *lj;
 user_doc item;
 lonejson_mapped_array_stream_handler handler;
-lonejson_parse_options options = lonejson_default_parse_options();
+lonejson_config config;
 
-lonejson_init(&envelope_map, &envelope);
-lonejson_init(&user_doc_map, &item);
+config = lonejson_default_config();
+config.clear_destination_by_default = 0;
+lj = lonejson_new(&config, &error);
+lonejson_init(lj, &envelope_map, &envelope);
+lonejson_init(lj, &user_doc_map, &item);
 handler.item_map = &user_doc_map;
 handler.item_dst = &item;
 handler.item = on_item;
 handler.user = NULL;
 lonejson_mapped_array_stream_set_handler(&envelope.items, &handler, &error);
-options.clear_destination = 0;
-lonejson_parse_path(&envelope_map, &envelope, "/tmp/envelope.json", &options,
+lonejson_parse_path(lj, &envelope_map, &envelope, "/tmp/envelope.json",
                     &error);
 lonejson_cleanup(&user_doc_map, &item);
 lonejson_cleanup(&envelope_map, &envelope);
+lonejson_free(lj);
 ```
 
 ### Rewrite a selected array while streaming
@@ -398,6 +438,7 @@ dot-separated keys. Fan-out through arrays is explicit with `[]`, for example
 `"boards[].items"`.
 
 ```c
+lonejson *lj;
 static lonejson_status keep_item(
     void *user, const lonejson_array_rewrite_context *context, void *item,
     lonejson_array_rewrite_result *result, lonejson_error *error) {
@@ -412,13 +453,15 @@ static lonejson_status keep_item(
 lonejson_array_rewrite_options options = {0};
 lonejson_json_value item_value;
 
-lonejson_json_value_init(&item_value);
+lj = lonejson_new(NULL, &error);
+lonejson_json_value_init(lj, &item_value);
 options.item_value = &item_value;
 options.item = keep_item;
 
-status = lonejson_array_rewrite_path("items", "input.json", "output.json",
+status = lonejson_array_rewrite_path(lj, "items", "input.json", "output.json",
                                      &options, &error);
 lonejson_json_value_cleanup(&item_value);
+lonejson_free(lj);
 ```
 
 Replacement, insertion, and appended values can come from mapped structs or
@@ -513,16 +556,24 @@ lonejson_multipart_close(mp);
 ```c
 char buffer[256];
 size_t written = 0u;
+lonejson *lj;
+lonejson_config config;
 lonejson_error error;
-lonejson_write_options options = lonejson_default_write_options();
 
-options.pretty = 1;
-
-if (lonejson_serialize_buffer(
-      &user_doc_map, &doc, buffer, sizeof(buffer), &written,
-      &options, &error) != LONEJSON_STATUS_OK) {
+config = lonejson_default_config();
+config.write_pretty = 1;
+lj = lonejson_new(&config, &error);
+if (lj == NULL) {
   return 1;
 }
+
+if (lonejson_serialize_buffer(
+      lj, &user_doc_map, &doc, buffer, sizeof(buffer), &written,
+      &error) != LONEJSON_STATUS_OK) {
+  lonejson_free(lj);
+  return 1;
+}
+lonejson_free(lj);
 ```
 
 ### Emit JSON Lines
@@ -555,26 +606,28 @@ static const lonejson_field ingest_doc_fields[] = {
 LONEJSON_MAP_DEFINE(ingest_doc_map, ingest_doc, ingest_doc_fields);
 ```
 
-`LONEJSON_FIELD_STRING_STREAM_REQ(...)` uses the library defaults:
+`LONEJSON_FIELD_STRING_STREAM_REQ(...)` uses the runtime's default spool class:
 
 - `memory_limit = 64 KiB` before spilling to disk
 - `max_bytes = 10 MiB` total logical payload
 
-To change either threshold, attach explicit spool options to the field mapping:
+To change either threshold for one field family, move that field onto a named
+runtime spool class:
 
 ```c
-static const lonejson_spool_options ingest_spool = {
-  64u * 1024u,
-  32u * 1024u * 1024u,
-  "/tmp"
+static const lonejson_field ingest_doc_fields[] = {
+  LONEJSON_FIELD_STRING_STREAM_CLASS(ingest_doc, body, "body",
+                                     LONEJSON_SPOOL_CLASS_BLOB)
 };
 
-static const lonejson_field ingest_doc_fields[] = {
-  LONEJSON_FIELD_STRING_STREAM_OPTS(ingest_doc, body, "body", &ingest_spool)
-};
+lonejson_config config = lonejson_default_config();
+config.spool_blob.memory_limit = 64u * 1024u;
+config.spool_blob.max_bytes = 32u * 1024u * 1024u;
+config.spool_blob.temp_dir = "/tmp";
 ```
 
-Set `max_bytes = 0` to disable the total spool-size ceiling for that field.
+Set `config.spool_blob.max_bytes = 0` to disable the total spool-size ceiling
+for that class.
 
 The resulting `lonejson_spooled` value remains in memory when it is small and
 spills to a temporary file when it grows past the configured threshold. The
@@ -651,19 +704,20 @@ three inbound behaviors before decoding:
   caller sink as lonejson validates the nested value incrementally
 - `lonejson_json_value_set_parse_visitor(...)` streams structured object,
   array, string, number, boolean, and null events to a caller visitor while
-  applying `lonejson_value_limits`
+  applying the runtime's JSON-value visitor ceilings
 - `lonejson_json_value_enable_parse_capture(...)` explicitly captures compact
   JSON bytes into owned storage for later reuse or re-emission
 
 When using inbound parse sinks, parse visitors, or explicit capture, initialize
-the destination first and parse with `clear_destination = 0` so the configured
-`json_value` handles remain attached. The same supported pattern applies when a
-`json_value` field lives inside a nested mapped object or a mapped-array-stream
-item:
+the destination first and create the runtime with
+`clear_destination_by_default = 0` so the configured `json_value` handles
+remain attached. The same supported pattern applies when a `json_value` field
+lives inside a nested mapped object or a mapped-array-stream item:
 
 ```c
-lonejson_parse_options options = lonejson_default_parse_options();
-options.clear_destination = 0;
+lonejson_config config = lonejson_default_config();
+config.clear_destination_by_default = 0;
+lonejson *lj = lonejson_new(&config, &error);
 ```
 
 That means you can prepare `doc.response.payload` once, then reuse the same
@@ -713,10 +767,11 @@ visitor.number_end = on_number_end;
 visitor.boolean_value = on_boolean;
 visitor.null_value = on_null;
 
-lonejson_value_limits limits = lonejson_default_value_limits();
-limits.max_depth = 32;
+lonejson_config config = lonejson_default_config();
+config.json_value_max_depth = 32;
+lonejson *lj = lonejson_new(&config, &error);
 
-status = lonejson_visit_value_cstr(json, &visitor, user, &limits, &error);
+status = lonejson_visit_value_cstr(lj, json, &visitor, user, &error);
 ```
 
 Default limits are intentionally conservative. Strings, object keys, and total
@@ -736,10 +791,9 @@ manual `memset` or `{0}`:
 - `lonejson_json_value_init_with_allocator` and
   `lonejson_spooled_init_with_allocator` when an explicit allocator should own
   future internal allocations
-- `lonejson_default_parse_options()`, `lonejson_default_write_options()`,
-  `lonejson_default_value_visitor()`, `lonejson_default_read_result()`, and
-  `lonejson_default_allocator()`
-  for option/result structs
+- `lonejson_default_config()`, `lonejson_default_value_visitor()`,
+  `lonejson_default_read_result()`, and `lonejson_default_allocator()`
+  for configuration/result structs
 
 `lonejson_error` is output-only and does not need prior initialization, but
 `lonejson_error_init()` is available when you want an explicit empty state.
@@ -749,8 +803,8 @@ manual `memset` or `{0}`:
 Pretty printing is optional and uses two-space indentation:
 
 ```c
-lonejson_write_options options = lonejson_default_write_options();
-options.pretty = 1;
+lonejson_config config = lonejson_default_config();
+config.write_pretty = 1;
 ```
 
 The same option applies to normal JSON serializers and to JSONL serializers,
@@ -758,15 +812,16 @@ where each record is formatted independently and then terminated by `\n`.
 
 When you use the default alloc-returning serializer, release the returned
 buffer with `LONEJSON_FREE()`. Alloc-returning and owned-buffer serializers
-enforce `options.max_output_bytes`; set a larger explicit value when you
-intentionally materialize a larger document.
+enforce the runtime's `write_max_output_bytes`; set a larger explicit value
+when you intentionally materialize a larger document.
 
 ```c
-lonejson_write_options options = lonejson_default_write_options();
-options.max_output_bytes = 16u * 1024u * 1024u;
+lonejson_config config = lonejson_default_config();
+config.write_max_output_bytes = 16u * 1024u * 1024u;
+lonejson *lj = lonejson_new(&config, &error);
 
 char *json =
-    lonejson_serialize_alloc(&user_doc_map, &doc, NULL, &options, &error);
+    lonejson_serialize_alloc(lj, &user_doc_map, &doc, NULL, &error);
 if (json == NULL) {
   return 1;
 }
@@ -787,21 +842,22 @@ static void *my_realloc(void *ctx, void *ptr, size_t size) {
 static void my_free(void *ctx, void *ptr) { free(ptr); }
 
 lonejson_allocator allocator = lonejson_default_allocator();
-lonejson_parse_options parse_options = lonejson_default_parse_options();
-lonejson_write_options write_options = lonejson_default_write_options();
+lonejson_config config = lonejson_default_config();
 
 allocator.malloc_fn = my_malloc;
 allocator.realloc_fn = my_realloc;
 allocator.free_fn = my_free;
-parse_options.allocator = &allocator;
-write_options.allocator = &allocator;
+config.allocator = &allocator;
+
+lonejson *lj = lonejson_new(&config, &error);
 
 lonejson_owned_buffer owned = lonejson_default_owned_buffer();
-if (lonejson_serialize_owned(&user_doc_map, &doc, &owned, &write_options,
+if (lonejson_serialize_owned(lj, &user_doc_map, &doc, &owned,
                              &error) == LONEJSON_STATUS_OK) {
   puts(owned.data);
 }
 lonejson_owned_buffer_free(&owned);
+lonejson_free(lj);
 ```
 
 ## Benchmarks
@@ -871,9 +927,10 @@ eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_json_value_obj
 The Lua binding now supports `json_value` fields at top level, inside nested
 object fields, and inside object-array element schemas.
 
-For reusable records with `clear_destination = false`, omitted fields remain as
-they were, while present arrays replace the previous array contents instead of
-silently appending.
+For reusable records on a runtime configured with
+`clear_destination_by_default = false`, omitted fields remain as they were,
+while present arrays replace the previous array contents instead of silently
+appending.
 
 ## Example programs
 

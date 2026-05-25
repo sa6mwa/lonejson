@@ -34,46 +34,69 @@ LONEJSON_MAP_DEFINE(fuzz_json_value_doc_map, fuzz_json_value_doc,
                     fuzz_json_value_doc_fields);
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  lonejson *runtime;
+  lonejson *runtime_pretty;
+  lonejson *runtime_streamed;
+  lonejson_config config;
   fuzz_json_value_doc doc;
   fuzz_json_value_doc streamed;
   lonejson_error error;
   lonejson_status status;
-  lonejson_parse_options options;
   fuzz_sink_state selector_sink;
   fuzz_sink_state fields_sink;
   fuzz_sink_state error_sink;
 
   memset(&doc, 0, sizeof(doc));
-  status = lonejson_parse_buffer(&fuzz_json_value_doc_map, &doc, data, size,
-                                 NULL, &error);
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    return 0;
+  }
+  status =
+      lonejson_parse_buffer(runtime, &fuzz_json_value_doc_map, &doc, data, size,
+                            &error);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     char compact[2048];
     char pretty[4096];
     size_t needed = 0u;
-    lonejson_write_options options = lonejson_default_write_options();
+    config = lonejson_default_config();
+    config.write_pretty = 1;
+    runtime_pretty = lonejson_new(&config, &error);
+    if (runtime_pretty == NULL) {
+      runtime_pretty = NULL;
+    }
 
-    (void)lonejson_serialize_buffer(&fuzz_json_value_doc_map, &doc, compact,
-                                    sizeof(compact), &needed, NULL, &error);
-    options.pretty = 1;
-    (void)lonejson_serialize_buffer(&fuzz_json_value_doc_map, &doc, pretty,
-                                    sizeof(pretty), &needed, &options, &error);
+    (void)lonejson_serialize_buffer(runtime, &fuzz_json_value_doc_map, &doc,
+                                    compact, sizeof(compact), &needed, &error);
+    if (runtime_pretty != NULL) {
+      (void)lonejson_serialize_buffer(runtime_pretty, &fuzz_json_value_doc_map,
+                                      &doc, pretty, sizeof(pretty), &needed,
+                                      &error);
+      lonejson_free(runtime_pretty);
+    }
   }
   lonejson_cleanup(&fuzz_json_value_doc_map, &doc);
+  lonejson_free(runtime);
 
   memset(&streamed, 0, sizeof(streamed));
+  config = lonejson_default_config();
+  config.clear_destination_by_default = 0;
+  runtime_streamed = lonejson_new(&config, &error);
+  if (runtime_streamed == NULL) {
+    return 0;
+  }
+  lonejson_init(runtime_streamed, &fuzz_json_value_doc_map, &streamed);
+  memset(&selector_sink, 0, sizeof(selector_sink));
+  memset(&fields_sink, 0, sizeof(fields_sink));
+  memset(&error_sink, 0, sizeof(error_sink));
   lonejson_json_value_set_parse_sink(&streamed.selector, fuzz_count_sink,
                                      &selector_sink, &error);
   lonejson_json_value_set_parse_sink(&streamed.fields, fuzz_count_sink,
                                      &fields_sink, &error);
   lonejson_json_value_set_parse_sink(&streamed.last_error, fuzz_count_sink,
                                      &error_sink, &error);
-  memset(&selector_sink, 0, sizeof(selector_sink));
-  memset(&fields_sink, 0, sizeof(fields_sink));
-  memset(&error_sink, 0, sizeof(error_sink));
-  options = lonejson_default_parse_options();
-  options.clear_destination = 0;
-  (void)lonejson_parse_buffer(&fuzz_json_value_doc_map, &streamed, data, size,
-                              &options, &error);
+  (void)lonejson_parse_buffer(runtime_streamed, &fuzz_json_value_doc_map,
+                              &streamed, data, size, &error);
   lonejson_cleanup(&fuzz_json_value_doc_map, &streamed);
+  lonejson_free(runtime_streamed);
   return 0;
 }

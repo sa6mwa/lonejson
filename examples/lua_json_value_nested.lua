@@ -1,4 +1,6 @@
-local lj = require("lonejson")
+local lj = require("lonejson").new({
+  clear_destination_by_default = false,
+})
 
 local Response = lj.schema("Response", {
   lj.field("type", lj.string { required = true, fixed_capacity = 32, overflow = "fail" }),
@@ -22,7 +24,7 @@ print("first type=" .. rec.type ..
 
 Response:decode_into(rec, [[
   {"type":"response.delta","response":{"payload":{"delta":[true,null,2]}}}
-]], { clear_destination = false })
+]])
 print("second type=" .. rec.type ..
       " status=" .. tostring(rec.response.status) ..
       " payload.delta[2]=json_null:" ..

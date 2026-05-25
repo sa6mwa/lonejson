@@ -19,12 +19,21 @@ LJ_MAP_DEFINE(user_profile_map, user_profile, user_profile_fields);
 
 int main(void) {
   const char *json = "{\"name\":\"Alice\",\"age\":34,\"active\":true}";
+  lj *runtime;
   user_profile profile;
   lj_error error;
 
-  if (lj_parse_cstr(&user_profile_map, &profile, json, NULL, &error) !=
+  runtime = lj_new(NULL, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  lj_init(runtime, &user_profile_map, &profile);
+  if (lj_parse_cstr(runtime, &user_profile_map, &profile, json, &error) !=
       LJ_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
+    lj_free(runtime);
     return 1;
   }
 
@@ -32,5 +41,6 @@ int main(void) {
          profile.active ? "true" : "false");
 
   lj_cleanup(&user_profile_map, &profile);
+  lj_free(runtime);
   return 0;
 }

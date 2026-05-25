@@ -20,6 +20,7 @@ LONEJSON_MAP_DEFINE(outbound_bytes_doc_map, outbound_bytes_doc,
 int main(void) {
   static const unsigned char payload[] = {0x00u, 0x01u, 0x02u,
                                           0x7fu, 0x80u, 0xffu};
+  lonejson *lj;
   outbound_bytes_doc doc;
   lonejson_error error;
   lonejson_status status;
@@ -27,7 +28,13 @@ int main(void) {
   int fd;
   char *json;
 
-  lonejson_init(&outbound_bytes_doc_map, &doc);
+  lj = lonejson_new(NULL, &error);
+  if (lj == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  lonejson_init(lj, &outbound_bytes_doc_map, &doc);
   strcpy(doc.id, "bin-1");
 
   fd = mkstemp(path);
@@ -53,16 +60,18 @@ int main(void) {
     fprintf(stderr, "set_fd failed: %s\n", error.message);
     close(fd);
     unlink(path);
+    lonejson_free(lj);
     return 1;
   }
 
-  json = lonejson_serialize_alloc(&outbound_bytes_doc_map, &doc, NULL, NULL,
-                                  &error);
+  json =
+      lonejson_serialize_alloc(lj, &outbound_bytes_doc_map, &doc, NULL, &error);
   if (json == NULL) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
     lonejson_cleanup(&outbound_bytes_doc_map, &doc);
     close(fd);
     unlink(path);
+    lonejson_free(lj);
     return 1;
   }
 
@@ -73,5 +82,6 @@ int main(void) {
   lonejson_cleanup(&outbound_bytes_doc_map, &doc);
   close(fd);
   unlink(path);
+  lonejson_free(lj);
   return 0;
 }

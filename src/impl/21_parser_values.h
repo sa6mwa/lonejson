@@ -463,6 +463,15 @@ static lonejson_status lonejson__json_value_emit(lonejson_parser *parser,
                                parser->error.column,
                                "JSON value stream has no destination");
   }
+  if (value->parse_visitor_limits.max_total_bytes != 0u &&
+      parser->json_stream_total_bytes + len >
+          value->parse_visitor_limits.max_total_bytes) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "JSON value exceeds maximum total byte limit");
+  }
+  parser->json_stream_total_bytes += len;
   if (value->parse_mode == LONEJSON_JSON_VALUE_PARSE_SINK) {
     return value->parse_sink(value->parse_sink_user, data, len, &parser->error);
   }
@@ -730,7 +739,20 @@ lonejson__json_value_string_chunk(lonejson_parser *parser, const char *data,
   size_t limit;
   const char *msg;
 
+  limit = parser->json_stream_text_is_key
+              ? value->parse_visitor_limits.max_key_bytes
+              : value->parse_visitor_limits.max_string_bytes;
+  msg = parser->json_stream_text_is_key
+            ? "JSON object key exceeds maximum decoded byte limit"
+            : "JSON string exceeds maximum decoded byte limit";
+
   if (!lonejson__json_value_parse_visitor_active(parser)) {
+    if (limit != 0u && parser->json_stream_text_bytes + len > limit) {
+      return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
+                                 parser->error.offset, parser->error.line,
+                                 parser->error.column, "%s", msg);
+    }
+    parser->json_stream_text_bytes += len;
     capture_state.parser = parser;
     capture_state.value = value;
     return lonejson__emit_escaped_fragment(
@@ -741,12 +763,6 @@ lonejson__json_value_string_chunk(lonejson_parser *parser, const char *data,
         &parser->error,
         (const unsigned char *)data, len);
   }
-  limit = parser->json_stream_text_is_key
-              ? value->parse_visitor_limits.max_key_bytes
-              : value->parse_visitor_limits.max_string_bytes;
-  msg = parser->json_stream_text_is_key
-            ? "JSON object key exceeds maximum decoded byte limit"
-            : "JSON string exceeds maximum decoded byte limit";
   return lonejson__json_value_visit_chunk(
       parser,
       parser->json_stream_text_is_key ? value->parse_visitor->object_key_chunk
@@ -759,6 +775,15 @@ static lonejson_status lonejson__json_value_emit_string(lonejson_parser *parser,
                                                         size_t len) {
   lonejson_status status;
   lonejson__json_parse_capture_sink_state capture_state;
+  lonejson_json_value *json_value = parser->json_stream_value;
+
+  if (json_value != NULL && json_value->parse_visitor_limits.max_string_bytes != 0u &&
+      len > json_value->parse_visitor_limits.max_string_bytes) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "JSON string exceeds maximum decoded byte limit");
+  }
 
   status = lonejson__json_value_emit(parser, "\"", 1u);
   if (status != LONEJSON_STATUS_OK) {
@@ -1020,7 +1045,8 @@ static void *lonejson__object_array_append_slot(lonejson_parser *parser,
   slot = (unsigned char *)arr->items + (arr->count * arr->elem_size);
   memset(slot, 0, arr->elem_size);
   if (field->submap != NULL) {
-    lonejson__init_map_with_allocator(field->submap, slot, &parser->allocator);
+    lonejson__init_map_with_allocator(field->submap, slot, &parser->allocator,
+                                      parser->runtime);
   }
   arr->count++;
   return slot;

@@ -20,6 +20,7 @@
 #include <lua.h>
 
 #define LJLUA_SCHEMA_MT "lonejson.schema"
+#define LJLUA_RUNTIME_MT "lonejson.runtime"
 #define LJLUA_RECORD_MT "lonejson.record"
 #define LJLUA_STREAM_MT "lonejson.stream"
 #define LJLUA_ARRAY_STREAM_MT "lonejson.array_stream"
@@ -27,12 +28,19 @@
 #define LJLUA_PATH_MT "lonejson.path"
 #define LJLUA_FIXED_STRING_SCRATCH_MT "lonejson.fixed_string_scratch"
 #define LJLUA_SCHEMA_MAGIC 0x4c4a5343u
+#define LJLUA_RUNTIME_MAGIC 0x4c4a5254u
 #define LJLUA_RECORD_MAGIC 0x4c4a5243u
 #define LJLUA_STREAM_MAGIC 0x4c4a5354u
 #define LJLUA_ARRAY_STREAM_MAGIC 0x4c4a4153u
 #define LJLUA_SPOOL_MAGIC 0x4c4a5350u
 #define LJLUA_PATH_MAGIC 0x4c4a5048u
 #define LJLUA_FIXED_STRING_SCRATCH_MAGIC 0x4c4a4653u
+
+#if !defined(LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE) && LUA_VERSION_NUM >= 504
+#define LJLUA_HAS_INDEXED_USERVALUE 1
+#else
+#define LJLUA_HAS_INDEXED_USERVALUE 0
+#endif
 
 typedef enum ljlua_field_kind {
   LJLUA_FIELD_STRING = 1,
@@ -55,6 +63,12 @@ typedef enum ljlua_field_kind {
 typedef struct ljlua_schema ljlua_schema;
 typedef struct ljlua_compiled_path ljlua_compiled_path;
 typedef struct ljlua_json_value_decode_state ljlua_json_value_decode_state;
+
+typedef struct ljlua_runtime_ud {
+  unsigned int magic;
+  lonejson *runtime;
+  int fixed_string_scratch_ref;
+} ljlua_runtime_ud;
 
 typedef struct ljlua_field_meta {
   char *name;
@@ -79,11 +93,13 @@ struct ljlua_compiled_path {
 };
 
 struct ljlua_schema {
+  lonejson *runtime;
   lonejson_map map;
   char *name;
   size_t record_size;
   size_t field_count;
   int has_json_value;
+  int needs_record_init;
   lonejson_field *fields;
   ljlua_field_meta *metas;
   ljlua_compiled_path *path_cache;
@@ -96,6 +112,7 @@ struct ljlua_schema {
 typedef struct ljlua_schema_ud {
   unsigned int magic;
   ljlua_schema *schema;
+  int runtime_ref;
 } ljlua_schema_ud;
 
 typedef struct ljlua_record_ud {
@@ -110,12 +127,12 @@ typedef struct ljlua_stream_ud {
   unsigned int magic;
   ljlua_schema *schema;
   int schema_ref;
-  int fixed_string_scratch_ref;
+  int input_ref;
   lonejson_stream *stream;
   int clear_destination;
-  unsigned char *owned_input;
-  size_t owned_input_len;
-  size_t owned_input_offset;
+  const unsigned char *input;
+  size_t input_len;
+  size_t input_offset;
 } ljlua_stream_ud;
 
 typedef struct ljlua_decode_context {
@@ -128,14 +145,14 @@ typedef struct ljlua_array_stream_ud {
   unsigned int magic;
   ljlua_schema *schema;
   int schema_ref;
-  int fixed_string_scratch_ref;
+  int input_ref;
   lonejson_array_stream *stream;
   int clear_destination;
   unsigned char *pending_record;
   ljlua_decode_context pending_ctx;
-  unsigned char *owned_input;
-  size_t owned_input_len;
-  size_t owned_input_offset;
+  const unsigned char *input;
+  size_t input_len;
+  size_t input_offset;
 } ljlua_array_stream_ud;
 
 typedef struct ljlua_spool_ud {
@@ -160,6 +177,258 @@ typedef struct ljlua_path_ud {
   int schema_ref;
 } ljlua_path_ud;
 
+static void *ljlua_newuserdata_slots(lua_State *L, size_t size, int slot_count) {
+#if LJLUA_HAS_INDEXED_USERVALUE
+  return lua_newuserdatauv(L, size, slot_count);
+#else
+  void *ud = lua_newuserdata(L, size);
+  if (slot_count > 0) {
+    lua_newtable(L);
+    lua_setuservalue(L, -2);
+  }
+  return ud;
+#endif
+}
+
+static void ljlua_set_uservalue_ref(lua_State *L, int ud_index, int slot,
+                                    int value_index) {
+  ud_index = lua_absindex(L, ud_index);
+  value_index = lua_absindex(L, value_index);
+#if LJLUA_HAS_INDEXED_USERVALUE
+  lua_pushvalue(L, value_index);
+  lua_setiuservalue(L, ud_index, slot);
+#else
+  lua_getuservalue(L, ud_index);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_newtable(L);
+    lua_pushvalue(L, -1);
+    lua_setuservalue(L, ud_index);
+  }
+  lua_pushvalue(L, value_index);
+  lua_rawseti(L, -2, slot);
+  lua_pop(L, 1);
+#endif
+}
+
+static ljlua_fixed_string_scratch_ud *
+ljlua_check_fixed_string_scratch(lua_State *L, int index);
+
+static ljlua_runtime_ud *ljlua_check_runtime(lua_State *L, int index) {
+  ljlua_runtime_ud *ud =
+      (ljlua_runtime_ud *)luaL_checkudata(L, index, LJLUA_RUNTIME_MT);
+  luaL_argcheck(L, ud != NULL && ud->magic == LJLUA_RUNTIME_MAGIC &&
+                         ud->runtime != NULL,
+                index, "invalid lonejson runtime");
+  return ud;
+}
+
+static lonejson_overflow_policy
+ljlua_parse_runtime_overflow_policy(lua_State *L, int index, const char *key,
+                                    lonejson_overflow_policy fallback) {
+  lonejson_overflow_policy value = fallback;
+
+  lua_getfield(L, index, key);
+  if (!lua_isnil(L, -1)) {
+    const char *name = luaL_checkstring(L, -1);
+
+    if (strcmp(name, "fail") == 0) {
+      value = LONEJSON_OVERFLOW_FAIL;
+    } else if (strcmp(name, "truncate") == 0) {
+      value = LONEJSON_OVERFLOW_TRUNCATE;
+    } else if (strcmp(name, "truncate_silent") == 0) {
+      value = LONEJSON_OVERFLOW_TRUNCATE_SILENT;
+    } else {
+      luaL_error(L, "unsupported overflow policy '%s'", name);
+    }
+  }
+  lua_pop(L, 1);
+  return value;
+}
+
+static void ljlua_parse_runtime_spool_policy(lua_State *L, int index,
+                                             const char *key,
+                                             lonejson_spool_policy *policy) {
+  int policy_index;
+  lua_Integer value;
+
+  lua_getfield(L, index, key);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    return;
+  }
+  luaL_checktype(L, -1, LUA_TTABLE);
+  policy_index = lua_absindex(L, -1);
+
+  lua_getfield(L, policy_index, "memory_limit");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "spool memory_limit must be non-negative");
+    policy->memory_limit = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, policy_index, "max_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "spool max_bytes must be non-negative");
+    policy->max_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, policy_index, "temp_dir");
+  if (!lua_isnil(L, -1)) {
+    policy->temp_dir = luaL_checkstring(L, -1);
+  }
+  lua_pop(L, 1);
+  lua_pop(L, 1);
+}
+
+static void ljlua_parse_runtime_config(lua_State *L, int index,
+                                       lonejson_config *config) {
+  lua_Integer value;
+
+  *config = lonejson_default_config();
+  if (index == 0 || lua_isnoneornil(L, index)) {
+    return;
+  }
+  luaL_checktype(L, index, LUA_TTABLE);
+
+  lua_getfield(L, index, "max_alloc_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "max_alloc_bytes must be non-negative");
+    config->max_alloc_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "max_dynamic_string_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "max_dynamic_string_bytes must be non-negative");
+    config->max_dynamic_string_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "max_depth");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value > 0, index, "max_depth must be positive");
+    config->max_depth = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "json_value_max_total_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "json_value_max_total_bytes must be non-negative");
+    config->json_value_max_total_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "json_value_max_string_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "json_value_max_string_bytes must be non-negative");
+    config->json_value_max_string_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "json_value_max_key_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "json_value_max_key_bytes must be non-negative");
+    config->json_value_max_key_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "json_value_max_number_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "json_value_max_number_bytes must be non-negative");
+    config->json_value_max_number_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "json_value_max_depth");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value > 0, index,
+                  "json_value_max_depth must be positive");
+    config->json_value_max_depth = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "clear_destination_by_default");
+  if (!lua_isnil(L, -1)) {
+    config->clear_destination_by_default = lua_toboolean(L, -1) ? 1 : 0;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "reject_duplicate_keys_by_default");
+  if (!lua_isnil(L, -1)) {
+    config->reject_duplicate_keys_by_default = lua_toboolean(L, -1) ? 1 : 0;
+  }
+  lua_pop(L, 1);
+
+  config->write_overflow_policy = ljlua_parse_runtime_overflow_policy(
+      L, index, "write_overflow_policy", config->write_overflow_policy);
+
+  lua_getfield(L, index, "write_pretty");
+  if (!lua_isnil(L, -1)) {
+    config->write_pretty = lua_toboolean(L, -1) ? 1 : 0;
+  }
+  lua_pop(L, 1);
+
+  lua_getfield(L, index, "write_max_output_bytes");
+  if (!lua_isnil(L, -1)) {
+    value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index,
+                  "write_max_output_bytes must be non-negative");
+    config->write_max_output_bytes = (size_t)value;
+  }
+  lua_pop(L, 1);
+
+  ljlua_parse_runtime_spool_policy(L, index, "spool_default",
+                                   &config->spool_default);
+  ljlua_parse_runtime_spool_policy(L, index, "spool_blob",
+                                   &config->spool_blob);
+  ljlua_parse_runtime_spool_policy(L, index, "spool_large_text",
+                                   &config->spool_large_text);
+
+  lua_getfield(L, index, "fixed_string_scratch");
+  if (!lua_isnil(L, -1)) {
+    ljlua_fixed_string_scratch_ud *scratch =
+        ljlua_check_fixed_string_scratch(L, -1);
+    config->fixed_string_scratch = scratch->data;
+    config->fixed_string_scratch_size = scratch->size;
+  }
+  lua_pop(L, 1);
+}
+
+static int ljlua_runtime_config_fixed_string_scratch_ref(lua_State *L,
+                                                         int index) {
+  if (index == 0 || lua_isnoneornil(L, index)) {
+    return LUA_NOREF;
+  }
+  luaL_checktype(L, index, LUA_TTABLE);
+  lua_getfield(L, index, "fixed_string_scratch");
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    return LUA_NOREF;
+  }
+  (void)ljlua_check_fixed_string_scratch(L, -1);
+  return luaL_ref(L, LUA_REGISTRYINDEX);
+}
+
 static ljlua_fixed_string_scratch_ud *
 ljlua_check_fixed_string_scratch(lua_State *L, int index) {
   ljlua_fixed_string_scratch_ud *ud =
@@ -176,7 +445,45 @@ typedef struct ljlua_json_buf {
   char *data;
   size_t len;
   size_t cap;
+  size_t max_cap;
 } ljlua_json_buf;
+
+#if defined(LONEJSON_TEST_LUA_ENCODE_STATS)
+typedef struct ljlua_test_encode_stats {
+  size_t json_buf_peak_capacity;
+  size_t pretty_key_bytes_live;
+  size_t pretty_key_peak_bytes_live;
+} ljlua_test_encode_stats;
+
+static ljlua_test_encode_stats g_ljlua_test_encode_stats;
+
+static void ljlua_test_reset_encode_stats(void) {
+  memset(&g_ljlua_test_encode_stats, 0, sizeof(g_ljlua_test_encode_stats));
+}
+
+static void ljlua_test_note_json_buf_capacity(size_t cap) {
+  if (cap > g_ljlua_test_encode_stats.json_buf_peak_capacity) {
+    g_ljlua_test_encode_stats.json_buf_peak_capacity = cap;
+  }
+}
+
+static void ljlua_test_note_pretty_key_alloc(size_t size) {
+  g_ljlua_test_encode_stats.pretty_key_bytes_live += size;
+  if (g_ljlua_test_encode_stats.pretty_key_bytes_live >
+      g_ljlua_test_encode_stats.pretty_key_peak_bytes_live) {
+    g_ljlua_test_encode_stats.pretty_key_peak_bytes_live =
+        g_ljlua_test_encode_stats.pretty_key_bytes_live;
+  }
+}
+
+static void ljlua_test_note_pretty_key_free(size_t size) {
+  if (size > g_ljlua_test_encode_stats.pretty_key_bytes_live) {
+    g_ljlua_test_encode_stats.pretty_key_bytes_live = 0u;
+  } else {
+    g_ljlua_test_encode_stats.pretty_key_bytes_live -= size;
+  }
+}
+#endif
 
 typedef struct ljlua_json_key {
   char *text;
@@ -188,6 +495,191 @@ typedef struct ljlua_json_parser {
   size_t len;
   size_t off;
 } ljlua_json_parser;
+
+static lonejson_status
+ljlua_parse_buffer_with_options(const lonejson_map *map, void *dst,
+                                const void *data, size_t len,
+                                const lonejson__parse_options *options,
+                                const lonejson_runtime *runtime,
+                                lonejson_error *error) {
+  return lonejson__parse_buffer_with_options(map, dst, data, len, options,
+                                             runtime, error);
+}
+
+static lonejson_status
+ljlua_parse_reader_with_options(const lonejson_map *map, void *dst,
+                                lonejson_reader_fn reader, void *user,
+                                const lonejson__parse_options *options,
+                                const lonejson_runtime *runtime,
+                                lonejson_error *error) {
+  return lonejson__parse_reader_with_options(map, dst, reader, user, options,
+                                             runtime, error);
+}
+
+static lonejson_status
+ljlua_parse_filep_with_options(const lonejson_map *map, void *dst, FILE *fp,
+                               const lonejson__parse_options *options,
+                               const lonejson_runtime *runtime,
+                               lonejson_error *error) {
+  return ljlua_parse_reader_with_options(map, dst, lonejson__file_reader, fp,
+                                         options, runtime, error);
+}
+
+static lonejson_status
+ljlua_parse_path_with_options(const lonejson_map *map, void *dst,
+                              const char *path,
+                              const lonejson__parse_options *options,
+                              const lonejson_runtime *runtime,
+                              lonejson_error *error) {
+  FILE *fp;
+  lonejson_status status;
+
+  if (path == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "path is required");
+  }
+  fp = fopen(path, "rb");
+  if (fp == NULL) {
+    if (error != NULL) {
+      error->system_errno = errno;
+    }
+    return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
+                               "failed to open '%s'", path);
+  }
+  status = ljlua_parse_filep_with_options(map, dst, fp, options, runtime,
+                                          error);
+  fclose(fp);
+  return status;
+}
+
+static lonejson_status
+ljlua_serialize_buffer_with_options(const lonejson_map *map, const void *src,
+                                    char *buffer, size_t capacity,
+                                    size_t *needed,
+                                    const lonejson__write_options *options,
+                                    lonejson_error *error) {
+  return lonejson__serialize_buffer_with_options(map, src, buffer, capacity,
+                                                 needed, options, error);
+}
+
+static lonejson_status
+ljlua_serialize_filep_with_options(const lonejson_map *map, const void *src,
+                                   FILE *fp,
+                                   const lonejson__write_options *options,
+                                   lonejson_error *error) {
+  return lonejson__serialize_filep_with_options(map, src, fp, options, error);
+}
+
+static lonejson_status
+ljlua_serialize_path_with_options(const lonejson_map *map, const void *src,
+                                  const char *path,
+                                  const lonejson__write_options *options,
+                                  lonejson_error *error) {
+  return lonejson__serialize_path_with_options(map, src, path, options, error);
+}
+
+static lonejson_stream *
+ljlua_stream_open_reader_with_options(const lonejson_map *map,
+                                      lonejson_reader_fn reader, void *user,
+                                      const lonejson__parse_options *options,
+                                      const lonejson_runtime *runtime,
+                                      lonejson_error *error) {
+  return lonejson__stream_open_reader_with_options(map, reader, user, options,
+                                                   runtime, error);
+}
+
+static lonejson_stream *
+ljlua_stream_open_memory_with_options(const lonejson_map *map,
+                                      const unsigned char *input,
+                                      size_t input_len,
+                                      const lonejson__parse_options *options,
+                                      const lonejson_runtime *runtime,
+                                      lonejson_error *error) {
+  lonejson_stream *stream;
+
+  if (input == NULL && input_len != 0u) {
+    lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+                        "memory input is required");
+    return NULL;
+  }
+  stream = lonejson__stream_open_common(map, options, runtime, error);
+  if (stream == NULL) {
+    return NULL;
+  }
+  stream->source_kind = LONEJSON_STREAM_SOURCE_MEMORY;
+  stream->memory_input = input;
+  stream->memory_input_len = input_len;
+  stream->memory_input_offset = 0u;
+  return stream;
+}
+
+static lonejson_stream *
+ljlua_stream_open_filep_with_options(const lonejson_map *map, FILE *fp,
+                                     const lonejson__parse_options *options,
+                                     const lonejson_runtime *runtime,
+                                     lonejson_error *error) {
+  return lonejson__stream_open_filep_with_options(map, fp, options, runtime,
+                                                  error);
+}
+
+static lonejson_stream *
+ljlua_stream_open_path_with_options(const lonejson_map *map, const char *path,
+                                    const lonejson__parse_options *options,
+                                    const lonejson_runtime *runtime,
+                                    lonejson_error *error) {
+  return lonejson__stream_open_path_with_options(map, path, options, runtime,
+                                                 error);
+}
+
+static lonejson_stream *
+ljlua_stream_open_fd_with_options(const lonejson_map *map, int fd,
+                                  const lonejson__parse_options *options,
+                                  const lonejson_runtime *runtime,
+                                  lonejson_error *error) {
+  return lonejson__stream_open_fd_with_options(map, fd, options, runtime,
+                                               error);
+}
+
+static lonejson_array_stream *
+ljlua_array_stream_open_reader_with_options(const char *path,
+                                            lonejson_reader_fn reader,
+                                            void *user,
+                                            const lonejson__parse_options *options,
+                                            const lonejson_runtime *runtime,
+                                            lonejson_error *error) {
+  return lonejson__array_stream_open_reader_with_options(path, reader, user,
+                                                         options, runtime,
+                                                         error);
+}
+
+static lonejson_array_stream *
+ljlua_array_stream_open_filep_with_options(const char *path, FILE *fp,
+                                           const lonejson__parse_options *options,
+                                           const lonejson_runtime *runtime,
+                                           lonejson_error *error) {
+  return lonejson__array_stream_open_filep_with_options(path, fp, options,
+                                                        runtime, error);
+}
+
+static lonejson_array_stream *
+ljlua_array_stream_open_path_with_options(const char *array_path,
+                                          const char *path,
+                                          const lonejson__parse_options *options,
+                                          const lonejson_runtime *runtime,
+                                          lonejson_error *error) {
+  return lonejson__array_stream_open_path_with_options(array_path, path,
+                                                       options, runtime,
+                                                       error);
+}
+
+static lonejson_array_stream *
+ljlua_array_stream_open_fd_with_options(const char *path, int fd,
+                                        const lonejson__parse_options *options,
+                                        const lonejson_runtime *runtime,
+                                        lonejson_error *error) {
+  return lonejson__array_stream_open_fd_with_options(path, fd, options,
+                                                     runtime, error);
+}
 
 static char ljlua_json_null_sentinel;
 
@@ -349,12 +841,32 @@ static int ljlua_json_buf_reserve(ljlua_json_buf *buf, size_t extra) {
   if (needed <= buf->cap) {
     return 1;
   }
+  if (buf->max_cap != 0u && needed > buf->max_cap) {
+    return 0;
+  }
   cap = buf->cap == 0u ? 128u : buf->cap;
+  if (buf->max_cap != 0u && cap > buf->max_cap) {
+    cap = buf->max_cap;
+  }
   while (cap < needed) {
-    cap *= 2u;
+    size_t next = cap * 2u;
+
+    if (next <= cap) {
+      next = needed;
+    }
+    if (buf->max_cap != 0u && next > buf->max_cap) {
+      next = buf->max_cap;
+    }
+    if (next < needed) {
+      return 0;
+    }
+    cap = next;
   }
   buf->data = (char *)ljlua_xrealloc(buf->data, cap);
   buf->cap = cap;
+#if defined(LONEJSON_TEST_LUA_ENCODE_STATS)
+  ljlua_test_note_json_buf_capacity(cap);
+#endif
   return 1;
 }
 
@@ -379,6 +891,18 @@ static lonejson_status ljlua_json_buf_sink(void *user, const void *data,
   return ljlua_json_buf_append((ljlua_json_buf *)user, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
+}
+
+static lonejson_status ljlua_json_buf_sink_limited(void *user, const void *data,
+                                                   size_t len,
+                                                   lonejson_error *error) {
+  ljlua_json_buf *buf = (ljlua_json_buf *)user;
+
+  if (buf->max_cap != 0u && len > (buf->max_cap - 1u) - buf->len) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "serializer-owned output exceeds max_output_bytes");
+  }
+  return ljlua_json_buf_sink(user, data, len, error);
 }
 
 typedef struct ljlua_json_out {

@@ -32,7 +32,9 @@ typedef enum lonejson__writer_event_kind {
 
 typedef struct lonejson__writer_state {
   lonejson__writer_mode mode;
-  lonejson_write_options options;
+  const lonejson_runtime *runtime;
+  lonejson_runtime runtime_storage;
+  lonejson__write_options options;
   lonejson_allocator allocator;
   lonejson_sink_fn sink;
   void *sink_user;
@@ -82,6 +84,24 @@ typedef struct lonejson__writer_value_stream_state {
   int failed;
   lonejson_allocator allocator;
 } lonejson__writer_value_stream_state;
+
+static const lonejson_runtime *
+lonejson__writer_runtime(const lonejson__writer_state *state) {
+  if (state == NULL) {
+    return NULL;
+  }
+  return state->runtime;
+}
+
+static const lonejson__parse_options *
+lonejson__writer_runtime_parse_options(const lonejson_writer *writer) {
+  const lonejson__writer_state *state;
+  const lonejson_runtime *runtime;
+
+  state = writer != NULL ? (const lonejson__writer_state *)writer->state : NULL;
+  runtime = lonejson__writer_runtime(state);
+  return runtime != NULL ? &runtime->parse_options : NULL;
+}
 
 static lonejson_error *lonejson__writer_error_target(lonejson_writer *writer,
                                                      lonejson_error *error) {
@@ -510,9 +530,10 @@ static lonejson_status lonejson__writer_emit_value_bytes(
   return lonejson__writer_emit(writer, data, len, error);
 }
 
-lonejson_status lonejson_writer_init_sink(
+static lonejson_status lonejson__writer_init_sink_with_options(
     lonejson_writer *writer, lonejson_sink_fn sink, void *sink_user,
-    const lonejson_write_options *options, lonejson_error *error) {
+    const lonejson__write_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error) {
   lonejson__writer_state *state;
   lonejson_allocator allocator;
 
@@ -538,14 +559,46 @@ lonejson_status lonejson_writer_init_sink(
   state->mode = sink == lonejson__writer_generator_sink
                     ? LONEJSON__WRITER_MODE_GENERATOR
                     : LONEJSON__WRITER_MODE_SINK;
-  state->options = options ? *options : lonejson_default_write_options();
+  state->options = options ? *options : lonejson__default_write_options();
   state->allocator = allocator;
+  if (lonejson__runtime_snapshot_init(&state->runtime_storage, runtime, 1,
+                                      error) != LONEJSON_STATUS_OK) {
+    lonejson__buffer_free(&allocator, state, sizeof(*state));
+    return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  state->runtime =
+      runtime != NULL ? &state->runtime_storage : (const lonejson_runtime *)NULL;
+  if (runtime != NULL && state->options.allocator == runtime->config.allocator) {
+    state->options.allocator = state->runtime->config.allocator;
+  }
   state->sink = sink;
   state->sink_user = sink_user;
   state->external_error = error;
   writer->state = state;
   lonejson__clear_error(&writer->error);
   return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_writer_init_sink(lonejson *runtime,
+                                          lonejson_writer *writer,
+                                          lonejson_sink_fn sink,
+                                          void *sink_user,
+                                          lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  const lonejson__write_options *options;
+  lonejson_status status;
+
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  options = &runtime_state->write_options;
+  status = lonejson__writer_init_sink_with_options(writer, sink, sink_user,
+                                                   options, runtime_state,
+                                                   error);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
 }
 
 void lonejson_writer_cleanup(lonejson_writer *writer) {
@@ -558,6 +611,7 @@ void lonejson_writer_cleanup(lonejson_writer *writer) {
   lonejson__writer_clear_event(state);
   lonejson__buffer_free(&state->allocator, state->frames,
                         state->frame_capacity * sizeof(*state->frames));
+  lonejson__runtime_free_owned_config(&state->runtime_storage);
   lonejson__buffer_free(&state->allocator, state, sizeof(*state));
   memset(writer, 0, sizeof(*writer));
 }
@@ -1731,12 +1785,13 @@ static void lonejson__writer_value_destroy(
   }
 }
 
-lonejson_status lonejson_writer_value_stream_open(
+static lonejson_status lonejson__writer_value_stream_open_with_limits(
     lonejson_writer_value_stream *stream, lonejson_writer *writer,
-    const lonejson_value_limits *limits, lonejson_error *error) {
+    const lonejson__value_limits *limits, lonejson_error *error) {
   lonejson__writer_value_stream_state *state;
   lonejson__writer_state *writer_state;
-  lonejson_parse_options parse_options;
+  const lonejson_runtime *runtime;
+  lonejson__parse_options parse_options;
   lonejson_allocator allocator;
   lonejson_error local_error;
   lonejson_error *open_error;
@@ -1755,6 +1810,7 @@ lonejson_status lonejson_writer_value_stream_open(
         "writer value stream is already open");
   }
   writer_state = (lonejson__writer_state *)writer->state;
+  runtime = lonejson__writer_runtime(writer_state);
   if (writer_state->mode != LONEJSON__WRITER_MODE_SINK) {
     return lonejson__writer_value_set_error(
         stream, error, LONEJSON_STATUS_INVALID_ARGUMENT,
@@ -1805,14 +1861,19 @@ lonejson_status lonejson_writer_value_stream_open(
   state->visitor.null_value = lonejson__writer_value_null;
   lonejson_json_value_init_with_allocator(&state->json_value,
                                           &writer_state->allocator);
+  if (limits != NULL) {
+    state->json_value.parse_visitor_limits = *limits;
+  } else if (runtime != NULL) {
+    state->json_value.parse_visitor_limits = runtime->value_limits;
+  }
   status = lonejson_json_value_set_parse_visitor(
-      &state->json_value, &state->visitor, state, limits, error);
+      &state->json_value, &state->visitor, state, error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson__writer_value_destroy(stream, state, 0);
     return status;
   }
   state->max_total_bytes = state->json_value.parse_visitor_limits.max_total_bytes;
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.max_depth = state->json_value.parse_visitor_limits.max_depth;
   parse_options.allocator = &writer_state->allocator;
   parser_bytes = sizeof(*state->parser) + LONEJSON_PUSH_PARSER_BUFFER_SIZE +
@@ -1828,7 +1889,7 @@ lonejson_status lonejson_writer_value_stream_open(
   }
   workspace = ((unsigned char *)state->parser) + sizeof(*state->parser);
   lonejson__parser_init_state(
-      state->parser, NULL, NULL, &parse_options, 1, workspace,
+      state->parser, NULL, NULL, &parse_options, runtime, 1, 0, 0, 0u, workspace,
       LONEJSON_PUSH_PARSER_BUFFER_SIZE + LONEJSON__PARSER_WORKSPACE_SLACK);
   state->parser->self_alloc_size = parser_bytes;
   state->parser->owns_self = 1;
@@ -1848,6 +1909,13 @@ lonejson_status lonejson_writer_value_stream_open(
   writer_state->value_stream_active = 1;
   lonejson__clear_error(&stream->error);
   return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_writer_value_stream_open(
+    lonejson_writer_value_stream *stream, lonejson_writer *writer,
+    lonejson_error *error) {
+  return lonejson__writer_value_stream_open_with_limits(stream, writer, NULL,
+                                                        error);
 }
 
 lonejson_status lonejson_writer_value_stream_push(
@@ -1968,9 +2036,9 @@ void lonejson_writer_value_stream_cleanup(lonejson_writer_value_stream *stream) 
   lonejson__clear_error(&stream->error);
 }
 
-static lonejson_status lonejson__writer_json_value_stream_reader(
+static lonejson_status lonejson__writer_json_value_stream_reader_with_limits(
     lonejson_writer *writer, lonejson_reader_fn reader, void *reader_user,
-    const lonejson_value_limits *limits, lonejson_error *error) {
+    const lonejson__value_limits *limits, lonejson_error *error) {
   unsigned char buffer[4096];
   lonejson_writer_value_stream stream;
   lonejson_status status;
@@ -1981,7 +2049,8 @@ static lonejson_status lonejson__writer_json_value_stream_reader(
                                       "JSON value reader is required");
   }
   memset(&stream, 0, sizeof(stream));
-  status = lonejson_writer_value_stream_open(&stream, writer, limits, error);
+  status = lonejson__writer_value_stream_open_with_limits(&stream, writer,
+                                                          limits, error);
   if (status != LONEJSON_STATUS_OK) {
     (void)lonejson__writer_value_return_error(writer, &stream, error, status);
     return status;
@@ -2035,16 +2104,24 @@ static lonejson_status lonejson__writer_json_value_stream_reader(
   return status;
 }
 
-lonejson_status lonejson_writer_json_value_reader(
+static lonejson_status lonejson__writer_json_value_reader_with_limits(
     lonejson_writer *writer, lonejson_reader_fn reader, void *reader_user,
-    const lonejson_value_limits *limits, lonejson_error *error) {
-  return lonejson__writer_json_value_stream_reader(writer, reader, reader_user,
-                                                  limits, error);
+    const lonejson__value_limits *limits, lonejson_error *error) {
+  return lonejson__writer_json_value_stream_reader_with_limits(
+      writer, reader, reader_user, limits, error);
 }
 
-lonejson_status lonejson_writer_json_value_buffer(
+lonejson_status lonejson_writer_json_value_reader(
+    lonejson_writer *writer, lonejson_reader_fn reader, void *reader_user,
+    lonejson_error *error) {
+  return lonejson__writer_json_value_reader_with_limits(writer, reader,
+                                                        reader_user, NULL,
+                                                        error);
+}
+
+static lonejson_status lonejson__writer_json_value_buffer_with_limits(
     lonejson_writer *writer, const void *data, size_t len,
-    const lonejson_value_limits *limits, lonejson_error *error) {
+    const lonejson__value_limits *limits, lonejson_error *error) {
   lonejson_writer_value_stream stream;
   lonejson_status status;
 
@@ -2054,7 +2131,8 @@ lonejson_status lonejson_writer_json_value_buffer(
                                       "JSON value buffer is required");
   }
   memset(&stream, 0, sizeof(stream));
-  status = lonejson_writer_value_stream_open(&stream, writer, limits, error);
+  status = lonejson__writer_value_stream_open_with_limits(&stream, writer,
+                                                          limits, error);
   if (status != LONEJSON_STATUS_OK) {
     (void)lonejson__writer_value_return_error(writer, &stream, error, status);
     return status;
@@ -2073,6 +2151,13 @@ lonejson_status lonejson_writer_json_value_buffer(
   return status;
 }
 
+lonejson_status lonejson_writer_json_value_buffer(
+    lonejson_writer *writer, const void *data, size_t len,
+    lonejson_error *error) {
+  return lonejson__writer_json_value_buffer_with_limits(writer, data, len, NULL,
+                                                        error);
+}
+
 static lonejson_read_result lonejson__writer_json_value_file_reader(
     void *user, unsigned char *buffer, size_t capacity) {
   FILE *fp = (FILE *)user;
@@ -2087,8 +2172,8 @@ static lonejson_read_result lonejson__writer_json_value_file_reader(
   return result;
 }
 
-lonejson_status lonejson_writer_json_value_file(
-    lonejson_writer *writer, FILE *fp, const lonejson_value_limits *limits,
+static lonejson_status lonejson__writer_json_value_file_with_limits(
+    lonejson_writer *writer, FILE *fp, const lonejson__value_limits *limits,
     lonejson_error *error) {
   if (fp == NULL) {
     return lonejson__writer_set_error(writer, error,
@@ -2096,8 +2181,14 @@ lonejson_status lonejson_writer_json_value_file(
                                       "JSON value FILE* is required");
   }
   clearerr(fp);
-  return lonejson__writer_json_value_stream_reader(
+  return lonejson__writer_json_value_stream_reader_with_limits(
       writer, lonejson__writer_json_value_file_reader, fp, limits, error);
+}
+
+lonejson_status lonejson_writer_json_value_file(lonejson_writer *writer,
+                                                FILE *fp,
+                                                lonejson_error *error) {
+  return lonejson__writer_json_value_file_with_limits(writer, fp, NULL, error);
 }
 
 typedef struct lonejson__writer_json_value_fd_reader_state {
@@ -2131,8 +2222,8 @@ static lonejson_read_result lonejson__writer_spooled_reader(
   return lonejson_spooled_read((lonejson_spooled *)user, buffer, capacity);
 }
 
-lonejson_status lonejson_writer_json_value_fd(
-    lonejson_writer *writer, int fd, const lonejson_value_limits *limits,
+static lonejson_status lonejson__writer_json_value_fd_with_limits(
+    lonejson_writer *writer, int fd, const lonejson__value_limits *limits,
     lonejson_error *error) {
   lonejson__writer_json_value_fd_reader_state state;
 
@@ -2142,8 +2233,13 @@ lonejson_status lonejson_writer_json_value_fd(
                                       "JSON value file descriptor is required");
   }
   state.fd = fd;
-  return lonejson__writer_json_value_stream_reader(
+  return lonejson__writer_json_value_stream_reader_with_limits(
       writer, lonejson__writer_json_value_fd_reader, &state, limits, error);
+}
+
+lonejson_status lonejson_writer_json_value_fd(lonejson_writer *writer, int fd,
+                                              lonejson_error *error) {
+  return lonejson__writer_json_value_fd_with_limits(writer, fd, NULL, error);
 }
 
 static lonejson_status
@@ -2161,9 +2257,9 @@ lonejson__writer_json_value_path_close_failed(lonejson_writer *writer,
   return LONEJSON_STATUS_IO_ERROR;
 }
 
-lonejson_status lonejson_writer_json_value_path(
+static lonejson_status lonejson__writer_json_value_path_with_limits(
     lonejson_writer *writer, const char *path,
-    const lonejson_value_limits *limits, lonejson_error *error) {
+    const lonejson__value_limits *limits, lonejson_error *error) {
   FILE *fp;
   lonejson_status status;
 
@@ -2189,16 +2285,24 @@ lonejson_status lonejson_writer_json_value_path(
     }
     return LONEJSON_STATUS_IO_ERROR;
   }
-  status = lonejson_writer_json_value_file(writer, fp, limits, error);
+  status = lonejson__writer_json_value_file_with_limits(writer, fp, limits,
+                                                        error);
   if (fclose(fp) != 0 && status == LONEJSON_STATUS_OK) {
     return lonejson__writer_json_value_path_close_failed(writer, error, errno);
   }
   return status;
 }
 
-lonejson_status lonejson_writer_json_value_spooled(
+lonejson_status lonejson_writer_json_value_path(lonejson_writer *writer,
+                                                const char *path,
+                                                lonejson_error *error) {
+  return lonejson__writer_json_value_path_with_limits(writer, path, NULL,
+                                                      error);
+}
+
+static lonejson_status lonejson__writer_json_value_spooled_with_limits(
     lonejson_writer *writer, const lonejson_spooled *value,
-    const lonejson_value_limits *limits, lonejson_error *error) {
+    const lonejson__value_limits *limits, lonejson_error *error) {
   lonejson_spooled cursor;
   lonejson_status status;
 
@@ -2212,8 +2316,15 @@ lonejson_status lonejson_writer_json_value_spooled(
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  return lonejson__writer_json_value_stream_reader(
+  return lonejson__writer_json_value_stream_reader_with_limits(
       writer, lonejson__writer_spooled_reader, &cursor, limits, error);
+}
+
+lonejson_status lonejson_writer_json_value_spooled(
+    lonejson_writer *writer, const lonejson_spooled *value,
+    lonejson_error *error) {
+  return lonejson__writer_json_value_spooled_with_limits(writer, value, NULL,
+                                                         error);
 }
 
 typedef struct lonejson__writer_array_items_sink_state {
@@ -2378,9 +2489,9 @@ static lonejson_status lonejson__writer_array_items_from_stream(
   }
 }
 
-lonejson_status lonejson_writer_array_items_reader(
+static lonejson_status lonejson__writer_array_items_reader_with_options(
     lonejson_writer *writer, const char *selector, lonejson_reader_fn reader,
-    void *reader_user, const lonejson_parse_options *options,
+    void *reader_user, const lonejson__parse_options *options,
     lonejson_error *error) {
   lonejson_error local_error;
   lonejson_error *open_error;
@@ -2389,9 +2500,10 @@ lonejson_status lonejson_writer_array_items_reader(
 
   lonejson__clear_error(&local_error);
   open_error = error != NULL ? error : &local_error;
-  stream =
-      lonejson_array_stream_open_reader(selector, reader, reader_user, options,
-                                        open_error);
+  stream = lonejson__array_stream_open_reader_with_options(
+      selector, reader, reader_user, options,
+      lonejson__writer_runtime((const lonejson__writer_state *)writer->state),
+      open_error);
   if (stream == NULL) {
     return lonejson__writer_array_items_open_failed(writer, error,
                                                     &local_error);
@@ -2401,9 +2513,17 @@ lonejson_status lonejson_writer_array_items_reader(
   return status;
 }
 
-lonejson_status lonejson_writer_array_items_buffer(
+lonejson_status lonejson_writer_array_items_reader(
+    lonejson_writer *writer, const char *selector, lonejson_reader_fn reader,
+    void *reader_user, lonejson_error *error) {
+  return lonejson__writer_array_items_reader_with_options(
+      writer, selector, reader, reader_user,
+      lonejson__writer_runtime_parse_options(writer), error);
+}
+
+static lonejson_status lonejson__writer_array_items_buffer_with_options(
     lonejson_writer *writer, const char *selector, const void *data, size_t len,
-    const lonejson_parse_options *options, lonejson_error *error) {
+    const lonejson__parse_options *options, lonejson_error *error) {
   lonejson_buffer_reader buffer_reader;
 
   if (data == NULL && len != 0u) {
@@ -2412,34 +2532,57 @@ lonejson_status lonejson_writer_array_items_buffer(
                                       "array item buffer is required");
   }
   lonejson_buffer_reader_init(&buffer_reader, data, len);
-  return lonejson_writer_array_items_reader(
+  return lonejson__writer_array_items_reader_with_options(
       writer, selector, lonejson_buffer_reader_read, &buffer_reader, options,
       error);
 }
 
+lonejson_status lonejson_writer_array_items_buffer(
+    lonejson_writer *writer, const char *selector, const void *data, size_t len,
+    lonejson_error *error) {
+  return lonejson__writer_array_items_buffer_with_options(writer, selector,
+                                                          data, len,
+                                                          lonejson__writer_runtime_parse_options(
+                                                              writer),
+                                                          error);
+}
+
+static lonejson_status lonejson__writer_array_items_filep_with_options(
+    lonejson_writer *writer, const char *selector, FILE *fp,
+    const lonejson__parse_options *options, lonejson_error *error) {
+  lonejson_error local_error;
+  lonejson_error *open_error;
+  lonejson_array_stream *stream;
+  lonejson_status status;
+
+  lonejson__clear_error(&local_error);
+  open_error = error != NULL ? error : &local_error;
+  stream =
+      lonejson__array_stream_open_filep_with_options(
+          selector, fp, options,
+          lonejson__writer_runtime((const lonejson__writer_state *)writer->state),
+          open_error);
+  if (stream == NULL) {
+    return lonejson__writer_array_items_open_failed(writer, error,
+                                                    &local_error);
+  }
+  status = lonejson__writer_array_items_from_stream(writer, stream, error);
+  lonejson_array_stream_close(stream);
+  return status;
+}
+
 lonejson_status lonejson_writer_array_items_filep(
     lonejson_writer *writer, const char *selector, FILE *fp,
-    const lonejson_parse_options *options, lonejson_error *error) {
-  lonejson_error local_error;
-  lonejson_error *open_error;
-  lonejson_array_stream *stream;
-  lonejson_status status;
-
-  lonejson__clear_error(&local_error);
-  open_error = error != NULL ? error : &local_error;
-  stream = lonejson_array_stream_open_filep(selector, fp, options, open_error);
-  if (stream == NULL) {
-    return lonejson__writer_array_items_open_failed(writer, error,
-                                                    &local_error);
-  }
-  status = lonejson__writer_array_items_from_stream(writer, stream, error);
-  lonejson_array_stream_close(stream);
-  return status;
+    lonejson_error *error) {
+  return lonejson__writer_array_items_filep_with_options(writer, selector, fp,
+                                                         lonejson__writer_runtime_parse_options(
+                                                             writer),
+                                                         error);
 }
 
-lonejson_status lonejson_writer_array_items_fd(
+static lonejson_status lonejson__writer_array_items_fd_with_options(
     lonejson_writer *writer, const char *selector, int fd,
-    const lonejson_parse_options *options, lonejson_error *error) {
+    const lonejson__parse_options *options, lonejson_error *error) {
   lonejson_error local_error;
   lonejson_error *open_error;
   lonejson_array_stream *stream;
@@ -2447,7 +2590,11 @@ lonejson_status lonejson_writer_array_items_fd(
 
   lonejson__clear_error(&local_error);
   open_error = error != NULL ? error : &local_error;
-  stream = lonejson_array_stream_open_fd(selector, fd, options, open_error);
+  stream =
+      lonejson__array_stream_open_fd_with_options(
+          selector, fd, options,
+          lonejson__writer_runtime((const lonejson__writer_state *)writer->state),
+          open_error);
   if (stream == NULL) {
     return lonejson__writer_array_items_open_failed(writer, error,
                                                     &local_error);
@@ -2457,9 +2604,18 @@ lonejson_status lonejson_writer_array_items_fd(
   return status;
 }
 
-lonejson_status lonejson_writer_array_items_path(
+lonejson_status lonejson_writer_array_items_fd(lonejson_writer *writer,
+                                               const char *selector, int fd,
+                                               lonejson_error *error) {
+  return lonejson__writer_array_items_fd_with_options(writer, selector, fd,
+                                                      lonejson__writer_runtime_parse_options(
+                                                          writer),
+                                                      error);
+}
+
+static lonejson_status lonejson__writer_array_items_path_with_options(
     lonejson_writer *writer, const char *selector, const char *path,
-    const lonejson_parse_options *options, lonejson_error *error) {
+    const lonejson__parse_options *options, lonejson_error *error) {
   lonejson_error local_error;
   lonejson_error *open_error;
   lonejson_array_stream *stream;
@@ -2471,7 +2627,11 @@ lonejson_status lonejson_writer_array_items_path(
   }
   lonejson__clear_error(&local_error);
   open_error = error != NULL ? error : &local_error;
-  stream = lonejson_array_stream_open_path(selector, path, options, open_error);
+  stream = lonejson__array_stream_open_path_with_options(selector, path,
+                                                         options,
+                                                         lonejson__writer_runtime(
+                                                             (const lonejson__writer_state *)writer->state),
+                                                         open_error);
   if (stream == NULL) {
     return lonejson__writer_array_items_open_failed(writer, error,
                                                     &local_error);
@@ -2481,9 +2641,19 @@ lonejson_status lonejson_writer_array_items_path(
   return status;
 }
 
-lonejson_status lonejson_writer_array_items_spooled(
+lonejson_status lonejson_writer_array_items_path(lonejson_writer *writer,
+                                                 const char *selector,
+                                                 const char *path,
+                                                 lonejson_error *error) {
+  return lonejson__writer_array_items_path_with_options(writer, selector, path,
+                                                        lonejson__writer_runtime_parse_options(
+                                                            writer),
+                                                        error);
+}
+
+static lonejson_status lonejson__writer_array_items_spooled_with_options(
     lonejson_writer *writer, const char *selector,
-    const lonejson_spooled *value, const lonejson_parse_options *options,
+    const lonejson_spooled *value, const lonejson__parse_options *options,
     lonejson_error *error) {
   lonejson_spooled cursor;
 
@@ -2496,9 +2666,19 @@ lonejson_status lonejson_writer_array_items_spooled(
   if (lonejson_spooled_rewind(&cursor, error) != LONEJSON_STATUS_OK) {
     return error != NULL ? error->code : LONEJSON_STATUS_IO_ERROR;
   }
-  return lonejson_writer_array_items_reader(
+  return lonejson__writer_array_items_reader_with_options(
       writer, selector, lonejson__writer_spooled_reader, &cursor, options,
       error);
+}
+
+lonejson_status lonejson_writer_array_items_spooled(
+    lonejson_writer *writer, const char *selector,
+    const lonejson_spooled *value, lonejson_error *error) {
+  return lonejson__writer_array_items_spooled_with_options(writer, selector,
+                                                           value,
+                                                           lonejson__writer_runtime_parse_options(
+                                                               writer),
+                                                           error);
 }
 
 lonejson_status lonejson_writer_mapped(lonejson_writer *writer,
@@ -2560,13 +2740,12 @@ lonejson_status lonejson_writer_finish(lonejson_writer *writer,
 }
 
 lonejson_status lonejson_write_json_string_sink(
-    lonejson_reader_fn reader, void *reader_user, lonejson_sink_fn sink,
-    void *sink_user, const lonejson_write_options *options,
-    lonejson_error *error) {
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    lonejson_sink_fn sink, void *sink_user, lonejson_error *error) {
   lonejson_writer writer;
   lonejson_status status;
 
-  status = lonejson_writer_init_sink(&writer, sink, sink_user, options, error);
+  status = lonejson_writer_init_sink(runtime, &writer, sink, sink_user, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -2579,12 +2758,12 @@ lonejson_status lonejson_write_json_string_sink(
 }
 
 lonejson_status lonejson_write_json_string_buffer_sink(
-    const void *data, size_t len, lonejson_sink_fn sink, void *sink_user,
-    const lonejson_write_options *options, lonejson_error *error) {
+    lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+    void *sink_user, lonejson_error *error) {
   lonejson_writer writer;
   lonejson_status status;
 
-  status = lonejson_writer_init_sink(&writer, sink, sink_user, options, error);
+  status = lonejson_writer_init_sink(runtime, &writer, sink, sink_user, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -2597,12 +2776,12 @@ lonejson_status lonejson_write_json_string_buffer_sink(
 }
 
 lonejson_status lonejson_write_json_string_spooled_sink(
-    const lonejson_spooled *value, lonejson_sink_fn sink, void *sink_user,
-    const lonejson_write_options *options, lonejson_error *error) {
+    lonejson *runtime, const lonejson_spooled *value, lonejson_sink_fn sink,
+    void *sink_user, lonejson_error *error) {
   lonejson_writer writer;
   lonejson_status status;
 
-  status = lonejson_writer_init_sink(&writer, sink, sink_user, options, error);
+  status = lonejson_writer_init_sink(runtime, &writer, sink, sink_user, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }

@@ -44,6 +44,13 @@ typedef enum lonejson_string_capture_mode {
 } lonejson_string_capture_mode;
 
 typedef struct lonejson_parser lonejson_parser;
+typedef struct lonejson_runtime lonejson_runtime;
+typedef struct lonejson__runtime_handle lonejson__runtime_handle;
+struct lonejson__runtime_bundle;
+
+static const lonejson_runtime *lonejson__runtime_data_const(
+    const lonejson *runtime);
+static lonejson_runtime *lonejson__runtime_data_mut(lonejson *runtime);
 
 typedef struct lonejson_scratch {
   char *data;
@@ -83,7 +90,7 @@ typedef struct lonejson__parser_workspace_align_probe {
 #define LONEJSON__PARSER_WORKSPACE_SLACK                                       \
   (LONEJSON__PARSER_WORKSPACE_ALIGNMENT - 1u)
 
-#define LONEJSON__MAP_MASK_CACHE_SIZE 8u
+#define LONEJSON__MAP_MASK_CACHE_SIZE 2u
 #define LONEJSON__SPOOLED_MAGIC 0x4C4A5350u
 #define LONEJSON__JSON_VALUE_MAGIC 0x4C4A4A56u
 #define LONEJSON__STRING_ARRAY_STREAM_MAGIC 0x4C4A4153u
@@ -109,6 +116,26 @@ typedef struct lonejson__parser_workspace_align_probe {
 #define LONEJSON__UNLIKELY(expr) (expr)
 #define LONEJSON__TEXT_LEN(text) strlen(text)
 #endif
+
+#if defined(LONEJSON_TEST_FORCE_NO_TLS)
+#define LONEJSON__HAS_TLS 0
+#define LONEJSON__TLS
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define LONEJSON__HAS_TLS 1
+#define LONEJSON__TLS _Thread_local
+#elif defined(__GNUC__) || defined(__clang__)
+#define LONEJSON__HAS_TLS 1
+#define LONEJSON__TLS __thread
+#else
+#define LONEJSON__HAS_TLS 0
+#define LONEJSON__TLS
+#endif
+
+void lonejson_json_value_init_with_allocator(
+    lonejson_json_value *value, const lonejson_allocator *allocator);
+void lonejson_spooled_init_with_allocator(lonejson_spooled *value,
+                                          const lonejson__spool_options *options,
+                                          const lonejson_allocator *allocator);
 
 static LONEJSON__INLINE unsigned lonejson__init_cookie(const void *ptr,
                                                        unsigned base_magic) {
@@ -164,12 +191,78 @@ struct lonejson_parser {
   size_t json_stream_text_bytes;
   int json_stream_text_is_key;
   size_t parse_alloc_bytes_live;
+  int root_map_may_allocate;
+  lonejson_uint64 root_map_adopt_mask;
   const lonejson_map *root_map;
   void *root_dst;
-  lonejson_parse_options options;
+  const lonejson_runtime *runtime;
+  lonejson__parse_options options;
   lonejson_error error;
   lonejson_allocator allocator;
 };
+
+struct lonejson_runtime {
+  lonejson *api_owner;
+  lonejson_config config;
+  lonejson_allocator allocator_storage;
+  char *owned_temp_dirs[3];
+  void *owned_fixed_string_scratch;
+  lonejson__parse_options parse_options;
+  lonejson__value_limits value_limits;
+  lonejson__write_options write_options;
+  lonejson__spool_options spool_options[3];
+};
+
+struct lonejson__runtime_handle {
+  lonejson_runtime *runtime_state;
+  lonejson *api_owner;
+  unsigned int generation;
+  unsigned int active_pins;
+  int closing;
+  lonejson__runtime_handle *next_live;
+};
+
+typedef struct lonejson__runtime_borrow {
+  const lonejson_runtime *runtime;
+  lonejson__runtime_handle *handle;
+} lonejson__runtime_borrow;
+
+typedef struct lonejson__runtime_bundle {
+  lonejson api;
+  lonejson_runtime state;
+  lonejson__runtime_handle live_handle;
+} lonejson__runtime_bundle;
+
+static const lonejson_runtime *
+lonejson__runtime_handle_lookup_const(const lonejson *runtime);
+static lonejson_runtime *lonejson__runtime_handle_lookup_mut(lonejson *runtime);
+static const lonejson_runtime *lonejson__runtime_borrow_const(
+    const lonejson *runtime, lonejson__runtime_borrow *borrow);
+static void lonejson__runtime_borrow_release(lonejson__runtime_borrow *borrow);
+
+static LONEJSON__INLINE const lonejson_runtime *
+lonejson__runtime_data_const(const lonejson *runtime) {
+  if (runtime == NULL || runtime->state == NULL || runtime->_state_token == 0u) {
+    return NULL;
+  }
+  if (runtime->_runtime_owner_self == runtime &&
+      runtime->_runtime_owner_data != NULL) {
+    return (const lonejson_runtime *)runtime->_runtime_owner_data;
+  }
+  return lonejson__runtime_handle_lookup_const(runtime);
+}
+
+static LONEJSON__INLINE lonejson_runtime *
+lonejson__runtime_data_mut(lonejson *runtime) {
+  if (runtime == NULL || runtime->state == NULL || runtime->_state_token == 0u) {
+    return NULL;
+  }
+  if (runtime->_runtime_owner_self == runtime &&
+      runtime->_runtime_owner_data != NULL) {
+    return (lonejson_runtime *)runtime->_runtime_owner_data;
+  }
+  return lonejson__runtime_handle_lookup_mut(runtime);
+}
 
 typedef struct lonejson_buffer_sink {
   char *buffer;
@@ -186,7 +279,8 @@ typedef struct lonejson_buffer_sink {
 typedef enum lonejson_stream_source_kind {
   LONEJSON_STREAM_SOURCE_READER = 1,
   LONEJSON_STREAM_SOURCE_FILE = 2,
-  LONEJSON_STREAM_SOURCE_FD = 3
+  LONEJSON_STREAM_SOURCE_FD = 3,
+  LONEJSON_STREAM_SOURCE_MEMORY = 4
 } lonejson_stream_source_kind;
 
 struct lonejson_stream {
@@ -194,6 +288,9 @@ struct lonejson_stream {
   void *reader_user;
   FILE *fp;
   int fd;
+  const unsigned char *memory_input;
+  size_t memory_input_len;
+  size_t memory_input_offset;
   int owns_fp;
   int owns_fd;
   int saw_eof;
@@ -206,7 +303,9 @@ struct lonejson_stream {
   void *prepared_dst;
   lonejson_parser *parser;
   const lonejson_map *map;
-  lonejson_parse_options options;
+  const lonejson_runtime *runtime;
+  lonejson_runtime runtime_storage;
+  lonejson__parse_options options;
   lonejson_error error;
   unsigned char io_buffer[LONEJSON_STREAM_BUFFER_SIZE];
   lonejson_allocator allocator;
@@ -318,7 +417,9 @@ struct lonejson_array_stream {
   size_t line;
   size_t column;
   size_t self_alloc_size;
-  lonejson_parse_options options;
+  const lonejson_runtime *runtime;
+  lonejson_runtime runtime_storage;
+  lonejson__parse_options options;
   lonejson_error error;
   lonejson_allocator allocator;
   lonejson_parser value_parser;
@@ -356,7 +457,11 @@ struct lonejson_sse {
   const lonejson_map *json_map;
   void *json_dst;
   lonejson_json_value *json_value;
-  const lonejson_parse_options *json_parse_options;
+  const lonejson__parse_options *json_parse_options;
+  const lonejson_runtime *json_runtime;
+  const lonejson_runtime *json_runtime_source;
+  lonejson_runtime json_runtime_storage;
+  lonejson__parse_options json_parse_options_storage;
   size_t event_data_len;
   size_t json_data_len;
   unsigned long retry_ms;
@@ -706,6 +811,23 @@ static void lonejson__owned_free(void *ptr) {
   header->meta.allocator.free_fn(header->meta.allocator.ctx, header);
 }
 
+static char *lonejson__owned_strdup(const lonejson_allocator *allocator,
+                                    const char *src) {
+  size_t len;
+  char *copy;
+
+  if (src == NULL || src[0] == '\0') {
+    return NULL;
+  }
+  len = strlen(src);
+  copy = (char *)lonejson__owned_malloc(allocator, len + 1u);
+  if (copy == NULL) {
+    return NULL;
+  }
+  memcpy(copy, src, len + 1u);
+  return copy;
+}
+
 static LONEJSON__INLINE int
 lonejson__parser_alloc_can_grow(const lonejson_parser *parser, size_t current,
                                 size_t next) {
@@ -855,8 +977,8 @@ static void lonejson__owned_free_parse(lonejson_parser *parser, void *ptr) {
   lonejson__owned_free(ptr);
 }
 
-lonejson_spool_options lonejson_default_spool_options(void) {
-  lonejson_spool_options options;
+lonejson__spool_options lonejson__default_spool_options(void) {
+  lonejson__spool_options options;
 
   options.memory_limit = LONEJSON_SPOOL_MEMORY_LIMIT;
   options.max_bytes = LONEJSON_SPOOL_MAX_BYTES;
@@ -920,13 +1042,13 @@ lonejson_value_visitor lonejson_default_value_visitor(void) {
 
 static void
 lonejson__spooled_apply_options(lonejson_spooled *value,
-                                const lonejson_spool_options *options) {
-  lonejson_spool_options local;
+                                const lonejson__spool_options *options) {
+  lonejson__spool_options local;
 
   if (value == NULL) {
     return;
   }
-  local = options ? *options : lonejson_default_spool_options();
+  local = options ? *options : lonejson__default_spool_options();
   value->memory_limit = local.memory_limit;
   value->max_bytes = local.max_bytes;
   value->temp_dir = local.temp_dir;
@@ -992,8 +1114,19 @@ void lonejson_source_reset(lonejson_source *value) {
   lonejson_source_cleanup(value);
 }
 
-void lonejson_json_value_init(lonejson_json_value *value) {
-  lonejson_json_value_init_with_allocator(value, NULL);
+void lonejson_json_value_init(lonejson *runtime, lonejson_json_value *value) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state =
+      lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+
+  lonejson_json_value_init_with_allocator(
+      value, runtime_state != NULL ? runtime_state->config.allocator : NULL);
+  if (value != NULL && runtime_state != NULL) {
+    value->parse_visitor_limits = runtime_state->value_limits;
+    value->runtime_parse_visitor_limits = runtime_state->value_limits;
+    value->parse_limits_follow_runtime = 1;
+  }
+  lonejson__runtime_borrow_release(&borrow);
 }
 
 void lonejson_json_value_init_with_allocator(
@@ -1007,7 +1140,9 @@ void lonejson_json_value_init_with_allocator(
   value->parse_mode = LONEJSON_JSON_VALUE_PARSE_NONE;
   value->parse_visitor = NULL;
   value->parse_visitor_user = NULL;
-  value->parse_visitor_limits = lonejson_default_value_limits();
+  value->parse_visitor_limits = lonejson__default_value_limits();
+  value->runtime_parse_visitor_limits = value->parse_visitor_limits;
+  value->parse_limits_follow_runtime = 1;
   lonejson__json_value_apply_allocator(value, allocator);
   value->_lonejson_magic =
       lonejson__init_cookie(value, LONEJSON__JSON_VALUE_MAGIC);
@@ -1015,11 +1150,17 @@ void lonejson_json_value_init_with_allocator(
 
 void lonejson_json_value_cleanup(lonejson_json_value *value) {
   lonejson_allocator allocator;
+  lonejson__value_limits limits;
+  lonejson__value_limits runtime_limits;
+  int follow_runtime;
 
   if (value == NULL) {
     return;
   }
   allocator = value->allocator;
+  limits = value->parse_visitor_limits;
+  runtime_limits = value->runtime_parse_visitor_limits;
+  follow_runtime = value->parse_limits_follow_runtime;
   lonejson__owned_free(value->json);
   lonejson__owned_free(value->path);
   value->json = NULL;
@@ -1034,7 +1175,9 @@ void lonejson_json_value_cleanup(lonejson_json_value *value) {
   value->parse_sink_user = NULL;
   value->parse_visitor = NULL;
   value->parse_visitor_user = NULL;
-  value->parse_visitor_limits = lonejson_default_value_limits();
+  value->parse_visitor_limits = limits;
+  value->runtime_parse_visitor_limits = runtime_limits;
+  value->parse_limits_follow_runtime = follow_runtime;
   value->parse_mode = LONEJSON_JSON_VALUE_PARSE_NONE;
   value->allocator = allocator;
   value->_lonejson_magic =
@@ -1095,7 +1238,17 @@ static void lonejson__spooled_reset_parse(lonejson_parser *parser,
     return;
   }
   lonejson__parser_alloc_note_release(parser, value->memory);
+  lonejson__parser_alloc_note_release(parser, value->owned_temp_dir);
   lonejson_spooled_reset(value);
+  if (value->owned_temp_dir != NULL &&
+      !lonejson__parser_alloc_try_adopt(parser, value->owned_temp_dir)) {
+    lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
+                        parser->error.offset, parser->error.line,
+                        parser->error.column,
+                        "parse allocations exceed configured max bytes");
+    parser->failed = 1;
+    lonejson_spooled_cleanup(value);
+  }
 }
 
 static void lonejson__source_reset_parse(lonejson_parser *parser,
@@ -1158,20 +1311,58 @@ lonejson_status lonejson_source_set_path(lonejson_source *value,
   return LONEJSON_STATUS_OK;
 }
 
-void lonejson_spooled_init(lonejson_spooled *value,
-                           const lonejson_spool_options *options) {
-  lonejson_spooled_init_with_allocator(value, options, NULL);
+void lonejson_spooled_init(lonejson *runtime, lonejson_spooled *value) {
+  lonejson_spooled_init_class(runtime, value, LONEJSON_SPOOL_CLASS_DEFAULT);
+}
+
+static const lonejson__spool_options *
+lonejson__runtime_spool_options_for_class(const lonejson_runtime *runtime,
+                                          lonejson_spool_class spool_class) {
+  if (runtime == NULL) {
+    return NULL;
+  }
+  switch (spool_class) {
+  case LONEJSON_SPOOL_CLASS_DEFAULT:
+    return &runtime->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT];
+  case LONEJSON_SPOOL_CLASS_BLOB:
+    return &runtime->spool_options[LONEJSON_SPOOL_CLASS_BLOB];
+  case LONEJSON_SPOOL_CLASS_LARGE_TEXT:
+    return &runtime->spool_options[LONEJSON_SPOOL_CLASS_LARGE_TEXT];
+  default:
+    return &runtime->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT];
+  }
+}
+
+void lonejson_spooled_init_class(lonejson *runtime, lonejson_spooled *value,
+                                 lonejson_spool_class spool_class) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state =
+      lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+  const lonejson__spool_options *options =
+      lonejson__runtime_spool_options_for_class(runtime_state, spool_class);
+
+  lonejson_spooled_init_with_allocator(
+      value, options,
+      runtime_state != NULL ? runtime_state->config.allocator : NULL);
+  lonejson__runtime_borrow_release(&borrow);
 }
 
 void lonejson_spooled_init_with_allocator(lonejson_spooled *value,
-                                          const lonejson_spool_options *options,
+                                          const lonejson__spool_options *options,
                                           const lonejson_allocator *allocator) {
+  const char *temp_dir = NULL;
+
   if (value == NULL) {
     return;
   }
+  if (options != NULL) {
+    temp_dir = options->temp_dir;
+  }
   memset(value, 0, sizeof(*value));
-  lonejson__spooled_apply_options(value, options);
   lonejson__spooled_apply_allocator(value, allocator);
+  value->owned_temp_dir = lonejson__owned_strdup(&value->allocator, temp_dir);
+  lonejson__spooled_apply_options(value, options);
+  value->temp_dir = value->owned_temp_dir;
   value->_lonejson_magic =
       lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
 }
@@ -1201,24 +1392,32 @@ void lonejson_spooled_cleanup(lonejson_spooled *value) {
   value->read_offset = 0u;
   value->spilled = 0;
   lonejson__spooled_close_temp(value);
+  lonejson__owned_free(value->owned_temp_dir);
+  value->owned_temp_dir = NULL;
+  value->temp_dir = NULL;
   value->_lonejson_magic =
       lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
 }
 
 void lonejson_spooled_reset(lonejson_spooled *value) {
-  lonejson_spool_options options;
+  lonejson__spool_options options;
   lonejson_allocator allocator;
+  char *saved_temp_dir = NULL;
 
   if (value == NULL) {
     return;
   }
   options.memory_limit = value->memory_limit;
   options.max_bytes = value->max_bytes;
-  options.temp_dir = value->temp_dir;
+  saved_temp_dir = value->owned_temp_dir;
+  value->owned_temp_dir = NULL;
+  options.temp_dir = saved_temp_dir;
   allocator = value->allocator;
   lonejson_spooled_cleanup(value);
   lonejson__spooled_apply_options(value, &options);
   value->allocator = allocator;
+  value->owned_temp_dir = saved_temp_dir;
+  value->temp_dir = saved_temp_dir;
 }
 
 size_t lonejson_spooled_size(const lonejson_spooled *value) {

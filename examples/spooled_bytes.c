@@ -11,13 +11,11 @@ typedef struct binary_blob {
   lonejson_spooled payload;
 } binary_blob;
 
-static const lonejson_spool_options spool_options = {96u, 0u, "/tmp"};
-
 static const lonejson_field binary_blob_fields[] = {
     LONEJSON_FIELD_STRING_FIXED_REQ(binary_blob, id, "id",
                                     LONEJSON_OVERFLOW_FAIL),
-    LONEJSON_FIELD_BASE64_STREAM_OPTS(binary_blob, payload, "payload",
-                                      &spool_options)};
+    LONEJSON_FIELD_BASE64_STREAM_CLASS(binary_blob, payload, "payload",
+                                       LONEJSON_SPOOL_CLASS_BLOB)};
 LONEJSON_MAP_DEFINE(binary_blob_map, binary_blob, binary_blob_fields);
 
 static char *base64_encode_bytes(const unsigned char *data, size_t len) {
@@ -85,6 +83,8 @@ int main(void) {
   int before_cleanup_exists;
   int after_cleanup_missing;
   size_t i;
+  lonejson_config config;
+  lonejson *runtime;
 
   for (i = 0u; i < sizeof(raw); ++i) {
     raw[i] = (unsigned char)((i * 7u) & 0xFFu);
@@ -101,9 +101,22 @@ int main(void) {
     return 1;
   }
 
-  if (lonejson_parse_cstr(&binary_blob_map, &blob, json, NULL, &error) !=
+  config = lonejson_default_config();
+  config.spool_blob.memory_limit = 96u;
+  config.spool_blob.max_bytes = 0u;
+  config.spool_blob.temp_dir = "/tmp";
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    free(base64_text);
+    LONEJSON_FREE(json);
+    return 1;
+  }
+
+  if (lonejson_parse_cstr(runtime, &binary_blob_map, &blob, json, &error) !=
       LONEJSON_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
+    lonejson_free(runtime);
     free(base64_text);
     LONEJSON_FREE(json);
     return 1;
@@ -112,6 +125,7 @@ int main(void) {
   if (!lonejson_spooled_spilled(&blob.payload)) {
     fprintf(stderr, "expected the example to spill to disk\n");
     lonejson_cleanup(&binary_blob_map, &blob);
+    lonejson_free(runtime);
     free(base64_text);
     LONEJSON_FREE(json);
     return 1;
@@ -125,6 +139,7 @@ int main(void) {
   if (lonejson_spooled_rewind(&blob.payload, &error) != LONEJSON_STATUS_OK) {
     fprintf(stderr, "rewind failed: %s\n", error.message);
     lonejson_cleanup(&binary_blob_map, &blob);
+    lonejson_free(runtime);
     free(base64_text);
     LONEJSON_FREE(json);
     return 1;
@@ -144,6 +159,7 @@ int main(void) {
   printf("\n");
 
   lonejson_cleanup(&binary_blob_map, &blob);
+  lonejson_free(runtime);
   after_cleanup_missing =
       (temp_path[0] != '\0' && stat(temp_path, &st) != 0 && errno == ENOENT)
           ? 1

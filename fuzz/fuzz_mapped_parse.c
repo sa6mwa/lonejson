@@ -131,32 +131,38 @@ static lonejson_status fuzz_stream_end(void *user, lonejson_error *error) {
 }
 
 static void fuzz_parse_stream_envelope(const uint8_t *data, size_t size) {
+  lonejson_config config;
+  lonejson *runtime;
   fuzz_stream_envelope envelope;
   fuzz_stream_state state;
   lonejson_array_stream_string_handler handler;
-  lonejson_parse_options options;
   lonejson_error error;
 
   memset(&envelope, 0, sizeof(envelope));
   memset(&state, 0, sizeof(state));
   memset(&handler, 0, sizeof(handler));
-  options = lonejson_default_parse_options();
-  options.clear_destination = 0;
+  config = lonejson_default_config();
+  config.clear_destination_by_default = 0;
   if (size > 0u) {
-    options.reject_duplicate_keys = (data[0] & 1u) ? 1 : 0;
+    config.reject_duplicate_keys_by_default = (data[0] & 1u) ? 1 : 0;
     state.fail_after_chunks = (data[0] & 8u) ? ((data[0] & 3u) + 1u) : 0u;
+  }
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return;
   }
   handler.begin = fuzz_stream_begin;
   handler.chunk = fuzz_stream_chunk;
   handler.end = fuzz_stream_end;
 
-  lonejson_init(&fuzz_stream_envelope_map, &envelope);
+  lonejson_init(runtime, &fuzz_stream_envelope_map, &envelope);
   (void)lonejson_string_array_stream_set_handler(&envelope.keys, &handler,
                                                  &state, &error);
   (void)lonejson_json_value_enable_parse_capture(&envelope.metadata, &error);
-  (void)lonejson_parse_buffer(&fuzz_stream_envelope_map, &envelope, data, size,
-                              &options, &error);
+  (void)lonejson_parse_buffer(runtime, &fuzz_stream_envelope_map, &envelope,
+                              data, size, &error);
   lonejson_cleanup(&fuzz_stream_envelope_map, &envelope);
+  lonejson_free(runtime);
 }
 
 static const char *fuzz_nullable_value(unsigned selector, const char *valid,
@@ -195,6 +201,7 @@ static int fuzz_append_field(char **out, size_t *remaining, const char *key,
 }
 
 static void fuzz_parse_nullable_primitives(const uint8_t *data, size_t size) {
+  lonejson *runtime;
   fuzz_nullable_primitives doc;
   lonejson_error error;
   lonejson_status status;
@@ -244,20 +251,26 @@ static void fuzz_parse_nullable_primitives(const uint8_t *data, size_t size) {
   }
 
   memset(&doc, 0, sizeof(doc));
-  status = lonejson_parse_cstr(&fuzz_nullable_primitives_map, &doc, json, NULL,
-                               &error);
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    return;
+  }
+  status = lonejson_parse_cstr(runtime, &fuzz_nullable_primitives_map, &doc,
+                               json, &error);
   if (status == LONEJSON_STATUS_OK) {
     char buffer[256];
     size_t needed;
-    (void)lonejson_serialize_buffer(&fuzz_nullable_primitives_map, &doc,
-                                    buffer, sizeof(buffer), &needed, NULL,
+    (void)lonejson_serialize_buffer(runtime, &fuzz_nullable_primitives_map,
+                                    &doc, buffer, sizeof(buffer), &needed,
                                     &error);
   }
+  lonejson_free(runtime);
 }
 
 static void fuzz_parse_capped_alloc_doc(const uint8_t *data, size_t size) {
+  lonejson_config config;
+  lonejson *runtime;
   fuzz_capped_alloc_doc doc;
-  lonejson_parse_options options = lonejson_default_parse_options();
   lonejson_error error;
   lonejson_status status;
   char *json;
@@ -274,16 +287,21 @@ static void fuzz_parse_capped_alloc_doc(const uint8_t *data, size_t size) {
   body_len = size > 1u ? (size_t)(data[1] * 64u) : 0u;
   tags = size > 2u ? (size_t)(data[2] & 7u) : 0u;
   tag_len = size > 3u ? (size_t)(data[3] & 63u) : 0u;
+  config = lonejson_default_config();
   if (size > 4u) {
-    options.max_dynamic_string_bytes =
+    config.max_dynamic_string_bytes =
         (data[4] & 1u) != 0u ? 0u : (size_t)(1u + (data[4] & 63u));
   }
   if (size > 5u) {
-    options.max_alloc_bytes =
+    config.max_alloc_bytes =
         (data[5] & 1u) != 0u ? 0u : (size_t)(16u + ((size_t)data[5] * 16u));
   }
   if (size > 6u) {
-    options.clear_destination = (data[6] & 1u) == 0u ? 1 : 0;
+    config.clear_destination_by_default = (data[6] & 1u) == 0u ? 1 : 0;
+  }
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return;
   }
 
   cap = 64u + name_len + body_len + (tags * (tag_len + 8u));
@@ -334,15 +352,17 @@ static void fuzz_parse_capped_alloc_doc(const uint8_t *data, size_t size) {
   }
 
   memset(&doc, 0, sizeof(doc));
-  lonejson_init(&fuzz_capped_alloc_doc_map, &doc);
-  status = lonejson_parse_cstr(&fuzz_capped_alloc_doc_map, &doc, json,
-                               &options, &error);
+  lonejson_init(runtime, &fuzz_capped_alloc_doc_map, &doc);
+  status =
+      lonejson_parse_cstr(runtime, &fuzz_capped_alloc_doc_map, &doc, json, &error);
   (void)status;
   lonejson_cleanup(&fuzz_capped_alloc_doc_map, &doc);
+  lonejson_free(runtime);
   free(json);
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  lonejson *runtime;
   fuzz_person person;
   lonejson_error error;
   lonejson_status status;
@@ -351,15 +371,20 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   fuzz_parse_nullable_primitives(data, size);
   fuzz_parse_capped_alloc_doc(data, size);
 
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    return 0;
+  }
   memset(&person, 0, sizeof(person));
-  status = lonejson_parse_buffer(&fuzz_person_map, &person, data, size, NULL,
-                                 &error);
+  status =
+      lonejson_parse_buffer(runtime, &fuzz_person_map, &person, data, size, &error);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     char buffer[1024];
     size_t needed;
-    (void)lonejson_serialize_buffer(&fuzz_person_map, &person, buffer,
-                                    sizeof(buffer), &needed, NULL, &error);
+    (void)lonejson_serialize_buffer(runtime, &fuzz_person_map, &person, buffer,
+                                    sizeof(buffer), &needed, &error);
   }
   lonejson_cleanup(&fuzz_person_map, &person);
+  lonejson_free(runtime);
   return 0;
 }

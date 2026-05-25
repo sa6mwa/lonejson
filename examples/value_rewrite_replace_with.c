@@ -57,6 +57,7 @@ static lj_status increment_selected_value(lj_writer *writer,
 int main(void) {
   static const char input[] =
       "{\"meta\":{\"version\":7},\"payload\":{\"ok\":true}}";
+  lj *runtime;
   lj_value_rewrite_selector_options options = {0};
   lj_owned_buffer output;
   lj_error error;
@@ -65,6 +66,11 @@ int main(void) {
 
   ctx.delta = 5;
   lj_owned_buffer_init(&output);
+  runtime = lj_new(NULL, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
 
   options.selector = "meta.version";
   options.action = LJ_VALUE_REWRITE_REPLACE_WITH;
@@ -72,14 +78,17 @@ int main(void) {
   options.replace_user = &ctx;
 
   status = lj_value_rewrite_selector_buffer(
-      input, strlen(input), lj_owned_buffer_sink, &output, &options, &error);
+      runtime, input, strlen(input), lj_owned_buffer_sink, &output, &options,
+      &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "rewrite failed: %s\n", error.message);
     lj_owned_buffer_free(&output);
+    lj_free(runtime);
     return 1;
   }
 
   printf("%s\n", output.data);
   lj_owned_buffer_free(&output);
+  lj_free(runtime);
   return 0;
 }

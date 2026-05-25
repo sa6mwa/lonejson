@@ -16,6 +16,7 @@ static const lj_field export_event_fields[] = {
 LJ_MAP_DEFINE(export_event_map, export_event, export_event_fields);
 
 int main(void) {
+  lj *runtime;
   export_event events[2];
   lj_error error;
   char *jsonl;
@@ -26,14 +27,22 @@ int main(void) {
   strcpy(events[1].id, "evt-2");
   events[1].ok = false;
 
-  jsonl = lj_serialize_jsonl_alloc(&export_event_map, events, 2u, 0u, NULL,
+  runtime = lj_new(NULL, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  jsonl = lj_serialize_jsonl_alloc(runtime, &export_event_map, events, 2u, 0u,
                                    NULL, &error);
   if (jsonl == NULL) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
+    lj_free(runtime);
     return 1;
   }
 
   fputs(jsonl, stdout);
   LONEJSON_FREE(jsonl);
+  lj_free(runtime);
   return 0;
 }

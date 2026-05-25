@@ -257,15 +257,21 @@ static void fuzz_writer_free(void *user, void *ptr) {
 }
 
 static int fuzz_render_with_sink(fuzz_writer_ctx *ctx, fuzz_writer_buf *out) {
+  lonejson *runtime;
   lonejson_writer writer;
   lonejson_error error;
   lonejson_status status;
 
   ctx->step = 0;
   memset(out, 0, sizeof(*out));
-  status =
-      lonejson_writer_init_sink(&writer, fuzz_writer_sink, out, NULL, &error);
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    return 0;
+  }
+  status = lonejson_writer_init_sink(runtime, &writer, fuzz_writer_sink, out,
+                                     &error);
   if (status != LONEJSON_STATUS_OK) {
+    lonejson_free(runtime);
     return 0;
   }
   status = fuzz_writer_producer(&writer, ctx, &error);
@@ -273,16 +279,18 @@ static int fuzz_render_with_sink(fuzz_writer_ctx *ctx, fuzz_writer_buf *out) {
     status = lonejson_writer_finish(&writer, &error);
   }
   lonejson_writer_cleanup(&writer);
+  lonejson_free(runtime);
   return status == LONEJSON_STATUS_OK;
 }
 
 static int fuzz_render_with_generator(fuzz_writer_ctx *ctx, size_t first_cap,
                                       fuzz_writer_buf *out) {
+  lonejson_config config;
+  lonejson *runtime;
   lonejson_generator generator;
   lonejson_error error;
   fuzz_writer_allocator allocator_state;
   lonejson_allocator allocator;
-  lonejson_write_options options;
   unsigned char chunk[32];
   size_t out_len;
   size_t reads;
@@ -298,11 +306,16 @@ static int fuzz_render_with_generator(fuzz_writer_ctx *ctx, size_t first_cap,
   allocator.realloc_fn = fuzz_writer_realloc;
   allocator.free_fn = fuzz_writer_free;
   allocator.ctx = &allocator_state;
-  options = lonejson_default_write_options();
-  options.allocator = &allocator;
-  status = lonejson_writer_generator_init(&generator, fuzz_writer_producer, ctx,
-                                          &options);
+  config = lonejson_default_config();
+  config.allocator = &allocator;
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return 0;
+  }
+  status = lonejson_writer_generator_init(runtime, &generator,
+                                          fuzz_writer_producer, ctx);
   if (status != LONEJSON_STATUS_OK) {
+    lonejson_free(runtime);
     return 0;
   }
   eof = 0;
@@ -311,19 +324,24 @@ static int fuzz_render_with_generator(fuzz_writer_ctx *ctx, size_t first_cap,
     status = lonejson_generator_read(&generator, chunk, cap, &out_len, &eof);
     if (status != LONEJSON_STATUS_OK) {
       lonejson_generator_cleanup(&generator);
+      lonejson_free(runtime);
       return 0;
     }
     if (out_len != 0u &&
         fuzz_writer_sink(out, chunk, out_len, &error) != LONEJSON_STATUS_OK) {
       lonejson_generator_cleanup(&generator);
+      lonejson_free(runtime);
       return 0;
     }
   }
   lonejson_generator_cleanup(&generator);
+  lonejson_free(runtime);
   return eof != 0;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  lonejson *runtime;
+  lonejson_error error;
   fuzz_writer_ctx sink_ctx;
   fuzz_writer_ctx generator_ctx;
   fuzz_writer_buf sink_out;
@@ -342,8 +360,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   }
   memset(&sink_ctx, 0, sizeof(sink_ctx));
   memset(&generator_ctx, 0, sizeof(generator_ctx));
-  lonejson_json_value_init(&sink_ctx.json_value);
-  lonejson_json_value_init(&generator_ctx.json_value);
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    return 0;
+  }
+  lonejson_json_value_init(runtime, &sink_ctx.json_value);
+  lonejson_json_value_init(runtime, &generator_ctx.json_value);
   fuzz_fill_ascii(key, sizeof(key), data, size, 1u, &key_len);
   fuzz_fill_ascii(str, sizeof(str), data, size, 2u, &str_len);
   fuzz_fill_ascii(sink_ctx.doc.payload, sizeof(sink_ctx.doc.payload), data,
@@ -352,6 +374,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
          sizeof(generator_ctx.doc.payload));
   if (!fuzz_escape_json_string(raw_json, sizeof(raw_json), str, str_len,
                                &raw_len)) {
+    lonejson_free(runtime);
     return 0;
   }
   sink_ctx.key = key;
@@ -382,14 +405,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     sink_ctx.f64_value = -1.0e-30;
   }
   generator_ctx = sink_ctx;
-  lonejson_json_value_init(&sink_ctx.json_value);
-  lonejson_json_value_init(&generator_ctx.json_value);
+  lonejson_json_value_init(runtime, &sink_ctx.json_value);
+  lonejson_json_value_init(runtime, &generator_ctx.json_value);
   if (lonejson_json_value_set_buffer(&sink_ctx.json_value, raw_json, raw_len,
                                      NULL) != LONEJSON_STATUS_OK ||
       lonejson_json_value_set_buffer(&generator_ctx.json_value, raw_json,
                                      raw_len, NULL) != LONEJSON_STATUS_OK) {
     lonejson_json_value_cleanup(&sink_ctx.json_value);
     lonejson_json_value_cleanup(&generator_ctx.json_value);
+    lonejson_free(runtime);
     return 0;
   }
 
@@ -400,9 +424,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                memcmp(sink_out.data, generator_out.data, sink_out.len) != 0))) {
     abort();
   }
-  if (ok1 && (lonejson_validate_buffer(sink_out.data, sink_out.len, NULL) !=
+  if (ok1 && (lonejson_validate_buffer(runtime, sink_out.data, sink_out.len, NULL) !=
                   LONEJSON_STATUS_OK ||
-              lonejson_validate_buffer(generator_out.data, generator_out.len,
+              lonejson_validate_buffer(runtime, generator_out.data, generator_out.len,
                                        NULL) != LONEJSON_STATUS_OK)) {
     abort();
   }
@@ -410,5 +434,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   free(generator_out.data);
   lonejson_json_value_cleanup(&sink_ctx.json_value);
   lonejson_json_value_cleanup(&generator_ctx.json_value);
+  lonejson_free(runtime);
   return 0;
 }

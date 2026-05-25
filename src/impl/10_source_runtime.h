@@ -31,7 +31,7 @@ typedef struct lonejson__json_io {
   size_t base_depth;
   size_t depth;
   size_t total_bytes;
-  lonejson_value_limits limits;
+  lonejson__value_limits limits;
   const lonejson_allocator *allocator;
   int has_pushback;
   int pushback;

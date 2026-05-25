@@ -45,15 +45,25 @@ int main(void) {
   char fields_path[] = "/tmp/lonejson-json-fields-XXXXXX";
   int selector_fd;
   int fields_fd;
+  lj *runtime;
   streamed_query_request req;
   lj_error error;
   lj_status status;
-  lj_write_options options;
+  lj_config config;
   char *pretty;
+
+  config = lj_default_config();
+  config.write_pretty = 1;
+  runtime = lj_new(&config, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
 
   large_fields = (char *)malloc(65536u);
   if (large_fields == NULL) {
     fprintf(stderr, "malloc failed\n");
+    lj_free(runtime);
     return 1;
   }
   large_fields[len++] = '[';
@@ -73,6 +83,7 @@ int main(void) {
   if (selector_fd < 0) {
     perror("selector temp file");
     free(large_fields);
+    lj_free(runtime);
     return 1;
   }
   close(selector_fd);
@@ -82,11 +93,12 @@ int main(void) {
     perror("fields temp file");
     unlink(selector_path);
     free(large_fields);
+    lj_free(runtime);
     return 1;
   }
   close(fields_fd);
 
-  lj_init(&streamed_query_request_map, &req);
+  lj_init(runtime, &streamed_query_request_map, &req);
   strcpy(req.namespace_, "default");
 
   status = lj_json_value_set_path(&req.selector, selector_path, &error);
@@ -95,6 +107,7 @@ int main(void) {
     unlink(selector_path);
     unlink(fields_path);
     free(large_fields);
+    lj_free(runtime);
     return 1;
   }
   status = lj_json_value_set_path(&req.fields, fields_path, &error);
@@ -104,19 +117,19 @@ int main(void) {
     unlink(selector_path);
     unlink(fields_path);
     free(large_fields);
+    lj_free(runtime);
     return 1;
   }
 
-  options = lj_default_write_options();
-  options.pretty = 1;
-  pretty =
-      lj_serialize_alloc(&streamed_query_request_map, &req, NULL, &options, &error);
+  pretty = lj_serialize_alloc(runtime, &streamed_query_request_map, &req, NULL,
+                              &error);
   if (pretty == NULL) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
     lj_cleanup(&streamed_query_request_map, &req);
     unlink(selector_path);
     unlink(fields_path);
     free(large_fields);
+    lj_free(runtime);
     return 1;
   }
 
@@ -130,5 +143,6 @@ int main(void) {
   unlink(selector_path);
   unlink(fields_path);
   free(large_fields);
+  lj_free(runtime);
   return 0;
 }

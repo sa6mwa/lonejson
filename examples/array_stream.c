@@ -21,6 +21,7 @@ LONEJSON_MAP_DEFINE(issue_event_map, issue_event, issue_event_fields);
 int main(int argc, char **argv) {
   const char *path =
       argc > 1 ? argv[1] : "tests/fixtures/array_stream/issues.json";
+  lonejson *lj;
   lonejson_array_stream *stream;
   lonejson_array_stream_result result;
   lonejson_error error;
@@ -28,14 +29,21 @@ int main(int argc, char **argv) {
   size_t count = 0u;
   lonejson_int64 priority_total = 0;
 
-  stream = lonejson_array_stream_open_path("items", path, NULL, &error);
+  lj = lonejson_new(NULL, &error);
+  if (lj == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  stream = lonejson_array_stream_open_path(lj, "items", path, &error);
   if (stream == NULL) {
     fprintf(stderr, "array stream open failed: %s\n", error.message);
+    lonejson_free(lj);
     return 1;
   }
 
   for (;;) {
-    lonejson_init(&issue_event_map, &event);
+    lonejson_init(lj, &issue_event_map, &event);
     result =
         lonejson_array_stream_next(stream, &issue_event_map, &event, &error);
     if (result == LONEJSON_ARRAY_STREAM_ITEM) {
@@ -53,10 +61,12 @@ int main(int argc, char **argv) {
   if (result != LONEJSON_ARRAY_STREAM_EOF) {
     fprintf(stderr, "array stream parse failed: %s\n", error.message);
     lonejson_array_stream_close(stream);
+    lonejson_free(lj);
     return 1;
   }
 
   lonejson_array_stream_close(stream);
+  lonejson_free(lj);
   printf("streamed %lu items priority_total=%ld\n", (unsigned long)count,
          (long)priority_total);
   return 0;

@@ -64,8 +64,12 @@ static lonejson_status lonejson__stream_value_begin(lonejson_parser *parser,
                                                     void *ptr);
 static void lonejson__parser_init_state(lonejson_parser *parser,
                                         const lonejson_map *map, void *dst,
-                                        const lonejson_parse_options *options,
+                                        const lonejson__parse_options *options,
+                                        const lonejson_runtime *runtime,
                                         int validate_only,
+                                        int root_map_analysis_known,
+                                        int root_map_may_allocate,
+                                        lonejson_uint64 root_map_adopt_mask,
                                         unsigned char *workspace,
                                         size_t workspace_size);
 #define lonejson__parser_peak_workspace_used(parser_ptr)                       \
@@ -306,6 +310,8 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
         if (parser->options.fixed_string_scratch != NULL &&
             parser->options.fixed_string_scratch_size >= field->fixed_capacity) {
           stage = (char *)parser->options.fixed_string_scratch;
+        } else if (field->fixed_capacity <= lonejson__token_limit(parser)) {
+          stage = (char *)lonejson__token_base(parser);
         } else {
           if (!lonejson__parser_alloc_can_grow(parser, 0u,
                                                field->fixed_capacity)) {

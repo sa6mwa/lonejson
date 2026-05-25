@@ -19,6 +19,7 @@ LJ_MAP_DEFINE(outbound_text_doc_map, outbound_text_doc,
 int main(void) {
   static const char payload[] =
       "Hello from disk.\nThis is streamed as JSON text.";
+  lj *runtime;
   outbound_text_doc doc;
   lj_error error;
   lj_status status;
@@ -26,7 +27,13 @@ int main(void) {
   int fd;
   char *json;
 
-  lj_init(&outbound_text_doc_map, &doc);
+  runtime = lj_new(NULL, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  lj_init(runtime, &outbound_text_doc_map, &doc);
   strcpy(doc.id, "txt-1");
 
   fd = mkstemp(path);
@@ -47,14 +54,17 @@ int main(void) {
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "set_path failed: %s\n", error.message);
     unlink(path);
+    lj_free(runtime);
     return 1;
   }
 
-  json = lj_serialize_alloc(&outbound_text_doc_map, &doc, NULL, NULL, &error);
+  json = lj_serialize_alloc(runtime, &outbound_text_doc_map, &doc, NULL,
+                            &error);
   if (json == NULL) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
     lj_cleanup(&outbound_text_doc_map, &doc);
     unlink(path);
+    lj_free(runtime);
     return 1;
   }
 
@@ -64,5 +74,6 @@ int main(void) {
   LONEJSON_FREE(json);
   lj_cleanup(&outbound_text_doc_map, &doc);
   unlink(path);
+  lj_free(runtime);
   return 0;
 }

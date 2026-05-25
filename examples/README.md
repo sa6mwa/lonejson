@@ -64,11 +64,13 @@ The public API also includes streaming selected-array rewrites
 (`lonejson_multipart_*`). Those surfaces are covered by the integration tests
 under `tests/` even when there is no dedicated standalone example program yet.
 
-The linked-library examples intentionally use lonejson's public initializers and
-default helpers instead of manual `memset` or `{0}` for public structs:
-`lonejson_init` / `lj_init` for mapped values, `*_init` for handles, and
-`lonejson_default_*` / `lj_default_*` for option, visitor, and read-result
-structs.
+The linked-library examples intentionally use lonejson's public initializers
+and runtime constructor instead of manual `memset` or `{0}` for public
+structs: `lonejson_new` / `lj_new`, `lonejson_init` / `lj_init` for mapped
+values, `*_init` for handles, and `lonejson_default_*` / `lj_default_*` for
+config, visitor, and read-result structs. They also stick to the instance-first
+surface only: free functions take `lonejson *` explicitly, and the equivalent
+runtime method pointers are available when that call style fits better.
 
 The curl examples also define `LONEJSON_WITH_CURL` and need curl headers/libs. With a host-native `c.pkt.systems` dependency bundle downloaded via `make deps-host`, a typical command is:
 
@@ -110,20 +112,23 @@ That example shows the schema DSL, reusable record decoding, object-framed
 stream parsing, selected-array stream parsing, selected-array rewrites, native
 `json_value` handling, and spool-backed text/byte fields.
 
-Current parse defaults to keep in mind while reading the examples:
+Current runtime defaults to keep in mind while reading the examples:
 
 * `STRING_ALLOC` fields are capped at `128 KiB` per field unless
-  `parse_options.max_dynamic_string_bytes` is raised or set to `0`.
-* lonejson-owned live parse heap is capped at `1 MiB` per parse call unless
-  `parse_options.max_alloc_bytes` is raised or set to `0`.
-* reused non-empty `STRING_FIXED` fields under `clear_destination = 0` stage
-  replacement bytes before commit; provide
-  `parse_options.fixed_string_scratch` to keep that path allocation-free, or
-  let the temporary staging compete under `max_alloc_bytes`.
-* the Lua binding exposes the same surface as
-  `lj.fixed_string_scratch(size)` via parse options.
+  `lonejson.new({...})` or `lonejson_new(&config, ...)` raises
+  `max_dynamic_string_bytes` or sets it to `0`.
+* lonejson-owned live parse heap is capped at `1 MiB` per runtime unless
+  `max_alloc_bytes` is raised or set to `0`.
+* reused non-empty `STRING_FIXED` fields under
+  `clear_destination_by_default = false` stage replacement bytes before
+  commit; provide `fixed_string_scratch` in the runtime config to keep that
+  path allocation-free, or let the temporary staging compete under
+  `max_alloc_bytes`.
+* the Lua binding exposes the same scratch surface as
+  `lonejson.fixed_string_scratch(size)` in `lonejson.new({...})`.
 * default spool-backed fields keep `64 KiB` in memory and cap total payload at
-  `10 MiB` unless a field uses explicit `lonejson_spool_options`.
+  `10 MiB` unless a field is mapped to a different named spool class in the
+  runtime config.
 
 Run the smaller nullable primitive Lua example with:
 
@@ -142,7 +147,7 @@ eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_json_value_nes
 ```
 
 It shows a nested object `json_value` field decoding into Lua values and being
-reused with `clear_destination = false`.
+reused on a runtime configured with `clear_destination_by_default = false`.
 
 Run the object-array `json_value` Lua example with:
 
@@ -150,6 +155,7 @@ Run the object-array `json_value` Lua example with:
 eval "$(luarocks path --tree build/luarocks)" && lua examples/lua_json_value_object_array.lua
 ```
 
-It shows `json_value` fields inside object-array element schemas. With
-`clear_destination = false`, omitted arrays are preserved and present arrays are
-replaced, which matches the more idiomatic Lua expectation for record reuse.
+It shows `json_value` fields inside object-array element schemas. On a runtime
+configured with `clear_destination_by_default = false`, omitted arrays are
+preserved and present arrays are replaced, which matches the more idiomatic Lua
+expectation for record reuse.

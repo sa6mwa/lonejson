@@ -1,4 +1,27 @@
-local lj = require("lonejson")
+local lonejson = require("lonejson")
+
+local function new_runtime(extra)
+  local config = {
+    spool_default = {
+      memory_limit = 32,
+      temp_dir = "/tmp",
+    },
+    spool_blob = {
+      memory_limit = 32,
+      temp_dir = "/tmp",
+    },
+  }
+  local key
+
+  if extra ~= nil then
+    for key, value in pairs(extra) do
+      config[key] = value
+    end
+  end
+  return lonejson.new(config)
+end
+
+local lj = new_runtime()
 
 local function assert_eq(a, b, msg)
   if a ~= b then
@@ -33,12 +56,13 @@ local function exists(path)
   return true
 end
 
-local Test = lj.schema("Test", {
+local function build_test_schema(runtime, name)
+  return runtime.schema(name, {
   lj.field("name", lj.string { required = true }),
   lj.field("age", lj.i64()),
   lj.field("active", lj.bool()),
-  lj.field("body", lj.spooled_text { memory_limit = 32, temp_dir = "/tmp" }),
-  lj.field("payload", lj.spooled_bytes { memory_limit = 32, temp_dir = "/tmp" }),
+  lj.field("body", lj.spooled_text()),
+  lj.field("payload", lj.spooled_bytes { class = "blob" }),
   lj.field("meta", lj.object {
     fields = {
       lj.field("city", lj.string()),
@@ -47,6 +71,100 @@ local Test = lj.schema("Test", {
   }),
   lj.field("nums", lj.i64_array { fixed_capacity = 8, overflow = "fail" }),
 })
+end
+
+local function build_merge_schema(runtime, name)
+  return runtime.schema(name, {
+    lj.field("id", lj.string()),
+    lj.field("age", lj.i64()),
+    lj.field("selector", lj.json_value()),
+    lj.field("fields", lj.json_value()),
+  })
+end
+
+local function build_nested_query_schema(runtime, name)
+  return runtime.schema(name, {
+    lj.field("type", lj.string { required = true }),
+    lj.field("response", lj.object {
+      required = true,
+      fields = {
+        lj.field("status", lj.string()),
+        lj.field("selector", lj.json_value { required = true }),
+        lj.field("fields", lj.json_value()),
+      },
+    }),
+  })
+end
+
+local function build_batch_schema(runtime, name)
+  return runtime.schema(name, {
+    lj.field("batch_id", lj.string()),
+    lj.field("items", lj.object_array {
+      fields = {
+        lj.field("id", lj.string { required = true }),
+        lj.field("payload", lj.json_value { required = true }),
+        lj.field("tags", lj.json_value()),
+      },
+    }),
+  })
+end
+
+local function build_fixed_large_schema(runtime, name)
+  return runtime.schema(name, {
+    lj.field("payload", lj.string { required = true, fixed_capacity = 8192, overflow = "fail" }),
+  })
+end
+
+local fixed_string_scratch = lonejson.fixed_string_scratch(8192)
+local merge_lj = new_runtime({ clear_destination_by_default = false })
+local allow_dup_lj = new_runtime({ reject_duplicate_keys_by_default = false })
+local pretty_lj = new_runtime({ write_pretty = true })
+local pretty_limited_output_lj = new_runtime({
+  write_pretty = true,
+  write_max_output_bytes = 32,
+})
+local pretty_limited_json_value_lj = new_runtime({
+  write_pretty = true,
+  json_value_max_string_bytes = 1,
+})
+local limited_output_lj = new_runtime({ write_max_output_bytes = 32 })
+local default_cap_lj = new_runtime({ write_max_output_bytes = 0 })
+local fixed_large_budget_lj = new_runtime({
+  clear_destination_by_default = false,
+  max_alloc_bytes = 1,
+})
+local fixed_large_scratch_lj = new_runtime({
+  clear_destination_by_default = false,
+  max_alloc_bytes = 1,
+  fixed_string_scratch = fixed_string_scratch,
+})
+local limited_json_value_lj = new_runtime({
+  clear_destination_by_default = false,
+  json_value_max_string_bytes = 1,
+})
+
+do
+  local colon_lj = new_runtime()
+  local sink_chunks = {}
+  local schema = colon_lj:schema("ColonSchema", {
+    lj.field("name", lj.string { required = true }),
+  })
+
+  assert_true(schema ~= nil)
+  assert_eq(colon_lj:encode_json({ alpha = 1 }), '{"alpha":1}')
+  colon_lj:encode_json_to_sink({ beta = true }, function(chunk)
+    sink_chunks[#sink_chunks + 1] = chunk
+    return true
+  end)
+  assert_eq(table.concat(sink_chunks), '{"beta":true}')
+  assert_eq(colon_lj:decode_json('{"gamma":2}').gamma, 2)
+  assert_eq(schema:decode('{"name":"colon"}').name, "colon")
+end
+
+local Test = build_test_schema(lj, "Test")
+local TestPretty = build_test_schema(pretty_lj, "TestPretty")
+local TestLimitedOutput = build_test_schema(limited_output_lj, "TestLimitedOutput")
+local TestAllowDup = build_test_schema(allow_dup_lj, "TestAllowDup")
 
 local UInts = lj.schema("UInts", {
   lj.field("value", lj.u64()),
@@ -61,39 +179,23 @@ local Query = lj.schema("Query", {
   lj.field("last_error", lj.json_value()),
 })
 
-local Merge = lj.schema("Merge", {
-  lj.field("id", lj.string()),
-  lj.field("age", lj.i64()),
-  lj.field("selector", lj.json_value()),
-  lj.field("fields", lj.json_value()),
-})
+local Merge = build_merge_schema(lj, "Merge")
+local MergeNoClear = build_merge_schema(merge_lj, "MergeNoClear")
 
-local NestedQuery = lj.schema("NestedQuery", {
-  lj.field("type", lj.string { required = true }),
-  lj.field("response", lj.object {
-    required = true,
-    fields = {
-      lj.field("status", lj.string()),
-      lj.field("selector", lj.json_value { required = true }),
-      lj.field("fields", lj.json_value()),
-    },
-  }),
-})
+local NestedQuery = build_nested_query_schema(lj, "NestedQuery")
+local NestedQueryNoClear =
+    build_nested_query_schema(merge_lj, "NestedQueryNoClear")
 
-local Batch = lj.schema("Batch", {
-  lj.field("batch_id", lj.string()),
-  lj.field("items", lj.object_array {
-    fields = {
-      lj.field("id", lj.string { required = true }),
-      lj.field("payload", lj.json_value { required = true }),
-      lj.field("tags", lj.json_value()),
-    },
-  }),
-})
+local Batch = build_batch_schema(lj, "Batch")
+local BatchNoClear = build_batch_schema(merge_lj, "BatchNoClear")
+local NestedQueryLimitedNoClear =
+    build_nested_query_schema(limited_json_value_lj, "NestedQueryLimitedNoClear")
 
-local FixedLarge = lj.schema("FixedLarge", {
-  lj.field("payload", lj.string { required = true, fixed_capacity = 8192, overflow = "fail" }),
-})
+local FixedLarge = build_fixed_large_schema(lj, "FixedLarge")
+local FixedLargeBudget =
+    build_fixed_large_schema(fixed_large_budget_lj, "FixedLargeBudget")
+local FixedLargeScratch =
+    build_fixed_large_schema(fixed_large_scratch_lj, "FixedLargeScratch")
 
 local Nullable = lj.schema("Nullable", {
   lj.field("required_count", lj.i64 { required = true }),
@@ -113,71 +215,126 @@ do
     return string.rep(ch, n)
   end
 
-  local scratch = lj.fixed_string_scratch(8192)
-  local rec = FixedLarge:new_record()
+  local budget_rec = FixedLargeBudget:new_record()
+  local scratch_rec = FixedLargeScratch:new_record()
   local first = long_text("a", 6000)
   local second = long_text("b", 7000)
   local third = long_text("c", 6500)
   local ok, err, stream, obj, status
 
-  assert_eq(scratch:size(), 8192)
+  assert_eq(fixed_string_scratch:size(), 8192)
 
-  ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. first .. '"}')
+  ok, err = FixedLargeBudget:decode_into(budget_rec, '{"payload":"' .. first .. '"}')
   assert_true(err == nil)
-  assert_eq(rec.payload, first)
+  assert_eq(budget_rec.payload, first)
 
-  ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. second .. '"}', {
-    clear_destination = false,
-    max_alloc_bytes = 1,
-  })
+  ok, err = FixedLargeBudget:decode_into(budget_rec, '{"payload":"' .. second .. '"}')
   assert_true(err ~= nil and err.status == "overflow")
-  assert_eq(rec.payload, first)
+  assert_eq(budget_rec.payload, first)
 
-  ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. second .. '"}', {
-    clear_destination = false,
-    max_alloc_bytes = 1,
-    fixed_string_scratch = scratch,
-  })
+  ok, err = FixedLargeScratch:decode_into(scratch_rec, '{"payload":"' .. first .. '"}')
   assert_true(err == nil)
-  assert_eq(rec.payload, second)
+  assert_eq(scratch_rec.payload, first)
 
-  ok, err = FixedLarge:decode_into(
-      rec,
-      '{"payload":"' .. second .. '","payload":"' .. third .. '"}',
-      {
-        clear_destination = false,
-        max_alloc_bytes = 1,
-        fixed_string_scratch = scratch,
-      })
+  ok, err = FixedLargeScratch:decode_into(scratch_rec, '{"payload":"' .. second .. '"}')
+  assert_true(err == nil)
+  assert_eq(scratch_rec.payload, second)
+
+  ok, err = FixedLargeScratch:decode_into(
+      scratch_rec, '{"payload":"' .. second .. '","payload":"' .. third .. '"}')
   assert_true(err ~= nil and err.status == "duplicate_field")
-  assert_eq(rec.payload, second)
+  assert_eq(scratch_rec.payload, second)
 
-  ok, err = FixedLarge:decode_into(rec, '{"payload":"' .. third .. '\\u0000tail"}', {
-    clear_destination = false,
-    max_alloc_bytes = 1,
-    fixed_string_scratch = scratch,
-  })
+  ok, err = FixedLargeScratch:decode_into(
+      scratch_rec, '{"payload":"' .. third .. '\\u0000tail"}')
   assert_true(err ~= nil and err.status == "type_mismatch")
-  assert_eq(rec.payload, second)
+  assert_eq(scratch_rec.payload, second)
 
-  stream = FixedLarge:stream_string(
-      '{"payload":"' .. first .. '"}{"payload":"' .. second .. '"}',
-      {
-        clear_destination = false,
-        max_alloc_bytes = 1,
-        fixed_string_scratch = scratch,
-      })
-  obj, err, status = stream:next(rec)
+  stream = FixedLargeScratch:stream_string(
+      '{"payload":"' .. first .. '"}{"payload":"' .. second .. '"}')
+  obj, err, status = stream:next(scratch_rec)
   assert_eq(status, "object")
   assert_true(err == nil)
   assert_eq(obj.payload, first)
-  obj, err, status = stream:next(rec)
+  obj, err, status = stream:next(scratch_rec)
   assert_eq(status, "object")
   assert_true(err == nil)
   assert_eq(obj.payload, second)
   obj, err, status = stream:next(rec)
   assert_eq(status, "eof")
   stream:close()
+end
+
+do
+  local function new_gc_temp_dir_runtime()
+    local temp_dir = table.concat({"", "tmp"}, "/")
+    return lonejson.new({
+      spool_default = {
+        memory_limit = 1,
+        temp_dir = temp_dir,
+      },
+      spool_blob = {
+        memory_limit = 1,
+        temp_dir = temp_dir,
+      },
+    }), temp_dir
+  end
+
+  local runtime, temp_dir = new_gc_temp_dir_runtime()
+  local Temp = build_test_schema(runtime, "TempSpoolGc")
+  local rec
+  local body_path
+
+  collectgarbage("collect")
+  collectgarbage("collect")
+
+  rec = Temp:decode('{"name":"Alice","body":"' .. string.rep("x", 128) .. '"}')
+  body_path = rec.body:path()
+  assert_true(body_path ~= nil)
+  assert_true(body_path:sub(1, #temp_dir) == temp_dir)
+  assert_true(exists(body_path))
+end
+
+do
+  local weak = setmetatable({}, {__mode = "v"})
+  local scratch = lonejson.fixed_string_scratch(8192)
+  local ok, err
+
+  weak[1] = scratch
+  ok, err = pcall(function()
+    lonejson.new({
+      fixed_string_scratch = scratch,
+      max_alloc_bytes = -1,
+    })
+  end)
+  assert_true(not ok)
+  assert_true(type(err) == "string")
+  scratch = nil
+  collectgarbage("collect")
+  collectgarbage("collect")
+  assert_true(weak[1] == nil)
+end
+
+do
+  local saved_new = lonejson.core.new
+  local ok, err
+
+  lonejson.core.new = function()
+    return {
+      status = "allocation_failed",
+      message = "failed to allocate runtime",
+    }
+  end
+
+  ok, err = pcall(function()
+    lonejson.new({})
+  end)
+
+  lonejson.core.new = saved_new
+  assert_true(not ok)
+  assert_true(type(err) == "table")
+  assert_eq(err.status, "allocation_failed")
+  assert_eq(err.message, "failed to allocate runtime")
 end
 
 do
@@ -267,16 +424,44 @@ do
 end
 
 do
+  local pretty_expected
+  local huge
   assert_eq(lj.encode_json("a\nb"), [["a\nb"]])
   assert_eq(lj.encode_value("a\nb"), [["a\nb"]])
   assert_eq(lj.encode_json(lj.json_null), "null")
   assert_eq(lj.encode_json({ b = true, a = lj.json_array({ 1, lj.json_null }) }), '{"a":[1,null],"b":true}')
+  pretty_expected = table.concat({
+    "{",
+    '  "a": [',
+    "    1,",
+    "    null",
+    "  ],",
+    '  "b": true',
+    "}",
+  }, "\n")
+  assert_eq(pretty_lj.encode_json({ b = true, a = lj.json_array({ 1, lj.json_null }) }),
+            pretty_expected)
+  assert_eq(pretty_limited_json_value_lj.encode_json("ab"), [["ab"]])
   do
     local chunks = {}
+    local pretty_chunks = {}
     lj.encode_json_to_sink({ z = "sink", a = lj.json_array({ true, false }) }, function(chunk)
       chunks[#chunks + 1] = chunk
     end)
+    pretty_lj.encode_json_to_sink({ b = true, a = lj.json_array({ 1, lj.json_null }) }, function(chunk)
+      pretty_chunks[#pretty_chunks + 1] = chunk
+    end)
     assert_eq(table.concat(chunks), '{"a":[true,false],"z":"sink"}')
+    assert_eq(table.concat(pretty_chunks), pretty_expected)
+    assert_true(#pretty_chunks > 1)
+  end
+  huge = string.rep("x", 9 * 1024 * 1024)
+  do
+    local total = 0
+    lj.encode_json_to_sink(huge, function(chunk)
+      total = total + #chunk
+    end)
+    assert_eq(total, #huge + 2)
   end
   do
     local ok, err = pcall(function()
@@ -287,6 +472,43 @@ do
     assert_true(not ok)
     assert_true(tostring(err):find("sink boom", 1, true) ~= nil)
   end
+  do
+    local ok, err = pcall(function()
+      pretty_lj.encode_json_to_sink({ a = 1, b = 2 }, function()
+        error("pretty sink boom")
+      end)
+    end)
+    assert_true(not ok)
+    assert_true(tostring(err):find("pretty sink boom", 1, true) ~= nil)
+  end
+  do
+    local ok, err = pcall(function()
+      limited_output_lj.encode_json({ alpha = "abcdefghijklmnopqrstuvwxyz" })
+    end)
+    assert_true(not ok)
+    assert_true(tostring(err):find("max_output_bytes", 1, true) ~= nil)
+  end
+  do
+    local ok, err = pcall(function()
+      pretty_limited_output_lj.encode_json({ alpha = string.rep("x", 4096) })
+    end)
+    assert_true(not ok)
+    assert_true(tostring(err):find("max_output_bytes", 1, true) ~= nil)
+    for _ = 1, 64 do
+      ok, err = pcall(function()
+        pretty_limited_output_lj.encode_json({ alpha = string.rep("x", 4096) })
+      end)
+      assert_true(not ok)
+      assert_true(tostring(err):find("max_output_bytes", 1, true) ~= nil)
+    end
+  end
+  do
+    local ok, err = pcall(function()
+      default_cap_lj.encode_json(huge)
+    end)
+    assert_true(not ok)
+    assert_true(tostring(err):find("max_output_bytes", 1, true) ~= nil)
+  end
   assert_eq(lj.decode_json('"x\\ny"'), "x\ny")
   assert_eq(lj.decode_value('"x\\ny"'), "x\ny")
   assert_true(lj.decode_json("null") == lj.json_null)
@@ -294,6 +516,13 @@ do
   assert_eq(decoded.a[1], 1)
   assert_true(decoded.a[2] == lj.json_null)
   assert_eq(decoded.b, false)
+  do
+    local ok, err = pcall(function()
+      limited_json_value_lj.decode_json('"ab"')
+    end)
+    assert_true(not ok)
+    assert_true(tostring(err):find("string", 1, true) ~= nil)
+  end
   local ok = pcall(function()
     lj.decode_json("true false")
   end)
@@ -343,11 +572,9 @@ do
     "  ]",
     "}",
   }, "\n")
-  assert_eq(Test:encode(rec, { pretty = true }), pretty_expected)
-  assert_eq(Test:encode(rec, { max_output_bytes = 4096 }), json)
-  assert_eq(Test:encode(rec, { max_output_bytes = #json }), json)
+  assert_eq(TestPretty:encode(rec:to_table()), pretty_expected)
   local ok, err = pcall(function()
-    Test:encode(rec, { max_output_bytes = #json - 1 })
+    TestLimitedOutput:encode(rec:to_table())
   end)
   assert_true(not ok)
   assert_true(tostring(err):find("max_output_bytes", 1, true) ~= nil)
@@ -394,7 +621,7 @@ do
     name = "Path",
     age = 7,
   })
-  assert_true(Test:write_path(rec, path, { pretty = true }))
+  assert_true(TestPretty:write_path(rec:to_table(), path))
   f = assert(io.open(path, "rb"))
   pretty = assert(f:read("*a"))
   f:close()
@@ -446,6 +673,57 @@ do
   assert_eq(status, "eof")
   stream:close()
   os.remove(path)
+end
+
+do
+  local stream
+  local rec = Test:new_record()
+  local obj, err, status
+
+  stream = Test:stream_string('{"name":"One","age":1}{"name":"Two","age":2}')
+  collectgarbage("collect")
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.name, "One")
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.name, "Two")
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "eof")
+  stream:close()
+end
+
+do
+  local OptionalText = lj.schema("OptionalText", {
+    lj.field("name", lj.string()),
+    lj.field("nick", lj.string()),
+  })
+  local stream =
+      OptionalText:stream_string(
+          '{"name":"One","nick":"alpha"}{"name":"Two"}')
+  local rec = OptionalText:new_record()
+  local obj, err, status
+
+  rec:clear()
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.name, "One")
+  assert_eq(obj.nick, "alpha")
+
+  rec:clear()
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.name, "Two")
+  assert_true(obj.nick == nil)
+
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "eof")
+  stream:close()
 end
 
 do
@@ -594,15 +872,15 @@ do
 end
 
 do
-  local rec = Merge:new_record()
+  local rec = MergeNoClear:new_record()
 
-  Merge:assign(rec, {
+  MergeNoClear:assign(rec, {
     id = "old",
     age = 7,
     selector = lj.json_object { a = 1 },
     fields = lj.json_array { "keep" },
   })
-  Merge:decode_into(rec, '{"selector":{"b":2}}', { clear_destination = false })
+  MergeNoClear:decode_into(rec, '{"selector":{"b":2}}')
 
   assert_eq(rec.id, "old")
   assert_eq(rec.age, 7)
@@ -641,18 +919,19 @@ do
 end
 
 do
-  local rec = NestedQuery:new_record()
+  local rec = NestedQueryNoClear:new_record()
 
-  NestedQuery:decode_into(rec,
+  NestedQueryNoClear:decode_into(
+      rec,
       '{"type":"first","response":{"status":"ok","selector":{"a":1},"fields":["keep"]}}')
   assert_eq(rec.type, "first")
   assert_eq(rec.response.status, "ok")
   assert_eq(rec.response.selector.a, 1)
   assert_eq(rec.response.fields[1], "keep")
 
-  NestedQuery:decode_into(rec,
-      '{"type":"second","response":{"selector":{"b":[true,null]},"fields":{"deep":{"v":2}}}}',
-      { clear_destination = false })
+  NestedQueryNoClear:decode_into(
+      rec,
+      '{"type":"second","response":{"selector":{"b":[true,null]},"fields":{"deep":{"v":2}}}}')
   assert_eq(rec.type, "second")
   assert_true(rec.response.status == nil)
   assert_true(rec.response.selector.a == nil)
@@ -662,18 +941,39 @@ do
 end
 
 do
-  local rec = Batch:new_record()
+  local rec = NestedQueryLimitedNoClear:new_record()
+  local ok, err
+  local stream
+  local obj, status
 
-  Batch:decode_into(rec,
-      '{"batch_id":"b1","items":[{"id":"i1","payload":{"a":1},"tags":["keep"]}]}')
+  ok, err = NestedQueryLimitedNoClear:decode_into(
+      rec,
+      '{"type":"limited","response":{"selector":{"value":"ab"}}}')
+  assert_true(ok ~= nil)
+  assert_true(err ~= nil and err.status == "overflow")
+
+  stream = NestedQueryLimitedNoClear:stream_string(
+      '{"type":"limited","response":{"selector":{"value":"ab"}}}')
+  obj, err, status = stream:next(rec)
+  assert_true(not obj)
+  assert_true(err ~= nil and err.status == "overflow")
+  assert_eq(status, "error")
+  stream:close()
+end
+
+do
+  local rec = BatchNoClear:new_record()
+
+  BatchNoClear:decode_into(
+      rec, '{"batch_id":"b1","items":[{"id":"i1","payload":{"a":1},"tags":["keep"]}]}')
   assert_eq(rec.batch_id, "b1")
   assert_eq(rec.items[1].id, "i1")
   assert_eq(rec.items[1].payload.a, 1)
   assert_eq(rec.items[1].tags[1], "keep")
 
-  Batch:decode_into(rec,
-      '{"batch_id":"b2","items":[{"id":"i2","payload":[true,null],"tags":{"fresh":2}}]}',
-      { clear_destination = false })
+  BatchNoClear:decode_into(
+      rec,
+      '{"batch_id":"b2","items":[{"id":"i2","payload":[true,null],"tags":{"fresh":2}}]}')
   assert_eq(rec.batch_id, "b2")
   assert_eq(rec.items[1].id, "i2")
   assert_eq(rec.items[1].payload[1], true)
@@ -685,14 +985,14 @@ do
   local path = "/tmp/lonejson-lua-merge-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
-  local rec = Merge:new_record()
+  local rec = MergeNoClear:new_record()
   local obj, err, status
 
   f:write('{"id":"stream-old","age":9,"selector":{"a":1},"fields":["keep"]}')
   f:write('{"selector":{"b":2}}')
   f:close()
 
-  stream = Merge:stream_path(path, { clear_destination = false })
+  stream = MergeNoClear:stream_path(path)
   obj, err, status = stream:next(rec)
   assert_eq(status, "object")
   assert_true(err == nil)
@@ -720,14 +1020,14 @@ do
   local path = "/tmp/lonejson-lua-nested-merge-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
-  local rec = NestedQuery:new_record()
+  local rec = NestedQueryNoClear:new_record()
   local obj, err, status
 
   f:write('{"type":"stream-old","response":{"status":"ok","selector":{"a":1},"fields":["keep"]}}')
   f:write('{"type":"stream-new","response":{"selector":{"b":2}}}')
   f:close()
 
-  stream = NestedQuery:stream_path(path, { clear_destination = false })
+  stream = NestedQueryNoClear:stream_path(path)
   obj, err, status = stream:next(rec)
   assert_eq(status, "object")
   assert_true(obj == rec)
@@ -803,6 +1103,28 @@ do
 end
 
 do
+  local stream
+  local obj, err, status
+
+  stream = Test:array_stream_string(
+      "items",
+      '{"items":[{"name":"GC","age":3},{"name":"Keep","age":4}]}')
+  collectgarbage("collect")
+
+  obj, err, status = stream:next()
+  assert_eq(status, "item")
+  assert_true(err == nil)
+  assert_eq(obj.name, "GC")
+  obj, err, status = stream:next()
+  assert_eq(status, "item")
+  assert_true(err == nil)
+  assert_eq(obj.name, "Keep")
+  obj, err, status = stream:next()
+  assert_eq(status, "eof")
+  stream:close()
+end
+
+do
   local stream =
     Query:array_stream_string("queries", '{"queries":[{"id":"q1","selector":{"x":null},"fields":["id",{"deep":[true,null]}]},{"id":"q2","selector":{"ok":true}}]}')
   local rec = Query:new_record()
@@ -860,8 +1182,8 @@ end
 
 do
   local stream =
-    Merge:array_stream_string("items", '{"items":[{"id":"stream-old","age":9,"selector":{"a":1},"fields":["keep"]},{"selector":{"b":2}}]}', { clear_destination = false })
-  local rec = Merge:new_record()
+    MergeNoClear:array_stream_string("items", '{"items":[{"id":"stream-old","age":9,"selector":{"a":1},"fields":["keep"]},{"selector":{"b":2}}]}')
+  local rec = MergeNoClear:new_record()
   local obj, err, status
 
   obj, err, status = stream:next(rec)
@@ -890,8 +1212,8 @@ end
 
 do
   local stream =
-    Batch:array_stream_string("", '[{"batch_id":"b1","items":[{"id":"i1","payload":{"x":null},"tags":["keep"]}]},{"batch_id":"b2","items":[{"id":"i2","payload":[true,null],"tags":{"fresh":2}}]}]', { clear_destination = false })
-  local rec = Batch:new_record()
+    BatchNoClear:array_stream_string("", '[{"batch_id":"b1","items":[{"id":"i1","payload":{"x":null},"tags":["keep"]}]},{"batch_id":"b2","items":[{"id":"i2","payload":[true,null],"tags":{"fresh":2}}]}]')
+  local rec = BatchNoClear:new_record()
   local obj, err, status
 
   obj, err, status = stream:next(rec)
@@ -1025,7 +1347,7 @@ do
 end
 
 do
-  local stream = Test:array_stream_string("items", '{"meta":{"x":1,"x":2},"items":[{"name":"ok","age":14}]}', { reject_duplicate_keys = false })
+  local stream = TestAllowDup:array_stream_string("items", '{"meta":{"x":1,"x":2},"items":[{"name":"ok","age":14}]}')
   local obj, err, status = stream:next()
   assert_eq(status, "item")
   assert_true(err == nil)

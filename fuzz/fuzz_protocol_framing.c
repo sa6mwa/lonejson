@@ -205,11 +205,12 @@ static void fuzz_sse(const uint8_t *data, size_t size) {
 }
 
 static void fuzz_sse_json(const uint8_t *data, size_t size) {
+  lonejson_config config;
+  lonejson *runtime;
   static const char *selected_keep[] = {"keep"};
   static const char *selected_empty[] = {""};
   lonejson_sse_options sse_options = lonejson_default_sse_options();
   lonejson_sse_json_options json_options;
-  lonejson_parse_options parse_options = lonejson_default_parse_options();
   fuzz_framing_state state;
   fuzz_sse_json_doc doc;
   lonejson_sse *sse;
@@ -220,6 +221,7 @@ static void fuzz_sse_json(const uint8_t *data, size_t size) {
   sse_options.max_line_bytes = 4096u;
   sse_options.max_event_data_bytes = 65536u;
   sse_options.max_buffered_bytes = 65536u;
+  memset(&json_options, 0, sizeof(json_options));
   memset(&state, 0, sizeof(state));
   memset(&doc, 0, sizeof(doc));
   json_options.event_names = NULL;
@@ -231,16 +233,19 @@ static void fuzz_sse_json(const uint8_t *data, size_t size) {
     json_options.event_names = selected_empty;
     json_options.event_name_count = 1u;
   }
+  config = lonejson_default_config();
   if (size > 2u && (data[2] & 1u) != 0u) {
-    parse_options.clear_destination = 0;
-    json_options.parse_options = &parse_options;
-  } else {
-    json_options.parse_options = NULL;
+    config.clear_destination_by_default = 0;
   }
-  lonejson_init(&fuzz_sse_json_doc_map, &doc);
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return;
+  }
+  lonejson_init(runtime, &fuzz_sse_json_doc_map, &doc);
   sse = lonejson_sse_open(&sse_options, &error);
   if (sse == NULL) {
     lonejson_cleanup(&fuzz_sse_json_doc_map, &doc);
+    lonejson_free(runtime);
     return;
   }
   chunk_size = (size > 0u) ? (1u + ((size_t)data[0] % 97u)) : 17u;
@@ -249,23 +254,25 @@ static void fuzz_sse_json(const uint8_t *data, size_t size) {
     if (chunk > chunk_size) {
       chunk = chunk_size;
     }
-    (void)lonejson_sse_push_json(sse, &fuzz_sse_json_doc_map, &doc,
+    (void)lonejson_sse_push_json(runtime, sse, &fuzz_sse_json_doc_map, &doc,
                                  data + offset, chunk, &json_options,
                                  fuzz_sse_json_event, &state, &error);
   }
-  (void)lonejson_sse_finish_json(sse, &fuzz_sse_json_doc_map, &doc,
+  (void)lonejson_sse_finish_json(runtime, sse, &fuzz_sse_json_doc_map, &doc,
                                  &json_options, fuzz_sse_json_event, &state,
                                  &error);
   lonejson_sse_close(sse);
   lonejson_cleanup(&fuzz_sse_json_doc_map, &doc);
+  lonejson_free(runtime);
 }
 
 static void fuzz_sse_json_value(const uint8_t *data, size_t size) {
+  lonejson_config config;
+  lonejson *runtime;
   static const char *selected_keep[] = {"keep"};
   static const char *selected_empty[] = {""};
   lonejson_sse_options sse_options = lonejson_default_sse_options();
   lonejson_sse_json_options json_options;
-  lonejson_parse_options parse_options = lonejson_default_parse_options();
   lonejson_json_value value;
   lonejson_value_visitor visitor;
   fuzz_visit_state visit_state;
@@ -278,6 +285,7 @@ static void fuzz_sse_json_value(const uint8_t *data, size_t size) {
   sse_options.max_line_bytes = 4096u;
   sse_options.max_event_data_bytes = 65536u;
   sse_options.max_buffered_bytes = 65536u;
+  memset(&json_options, 0, sizeof(json_options));
   memset(&state, 0, sizeof(state));
   memset(&visit_state, 0, sizeof(visit_state));
   json_options.event_names = NULL;
@@ -289,8 +297,12 @@ static void fuzz_sse_json_value(const uint8_t *data, size_t size) {
     json_options.event_names = selected_empty;
     json_options.event_name_count = 1u;
   }
-  json_options.parse_options = &parse_options;
-  lonejson_json_value_init(&value);
+  config = lonejson_default_config();
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return;
+  }
+  lonejson_json_value_init(runtime, &value);
   switch (size > 2u ? (data[2] % 3u) : 0u) {
   case 0u:
     (void)lonejson_json_value_set_parse_sink(&value, fuzz_sink_write, &state,
@@ -314,7 +326,7 @@ static void fuzz_sse_json_value(const uint8_t *data, size_t size) {
     visitor.boolean_value = fuzz_value_bool;
     visitor.null_value = fuzz_value_event;
     (void)lonejson_json_value_set_parse_visitor(&value, &visitor, &visit_state,
-                                                NULL, &error);
+                                                &error);
     break;
   default:
     (void)lonejson_json_value_enable_parse_capture(&value, &error);
@@ -323,6 +335,7 @@ static void fuzz_sse_json_value(const uint8_t *data, size_t size) {
   sse = lonejson_sse_open(&sse_options, &error);
   if (sse == NULL) {
     lonejson_json_value_cleanup(&value);
+    lonejson_free(runtime);
     return;
   }
   chunk_size = (size > 0u) ? (1u + ((size_t)data[0] % 97u)) : 17u;
@@ -333,14 +346,14 @@ static void fuzz_sse_json_value(const uint8_t *data, size_t size) {
     }
     switch (value.parse_mode) {
     case LONEJSON_JSON_VALUE_PARSE_SINK:
-      (void)lonejson_sse_push_json_value(sse, &value, data + offset, chunk,
+      (void)lonejson_sse_push_json_value(runtime, sse, &value, data + offset, chunk,
                                          &json_options,
                                          fuzz_sse_json_value_sink_event, &state,
                                          &error);
       break;
     case LONEJSON_JSON_VALUE_PARSE_VISITOR:
       (void)lonejson_sse_push_json_value(
-          sse, &value, data + offset, chunk, &json_options,
+          runtime, sse, &value, data + offset, chunk, &json_options,
           fuzz_sse_json_value_visitor_event, &state, &error);
       state.bytes += visit_state.bytes;
       state.events += visit_state.events;
@@ -348,32 +361,35 @@ static void fuzz_sse_json_value(const uint8_t *data, size_t size) {
       break;
     default:
       (void)lonejson_sse_push_json_value(
-          sse, &value, data + offset, chunk, &json_options,
+          runtime, sse, &value, data + offset, chunk, &json_options,
           fuzz_sse_json_value_capture_event, &state, &error);
       break;
     }
   }
   switch (value.parse_mode) {
   case LONEJSON_JSON_VALUE_PARSE_SINK:
-    (void)lonejson_sse_finish_json_value(sse, &value, &json_options,
+    (void)lonejson_sse_finish_json_value(runtime, sse, &value, &json_options,
                                          fuzz_sse_json_value_sink_event, &state,
                                          &error);
     break;
   case LONEJSON_JSON_VALUE_PARSE_VISITOR:
     (void)lonejson_sse_finish_json_value(
-        sse, &value, &json_options, fuzz_sse_json_value_visitor_event, &state,
+        runtime, sse, &value, &json_options,
+        fuzz_sse_json_value_visitor_event, &state,
         &error);
     state.bytes += visit_state.bytes;
     state.events += visit_state.events;
     break;
   default:
     (void)lonejson_sse_finish_json_value(
-        sse, &value, &json_options, fuzz_sse_json_value_capture_event, &state,
+        runtime, sse, &value, &json_options,
+        fuzz_sse_json_value_capture_event, &state,
         &error);
     break;
   }
   lonejson_sse_close(sse);
   lonejson_json_value_cleanup(&value);
+  lonejson_free(runtime);
 }
 
 static void fuzz_multipart(const uint8_t *data, size_t size) {

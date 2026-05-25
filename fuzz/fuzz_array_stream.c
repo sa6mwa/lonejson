@@ -88,14 +88,19 @@ static void fuzz_drive_mapped(const char *path, const uint8_t *json,
                               size_t json_len, size_t chunk_size,
                               int reject_duplicate_keys,
                               size_t would_block_every) {
-  lonejson_parse_options options;
+  lonejson_config config;
+  lonejson *runtime;
   lonejson_array_stream *stream;
   lonejson_error error;
   fuzz_reader reader;
   size_t count;
 
-  options = lonejson_default_parse_options();
-  options.reject_duplicate_keys = reject_duplicate_keys;
+  config = lonejson_default_config();
+  config.reject_duplicate_keys_by_default = reject_duplicate_keys;
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return;
+  }
   reader.data = json;
   reader.len = json_len;
   reader.offset = 0u;
@@ -105,9 +110,11 @@ static void fuzz_drive_mapped(const char *path, const uint8_t *json,
   reader.would_blocks = 0u;
   reader.max_would_blocks = 2u;
   reader.read_calls = 0u;
-  stream = lonejson_array_stream_open_reader(path, fuzz_array_stream_reader,
-                                             &reader, &options, &error);
+  stream = lonejson_array_stream_open_reader(runtime, path,
+                                             fuzz_array_stream_reader, &reader,
+                                             &error);
   if (stream == NULL) {
+    lonejson_free(runtime);
     return;
   }
   for (count = 0u; count < 16u; ++count) {
@@ -125,20 +132,26 @@ static void fuzz_drive_mapped(const char *path, const uint8_t *json,
     }
   }
   lonejson_array_stream_close(stream);
+  lonejson_free(runtime);
 }
 
 static void fuzz_drive_raw(const char *path, const uint8_t *json,
                            size_t json_len, size_t chunk_size,
                            int reject_duplicate_keys,
                            size_t would_block_every) {
-  lonejson_parse_options options;
+  lonejson_config config;
+  lonejson *runtime;
   lonejson_array_stream *stream;
   lonejson_error error;
   fuzz_reader reader;
   size_t count;
 
-  options = lonejson_default_parse_options();
-  options.reject_duplicate_keys = reject_duplicate_keys;
+  config = lonejson_default_config();
+  config.reject_duplicate_keys_by_default = reject_duplicate_keys;
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return;
+  }
   reader.data = json;
   reader.len = json_len;
   reader.offset = 0u;
@@ -148,16 +161,18 @@ static void fuzz_drive_raw(const char *path, const uint8_t *json,
   reader.would_blocks = 0u;
   reader.max_would_blocks = 2u;
   reader.read_calls = 0u;
-  stream = lonejson_array_stream_open_reader(path, fuzz_array_stream_reader,
-                                             &reader, &options, &error);
+  stream = lonejson_array_stream_open_reader(runtime, path,
+                                             fuzz_array_stream_reader, &reader,
+                                             &error);
   if (stream == NULL) {
+    lonejson_free(runtime);
     return;
   }
   for (count = 0u; count < 16u; ++count) {
     lonejson_array_stream_result result;
     lonejson_json_value value;
 
-    lonejson_json_value_init(&value);
+    lonejson_json_value_init(runtime, &value);
     result = lonejson_array_stream_next_value(stream, &value, &error);
     lonejson_json_value_cleanup(&value);
     if (result == LONEJSON_ARRAY_STREAM_WOULD_BLOCK) {
@@ -168,24 +183,31 @@ static void fuzz_drive_raw(const char *path, const uint8_t *json,
     }
   }
   lonejson_array_stream_close(stream);
+  lonejson_free(runtime);
 }
 
 static void fuzz_drive_push(const char *path, const uint8_t *json,
                             size_t json_len, size_t chunk_size,
                             int reject_duplicate_keys, size_t fail_after) {
-  lonejson_parse_options options;
+  lonejson_config config;
+  lonejson *runtime;
   lonejson_array_stream *stream;
   lonejson_error error;
   fuzz_push_state state;
   fuzz_item item;
   size_t offset;
 
-  options = lonejson_default_parse_options();
-  options.reject_duplicate_keys = reject_duplicate_keys;
+  config = lonejson_default_config();
+  config.reject_duplicate_keys_by_default = reject_duplicate_keys;
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return;
+  }
   state.items = 0u;
   state.fail_after = fail_after;
-  stream = lonejson_array_stream_open_push(path, &options, &error);
+  stream = lonejson_array_stream_open_push(runtime, path, &error);
   if (stream == NULL) {
+    lonejson_free(runtime);
     return;
   }
   offset = 0u;
@@ -204,6 +226,7 @@ static void fuzz_drive_push(const char *path, const uint8_t *json,
     offset += n;
     if (status != LONEJSON_STATUS_OK) {
       lonejson_array_stream_close(stream);
+      lonejson_free(runtime);
       return;
     }
     if (state.items > 16u) {
@@ -215,19 +238,25 @@ static void fuzz_drive_push(const char *path, const uint8_t *json,
                                      fuzz_push_item, &state, &error);
   lonejson_cleanup(&fuzz_item_map, &item);
   lonejson_array_stream_close(stream);
+  lonejson_free(runtime);
 }
 
 static void fuzz_expect_raw_duplicate(const char *json, size_t json_len,
                                       size_t chunk_size) {
-  lonejson_parse_options options;
+  lonejson_config config;
+  lonejson *runtime;
   lonejson_array_stream *stream;
   lonejson_array_stream_result result;
   lonejson_error error;
   lonejson_json_value value;
   fuzz_reader reader;
 
-  options = lonejson_default_parse_options();
-  options.reject_duplicate_keys = 1;
+  config = lonejson_default_config();
+  config.reject_duplicate_keys_by_default = 1;
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    abort();
+  }
   reader.data = (const uint8_t *)json;
   reader.len = json_len;
   reader.offset = 0u;
@@ -237,15 +266,17 @@ static void fuzz_expect_raw_duplicate(const char *json, size_t json_len,
   reader.would_blocks = 0u;
   reader.max_would_blocks = 0u;
   reader.read_calls = 0u;
-  stream = lonejson_array_stream_open_reader("", fuzz_array_stream_reader,
-                                             &reader, &options, &error);
+  stream = lonejson_array_stream_open_reader(runtime, "",
+                                             fuzz_array_stream_reader, &reader,
+                                             &error);
   if (stream == NULL) {
     abort();
   }
-  lonejson_json_value_init(&value);
+  lonejson_json_value_init(runtime, &value);
   result = lonejson_array_stream_next_value(stream, &value, &error);
   lonejson_json_value_cleanup(&value);
   lonejson_array_stream_close(stream);
+  lonejson_free(runtime);
   if (result != LONEJSON_ARRAY_STREAM_ERROR ||
       error.code != LONEJSON_STATUS_DUPLICATE_FIELD) {
     abort();
@@ -254,7 +285,8 @@ static void fuzz_expect_raw_duplicate(const char *json, size_t json_len,
 
 static void fuzz_expect_root_duplicate(const char *json, size_t json_len,
                                        size_t chunk_size) {
-  lonejson_parse_options options;
+  lonejson_config config;
+  lonejson *runtime;
   lonejson_array_stream *stream;
   lonejson_array_stream_result result;
   lonejson_error error;
@@ -262,8 +294,12 @@ static void fuzz_expect_root_duplicate(const char *json, size_t json_len,
   fuzz_item item;
   size_t count;
 
-  options = lonejson_default_parse_options();
-  options.reject_duplicate_keys = 1;
+  config = lonejson_default_config();
+  config.reject_duplicate_keys_by_default = 1;
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    abort();
+  }
   reader.data = (const uint8_t *)json;
   reader.len = json_len;
   reader.offset = 0u;
@@ -273,8 +309,9 @@ static void fuzz_expect_root_duplicate(const char *json, size_t json_len,
   reader.would_blocks = 0u;
   reader.max_would_blocks = 0u;
   reader.read_calls = 0u;
-  stream = lonejson_array_stream_open_reader("items", fuzz_array_stream_reader,
-                                             &reader, &options, &error);
+  stream = lonejson_array_stream_open_reader(runtime, "items",
+                                             fuzz_array_stream_reader, &reader,
+                                             &error);
   if (stream == NULL) {
     abort();
   }
@@ -287,6 +324,7 @@ static void fuzz_expect_root_duplicate(const char *json, size_t json_len,
     }
   }
   lonejson_array_stream_close(stream);
+  lonejson_free(runtime);
   if (result != LONEJSON_ARRAY_STREAM_ERROR ||
       error.code != LONEJSON_STATUS_DUPLICATE_FIELD) {
     abort();

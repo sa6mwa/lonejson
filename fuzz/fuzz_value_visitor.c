@@ -119,8 +119,9 @@ static lonejson_read_result fuzz_reader(void *user, unsigned char *buffer,
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  lonejson_config config;
+  lonejson *runtime;
   lonejson_value_visitor visitor;
-  lonejson_value_limits limits;
   lonejson_error error;
   lonejson_status status;
   fuzz_visit_state state;
@@ -141,14 +142,18 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   visitor.null_value = fuzz_visit_null;
 
   memset(&state, 0, sizeof(state));
-  limits = lonejson_default_value_limits();
-  limits.max_depth = 1u + (size_t)(data[0] & 0x3Fu);
-  limits.max_string_bytes = 1u + (size_t)data[0] * 64u;
-  limits.max_key_bytes = 1u + (size_t)data[0] * 16u;
-  limits.max_number_bytes = 1u + (size_t)(data[0] & 0x7Fu);
-  limits.max_total_bytes = (data[0] & 0x80u) ? size : 0u;
-  status = lonejson_visit_value_buffer(data, size, &visitor, &state, &limits,
-                                       &error);
+  config = lonejson_default_config();
+  config.json_value_max_depth = 1u + (size_t)(data[0] & 0x3Fu);
+  config.json_value_max_string_bytes = 1u + (size_t)data[0] * 64u;
+  config.json_value_max_key_bytes = 1u + (size_t)data[0] * 16u;
+  config.json_value_max_number_bytes = 1u + (size_t)(data[0] & 0x7Fu);
+  config.json_value_max_total_bytes = (data[0] & 0x80u) ? size : 0u;
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return 0;
+  }
+  status =
+      lonejson_visit_value_buffer(runtime, data, size, &visitor, &state, &error);
   if (status == LONEJSON_STATUS_OK) {
     (void)state.callback_count;
   }
@@ -158,8 +163,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   reader.len = size;
   reader.offset = 0u;
   reader.chunk_size = 1u + (size_t)(data[0] % 31u);
-  status = lonejson_visit_value_reader(fuzz_reader, &reader, &visitor, &state,
-                                       NULL, &error);
+  status = lonejson_visit_value_reader(runtime, fuzz_reader, &reader, &visitor,
+                                       &state, &error);
   if (status == LONEJSON_STATUS_OK) {
     (void)state.string_bytes;
   }
@@ -169,9 +174,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     memcpy(cstr, data, size);
     cstr[size] = '\0';
     memset(&state, 0, sizeof(state));
-    (void)lonejson_visit_value_cstr(cstr, &visitor, &state, NULL, &error);
+    (void)lonejson_visit_value_cstr(runtime, cstr, &visitor, &state, &error);
     free(cstr);
   }
 
+  lonejson_free(runtime);
   return 0;
 }

@@ -119,6 +119,7 @@ fuzz_replace_with(lonejson_writer *writer,
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  lonejson *runtime;
   static const char *const path_count[] = {"count"};
   static const char *const path_meta_count[] = {"meta", "count"};
   static const char *const path_payload[] = {"payload"};
@@ -176,7 +177,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   visitor.boolean_value = fuzz_visit_bool;
   visitor.null_value = fuzz_visit_event;
 
-  lonejson_json_value_init(&replacement);
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    return 0;
+  }
+  lonejson_json_value_init(runtime, &replacement);
   (void)lonejson_json_value_set_buffer(&replacement, "0", 1u, &error);
   lonejson_owned_buffer_init(&sink_state.out);
   memset(&options, 0, sizeof(options));
@@ -202,22 +207,23 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     selector_options.old_value_user = options.old_value_user;
     selector_options.replace = options.replace;
     selector_options.replace_user = options.replace_user;
-    status = lonejson_value_rewrite_selector_buffer(data, size, fuzz_sink,
-                                                    &sink_state,
+    status = lonejson_value_rewrite_selector_buffer(runtime, data, size,
+                                                    fuzz_sink, &sink_state,
                                                     &selector_options, &error);
   } else {
-    status = lonejson_value_rewrite_buffer(data, size, fuzz_sink, &sink_state,
-                                           &options, &error);
+    status = lonejson_value_rewrite_buffer(runtime, data, size, fuzz_sink,
+                                           &sink_state, &options, &error);
   }
 
   if (status == LONEJSON_STATUS_OK) {
     if (sink_state.out.data == NULL ||
-        lonejson_validate_buffer(sink_state.out.data, sink_state.out.len,
+        lonejson_validate_buffer(runtime, sink_state.out.data, sink_state.out.len,
                                  &validate_error) != LONEJSON_STATUS_OK) {
       abort();
     }
   }
   lonejson_owned_buffer_free(&sink_state.out);
   lonejson_json_value_cleanup(&replacement);
+  lonejson_free(runtime);
   return 0;
 }

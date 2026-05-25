@@ -155,9 +155,8 @@ static void test_array_rewrite_root_array_mapped_actions(void) {
   options.item = test_array_rewrite_items;
   options.append = test_array_rewrite_append;
   options.user = &seen;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_OK);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out,
                 "[{\"id\":20,\"label\":\"twenty\"},{\"id\":3,"
                 "\"label\":\"three\"},{\"id\":30,\"label\":\"thirty\"},"
@@ -197,9 +196,9 @@ static void test_array_rewrite_direct_and_nested_arrays(void) {
   options.item = test_array_rewrite_items;
   options.append = test_array_rewrite_append;
   options.user = &seen;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "boards[].items", test_state_reader, &reader,
-             test_buffer_sink_write, &sink, &options, &error) ==
+             test_buffer_sink_write, &sink, NULL, &options, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out,
                 "{\"version\":1,\"boards\":[{\"id\":7,\"items\":[{\"id\":20,"
@@ -260,9 +259,9 @@ static void test_array_rewrite_parent_context_filters_nested_array(void) {
   options.item = test_array_rewrite_items;
   options.append = test_array_rewrite_append;
   options.user = &seen;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "boards[].items", test_state_reader, &reader,
-             test_buffer_sink_write, &sink, &options, &error) ==
+             test_buffer_sink_write, &sink, NULL, &options, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out, expected) == 0);
   EXPECT(seen.count == 3u);
@@ -290,8 +289,7 @@ static void test_array_rewrite_parent_context_filters_nested_array(void) {
   strcpy(seen.replacement.label, "twenty");
   seen.append.id = 99;
   strcpy(seen.append.label, "tail");
-  EXPECT(lonejson_array_rewrite_path("boards[].items", input_path, output_path,
-                                     &options, &error) == LONEJSON_STATUS_OK);
+  EXPECT(test_array_rewrite_path("boards[].items", input_path, output_path, NULL, &options, &error) == LONEJSON_STATUS_OK);
   fp = fopen(output_path, "rb");
   EXPECT(fp != NULL);
   if (fp != NULL) {
@@ -344,9 +342,9 @@ static void test_array_rewrite_repeated_parent_segments(void) {
   options.item = test_array_rewrite_repeated_parent_item;
   options.user = &seen;
 
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "nodes[].nodes[].items", test_state_reader, &reader,
-             test_buffer_sink_write, &sink, &options, &error) ==
+             test_buffer_sink_write, &sink, NULL, &options, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out, json) == 0);
   EXPECT(seen.count == 1u);
@@ -423,14 +421,14 @@ static void test_array_rewrite_json_value_items_and_failures(void) {
   lonejson_json_value item_value;
   lonejson_json_value replacement;
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_error error;
   test_buffer_sink sink;
   test_failing_sink failing_sink;
   unsigned char out[256];
 
-  lonejson_json_value_init(&item_value);
-  lonejson_json_value_init(&replacement);
+  lonejson_json_value_init(test_default_runtime(), &item_value);
+  lonejson_json_value_init(test_default_runtime(), &replacement);
   EXPECT(lonejson_json_value_set_buffer(&replacement, "{\"replaced\":true}",
                                         17u, &error) == LONEJSON_STATUS_OK);
   memset(&options, 0, sizeof(options));
@@ -443,9 +441,9 @@ static void test_array_rewrite_json_value_items_and_failures(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 5u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "items", test_state_reader, &reader, test_buffer_sink_write,
-             &sink, &options, &error) == LONEJSON_STATUS_OK);
+             &sink, NULL, &options, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out,
                 "{\"items\":[{\"keep\":true},{\"replaced\":true},[1,2]]}") ==
          0);
@@ -454,38 +452,36 @@ static void test_array_rewrite_json_value_items_and_failures(void) {
   reader.offset = 0u;
   reader.chunk_size = 64u;
   sink.length = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "items", test_state_reader, &reader, test_buffer_sink_write,
-             &sink, &options, &error) == LONEJSON_STATUS_DUPLICATE_FIELD);
+             &sink, NULL, &options, &error) == LONEJSON_STATUS_DUPLICATE_FIELD);
 
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.reject_duplicate_keys = 0;
-  options.parse_options = &parse_options;
   reader.json = duplicate;
   reader.offset = 0u;
   reader.chunk_size = 64u;
   sink.length = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "items", test_state_reader, &reader, test_buffer_sink_write,
-             &sink, &options, &error) == LONEJSON_STATUS_OK);
+             &sink, &parse_options, &options, &error) == LONEJSON_STATUS_OK);
 
-  options.parse_options = NULL;
   reader.json = missing;
   reader.offset = 0u;
   reader.chunk_size = 64u;
   sink.length = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "items", test_state_reader, &reader, test_buffer_sink_write,
-             &sink, &options, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+             &sink, NULL, &options, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
 
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 64u;
   failing_sink.total = 0u;
   failing_sink.fail_after = 10u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "items", test_state_reader, &reader, test_failing_sink_write,
-             &failing_sink, &options, &error) ==
+             &failing_sink, NULL, &options, &error) ==
          LONEJSON_STATUS_CALLBACK_FAILED);
 
   lonejson_json_value_cleanup(&replacement);
@@ -690,16 +686,14 @@ static void test_array_rewrite_callback_and_action_failures(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 64u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_CALLBACK_FAILED);
 
   options.item = test_array_rewrite_bad_action_item;
   reader.offset = 0u;
   sink.length = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 }
 
 static void test_array_rewrite_argument_and_selector_failures(void) {
@@ -709,7 +703,7 @@ static void test_array_rewrite_argument_and_selector_failures(void) {
   test_item item;
   lonejson_array_rewrite_parent parents[1];
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_error error;
   test_buffer_sink sink;
   test_allocator_state alloc_state;
@@ -724,52 +718,46 @@ static void test_array_rewrite_argument_and_selector_failures(void) {
   options.item_map = &test_item_map;
   options.item_dst = &item;
   options.item = test_array_rewrite_items;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", NULL, &reader, test_buffer_sink_write, &sink, &options,
-             &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, NULL, &sink, &options,
-             &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
+             "", NULL, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, NULL, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             NULL, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+             NULL, NULL, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(&options, 0, sizeof(options));
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   options.item = test_array_rewrite_items;
   options.item_map = &test_item_map;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   options.item_dst = &item;
   options.item_value = (lonejson_json_value *)&item;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(&options, 0, sizeof(options));
   options.append = test_array_rewrite_append;
   options.item_map = &test_item_map;
   options.item_dst = &item;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(&options, 0, sizeof(options));
   options.append = test_array_rewrite_append;
   options.parent_count = 1u;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "boards[].items", test_state_reader, &reader,
-             test_buffer_sink_write, &sink, &options, &error) ==
+             test_buffer_sink_write, &sink, NULL, &options, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(parents, 0, sizeof(parents));
@@ -777,31 +765,31 @@ static void test_array_rewrite_argument_and_selector_failures(void) {
   options.append = test_array_rewrite_append;
   options.parents = parents;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "boards[].items", test_state_reader, &reader,
-             test_buffer_sink_write, &sink, &options, &error) ==
+             test_buffer_sink_write, &sink, NULL, &options, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
 
   test_allocator_init(&alloc_state);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   alloc_state.allocator.realloc_fn = NULL;
   alloc_state.allocator.free_fn = NULL;
   parse_options.allocator = &alloc_state.allocator;
   memset(&options, 0, sizeof(options));
-  options.parse_options = &parse_options;
   options.append = test_array_rewrite_append;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+             &parse_options, &options, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(&options, 0, sizeof(options));
   options.append = test_array_rewrite_append;
   for (i = 0u; i < sizeof(bad_selectors) / sizeof(bad_selectors[0]); ++i) {
     reader.offset = 0u;
-    EXPECT(lonejson_array_rewrite_reader(
+    EXPECT(test_array_rewrite_reader(
                bad_selectors[i], test_state_reader, &reader,
-               test_buffer_sink_write, &sink, &options, &error) ==
+               test_buffer_sink_write, &sink, NULL, &options, &error) ==
            LONEJSON_STATUS_INVALID_ARGUMENT);
   }
 }
@@ -833,25 +821,25 @@ static void test_array_rewrite_parse_type_and_reader_failures(void) {
   reader.json = malformed;
   reader.offset = 0u;
   reader.chunk_size = 64u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "items", test_state_reader, &reader, test_buffer_sink_write,
-             &sink, &options, &error) == LONEJSON_STATUS_INVALID_JSON);
+             &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_JSON);
 
   reader.json = non_array;
   reader.offset = 0u;
   reader.chunk_size = 64u;
   sink.length = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "items", test_state_reader, &reader, test_buffer_sink_write,
-             &sink, &options, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+             &sink, NULL, &options, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
 
   reader.json = reader_prefix;
   reader.offset = 0u;
   reader.chunk_size = 12u;
   sink.length = 0u;
-  status = lonejson_array_rewrite_reader(
+  status = test_array_rewrite_reader(
       "items", test_error_after_prefix_reader, &reader,
-      test_buffer_sink_write, &sink, &options, &error);
+      test_buffer_sink_write, &sink, NULL, &options, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(error.system_errno == EIO);
 }
@@ -865,7 +853,7 @@ static void test_array_rewrite_string_capture_allocation_failures(void) {
   test_reader_state reader = {json, 0u, 64u};
   lonejson_json_value item_value;
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_allocator allocator;
   lonejson_error error;
   test_buffer_sink sink;
@@ -873,26 +861,26 @@ static void test_array_rewrite_string_capture_allocation_failures(void) {
   unsigned char out[128];
   int fd;
 
-  lonejson_json_value_init(&item_value);
+  lonejson_json_value_init(test_default_runtime(), &item_value);
   allocator = lonejson_default_allocator();
   allocator.ctx = &limit;
   allocator.malloc_fn = test_realloc_limit_malloc;
   allocator.realloc_fn = test_realloc_limit_realloc;
   allocator.free_fn = test_realloc_limit_free;
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &allocator;
   memset(&options, 0, sizeof(options));
   sink.buffer = out;
   sink.capacity = sizeof(out);
   sink.length = 0u;
   count = 0u;
-  options.parse_options = &parse_options;
   options.item_value = &item_value;
   options.item = test_array_rewrite_count_value_item;
   options.user = &count;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_ALLOCATION_FAILED);
+             &parse_options, &options, &error) ==
+         LONEJSON_STATUS_ALLOCATION_FAILED);
   EXPECT(count == 0u);
 
   fd = write_temp_text_file(input_path, json);
@@ -904,8 +892,8 @@ static void test_array_rewrite_string_capture_allocation_failures(void) {
     if (fd >= 0) {
       close(fd);
       count = 0u;
-      EXPECT(lonejson_array_rewrite_path("", input_path, output_path, &options,
-                                         &error) ==
+      EXPECT(test_array_rewrite_path("", input_path, output_path,
+                                         &parse_options, &options, &error) ==
              LONEJSON_STATUS_ALLOCATION_FAILED);
       EXPECT(count == 0u);
     }
@@ -920,7 +908,7 @@ static void test_array_rewrite_reader_uses_configured_allocator(void) {
   test_reader_state reader = {json, 0u, 1u};
   test_allocator_state alloc_state;
   lonejson_json_value item_value;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_array_rewrite_options options;
   lonejson_error error;
   test_buffer_sink sink;
@@ -928,21 +916,20 @@ static void test_array_rewrite_reader_uses_configured_allocator(void) {
   unsigned char out[32];
 
   test_allocator_init(&alloc_state);
-  lonejson_json_value_init(&item_value);
-  parse_options = lonejson_default_parse_options();
+  lonejson_json_value_init(test_default_runtime(), &item_value);
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &alloc_state.allocator;
   memset(&options, 0, sizeof(options));
   sink.buffer = out;
   sink.capacity = sizeof(out);
   sink.length = 0u;
   count = 0u;
-  options.parse_options = &parse_options;
   options.item_value = &item_value;
   options.item = test_array_rewrite_count_value_item;
   options.user = &count;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_OK);
+             &parse_options, &options, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out, "[1]") == 0);
   EXPECT(count == 1u);
   EXPECT(alloc_state.stats.alloc_calls != 0u);
@@ -955,32 +942,32 @@ static void test_array_rewrite_reader_allocator_failure(void) {
   test_reader_state reader = {json, 0u, 1u};
   lonejson_allocator allocator;
   lonejson_json_value item_value;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_array_rewrite_options options;
   lonejson_error error;
   test_buffer_sink sink;
   size_t count;
   unsigned char out[32];
 
-  lonejson_json_value_init(&item_value);
+  lonejson_json_value_init(test_default_runtime(), &item_value);
   allocator = lonejson_default_allocator();
   allocator.malloc_fn = test_fail_malloc;
   allocator.realloc_fn = test_passthrough_realloc;
   allocator.free_fn = test_passthrough_free;
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &allocator;
   memset(&options, 0, sizeof(options));
   sink.buffer = out;
   sink.capacity = sizeof(out);
   sink.length = 0u;
   count = 0u;
-  options.parse_options = &parse_options;
   options.item_value = &item_value;
   options.item = test_array_rewrite_count_value_item;
   options.user = &count;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_ALLOCATION_FAILED);
+             &parse_options, &options, &error) ==
+         LONEJSON_STATUS_ALLOCATION_FAILED);
   EXPECT(count == 0u);
   lonejson_json_value_cleanup(&item_value);
 }
@@ -992,7 +979,7 @@ static void test_array_rewrite_item_parse_and_limit_failures(void) {
   test_array_rewrite_seen seen;
   test_item item;
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_error error;
   test_buffer_sink sink;
   unsigned char out[128];
@@ -1011,23 +998,78 @@ static void test_array_rewrite_item_parse_and_limit_failures(void) {
   reader.json = missing_required;
   reader.offset = 0u;
   reader.chunk_size = 64u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
 
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.max_depth = 2u;
   memset(&options, 0, sizeof(options));
-  options.parse_options = &parse_options;
   options.append = test_array_rewrite_append;
   options.user = &seen;
   reader.json = too_deep;
   reader.offset = 0u;
   reader.chunk_size = 64u;
   sink.length = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_OVERFLOW);
+             &parse_options, &options, &error) == LONEJSON_STATUS_OVERFLOW);
+}
+
+static void test_array_rewrite_runtime_json_value_limits(void) {
+  static const char json[] = "[\"ab\"]";
+  lonejson_config config;
+  lonejson *limited_lj;
+  lonejson *default_lj;
+  test_reader_state reader;
+  test_array_rewrite_seen seen;
+  lonejson_array_rewrite_options options;
+  lonejson_error error;
+  test_buffer_sink sink;
+  unsigned char out[128];
+  lonejson_status status;
+
+  config = lonejson_default_config();
+  config.json_value_max_string_bytes = 1u;
+  limited_lj = lonejson_new(&config, &error);
+  EXPECT(limited_lj != NULL);
+  default_lj = lonejson_new(NULL, &error);
+  EXPECT(default_lj != NULL);
+  if (limited_lj == NULL || default_lj == NULL) {
+    lonejson_free(limited_lj);
+    lonejson_free(default_lj);
+    return;
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&options, 0, sizeof(options));
+  memset(out, 0, sizeof(out));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  sink.length = 0u;
+  seen.append.id = 9;
+  strcpy(seen.append.label, "tail");
+  options.append = test_array_rewrite_append;
+  options.user = &seen;
+
+  reader.json = json;
+  reader.offset = 0u;
+  reader.chunk_size = 2u;
+  status = lonejson_array_rewrite_reader(
+      limited_lj, "", test_state_reader, &reader, test_buffer_sink_write, &sink,
+      &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+
+  reader.offset = 0u;
+  sink.length = 0u;
+  status = lonejson_array_rewrite_reader(
+      default_lj, "", test_state_reader, &reader, test_buffer_sink_write, &sink,
+      &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)out, "[\"ab\",{\"id\":9,\"label\":\"tail\"}]") ==
+         0);
+
+  lonejson_free(limited_lj);
+  lonejson_free(default_lj);
 }
 
 static void test_array_rewrite_source_and_parent_failures(void) {
@@ -1061,11 +1103,10 @@ static void test_array_rewrite_source_and_parent_failures(void) {
   options.item_map = &test_item_map;
   options.item_dst = &item;
   options.item = test_array_rewrite_invalid_source_item;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
-  lonejson_json_value_init(&nonrewindable);
+  lonejson_json_value_init(test_default_runtime(), &nonrewindable);
   replacement_reader.json = replacement_json;
   replacement_reader.offset = 0u;
   replacement_reader.chunk_size = 64u;
@@ -1076,18 +1117,16 @@ static void test_array_rewrite_source_and_parent_failures(void) {
   sink.length = 0u;
   options.item = test_array_rewrite_nonrewindable_json_item;
   options.user = &nonrewindable;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
   lonejson_json_value_cleanup(&nonrewindable);
 
   memset(&options, 0, sizeof(options));
   options.append = test_array_rewrite_invalid_append;
   reader.offset = 0u;
   sink.length = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(parents, 0, sizeof(parents));
   memset(&options, 0, sizeof(options));
@@ -1099,9 +1138,9 @@ static void test_array_rewrite_source_and_parent_failures(void) {
   options.parent_count = 1u;
   options.append = test_array_rewrite_append;
   options.user = &seen;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "boards[].items", test_state_reader, &reader,
-             test_buffer_sink_write, &sink, &options, &error) ==
+             test_buffer_sink_write, &sink, NULL, &options, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(&board, 0, sizeof(board));
@@ -1110,9 +1149,9 @@ static void test_array_rewrite_source_and_parent_failures(void) {
   reader.json = nested_missing_parent;
   reader.offset = 0u;
   sink.length = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "boards[].items", test_state_reader, &reader,
-             test_buffer_sink_write, &sink, &options, &error) ==
+             test_buffer_sink_write, &sink, NULL, &options, &error) ==
          LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
 }
 
@@ -1135,9 +1174,9 @@ static void test_array_rewrite_append_only_and_object_path(void) {
   sink.length = 0u;
   options.append = test_array_rewrite_append;
   options.user = &seen;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "meta.items", test_state_reader, &reader, test_buffer_sink_write,
-             &sink, &options, &error) == LONEJSON_STATUS_OK);
+             &sink, NULL, &options, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out,
                 "{\"meta\":{\"items\":[{\"id\":4,\"label\":\"keep\"},"
                 "{\"id\":99,\"label\":\"tail\"}]}}") == 0);
@@ -1169,9 +1208,8 @@ static void test_array_rewrite_empty_all_drop_and_all_append(void) {
   reader.json = empty;
   reader.offset = 0u;
   reader.chunk_size = 64u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_OK);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out, "[{\"id\":99,\"label\":\"tail\"}]") == 0);
   EXPECT(seen.appended == 1u);
 
@@ -1186,9 +1224,8 @@ static void test_array_rewrite_empty_all_drop_and_all_append(void) {
   reader.json = all_drop;
   reader.offset = 0u;
   reader.chunk_size = 64u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_OK);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out, "[]") == 0);
   EXPECT(seen.count == 2u);
 }
@@ -1198,7 +1235,7 @@ static void test_array_rewrite_append_only_root_zero_alloc(void) {
   test_reader_state reader = {json, 0u, 64u};
   test_array_rewrite_seen seen;
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   test_allocator_state alloc_state;
   lonejson_error error;
   test_buffer_sink sink;
@@ -1207,19 +1244,18 @@ static void test_array_rewrite_append_only_root_zero_alloc(void) {
   memset(&seen, 0, sizeof(seen));
   memset(&options, 0, sizeof(options));
   test_allocator_init(&alloc_state);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &alloc_state.allocator;
   seen.append.id = 99;
   strcpy(seen.append.label, "tail");
   sink.buffer = out;
   sink.capacity = sizeof(out);
   sink.length = 0u;
-  options.parse_options = &parse_options;
   options.append = test_array_rewrite_append;
   options.user = &seen;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_OK);
+             &parse_options, &options, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp((char *)out, "[{\"id\":99,\"label\":\"tail\"}]") == 0);
   EXPECT(alloc_state.stats.peak_bytes_live == 0u);
   EXPECT(alloc_state.stats.bytes_live == 0u);
@@ -1242,8 +1278,8 @@ static void test_array_rewrite_spooled_replacement_item(void) {
   memset(&item, 0, sizeof(item));
   memset(&options, 0, sizeof(options));
   strcpy(replacement.id, "spooled");
-  lonejson_spooled_init(&replacement.text, &test_spool_small_options);
-  lonejson_spooled_init(&replacement.bytes, &test_spool_small_options);
+  lonejson_spooled_init_with_allocator(&replacement.text, &test_spool_small_options, NULL);
+  lonejson_spooled_init_with_allocator(&replacement.bytes, &test_spool_small_options, NULL);
   EXPECT(lonejson_spooled_append(&replacement.text, large_text,
                                  strlen(large_text), &error) ==
          LONEJSON_STATUS_OK);
@@ -1256,9 +1292,8 @@ static void test_array_rewrite_spooled_replacement_item(void) {
   options.item_dst = &item;
   options.item = test_array_rewrite_spool_replace_item;
   options.user = &replacement;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_OK);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_OK);
   EXPECT(strstr((char *)out, "\"id\":\"spooled\"") != NULL);
   EXPECT(strstr((char *)out, large_text) != NULL);
 
@@ -1276,7 +1311,7 @@ static void test_array_rewrite_large_array_memory_bound(void) {
   test_array_rewrite_seen seen;
   test_item item;
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   test_allocator_state alloc_state;
   lonejson_error error;
   test_array_rewrite_count_sink sink;
@@ -1302,9 +1337,8 @@ static void test_array_rewrite_large_array_memory_bound(void) {
   memset(&options, 0, sizeof(options));
   memset(&sink, 0, sizeof(sink));
   test_allocator_init(&alloc_state);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &alloc_state.allocator;
-  options.parse_options = &parse_options;
   options.item_map = &test_item_map;
   options.item_dst = &item;
   options.item = test_array_rewrite_items;
@@ -1312,9 +1346,10 @@ static void test_array_rewrite_large_array_memory_bound(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 13u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "items", test_state_reader, &reader,
-             test_array_rewrite_count_sink_write, &sink, &options, &error) ==
+             test_array_rewrite_count_sink_write, &sink, &parse_options,
+             &options, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(seen.count == 1000u);
   EXPECT(sink.bytes > 10000u);
@@ -1332,7 +1367,7 @@ static void test_array_rewrite_owned_item_cleanup_between_items(void) {
   test_reader_state reader;
   test_array_rewrite_owned_item item;
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   test_allocator_state alloc_state;
   lonejson_error error;
   test_array_rewrite_count_sink sink;
@@ -1359,9 +1394,8 @@ static void test_array_rewrite_owned_item_cleanup_between_items(void) {
   memset(&sink, 0, sizeof(sink));
   count = 0u;
   test_allocator_init(&alloc_state);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &alloc_state.allocator;
-  options.parse_options = &parse_options;
   options.item_map = &test_array_rewrite_owned_item_map;
   options.item_dst = &item;
   options.item = test_array_rewrite_count_owned_item;
@@ -1369,9 +1403,10 @@ static void test_array_rewrite_owned_item_cleanup_between_items(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 17u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader,
-             test_array_rewrite_count_sink_write, &sink, &options, &error) ==
+             test_array_rewrite_count_sink_write, &sink, &parse_options,
+             &options, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(count == 200u);
   EXPECT(alloc_state.stats.bytes_live == 0u);
@@ -1401,9 +1436,8 @@ static void test_array_rewrite_truncation_status_is_preserved(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 17u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_TRUNCATED);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_TRUNCATED);
   EXPECT(error.truncated);
   EXPECT(error.code == LONEJSON_STATUS_TRUNCATED);
   EXPECT(count == 1u);
@@ -1411,7 +1445,7 @@ static void test_array_rewrite_truncation_status_is_preserved(void) {
   EXPECT(strcmp((const char *)out,
                 "[{\"id\":4,\"label\":\"this-label-is-too-long\"}]") == 0);
 
-  lonejson_json_value_init(&value);
+  lonejson_json_value_init(test_default_runtime(), &value);
   memset(&options, 0, sizeof(options));
   memset(&sink, 0, sizeof(sink));
   sink.buffer = out;
@@ -1419,9 +1453,8 @@ static void test_array_rewrite_truncation_status_is_preserved(void) {
   options.item_value = &value;
   options.item = test_array_rewrite_truncated_item_callback;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
-             "", test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_TRUNCATED);
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader, test_buffer_sink_write, &sink, NULL, &options, &error) == LONEJSON_STATUS_TRUNCATED);
   lonejson_json_value_cleanup(&value);
 }
 
@@ -1436,7 +1469,7 @@ static void test_array_rewrite_owned_parent_cleanup_between_parents(void) {
   test_array_rewrite_owned_parent parent;
   lonejson_array_rewrite_parent parents[1];
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   test_allocator_state alloc_state;
   lonejson_error error;
   test_array_rewrite_count_sink sink;
@@ -1464,12 +1497,11 @@ static void test_array_rewrite_owned_parent_cleanup_between_parents(void) {
   memset(&sink, 0, sizeof(sink));
   count = 0u;
   test_allocator_init(&alloc_state);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &alloc_state.allocator;
   parents[0].segment = "boards";
   parents[0].map = &test_array_rewrite_owned_parent_map;
   parents[0].dst = &parent;
-  options.parse_options = &parse_options;
   options.parents = parents;
   options.parent_count = 1u;
   options.append = test_array_rewrite_owned_parent_append;
@@ -1477,9 +1509,10 @@ static void test_array_rewrite_owned_parent_cleanup_between_parents(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 19u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "boards[].items", test_state_reader, &reader,
-             test_array_rewrite_count_sink_write, &sink, &options, &error) ==
+             test_array_rewrite_count_sink_write, &sink, &parse_options,
+             &options, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(count == 200u);
   EXPECT(alloc_state.stats.bytes_live == 0u);
@@ -1492,54 +1525,52 @@ static void test_array_rewrite_owned_item_cleanup_on_failures(void) {
   test_array_rewrite_owned_required_item required_item;
   test_array_rewrite_owned_item item;
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   test_allocator_state alloc_state;
   lonejson_error error;
   test_failing_sink failing_sink;
   test_array_rewrite_count_sink count_sink;
 
   test_allocator_init(&alloc_state);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &alloc_state.allocator;
 
   memset(&required_item, 0, sizeof(required_item));
   memset(&options, 0, sizeof(options));
   memset(&count_sink, 0, sizeof(count_sink));
-  options.parse_options = &parse_options;
   options.item_map = &test_array_rewrite_owned_required_item_map;
   options.item_dst = &required_item;
   options.item = test_array_rewrite_fail_owned_item;
   reader.json = partial;
   reader.offset = 0u;
   reader.chunk_size = 64u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader,
-             test_array_rewrite_count_sink_write, &count_sink, &options,
-             &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+             test_array_rewrite_count_sink_write, &count_sink, &parse_options,
+             &options, &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
   EXPECT(alloc_state.stats.bytes_live == 0u);
 
   memset(&item, 0, sizeof(item));
   memset(&options, 0, sizeof(options));
   memset(&count_sink, 0, sizeof(count_sink));
-  options.parse_options = &parse_options;
   options.item_map = &test_array_rewrite_owned_item_map;
   options.item_dst = &item;
   options.item = test_array_rewrite_fail_owned_item;
   reader.json = json;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader,
-             test_array_rewrite_count_sink_write, &count_sink, &options,
-             &error) == LONEJSON_STATUS_CALLBACK_FAILED);
+             test_array_rewrite_count_sink_write, &count_sink, &parse_options,
+             &options, &error) == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(alloc_state.stats.bytes_live == 0u);
 
   memset(&item, 0, sizeof(item));
   options.item = test_array_rewrite_bad_action_owned_item;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader,
-             test_array_rewrite_count_sink_write, &count_sink, &options,
-             &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+             test_array_rewrite_count_sink_write, &count_sink, &parse_options,
+             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(alloc_state.stats.bytes_live == 0u);
 
   memset(&item, 0, sizeof(item));
@@ -1548,9 +1579,9 @@ static void test_array_rewrite_owned_item_cleanup_on_failures(void) {
   failing_sink.total = 0u;
   failing_sink.fail_after = 2u;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "", test_state_reader, &reader, test_failing_sink_write,
-             &failing_sink, &options, &error) ==
+             &failing_sink, &parse_options, &options, &error) ==
          LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(alloc_state.stats.bytes_live == 0u);
 }
@@ -1565,14 +1596,14 @@ static void test_array_rewrite_owned_parent_cleanup_on_failures(void) {
   test_array_rewrite_owned_parent parent;
   lonejson_array_rewrite_parent parents[1];
   lonejson_array_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   test_allocator_state alloc_state;
   lonejson_error error;
   test_array_rewrite_count_sink count_sink;
   test_failing_sink failing_sink;
 
   test_allocator_init(&alloc_state);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &alloc_state.allocator;
 
   memset(&required_parent, 0, sizeof(required_parent));
@@ -1582,7 +1613,6 @@ static void test_array_rewrite_owned_parent_cleanup_on_failures(void) {
   parents[0].segment = "boards";
   parents[0].map = &test_array_rewrite_owned_required_parent_map;
   parents[0].dst = &required_parent;
-  options.parse_options = &parse_options;
   options.parents = parents;
   options.parent_count = 1u;
   options.append = test_array_rewrite_owned_parent_append;
@@ -1590,10 +1620,10 @@ static void test_array_rewrite_owned_parent_cleanup_on_failures(void) {
   reader.json = missing_required;
   reader.offset = 0u;
   reader.chunk_size = 64u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "boards[].items", test_state_reader, &reader,
-             test_array_rewrite_count_sink_write, &count_sink, &options,
-             &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+             test_array_rewrite_count_sink_write, &count_sink, &parse_options,
+             &options, &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
   EXPECT(alloc_state.stats.bytes_live == 0u);
 
   memset(&parent, 0, sizeof(parent));
@@ -1602,7 +1632,6 @@ static void test_array_rewrite_owned_parent_cleanup_on_failures(void) {
   parents[0].segment = "boards";
   parents[0].map = &test_array_rewrite_owned_parent_map;
   parents[0].dst = &parent;
-  options.parse_options = &parse_options;
   options.parents = parents;
   options.parent_count = 1u;
   options.append = test_array_rewrite_owned_parent_append;
@@ -1611,9 +1640,10 @@ static void test_array_rewrite_owned_parent_cleanup_on_failures(void) {
   failing_sink.fail_after = 2u;
   reader.json = sink_failure;
   reader.offset = 0u;
-  EXPECT(lonejson_array_rewrite_reader(
+  EXPECT(test_array_rewrite_reader(
              "boards[].items", test_state_reader, &reader,
-             test_failing_sink_write, &failing_sink, &options, &error) ==
+             test_failing_sink_write, &failing_sink, &parse_options, &options,
+             &error) ==
          LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(alloc_state.stats.bytes_live == 0u);
 }
@@ -1653,8 +1683,7 @@ static void test_array_rewrite_path_helper(void) {
   options.item = test_array_rewrite_items;
   options.append = test_array_rewrite_append;
   options.user = &seen;
-  EXPECT(lonejson_array_rewrite_path("", input_path, output_path, &options,
-                                     &error) == LONEJSON_STATUS_OK);
+  EXPECT(test_array_rewrite_path("", input_path, output_path, NULL, &options, &error) == LONEJSON_STATUS_OK);
   fp = fopen(output_path, "rb");
   EXPECT(fp != NULL);
   if (fp != NULL) {
@@ -1668,8 +1697,7 @@ static void test_array_rewrite_path_helper(void) {
   EXPECT(fd >= 0);
   if (fd >= 0) {
     close(fd);
-    EXPECT(lonejson_array_rewrite_path("", same_path, same_path, &options,
-                                       &error) ==
+    EXPECT(test_array_rewrite_path("", same_path, same_path, NULL, &options, &error) ==
            LONEJSON_STATUS_INVALID_ARGUMENT);
     fp = fopen(same_path, "rb");
     EXPECT(fp != NULL);
@@ -1702,28 +1730,24 @@ static void test_array_rewrite_helper_failures(void) {
   options.append = test_array_rewrite_append;
   options.user = &seen;
 
-  EXPECT(lonejson_array_rewrite_reader_to_filep(
-             "", test_state_reader, &reader, NULL, &options, &error) ==
+  EXPECT(test_array_rewrite_reader_to_filep(
+             "", test_state_reader, &reader, NULL, NULL, &options, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(lonejson_array_rewrite_reader_to_fd(
-             "", test_state_reader, &reader, -1, &options, &error) ==
+  EXPECT(test_array_rewrite_reader_to_fd(
+             "", test_state_reader, &reader, -1, NULL, &options, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(lonejson_array_rewrite_filep(
-             "", NULL, test_array_rewrite_count_sink_write, &seen, &options,
-             &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(lonejson_array_rewrite_filep_to_filep("", NULL, NULL, &options,
-                                               &error) ==
+  EXPECT(test_array_rewrite_filep(
+             "", NULL, test_array_rewrite_count_sink_write, &seen, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_filep_to_filep("", NULL, NULL, NULL, &options, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(lonejson_array_rewrite_fd(
-             "", -1, test_array_rewrite_count_sink_write, &seen, &options,
-             &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(lonejson_array_rewrite_fd_to_fd("", -1, -1, &options, &error) ==
+  EXPECT(test_array_rewrite_fd(
+             "", -1, test_array_rewrite_count_sink_write, &seen, NULL, &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_array_rewrite_fd_to_fd("", -1, -1, NULL, &options, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(lonejson_array_rewrite_path(
+  EXPECT(test_array_rewrite_path(
              "", "/tmp/does-not-exist-lonejson-array-rewrite",
-             output_path, &options, &error) == LONEJSON_STATUS_IO_ERROR);
-  EXPECT(lonejson_array_rewrite_path("", NULL, output_path, &options,
-                                     &error) ==
+             output_path, NULL, &options, &error) == LONEJSON_STATUS_IO_ERROR);
+  EXPECT(test_array_rewrite_path("", NULL, output_path, NULL, &options, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
 
   fd = mkstemp(output_path);
@@ -1731,8 +1755,8 @@ static void test_array_rewrite_helper_failures(void) {
   if (fd >= 0) {
     close(fd);
     reader.offset = 0u;
-    EXPECT(lonejson_array_rewrite_reader_to_fd(
-               "", test_state_reader, &reader, fd, &options, &error) ==
+    EXPECT(test_array_rewrite_reader_to_fd(
+               "", test_state_reader, &reader, fd, NULL, &options, &error) ==
            LONEJSON_STATUS_IO_ERROR);
     unlink(output_path);
   }
@@ -1741,11 +1765,60 @@ static void test_array_rewrite_helper_failures(void) {
   EXPECT(fp != NULL);
   if (fp != NULL) {
     reader.offset = 0u;
-    EXPECT(lonejson_array_rewrite_reader_to_filep(
-               "", test_state_reader, &reader, fp, &options, &error) ==
+    EXPECT(test_array_rewrite_reader_to_filep(
+               "", test_state_reader, &reader, fp, NULL, &options, &error) ==
            LONEJSON_STATUS_OK);
     fclose(fp);
   }
+}
+
+static void test_array_rewrite_path_rejects_invalid_runtime_without_truncating(void) {
+  char input_path[] = "/tmp/lonejson-array-rewrite-invalid-in-XXXXXX";
+  char output_path[] = "/tmp/lonejson-array-rewrite-invalid-out-XXXXXX";
+  const char *input_json = "[1,2,3]";
+  const char *sentinel = "keep me";
+  test_array_rewrite_seen seen;
+  lonejson_array_rewrite_options options;
+  lonejson_error error;
+  FILE *fp;
+  char buffer[64];
+  size_t n;
+  int fd;
+
+  fd = write_temp_text_file(input_path, input_json);
+  EXPECT(fd >= 0);
+  if (fd < 0) {
+    return;
+  }
+  close(fd);
+
+  fd = write_temp_text_file(output_path, sentinel);
+  EXPECT(fd >= 0);
+  if (fd < 0) {
+    unlink(input_path);
+    return;
+  }
+  close(fd);
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&options, 0, sizeof(options));
+  options.append = test_array_rewrite_append;
+  options.user = &seen;
+  EXPECT(lonejson_array_rewrite_path(NULL, "", input_path, output_path,
+                                     &options, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  fp = fopen(output_path, "rb");
+  EXPECT(fp != NULL);
+  if (fp != NULL) {
+    n = fread(buffer, 1u, sizeof(buffer) - 1u, fp);
+    buffer[n] = '\0';
+    fclose(fp);
+    EXPECT(strcmp(buffer, sentinel) == 0);
+  }
+
+  unlink(input_path);
+  unlink(output_path);
 }
 
 static void test_array_rewrite_fd_to_fd_helper(void) {
@@ -1784,8 +1857,7 @@ static void test_array_rewrite_fd_to_fd_helper(void) {
   strcpy(seen.append.label, "tail");
   options.append = test_array_rewrite_append;
   options.user = &seen;
-  EXPECT(lonejson_array_rewrite_fd_to_fd("", input_fd, output_fd, &options,
-                                         &error) == LONEJSON_STATUS_OK);
+  EXPECT(test_array_rewrite_fd_to_fd("", input_fd, output_fd, NULL, &options, &error) == LONEJSON_STATUS_OK);
   close(input_fd);
   close(output_fd);
 

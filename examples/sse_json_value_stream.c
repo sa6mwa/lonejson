@@ -121,6 +121,7 @@ int main(void) {
       "id: evt-2\n"
       "data: \"done\"\n"
       "\n";
+  lonejson *lj;
   lj_value_visitor visitor;
   lj_sse_json_options options;
   lj_json_value value;
@@ -128,6 +129,12 @@ int main(void) {
   visit_log log;
   lj_error error;
   lj_status status;
+
+  lj = lj_new(NULL, &error);
+  if (lj == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
 
   memset(&log, 0, sizeof(log));
   visitor = lj_default_value_visitor();
@@ -147,38 +154,42 @@ int main(void) {
   visitor.boolean_value = on_boolean;
   visitor.null_value = on_null;
 
-  lj_json_value_init(&value);
-  status = lj_json_value_set_parse_visitor(&value, &visitor, &log, NULL, &error);
+  lj_json_value_init(lj, &value);
+  status = lj_json_value_set_parse_visitor(&value, &visitor, &log, &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "visitor setup failed: %s\n", error.message);
+    lj_free(lj);
     return 1;
   }
 
   options.event_names = selected;
   options.event_name_count = 1u;
-  options.parse_options = NULL;
 
   sse = lj_sse_open(NULL, &error);
   if (sse == NULL) {
     fprintf(stderr, "SSE open failed: %s\n", error.message);
     lj_json_value_cleanup(&value);
+    lj_free(lj);
     return 1;
   }
 
-  status = lj_sse_push_json_value(sse, &value, sse_bytes, strlen(sse_bytes),
-                                  &options, on_sse_json_value, &log, &error);
+  status = lj_sse_push_json_value(lj, sse, &value, sse_bytes,
+                                  strlen(sse_bytes), &options,
+                                  on_sse_json_value, &log, &error);
   if (status == LJ_STATUS_OK) {
-    status = lj_sse_finish_json_value(sse, &value, &options, on_sse_json_value,
-                                      &log, &error);
+    status = lj_sse_finish_json_value(lj, sse, &value, &options,
+                                      on_sse_json_value, &log, &error);
   }
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "SSE JSON value parse failed: %s\n", error.message);
     lj_sse_close(sse);
     lj_json_value_cleanup(&value);
+    lj_free(lj);
     return 1;
   }
 
   lj_sse_close(sse);
   lj_json_value_cleanup(&value);
+  lj_free(lj);
   return 0;
 }

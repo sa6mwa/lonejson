@@ -50,6 +50,76 @@ lonejson__decode_unicode_quad(const unsigned char *src, lonejson_uint32 *out) {
   return 1;
 }
 
+static LONEJSON__INLINE lonejson_status
+lonejson__direct_string_append_codepoint(lonejson_parser *parser,
+                                         lonejson_uint32 cp) {
+  unsigned char utf8[4];
+  size_t utf8_len;
+  size_t limit;
+  size_t remaining;
+  size_t copy_len;
+
+  if (!parser->direct_string_active || parser->direct_string_ptr == NULL ||
+      parser->direct_string_capacity == 0u) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_INTERNAL_ERROR,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "direct string field is not active");
+  }
+  if (cp == 0u) {
+    return lonejson__direct_string_reject_nul(parser);
+  }
+  if (cp <= 0x7Fu) {
+    utf8[0] = (unsigned char)cp;
+    utf8_len = 1u;
+  } else if (cp <= 0x7FFu) {
+    utf8[0] = (unsigned char)(0xC0u | (cp >> 6u));
+    utf8[1] = (unsigned char)(0x80u | (cp & 0x3Fu));
+    utf8_len = 2u;
+  } else if (cp <= 0xFFFFu) {
+    utf8[0] = (unsigned char)(0xE0u | (cp >> 12u));
+    utf8[1] = (unsigned char)(0x80u | ((cp >> 6u) & 0x3Fu));
+    utf8[2] = (unsigned char)(0x80u | (cp & 0x3Fu));
+    utf8_len = 3u;
+  } else if (cp <= 0x10FFFFu) {
+    utf8[0] = (unsigned char)(0xF0u | (cp >> 18u));
+    utf8[1] = (unsigned char)(0x80u | ((cp >> 12u) & 0x3Fu));
+    utf8[2] = (unsigned char)(0x80u | ((cp >> 6u) & 0x3Fu));
+    utf8[3] = (unsigned char)(0x80u | (cp & 0x3Fu));
+    utf8_len = 4u;
+  } else {
+    return lonejson__set_error(
+        &parser->error, LONEJSON_STATUS_INVALID_JSON, parser->error.offset,
+        parser->error.line, parser->error.column, "invalid unicode codepoint");
+  }
+
+  limit = parser->direct_string_capacity - 1u;
+  remaining = (parser->direct_string_len < limit)
+                  ? (limit - parser->direct_string_len)
+                  : 0u;
+  copy_len = (utf8_len < remaining) ? utf8_len : remaining;
+  if (copy_len != 0u) {
+    memcpy(parser->direct_string_ptr + parser->direct_string_len, utf8,
+           copy_len);
+    parser->direct_string_len += copy_len;
+  }
+  if (copy_len == utf8_len) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (parser->direct_string_overflow_policy == LONEJSON_OVERFLOW_FAIL) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "string field '%s' exceeds fixed capacity",
+                               parser->direct_string_field != NULL
+                                   ? parser->direct_string_field->json_key
+                                   : "<unknown>");
+  }
+  parser->direct_string_truncated = 1;
+  parser->error.truncated = 1;
+  return LONEJSON_STATUS_OK;
+}
+
 static LONEJSON__INLINE lonejson_status lonejson__append_unicode_codepoint(
     lonejson_parser *parser, lonejson_uint32 cp) {
   unsigned char utf8[4];
@@ -63,6 +133,10 @@ static LONEJSON__INLINE lonejson_status lonejson__append_unicode_codepoint(
           "failed to append unicode escape");
     }
     return LONEJSON_STATUS_OK;
+  }
+  if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_DIRECT &&
+      parser->direct_string_dst == NULL) {
+    return lonejson__direct_string_append_codepoint(parser, cp);
   }
   if (cp <= 0x7Fu) {
     utf8[0] = (unsigned char)cp;

@@ -13,7 +13,7 @@ static void test_generator_compact_streams_event_map(void) {
   strcpy(event.id, "evt-1");
   event.ok = true;
 
-  EXPECT(lonejson_generator_init(&generator, &test_event_map, &event, NULL) ==
+  EXPECT(test_generator_init(&generator, &test_event_map, &event, NULL) ==
          LONEJSON_STATUS_OK);
   total = 0u;
   eof = 0;
@@ -32,7 +32,7 @@ static void test_generator_compact_streams_event_map(void) {
 static void test_generator_pretty_streams_source_field(void) {
   test_source_doc doc;
   lonejson_generator generator;
-  lonejson_write_options options = lonejson_default_write_options();
+  lonejson__write_options options = lonejson__default_write_options();
   char path[] = "/tmp/lonejson-generator-XXXXXX";
   unsigned char chunk[64];
   char output[512];
@@ -66,7 +66,7 @@ static void test_generator_pretty_streams_source_field(void) {
   fclose(fp);
 
   EXPECT(lonejson_source_set_path(&doc.text, path, NULL) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_generator_init(&generator, &test_source_doc_map, &doc,
+  EXPECT(test_generator_init(&generator, &test_source_doc_map, &doc,
                                  &options) == LONEJSON_STATUS_OK);
   total = 0u;
   eof = 0;
@@ -98,9 +98,9 @@ static void test_generator_streams_json_value_fields(void) {
   memset(&generator, 0, sizeof(generator));
   memset(output, 0, sizeof(output));
   strcpy(doc.id, "evt-1");
-  lonejson_json_value_init(&doc.selector);
-  lonejson_json_value_init(&doc.fields);
-  lonejson_json_value_init(&doc.last_error);
+  lonejson_json_value_init(test_default_runtime(), &doc.selector);
+  lonejson_json_value_init(test_default_runtime(), &doc.fields);
+  lonejson_json_value_init(test_default_runtime(), &doc.last_error);
   EXPECT(lonejson_json_value_set_buffer(
              &doc.selector, "{\"op\":\"and\",\"clauses\":[1,true]}",
              strlen("{\"op\":\"and\",\"clauses\":[1,true]}"),
@@ -110,7 +110,7 @@ static void test_generator_streams_json_value_fields(void) {
              strlen("[\"id\",{\"metrics\":[null,3.14]}]"),
              NULL) == LONEJSON_STATUS_OK);
 
-  EXPECT(lonejson_generator_init(&generator, &test_json_value_doc_map, &doc,
+  EXPECT(test_generator_init(&generator, &test_json_value_doc_map, &doc,
                                  NULL) == LONEJSON_STATUS_OK);
   total = 0u;
   eof = 0;
@@ -133,7 +133,7 @@ static void test_generator_streams_json_value_fields(void) {
 static void test_generator_pretty_streams_json_value_reader(void) {
   test_json_value_doc doc;
   lonejson_generator generator;
-  lonejson_write_options options = lonejson_default_write_options();
+  lonejson__write_options options = lonejson__default_write_options();
   test_reader_state selector_reader = {
       "{\"filters\":[{\"op\":\"eq\",\"field\":\"kind\",\"value\":\"event\"},"
       "{\"op\":\"gt\",\"field\":\"score\",\"value\":3.5}],\"ok\":true}",
@@ -148,9 +148,9 @@ static void test_generator_pretty_streams_json_value_reader(void) {
   memset(&generator, 0, sizeof(generator));
   memset(output, 0, sizeof(output));
   strcpy(doc.id, "evt-1");
-  lonejson_json_value_init(&doc.selector);
-  lonejson_json_value_init(&doc.fields);
-  lonejson_json_value_init(&doc.last_error);
+  lonejson_json_value_init(test_default_runtime(), &doc.selector);
+  lonejson_json_value_init(test_default_runtime(), &doc.fields);
+  lonejson_json_value_init(test_default_runtime(), &doc.last_error);
   options.pretty = 1;
 
   EXPECT(lonejson_json_value_set_reader(&doc.selector, test_state_reader,
@@ -161,7 +161,7 @@ static void test_generator_pretty_streams_json_value_reader(void) {
              strlen("[\"id\",\"kind\",{\"nested\":[1,null,false]}]"),
              NULL) == LONEJSON_STATUS_OK);
 
-  EXPECT(lonejson_generator_init(&generator, &test_json_value_doc_map, &doc,
+  EXPECT(test_generator_init(&generator, &test_json_value_doc_map, &doc,
                                  &options) == LONEJSON_STATUS_OK);
   total = 0u;
   eof = 0;
@@ -207,7 +207,7 @@ static void test_serialize_omits_empty_optional_fields(void) {
   memset(&generator, 0, sizeof(generator));
   lonejson_error_init(&error);
   lonejson_source_init(&doc.payload);
-  lonejson_json_value_init(&doc.metadata);
+  lonejson_json_value_init(test_default_runtime(), &doc.metadata);
   doc.model = (char *)malloc(strlen("gpt-5-nano") + 1u);
   EXPECT(doc.model != NULL);
   if (doc.model == NULL) {
@@ -220,14 +220,14 @@ static void test_serialize_omits_empty_optional_fields(void) {
   doc.stream = true;
 
   allocated =
-      lonejson_serialize_alloc(&test_omit_doc_map, &doc, NULL, NULL, &error);
+      test_serialize_alloc(&test_omit_doc_map, &doc, NULL, NULL, &error);
   EXPECT(allocated != NULL);
   if (allocated != NULL) {
     EXPECT(strcmp(allocated, "{\"model\":\"gpt-5-nano\"}") == 0);
     free(allocated);
   }
 
-  status = lonejson_parse_cstr(
+  status = test_parse_cstr(
       &test_omit_doc_map, &parsed,
       "{\"model\":\"parsed\",\"max_output_tokens\":5,\"seed\":6,"
       "\"temperature\":1.5,\"stream\":false}",
@@ -242,7 +242,7 @@ static void test_serialize_omits_empty_optional_fields(void) {
   EXPECT(parsed.stream == false);
   EXPECT(parsed.has_stream != 0);
   allocated =
-      lonejson_serialize_alloc(&test_omit_doc_map, &parsed, NULL, NULL, &error);
+      test_serialize_alloc(&test_omit_doc_map, &parsed, NULL, NULL, &error);
   EXPECT(allocated != NULL);
   if (allocated != NULL) {
     EXPECT(strcmp(allocated,
@@ -291,7 +291,7 @@ static void test_serialize_omits_empty_optional_fields(void) {
   EXPECT(lonejson_source_is_rewindable(&doc.payload) != 0);
   EXPECT(lonejson_json_value_is_rewindable(&doc.metadata) != 0);
 
-  status = lonejson_serialize_buffer(&test_omit_doc_map, &doc, buffer,
+  status = test_serialize_buffer(&test_omit_doc_map, &doc, buffer,
                                      sizeof(buffer), &needed, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer,
@@ -301,7 +301,7 @@ static void test_serialize_omits_empty_optional_fields(void) {
                 "\"tags\":[\"request\"],\"tools\":[{\"id\":7,"
                 "\"label\":\"tool\"}],\"metadata\":{\"ok\":true}}") == 0);
   measured = 0u;
-  status = lonejson_generator_measure(&test_omit_doc_map, &doc, &measured, NULL,
+  status = test_generator_measure(&test_omit_doc_map, &doc, &measured, NULL,
                                       &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(measured == strlen(buffer));
@@ -310,12 +310,12 @@ static void test_serialize_omits_empty_optional_fields(void) {
   sink.buffer = (unsigned char *)sink_output;
   sink.capacity = sizeof(sink_output);
   sink.length = 0u;
-  status = lonejson_serialize_sink(&test_omit_doc_map, &doc,
+  status = test_serialize_sink(&test_omit_doc_map, &doc,
                                    test_buffer_sink_write, &sink, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(sink_output, buffer) == 0);
 
-  EXPECT(lonejson_generator_init(&generator, &test_omit_doc_map, &doc, NULL) ==
+  EXPECT(test_generator_init(&generator, &test_omit_doc_map, &doc, NULL) ==
          LONEJSON_STATUS_OK);
   memset(generated, 0, sizeof(generated));
   total = 0u;
@@ -332,12 +332,12 @@ static void test_serialize_omits_empty_optional_fields(void) {
   lonejson_generator_cleanup(&generator);
 
   lonejson_json_value_cleanup(&doc.metadata);
-  lonejson_json_value_init(&doc.metadata);
+  lonejson_json_value_init(test_default_runtime(), &doc.metadata);
   EXPECT(lonejson_json_value_set_reader(&doc.metadata, test_state_reader,
                                         &metadata_reader,
                                         &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_json_value_is_rewindable(&doc.metadata) == 0);
-  status = lonejson_generator_measure(&test_omit_doc_map, &doc, &measured, NULL,
+  status = test_generator_measure(&test_omit_doc_map, &doc, &measured, NULL,
                                       &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(strstr(error.message, "non-rewindable") != NULL);
@@ -362,7 +362,7 @@ static void test_nullable_presence_primitives(void) {
   doc.has_ratio = 0;
   doc.has_enabled = 0;
   doc.child.has_priority = 0;
-  status = lonejson_parse_cstr(&test_nullable_primitives_map, &doc,
+  status = test_parse_cstr(&test_nullable_primitives_map, &doc,
                                "{\"required_count\":7}", NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(doc.required_count == 7);
@@ -372,7 +372,7 @@ static void test_nullable_presence_primitives(void) {
   EXPECT(doc.has_enabled == 0);
   EXPECT(doc.child.has_priority == 0);
 
-  status = lonejson_parse_cstr(
+  status = test_parse_cstr(
       &test_nullable_primitives_map, &doc,
       "{\"count\":null,\"seed\":null,\"ratio\":null,\"enabled\":null,"
       "\"required_count\":8,\"child\":{\"priority\":null}}",
@@ -390,7 +390,7 @@ static void test_nullable_presence_primitives(void) {
   EXPECT(doc.child.priority == 0);
   EXPECT(doc.child.has_priority == 0);
 
-  status = lonejson_parse_cstr(
+  status = test_parse_cstr(
       &test_nullable_primitives_map, &doc,
       "{\"count\":-12,\"seed\":42,\"ratio\":1.25,\"enabled\":false,"
       "\"required_count\":9,\"child\":{\"priority\":3}}",
@@ -407,7 +407,7 @@ static void test_nullable_presence_primitives(void) {
   EXPECT(doc.child.priority == 3);
   EXPECT(doc.child.has_priority == 1);
 
-  status = lonejson_serialize_buffer(&test_nullable_primitives_map, &doc,
+  status = test_serialize_buffer(&test_nullable_primitives_map, &doc,
                                      buffer, sizeof(buffer), &needed, NULL,
                                      &error);
   EXPECT(status == LONEJSON_STATUS_OK);
@@ -421,7 +421,7 @@ static void test_nullable_presence_primitives(void) {
   doc.has_ratio = 0;
   doc.has_enabled = 0;
   doc.child.has_priority = 0;
-  status = lonejson_serialize_buffer(&test_nullable_primitives_map, &doc,
+  status = test_serialize_buffer(&test_nullable_primitives_map, &doc,
                                      buffer, sizeof(buffer), &needed, NULL,
                                      &error);
   EXPECT(status == LONEJSON_STATUS_OK);
@@ -444,19 +444,19 @@ static void test_nullable_presence_primitive_failures(void) {
 
   for (i = 0u; i < sizeof(wrong_type_json) / sizeof(wrong_type_json[0]); ++i) {
     memset(&doc, 0, sizeof(doc));
-    status = lonejson_parse_cstr(&test_nullable_primitives_map, &doc,
+    status = test_parse_cstr(&test_nullable_primitives_map, &doc,
                                  wrong_type_json[i], NULL, &error);
     EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
   }
 
   memset(&doc, 0, sizeof(doc));
-  status = lonejson_parse_cstr(&test_nullable_primitives_map, &doc,
+  status = test_parse_cstr(&test_nullable_primitives_map, &doc,
                                "{\"required_count\":null}", NULL, &error);
   EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
   EXPECT(strstr(error.message, "null is not allowed") != NULL);
 
   memset(&omit_doc, 0, sizeof(omit_doc));
-  status = lonejson_parse_cstr(&test_omit_doc_map, &omit_doc,
+  status = test_parse_cstr(&test_omit_doc_map, &omit_doc,
                                "{\"model\":\"x\",\"max_output_tokens\":null}",
                                NULL, &error);
   EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
@@ -464,13 +464,13 @@ static void test_nullable_presence_primitive_failures(void) {
   lonejson_cleanup(&test_omit_doc_map, &omit_doc);
 
   memset(&doc, 0, sizeof(doc));
-  status = lonejson_serialize_buffer(&test_bad_nullable_without_presence_map,
+  status = test_serialize_buffer(&test_bad_nullable_without_presence_map,
                                      &doc, buffer, sizeof(buffer), NULL, NULL,
                                      &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(strstr(error.message, "invalid map layout") != NULL);
 
-  status = lonejson_serialize_buffer(&test_bad_nullable_kind_map, &doc, buffer,
+  status = test_serialize_buffer(&test_bad_nullable_kind_map, &doc, buffer,
                                      sizeof(buffer), NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(strstr(error.message, "invalid map layout") != NULL);
@@ -486,7 +486,7 @@ static void test_serialize_omit_layout_failures(void) {
 
   memset(&doc, 0, sizeof(doc));
   lonejson_source_init(&doc.payload);
-  lonejson_json_value_init(&doc.metadata);
+  lonejson_json_value_init(test_default_runtime(), &doc.metadata);
   doc.model = (char *)malloc(strlen("gpt-5-nano") + 1u);
   EXPECT(doc.model != NULL);
   if (doc.model == NULL) {
@@ -499,7 +499,7 @@ static void test_serialize_omit_layout_failures(void) {
   maps[2] = &test_bad_presence_kind_map;
   maps[3] = &test_bad_presence_offset_map;
   for (i = 0u; i < sizeof(maps) / sizeof(maps[0]); ++i) {
-    status = lonejson_serialize_buffer(maps[i], &doc, buffer, sizeof(buffer),
+    status = test_serialize_buffer(maps[i], &doc, buffer, sizeof(buffer),
                                        NULL, NULL, &error);
     EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
     EXPECT(strstr(error.message, "invalid map layout") != NULL);
@@ -513,7 +513,7 @@ static void test_serialize_omit_layout_failures(void) {
 static void test_serialize_omit_pretty_and_recursive_invariants(void) {
   test_omit_doc doc;
   test_omit_deep_doc deep;
-  lonejson_write_options options = lonejson_default_write_options();
+  lonejson__write_options options = lonejson__default_write_options();
   lonejson_error error;
   char buffer[1024];
   lonejson_status status;
@@ -521,7 +521,7 @@ static void test_serialize_omit_pretty_and_recursive_invariants(void) {
   memset(&doc, 0, sizeof(doc));
   memset(&deep, 0, sizeof(deep));
   lonejson_source_init(&doc.payload);
-  lonejson_json_value_init(&doc.metadata);
+  lonejson_json_value_init(test_default_runtime(), &doc.metadata);
   options.pretty = 1;
 
   doc.model = (char *)malloc(strlen("gpt-5-nano") + 1u);
@@ -538,7 +538,7 @@ static void test_serialize_omit_pretty_and_recursive_invariants(void) {
   strcpy(doc.model, "gpt-5-nano");
   strcpy(deep.id, "deep-1");
 
-  status = lonejson_serialize_buffer(&test_pretty_omit_map, &doc, buffer,
+  status = test_serialize_buffer(&test_pretty_omit_map, &doc, buffer,
                                      sizeof(buffer), NULL, &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer, "{\n  \"model\": \"gpt-5-nano\"\n}") == 0);
@@ -558,7 +558,7 @@ static void test_serialize_omit_pretty_and_recursive_invariants(void) {
   EXPECT(lonejson_json_value_set_buffer(&doc.metadata, "{\"ok\":true}",
                                         strlen("{\"ok\":true}"),
                                         &error) == LONEJSON_STATUS_OK);
-  status = lonejson_serialize_buffer(&test_pretty_omit_map, &doc, buffer,
+  status = test_serialize_buffer(&test_pretty_omit_map, &doc, buffer,
                                      sizeof(buffer), NULL, &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer, "{\n"
@@ -569,7 +569,7 @@ static void test_serialize_omit_pretty_and_recursive_invariants(void) {
                         "    }\n"
                         "}") == 0);
 
-  status = lonejson_serialize_buffer(&test_omit_deep_doc_map, &deep, buffer,
+  status = test_serialize_buffer(&test_omit_deep_doc_map, &deep, buffer,
                                      sizeof(buffer), NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer, "{\"id\":\"deep-1\"}") == 0);
@@ -578,7 +578,7 @@ static void test_serialize_omit_pretty_and_recursive_invariants(void) {
   EXPECT(deep.middle.leaf.value != NULL);
   if (deep.middle.leaf.value != NULL) {
     strcpy(deep.middle.leaf.value, "set");
-    status = lonejson_serialize_buffer(&test_omit_deep_doc_map, &deep, buffer,
+    status = test_serialize_buffer(&test_omit_deep_doc_map, &deep, buffer,
                                        sizeof(buffer), NULL, NULL, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
     EXPECT(strcmp(buffer, "{\"id\":\"deep-1\",\"middle\":{\"leaf\":{\"value\":"
@@ -601,7 +601,7 @@ static void test_serialize_omit_empty_implies_null(void) {
 
   memset(&doc, 0, sizeof(doc));
   lonejson_source_init(&doc.payload);
-  lonejson_json_value_init(&doc.metadata);
+  lonejson_json_value_init(test_default_runtime(), &doc.metadata);
   doc.model = (char *)malloc(strlen("gpt-5-nano") + 1u);
   EXPECT(doc.model != NULL);
   if (doc.model == NULL) {
@@ -611,7 +611,7 @@ static void test_serialize_omit_empty_implies_null(void) {
   }
   strcpy(doc.model, "gpt-5-nano");
 
-  status = lonejson_serialize_buffer(&test_omit_empty_null_map, &doc, buffer,
+  status = test_serialize_buffer(&test_omit_empty_null_map, &doc, buffer,
                                      sizeof(buffer), NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer, "{\"model\":\"gpt-5-nano\"}") == 0);
@@ -632,10 +632,10 @@ static void test_serialize_declarative_conditional_helpers(void) {
   lonejson_status status;
 
   memset(&doc, 0, sizeof(doc));
-  lonejson_spooled_init(&doc.text, NULL);
-  lonejson_spooled_init(&doc.bytes, NULL);
+  lonejson_spooled_init_with_allocator(&doc.text, NULL, NULL);
+  lonejson_spooled_init_with_allocator(&doc.bytes, NULL, NULL);
 
-  status = lonejson_serialize_buffer(&test_conditional_doc_map, &doc, buffer,
+  status = test_serialize_buffer(&test_conditional_doc_map, &doc, buffer,
                                      sizeof(buffer), NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer, "{}") == 0);
@@ -648,7 +648,7 @@ static void test_serialize_declarative_conditional_helpers(void) {
     return;
   }
   doc.dyn[0] = '\0';
-  status = lonejson_serialize_buffer(&test_conditional_doc_map, &doc, buffer,
+  status = test_serialize_buffer(&test_conditional_doc_map, &doc, buffer,
                                      sizeof(buffer), NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer, "{}") == 0);
@@ -667,7 +667,7 @@ static void test_serialize_declarative_conditional_helpers(void) {
   doc.bools.items = bools;
   doc.bools.count = 2u;
 
-  status = lonejson_serialize_buffer(&test_conditional_doc_map, &doc, buffer,
+  status = test_serialize_buffer(&test_conditional_doc_map, &doc, buffer,
                                      sizeof(buffer), NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer,
@@ -722,7 +722,7 @@ static void test_rewindability_edges_and_measure_preserves_sources(void) {
   close(bytes_fd);
   close(json_fd);
 
-  lonejson_init(&test_source_doc_map, &source_doc);
+  lonejson_init(test_default_runtime(), &test_source_doc_map, &source_doc);
   strcpy(source_doc.id, "rewind-1");
   text_fp = fopen(text_path, "rb");
   bytes_fd = open(bytes_path, O_RDONLY);
@@ -747,10 +747,10 @@ static void test_rewindability_edges_and_measure_preserves_sources(void) {
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_source_is_rewindable(&source_doc.text) != 0);
   EXPECT(lonejson_source_is_rewindable(&source_doc.bytes) != 0);
-  status = lonejson_generator_measure(&test_source_doc_map, &source_doc,
+  status = test_generator_measure(&test_source_doc_map, &source_doc,
                                       &measured, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_serialize_buffer(&test_source_doc_map, &source_doc, buffer,
+  status = test_serialize_buffer(&test_source_doc_map, &source_doc, buffer,
                                      sizeof(buffer), NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer, "{\"id\":\"rewind-1\",\"text\":\"seekable text\","
@@ -771,12 +771,12 @@ static void test_rewindability_edges_and_measure_preserves_sources(void) {
   if (pipe(pipe_fds) == 0) {
     EXPECT(write(pipe_fds[1], "pipe", 4u) == 4);
     close(pipe_fds[1]);
-    lonejson_init(&test_source_doc_map, &source_doc);
+    lonejson_init(test_default_runtime(), &test_source_doc_map, &source_doc);
     strcpy(source_doc.id, "pipe-1");
     EXPECT(lonejson_source_set_fd(&source_doc.text, pipe_fds[0], &error) ==
            LONEJSON_STATUS_OK);
     EXPECT(lonejson_source_is_rewindable(&source_doc.text) == 0);
-    status = lonejson_generator_measure(&test_source_doc_map, &source_doc,
+    status = test_generator_measure(&test_source_doc_map, &source_doc,
                                         &measured, NULL, &error);
     EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
     lonejson_cleanup(&test_source_doc_map, &source_doc);
@@ -786,7 +786,7 @@ static void test_rewindability_edges_and_measure_preserves_sources(void) {
   }
 
   poison_bytes(&json_doc, sizeof(json_doc), 0xC3u);
-  lonejson__init_map(&test_json_value_doc_map, &json_doc);
+  test_init_map(&test_json_value_doc_map, &json_doc);
   strcpy(json_doc.id, "json-1");
   EXPECT(lonejson_json_value_set_path(&json_doc.selector, json_path, &error) ==
          LONEJSON_STATUS_OK);
@@ -794,7 +794,7 @@ static void test_rewindability_edges_and_measure_preserves_sources(void) {
   lonejson_cleanup(&test_json_value_doc_map, &json_doc);
 
   poison_bytes(&json_doc, sizeof(json_doc), 0xC4u);
-  lonejson__init_map(&test_json_value_doc_map, &json_doc);
+  test_init_map(&test_json_value_doc_map, &json_doc);
   strcpy(json_doc.id, "json-2");
   json_fp = fopen(json_path, "rb");
   json_fd = open(json_path, O_RDONLY);
@@ -807,7 +807,7 @@ static void test_rewindability_edges_and_measure_preserves_sources(void) {
            LONEJSON_STATUS_OK);
     EXPECT(lonejson_json_value_is_rewindable(&json_doc.selector) != 0);
     EXPECT(lonejson_json_value_is_rewindable(&json_doc.fields) != 0);
-    status = lonejson_generator_measure(&test_json_value_doc_map, &json_doc,
+    status = test_generator_measure(&test_json_value_doc_map, &json_doc,
                                         &measured, NULL, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
   }
@@ -824,12 +824,12 @@ static void test_rewindability_edges_and_measure_preserves_sources(void) {
            (ssize_t)strlen("{\"pipe\":true}"));
     close(pipe_fds[1]);
     poison_bytes(&json_doc, sizeof(json_doc), 0xC5u);
-    lonejson__init_map(&test_json_value_doc_map, &json_doc);
+    test_init_map(&test_json_value_doc_map, &json_doc);
     strcpy(json_doc.id, "json-3");
     EXPECT(lonejson_json_value_set_fd(&json_doc.selector, pipe_fds[0],
                                       &error) == LONEJSON_STATUS_OK);
     EXPECT(lonejson_json_value_is_rewindable(&json_doc.selector) == 0);
-    status = lonejson_generator_measure(&test_json_value_doc_map, &json_doc,
+    status = test_generator_measure(&test_json_value_doc_map, &json_doc,
                                         &measured, NULL, &error);
     EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
     lonejson_cleanup(&test_json_value_doc_map, &json_doc);

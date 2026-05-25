@@ -16,23 +16,32 @@ static const lonejson_field api_response_fields[] = {
 LONEJSON_MAP_DEFINE(api_response_map, api_response, api_response_fields);
 
 int main(void) {
+  lonejson *lj;
   api_response response;
   lonejson_error error;
   char *json;
 
-  lonejson_init(&api_response_map, &response);
+  lj = lonejson_new(NULL, &error);
+  if (lj == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  lonejson_init(lj, &api_response_map, &response);
   response.message = "created";
   response.code = 201;
   response.retry = false;
 
-  json = lonejson_serialize_alloc(&api_response_map, &response, NULL, NULL,
+  json = lonejson_serialize_alloc(lj, &api_response_map, &response, NULL,
                                   &error);
   if (json == NULL) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
+    lonejson_free(lj);
     return 1;
   }
 
   puts(json);
   LONEJSON_FREE(json);
+  lonejson_free(lj);
   return 0;
 }

@@ -1,4 +1,6 @@
-local lj = require("lonejson")
+local lj = require("lonejson").new({
+  clear_destination_by_default = false,
+})
 
 local Batch = lj.schema("Batch", {
   lj.field("batch_id", lj.string { required = true }),
@@ -34,7 +36,7 @@ Batch:decode_into(rec, [[
       {"id":"i3","payload":{"kind":"replace","ok":true},"tags":{"scope":"fresh"}}
     ]
   }
-]], { clear_destination = false })
+]])
 
 print("second batch=" .. rec.batch_id ..
       " items=" .. tostring(#rec.items) ..

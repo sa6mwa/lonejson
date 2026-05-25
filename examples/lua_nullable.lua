@@ -1,4 +1,4 @@
-local lj = require("lonejson")
+local lj = require("lonejson").new()
 
 local JobStatus = lj.schema("JobStatus", {
   lj.field("name", lj.string { required = true }),

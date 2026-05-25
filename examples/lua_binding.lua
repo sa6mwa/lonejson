@@ -1,10 +1,19 @@
-local lj = require("lonejson")
+local lj = require("lonejson").new({
+  spool_default = {
+    memory_limit = 96,
+    temp_dir = "/tmp",
+  },
+  spool_blob = {
+    memory_limit = 96,
+    temp_dir = "/tmp",
+  },
+})
 
 local Example = lj.schema("Example", {
   lj.field("id", lj.i64 { required = true }),
   lj.field("name", lj.string { required = true, fixed_capacity = 64, overflow = "fail" }),
-  lj.field("body", lj.spooled_text { memory_limit = 96, temp_dir = "/tmp" }),
-  lj.field("payload", lj.spooled_bytes { memory_limit = 96, temp_dir = "/tmp" }),
+  lj.field("body", lj.spooled_text()),
+  lj.field("payload", lj.spooled_bytes { class = "blob" }),
 })
 
 local function spool_summary(label, spool)

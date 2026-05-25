@@ -93,6 +93,7 @@ static lonejson_status test_sse_push_json_event_chunked(
     lonejson_sse *sse, const lonejson_map *map, void *dst, const char *event,
     const char *id, const lonejson__byte_buffer *payload, size_t chunk_bytes,
     const lonejson_sse_json_options *options,
+    const lonejson__parse_options *parse_options,
     lonejson_sse_json_event_fn event_cb, void *user, lonejson_error *error) {
   lonejson__byte_buffer framed;
   size_t pos;
@@ -132,8 +133,9 @@ static lonejson_status test_sse_push_json_event_chunked(
     if (chunk > chunk_bytes) {
       chunk = chunk_bytes;
     }
-    status = lonejson_sse_push_json(sse, map, dst, framed.data + pos, chunk,
-                                    options, event_cb, user, error);
+    status = test_sse_push_json(sse, map, dst, framed.data + pos, chunk,
+                                    options, parse_options, event_cb, user,
+                                    error);
   }
   lonejson__byte_free(&framed, NULL);
   return status;
@@ -143,6 +145,7 @@ static lonejson_status test_sse_push_json_value_event_chunked(
     lonejson_sse *sse, lonejson_json_value *value, const char *event,
     const char *id, const lonejson__byte_buffer *payload, size_t chunk_bytes,
     const lonejson_sse_json_options *options,
+    const lonejson__parse_options *parse_options,
     lonejson_sse_json_value_event_fn event_cb, void *user,
     lonejson_error *error) {
   lonejson__byte_buffer framed;
@@ -183,8 +186,9 @@ static lonejson_status test_sse_push_json_value_event_chunked(
     if (chunk > chunk_bytes) {
       chunk = chunk_bytes;
     }
-    status = lonejson_sse_push_json_value(sse, value, framed.data + pos, chunk,
-                                          options, event_cb, user, error);
+    status = test_sse_push_json_value(sse, value, framed.data + pos, chunk,
+                                          options, parse_options, event_cb,
+                                          user, error);
   }
   lonejson__byte_free(&framed, NULL);
   return status;
@@ -331,21 +335,21 @@ static void test_sse_incremental_events_and_json_selection(void) {
   memset(&event, 0, sizeof(event));
   json_options.event_names = selected;
   json_options.event_name_count = 1u;
-  json_options.parse_options = NULL;
   sse = lonejson_sse_open(NULL, &error);
   EXPECT(sse != NULL);
   if (sse == NULL) {
     return;
   }
   for (i = 0u; i < sizeof(json_chunks) / sizeof(json_chunks[0]); ++i) {
-    status = lonejson_sse_push_json(
+    status = test_sse_push_json(
         sse, &test_event_map, &event, json_chunks[i], strlen(json_chunks[i]),
-        &json_options, test_sse_json_event_cb, &json_state, &error);
+        &json_options, NULL, test_sse_json_event_cb, &json_state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
   }
   status =
-      lonejson_sse_finish_json(sse, &test_event_map, &event, &json_options,
-                               test_sse_json_event_cb, &json_state, &error);
+      test_sse_finish_json(sse, &test_event_map, &event, &json_options,
+                               NULL, test_sse_json_event_cb, &json_state,
+                               &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(json_state.count == 1u);
   EXPECT(json_state.invalid == 0);
@@ -373,7 +377,6 @@ static void test_sse_json_streams_data_without_event_buffering(void) {
 
   json_options.event_names = selected;
   json_options.event_name_count = 1u;
-  json_options.parse_options = NULL;
   sse_options = lonejson_default_sse_options();
   sse_options.max_event_data_bytes = 64u;
 
@@ -384,21 +387,22 @@ static void test_sse_json_streams_data_without_event_buffering(void) {
   if (sse == NULL) {
     return;
   }
-  status = lonejson_sse_push_json(sse, &test_event_map, &event, chunk0,
-                                  sizeof(chunk0) - 1u, &json_options,
+  status = test_sse_push_json(sse, &test_event_map, &event, chunk0,
+                                  sizeof(chunk0) - 1u, &json_options, NULL,
                                   test_sse_json_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(sse, &test_event_map, &event, chunk1,
-                                  sizeof(chunk1) - 1u, &json_options,
+  status = test_sse_push_json(sse, &test_event_map, &event, chunk1,
+                                  sizeof(chunk1) - 1u, &json_options, NULL,
                                   test_sse_json_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(sse, &test_event_map, &event, chunk2,
-                                  sizeof(chunk2) - 1u, &json_options,
+  status = test_sse_push_json(sse, &test_event_map, &event, chunk2,
+                                  sizeof(chunk2) - 1u, &json_options, NULL,
                                   test_sse_json_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   status =
-      lonejson_sse_finish_json(sse, &test_event_map, &event, &json_options,
-                               test_sse_json_event_cb, &json_state, &error);
+      test_sse_finish_json(sse, &test_event_map, &event, &json_options,
+                               NULL, test_sse_json_event_cb, &json_state,
+                               &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(json_state.count == 1u);
   EXPECT(json_state.invalid == 0);
@@ -415,8 +419,8 @@ static void test_sse_json_streams_data_without_event_buffering(void) {
   if (sse == NULL) {
     return;
   }
-  status = lonejson_sse_push_json(sse, &test_event_map, &event, late_event,
-                                  sizeof(late_event) - 1u, &json_options,
+  status = test_sse_push_json(sse, &test_event_map, &event, late_event,
+                                  sizeof(late_event) - 1u, &json_options, NULL,
                                   test_sse_json_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   lonejson_sse_close(sse);
@@ -441,7 +445,6 @@ static void test_sse_json_event_limits_and_boundary_errors(void) {
   payload_len = strlen(payload);
   json_options.event_names = selected;
   json_options.event_name_count = 1u;
-  json_options.parse_options = NULL;
 
   memset(&event, 0, sizeof(event));
   memset(&json_state, 0, sizeof(json_state));
@@ -452,17 +455,18 @@ static void test_sse_json_event_limits_and_boundary_errors(void) {
   if (sse == NULL) {
     return;
   }
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, header, strlen(header), &json_options,
+  status = test_sse_push_json(
+      sse, &test_event_map, &event, header, strlen(header), &json_options, NULL,
       test_sse_json_collect_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, payload, payload_len, &json_options,
+  status = test_sse_push_json(
+      sse, &test_event_map, &event, payload, payload_len, &json_options, NULL,
       test_sse_json_collect_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
+  status = test_sse_push_json(
       sse, &test_event_map, &event, event_terminator, strlen(event_terminator),
-      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+      &json_options, NULL, test_sse_json_collect_event_cb, &json_state,
+      &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
   EXPECT(error.code == LONEJSON_STATUS_OVERFLOW);
   EXPECT(json_state.count == 0u);
@@ -477,21 +481,22 @@ static void test_sse_json_event_limits_and_boundary_errors(void) {
   if (sse == NULL) {
     return;
   }
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, header, strlen(header), &json_options,
+  status = test_sse_push_json(
+      sse, &test_event_map, &event, header, strlen(header), &json_options, NULL,
       test_sse_json_collect_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, payload, payload_len, &json_options,
+  status = test_sse_push_json(
+      sse, &test_event_map, &event, payload, payload_len, &json_options, NULL,
       test_sse_json_collect_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
+  status = test_sse_push_json(
       sse, &test_event_map, &event, line_terminator, strlen(line_terminator),
-      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+      &json_options, NULL, test_sse_json_collect_event_cb, &json_state,
+      &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_finish_json(sse, &test_event_map, &event, &json_options,
-                                    test_sse_json_collect_event_cb, &json_state,
-                                    &error);
+  status = test_sse_finish_json(sse, &test_event_map, &event, &json_options,
+                                    NULL, test_sse_json_collect_event_cb,
+                                    &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(json_state.count == 1u);
   EXPECT(json_state.data_len == payload_len);
@@ -508,17 +513,18 @@ static void test_sse_json_event_limits_and_boundary_errors(void) {
   if (sse == NULL) {
     return;
   }
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, header, strlen(header), &json_options,
+  status = test_sse_push_json(
+      sse, &test_event_map, &event, header, strlen(header), &json_options, NULL,
       test_sse_json_collect_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
-      sse, &test_event_map, &event, payload, payload_len, &json_options,
+  status = test_sse_push_json(
+      sse, &test_event_map, &event, payload, payload_len, &json_options, NULL,
       test_sse_json_collect_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
+  status = test_sse_push_json(
       sse, &test_event_map, &event, split_line, strlen(split_line),
-      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+      &json_options, NULL, test_sse_json_collect_event_cb, &json_state,
+      &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
   EXPECT(error.code == LONEJSON_STATUS_OVERFLOW);
   EXPECT(json_state.count == 0u);
@@ -531,7 +537,7 @@ static void test_sse_json_event_limits_alloc_guarded_e2e(void) {
                                 "\"z\"],\"body\":\"payload\"}";
   static const char terminator[] = "\n\n";
   test_allocator_state parse_alloc;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_sse_options sse_options;
   lonejson_sse_json_options json_options;
   test_sse_json_state json_state;
@@ -543,9 +549,8 @@ static void test_sse_json_event_limits_alloc_guarded_e2e(void) {
   memset(&json_state, 0, sizeof(json_state));
   memset(&doc, 0, sizeof(doc));
   test_allocator_init(&parse_alloc);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &parse_alloc.allocator;
-  json_options.parse_options = &parse_options;
   json_options.event_names = NULL;
   json_options.event_name_count = 0u;
 
@@ -556,17 +561,20 @@ static void test_sse_json_event_limits_alloc_guarded_e2e(void) {
   if (sse == NULL) {
     return;
   }
-  status = lonejson_sse_push_json(
+  status = test_sse_push_json(
       sse, &test_alloc_parse_doc_map, &doc, header, strlen(header),
-      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+      &json_options, &parse_options, test_sse_json_collect_event_cb,
+      &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
+  status = test_sse_push_json(
       sse, &test_alloc_parse_doc_map, &doc, payload, strlen(payload),
-      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+      &json_options, &parse_options, test_sse_json_collect_event_cb,
+      &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
+  status = test_sse_push_json(
       sse, &test_alloc_parse_doc_map, &doc, terminator, strlen(terminator),
-      &json_options, test_sse_json_collect_event_cb, &json_state, &error);
+      &json_options, &parse_options, test_sse_json_collect_event_cb,
+      &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
   EXPECT(error.code == LONEJSON_STATUS_OVERFLOW);
   EXPECT(json_state.count == 0u);
@@ -586,7 +594,7 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
        chunk_index < sizeof(chunk_sizes) / sizeof(chunk_sizes[0]);
        ++chunk_index) {
     test_allocator_state parse_alloc;
-    lonejson_parse_options parse_options;
+    lonejson__parse_options parse_options;
     lonejson_sse_options sse_options;
     lonejson_sse_json_options json_options;
     test_sse_large_event_state state;
@@ -601,11 +609,10 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
     memset(&payload, 0, sizeof(payload));
     memset(&state, 0, sizeof(state));
     test_allocator_init(&parse_alloc);
-    parse_options = lonejson_default_parse_options();
+    parse_options = lonejson__default_parse_options();
     parse_options.allocator = &parse_alloc.allocator;
     json_options.event_names = NULL;
     json_options.event_name_count = 0u;
-    json_options.parse_options = &parse_options;
     sse_options = lonejson_default_sse_options();
     sse_options.max_event_data_bytes = 256u * 1024u;
     sse = lonejson_sse_open(&sse_options, &error);
@@ -619,7 +626,7 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
     EXPECT(status == LONEJSON_STATUS_OK);
     status = test_sse_push_json_event_chunked(
         sse, &test_sse_large_event_doc_map, &doc, "response.created", "evt-1",
-        &payload, chunk_sizes[chunk_index], &json_options,
+        &payload, chunk_sizes[chunk_index], &json_options, &parse_options,
         test_sse_large_event_cb, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
 
@@ -630,6 +637,7 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
     status = test_sse_push_json_event_chunked(
         sse, &test_sse_large_event_doc_map, &doc, "response.in_progress",
         "evt-2", &payload, chunk_sizes[chunk_index], &json_options,
+        &parse_options,
         test_sse_large_event_cb, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
 
@@ -640,6 +648,7 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
       status = test_sse_push_json_event_chunked(
           sse, &test_sse_large_event_doc_map, &doc, "response.output_text.delta",
           "evt-delta", &payload, chunk_sizes[chunk_index], &json_options,
+          &parse_options,
           test_sse_large_event_cb, &state, &error);
       EXPECT(status == LONEJSON_STATUS_OK);
     }
@@ -651,6 +660,7 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
     status = test_sse_push_json_event_chunked(
         sse, &test_sse_large_event_doc_map, &doc, "response.output_text.done",
         "evt-3", &payload, chunk_sizes[chunk_index], &json_options,
+        &parse_options,
         test_sse_large_event_cb, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
 
@@ -661,6 +671,7 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
     status = test_sse_push_json_event_chunked(
         sse, &test_sse_large_event_doc_map, &doc, "response.content_part.done",
         "evt-4", &payload, chunk_sizes[chunk_index], &json_options,
+        &parse_options,
         test_sse_large_event_cb, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
 
@@ -671,6 +682,7 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
     status = test_sse_push_json_event_chunked(
         sse, &test_sse_large_event_doc_map, &doc, "response.output_item.done",
         "evt-5", &payload, chunk_sizes[chunk_index], &json_options,
+        &parse_options,
         test_sse_large_event_cb, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
 
@@ -681,12 +693,13 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
     status = test_sse_push_json_event_chunked(
         sse, &test_sse_large_event_doc_map, &doc, "response.completed",
         "evt-6", &payload, chunk_sizes[chunk_index], &json_options,
+        &parse_options,
         test_sse_large_event_cb, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
 
-    status = lonejson_sse_finish_json(
+    status = test_sse_finish_json(
         sse, &test_sse_large_event_doc_map, &doc, &json_options,
-        test_sse_large_event_cb, &state, &error);
+        &parse_options, test_sse_large_event_cb, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
     EXPECT(state.invalid == 0);
     EXPECT(state.delta_count == delta_events);
@@ -704,7 +717,7 @@ static void test_sse_json_large_event_sequence_and_cleanup(void) {
 
 static void test_sse_json_parse_failure_cleans_current_destination(void) {
   test_allocator_state parse_alloc;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_sse_json_options json_options;
   lonejson_sse_options sse_options;
   test_sse_large_event_doc doc;
@@ -716,11 +729,10 @@ static void test_sse_json_parse_failure_cleans_current_destination(void) {
   memset(&doc, 0, sizeof(doc));
   memset(&payload, 0, sizeof(payload));
   test_allocator_init(&parse_alloc);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &parse_alloc.allocator;
   json_options.event_names = NULL;
   json_options.event_name_count = 0u;
-  json_options.parse_options = &parse_options;
   sse_options = lonejson_default_sse_options();
   sse_options.max_event_data_bytes = 256u * 1024u;
   sse = lonejson_sse_open(&sse_options, &error);
@@ -734,7 +746,7 @@ static void test_sse_json_parse_failure_cleans_current_destination(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   status = test_sse_push_json_event_chunked(
       sse, &test_sse_large_event_doc_map, &doc, "response.created", "evt-1",
-      &payload, 19u, &json_options, NULL, NULL, &error);
+      &payload, 19u, &json_options, &parse_options, NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(parse_alloc.stats.bytes_live != 0u);
 
@@ -746,7 +758,8 @@ static void test_sse_json_parse_failure_cleans_current_destination(void) {
   payload.data[payload.len] = '\0';
   status = test_sse_push_json_event_chunked(
       sse, &test_sse_large_event_doc_map, &doc, "response.output_item.done",
-      "evt-2", &payload, 23u, &json_options, NULL, NULL, &error);
+      "evt-2", &payload, 23u, &json_options, &parse_options, NULL, NULL,
+      &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(parse_alloc.stats.bytes_live == 0u);
 
@@ -769,7 +782,7 @@ static lonejson_status test_sse_json_fail_cb(void *user,
 
 static void test_sse_json_callback_failure_cleans_destination(void) {
   test_allocator_state parse_alloc;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_sse_json_options json_options;
   lonejson_sse_options sse_options;
   test_sse_large_event_doc doc;
@@ -781,11 +794,10 @@ static void test_sse_json_callback_failure_cleans_destination(void) {
   memset(&doc, 0, sizeof(doc));
   memset(&payload, 0, sizeof(payload));
   test_allocator_init(&parse_alloc);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &parse_alloc.allocator;
   json_options.event_names = NULL;
   json_options.event_name_count = 0u;
-  json_options.parse_options = &parse_options;
   sse_options = lonejson_default_sse_options();
   sse_options.max_event_data_bytes = 256u * 1024u;
   sse = lonejson_sse_open(&sse_options, &error);
@@ -799,7 +811,8 @@ static void test_sse_json_callback_failure_cleans_destination(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   status = test_sse_push_json_event_chunked(
       sse, &test_sse_large_event_doc_map, &doc, "response.completed", "evt-1",
-      &payload, 31u, &json_options, test_sse_json_fail_cb, NULL, &error);
+      &payload, 31u, &json_options, &parse_options, test_sse_json_fail_cb,
+      NULL, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(parse_alloc.stats.bytes_live == 0u);
 
@@ -811,7 +824,7 @@ static void test_sse_json_callback_failure_cleans_destination(void) {
 
 static void test_sse_json_value_capture_large_sequence_and_filtering(void) {
   const char *selected[] = {"keep", "done"};
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_sse_json_options json_options;
   lonejson_sse_options sse_options;
   lonejson_json_value value;
@@ -823,13 +836,12 @@ static void test_sse_json_value_capture_large_sequence_and_filtering(void) {
 
   memset(&payload, 0, sizeof(payload));
   memset(&state, 0, sizeof(state));
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   json_options.event_names = selected;
   json_options.event_name_count = 2u;
-  json_options.parse_options = &parse_options;
   sse_options = lonejson_default_sse_options();
   sse_options.max_event_data_bytes = 256u * 1024u;
-  lonejson_json_value_init(&value);
+  lonejson_json_value_init(test_default_runtime(), &value);
   status = lonejson_json_value_enable_parse_capture(&value, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   sse = lonejson_sse_open(&sse_options, &error);
@@ -844,7 +856,7 @@ static void test_sse_json_value_capture_large_sequence_and_filtering(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   status = test_sse_push_json_value_event_chunked(
       sse, &value, "skip", "evt-0", &payload, 5u, &json_options,
-      test_sse_json_value_capture_event_cb, &state, &error);
+      &parse_options, test_sse_json_value_capture_event_cb, &state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(state.count == 0u);
 
@@ -853,7 +865,7 @@ static void test_sse_json_value_capture_large_sequence_and_filtering(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   status = test_sse_push_json_value_event_chunked(
       sse, &value, "keep", "evt-1", &payload, 7u, &json_options,
-      test_sse_json_value_capture_event_cb, &state, &error);
+      &parse_options, test_sse_json_value_capture_event_cb, &state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(state.count == 1u);
   EXPECT(state.captured_len == payload.len);
@@ -864,15 +876,15 @@ static void test_sse_json_value_capture_large_sequence_and_filtering(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   status = test_sse_push_json_value_event_chunked(
       sse, &value, "done", "evt-2", &payload, 17u, &json_options,
-      test_sse_json_value_capture_event_cb, &state, &error);
+      &parse_options, test_sse_json_value_capture_event_cb, &state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(state.count == 2u);
   EXPECT(state.captured_len == payload.len);
   EXPECT(memcmp(state.captured, payload.data, payload.len) == 0);
 
-  status = lonejson_sse_finish_json_value(
-      sse, &value, &json_options, test_sse_json_value_capture_event_cb, &state,
-      &error);
+  status = test_sse_finish_json_value(
+      sse, &value, &json_options, &parse_options,
+      test_sse_json_value_capture_event_cb, &state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
 
   lonejson_sse_close(sse);
@@ -903,7 +915,7 @@ static void test_sse_json_value_sink_and_visitor_root_modes(void) {
   size_t i;
 
   for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
-    lonejson_parse_options parse_options;
+    lonejson__parse_options parse_options;
     lonejson_sse_json_options json_options;
     lonejson_value_visitor visitor;
     lonejson_error error;
@@ -918,34 +930,32 @@ static void test_sse_json_value_sink_and_visitor_root_modes(void) {
     memset(&payload, 0, sizeof(payload));
     memset(&visit_state, 0, sizeof(visit_state));
     memset(&sink_state, 0, sizeof(sink_state));
-    parse_options = lonejson_default_parse_options();
+    parse_options = lonejson__default_parse_options();
     json_options.event_names = selected;
     json_options.event_name_count = 1u;
-    json_options.parse_options = &parse_options;
     status = lonejson__byte_append(&payload, cases[i].payload,
                                    strlen(cases[i].payload), SIZE_MAX - 1u,
                                    NULL, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
 
-    lonejson_json_value_init(&visit_value);
+    lonejson_json_value_init(test_default_runtime(), &visit_value);
     visitor = test_counting_value_visitor();
     status = lonejson_json_value_set_parse_visitor(&visit_value, &visitor,
-                                                   &visit_state.visit, NULL,
-                                                   &error);
+                                                   &visit_state.visit, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
     sse = lonejson_sse_open(NULL, &error);
     EXPECT(sse != NULL);
     if (sse != NULL) {
       status = test_sse_push_json_value_event_chunked(
           sse, &visit_value, "keep", "evt-1", &payload, cases[i].chunk_bytes,
-          &json_options, test_sse_json_value_count_event_cb, &visit_state,
-          &error);
+          &json_options, &parse_options, test_sse_json_value_count_event_cb,
+          &visit_state, &error);
       EXPECT(status == LONEJSON_STATUS_OK);
       EXPECT(visit_state.count == 1u);
       lonejson_sse_close(sse);
     }
 
-    lonejson_json_value_init(&sink_value);
+    lonejson_json_value_init(test_default_runtime(), &sink_value);
     status = lonejson_json_value_set_parse_sink(&sink_value,
                                                 test_sse_json_value_sink_write,
                                                 &sink_state, &error);
@@ -955,8 +965,8 @@ static void test_sse_json_value_sink_and_visitor_root_modes(void) {
     if (sse != NULL) {
       status = test_sse_push_json_value_event_chunked(
           sse, &sink_value, "keep", "evt-2", &payload, cases[i].chunk_bytes,
-          &json_options, test_sse_json_value_count_event_cb, &sink_state,
-          &error);
+          &json_options, &parse_options, test_sse_json_value_count_event_cb,
+          &sink_state, &error);
       EXPECT(status == LONEJSON_STATUS_OK);
       EXPECT(sink_state.count == 1u);
       EXPECT(sink_state.sink_total == cases[i].expect_sink_bytes);
@@ -978,7 +988,7 @@ static void test_sse_json_value_sink_and_visitor_root_modes(void) {
 }
 
 static void test_sse_json_value_failure_cleanup_and_reuse(void) {
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_sse_json_options json_options;
   lonejson_json_value value;
   lonejson__byte_buffer payload;
@@ -989,11 +999,10 @@ static void test_sse_json_value_failure_cleanup_and_reuse(void) {
 
   memset(&payload, 0, sizeof(payload));
   memset(&state, 0, sizeof(state));
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   json_options.event_names = NULL;
   json_options.event_name_count = 0u;
-  json_options.parse_options = &parse_options;
-  lonejson_json_value_init(&value);
+  lonejson_json_value_init(test_default_runtime(), &value);
   status = lonejson_json_value_enable_parse_capture(&value, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   sse = lonejson_sse_open(NULL, &error);
@@ -1008,7 +1017,7 @@ static void test_sse_json_value_failure_cleanup_and_reuse(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   status = test_sse_push_json_value_event_chunked(
       sse, &value, "keep", "evt-1", &payload, 11u, &json_options,
-      test_sse_json_value_fail_cb, &state, &error);
+      &parse_options, test_sse_json_value_fail_cb, &state, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(state.saw_failure);
   EXPECT(value.kind == LONEJSON_JSON_VALUE_NULL);
@@ -1023,7 +1032,7 @@ static void test_sse_json_value_failure_cleanup_and_reuse(void) {
   payload.data[payload.len] = '\0';
   status = test_sse_push_json_value_event_chunked(
       sse, &value, "keep", "evt-2", &payload, 13u, &json_options,
-      test_sse_json_value_capture_event_cb, &state, &error);
+      &parse_options, test_sse_json_value_capture_event_cb, &state, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(value.kind == LONEJSON_JSON_VALUE_NULL);
   EXPECT(value.len == 0u);
@@ -1033,7 +1042,7 @@ static void test_sse_json_value_failure_cleanup_and_reuse(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   status = test_sse_push_json_value_event_chunked(
       sse, &value, "keep", "evt-3", &payload, 19u, &json_options,
-      test_sse_json_value_capture_event_cb, &state, &error);
+      &parse_options, test_sse_json_value_capture_event_cb, &state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(state.captured_len == payload.len);
   EXPECT(memcmp(state.captured, payload.data, payload.len) == 0);
@@ -1043,9 +1052,70 @@ static void test_sse_json_value_failure_cleanup_and_reuse(void) {
   lonejson_json_value_cleanup(&value);
 }
 
+static void test_sse_json_rejects_runtime_changes_mid_event(void) {
+  static const char chunk0[] = "event: data\ndata: {\"id\":\"evt-1\",\n";
+  static const char chunk1[] = "data: \"ok\":true}\n\n";
+  lonejson_sse *sse;
+  lonejson_config config;
+  lonejson *first_lj;
+  lonejson *second_lj;
+  lonejson_error error;
+  lonejson_status status;
+  test_event event;
+  lonejson_json_value value;
+
+  sse = lonejson_sse_open(NULL, &error);
+  EXPECT(sse != NULL);
+  if (sse == NULL) {
+    return;
+  }
+
+  config = lonejson_default_config();
+  first_lj = lonejson_new(&config, &error);
+  EXPECT(first_lj != NULL);
+  second_lj = lonejson_new(&config, &error);
+  EXPECT(second_lj != NULL);
+  if (first_lj == NULL || second_lj == NULL) {
+    lonejson_free(first_lj);
+    lonejson_free(second_lj);
+    lonejson_sse_close(sse);
+    return;
+  }
+
+  memset(&event, 0, sizeof(event));
+  status = lonejson_sse_push_json(first_lj, sse, &test_event_map, &event,
+                                  chunk0, strlen(chunk0), NULL, NULL, NULL,
+                                  &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json(second_lj, sse, &test_event_map, &event,
+                                  chunk1, strlen(chunk1), NULL, NULL, NULL,
+                                  &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(strstr(error.message, "arguments changed during an event") != NULL);
+
+  lonejson_json_value_init(second_lj, &value);
+  EXPECT(lonejson_json_value_enable_parse_capture(&value, &error) ==
+         LONEJSON_STATUS_OK);
+  lonejson__sse_json_reset_event(sse);
+  status = lonejson_sse_push_json_value(first_lj, sse, &value, chunk0,
+                                        strlen(chunk0), NULL, NULL, NULL,
+                                        &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_sse_push_json_value(second_lj, sse, &value, chunk1,
+                                        strlen(chunk1), NULL, NULL, NULL,
+                                        &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(strstr(error.message, "arguments changed during an event") != NULL);
+
+  lonejson_json_value_cleanup(&value);
+  lonejson_free(first_lj);
+  lonejson_free(second_lj);
+  lonejson_sse_close(sse);
+}
+
 static void test_sse_json_mixed_map_and_value_failures_preserve_prior_results(
     void) {
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_sse_json_options json_options;
   test_allocator_state parse_alloc;
   test_sse_large_event_doc doc;
@@ -1061,12 +1131,11 @@ static void test_sse_json_mixed_map_and_value_failures_preserve_prior_results(
   memset(&doc, 0, sizeof(doc));
   memset(&payload, 0, sizeof(payload));
   test_allocator_init(&parse_alloc);
-  parse_options = lonejson_default_parse_options();
+  parse_options = lonejson__default_parse_options();
   parse_options.allocator = &parse_alloc.allocator;
   json_options.event_names = NULL;
   json_options.event_name_count = 0u;
-  json_options.parse_options = &parse_options;
-  lonejson_json_value_init(&value);
+  lonejson_json_value_init(test_default_runtime(), &value);
   status = lonejson_json_value_enable_parse_capture(&value, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
 
@@ -1082,7 +1151,7 @@ static void test_sse_json_mixed_map_and_value_failures_preserve_prior_results(
   EXPECT(status == LONEJSON_STATUS_OK);
   status = test_sse_push_json_event_chunked(
       sse, &test_sse_large_event_doc_map, &doc, "mapped", "evt-map", &payload,
-      13u, &json_options, NULL, NULL, &error);
+      13u, &json_options, &parse_options, NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(doc.type != NULL && strcmp(doc.type, "response.completed") == 0);
   EXPECT(doc.status != NULL && strcmp(doc.status, "done") == 0);
@@ -1097,7 +1166,7 @@ static void test_sse_json_mixed_map_and_value_failures_preserve_prior_results(
   payload.data[payload.len] = '\0';
   status = test_sse_push_json_value_event_chunked(
       sse, &value, "value", "evt-value-bad", &payload, 11u, &json_options,
-      NULL, NULL, &error);
+      &parse_options, NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(doc.type != NULL && strcmp(doc.type, "response.completed") == 0);
   EXPECT(doc.status != NULL && strcmp(doc.status, "done") == 0);
@@ -1109,8 +1178,8 @@ static void test_sse_json_mixed_map_and_value_failures_preserve_prior_results(
   status = test_sse_build_large_json_string_payload(&payload, 96u, 'w', &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   status = test_sse_push_json_value_event_chunked(
-      sse, &value, "value", "evt-value", &payload, 17u, &json_options, NULL,
-      NULL, &error);
+      sse, &value, "value", "evt-value", &payload, 17u, &json_options,
+      &parse_options, NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(value.kind == LONEJSON_JSON_VALUE_BUFFER);
   EXPECT(value.len == payload.len);
@@ -1126,7 +1195,7 @@ static void test_sse_json_mixed_map_and_value_failures_preserve_prior_results(
   payload.data[payload.len] = '\0';
   status = test_sse_push_json_event_chunked(
       sse, &test_sse_large_event_doc_map, &doc, "mapped", "evt-map-bad",
-      &payload, 19u, &json_options, NULL, NULL, &error);
+      &payload, 19u, &json_options, &parse_options, NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(value.kind == LONEJSON_JSON_VALUE_BUFFER);
   EXPECT(value.len == captured_value_len);
@@ -1186,25 +1255,24 @@ static void test_sse_retry_and_json_metadata_only_events(void) {
   memset(&event, 0, sizeof(event));
   json_options.event_names = selected;
   json_options.event_name_count = 1u;
-  json_options.parse_options = NULL;
   sse = lonejson_sse_open(NULL, &error);
   EXPECT(sse != NULL);
   if (sse == NULL) {
     return;
   }
-  status = lonejson_sse_push_json(
+  status = test_sse_push_json(
       sse, &test_event_map, &event, json_metadata_only,
-      sizeof(json_metadata_only) - 1u, &json_options,
+      sizeof(json_metadata_only) - 1u, &json_options, NULL,
       test_sse_json_collect_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_push_json(
+  status = test_sse_push_json(
       sse, &test_event_map, &event, json_invalid_retry_only,
-      sizeof(json_invalid_retry_only) - 1u, &json_options,
+      sizeof(json_invalid_retry_only) - 1u, &json_options, NULL,
       test_sse_json_collect_event_cb, &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_sse_finish_json(sse, &test_event_map, &event, &json_options,
-                                    test_sse_json_collect_event_cb, &json_state,
-                                    &error);
+  status = test_sse_finish_json(sse, &test_event_map, &event, &json_options,
+                                    NULL, test_sse_json_collect_event_cb,
+                                    &json_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(json_state.count == 0u);
   lonejson_sse_close(sse);

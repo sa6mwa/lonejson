@@ -296,26 +296,20 @@ bench-check:
 	lua_latest="$$tmp_dir/lua-latest.json"; \
 	lua_history="$$tmp_dir/lua-history.jsonl"; \
 	lua_runs="$$tmp_dir/lua-runs"; \
+	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && \
 	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$$c_latest" "$$c_history" "$$c_runs" "$(PERF_ITERATIONS)" && \
 	if ! ./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$$c_latest"; then \
 		./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$$c_latest"; \
-		printf '%s\n' 'C benchmark gate failed once; rerunning to confirm before failing test-all.' >&2; \
-		c_retry="$$tmp_dir/c-latest-retry.json"; \
-		./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$$c_retry" "$$c_history" "$$c_runs" "$(PERF_ITERATIONS)"; \
-		./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$$c_retry"; \
-		./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$$c_retry"; \
+		printf '%s\n' 'C benchmark gate failed once; rerunning only failing cases once to confirm.' >&2; \
+		$(LUA) bench/lonejson_lua_bench.lua confirm-c "./build/$(HOST_PRESET)/lonejson_bench" "$(PERF_BASELINE)" "$$c_latest" "$(PERF_ITERATIONS)"; \
 	fi && \
-	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && \
 	$(LUA) bench/lonejson_lua_bench.lua run "$$c_latest" "$$lua_latest" "$$lua_history" "$$lua_runs" "$(LUA_PERF_ITERATIONS)" && \
 	if ! $(LUA) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$$lua_latest"; then \
 		$(LUA) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$$lua_latest"; \
-		printf '%s\n' 'Lua benchmark gate failed once; rerunning to confirm before failing test-all.' >&2; \
-		lua_retry="$$tmp_dir/lua-latest-retry.json"; \
-		$(LUA) bench/lonejson_lua_bench.lua run "$$c_latest" "$$lua_retry" "$$lua_history" "$$lua_runs" "$(LUA_PERF_ITERATIONS)"; \
-		$(LUA) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$$lua_retry"; \
-		$(LUA) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$$lua_retry"; \
+		printf '%s\n' 'Lua benchmark gate failed once; rerunning only failing cases once to confirm.' >&2; \
+		$(LUA) bench/lonejson_lua_bench.lua confirm-lua "$$c_latest" "$(LUA_PERF_BASELINE)" "$$lua_latest" "$(LUA_PERF_ITERATIONS)"; \
 	fi
 
 bench-freeze-baseline:

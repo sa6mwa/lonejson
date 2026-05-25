@@ -26,37 +26,48 @@ int main(void) {
       "\"fields\":{\"include\":[\"/id\",\"/meta/etag\"],\"strict\":true},"
       "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"offset\":17}}}";
   parsed_envelope doc;
+  lj *runtime;
   lj_error error;
   lj_status status;
-  lj_parse_options parse_options;
-  lj_write_options options;
+  lj_config config;
   char *pretty;
 
-  lj_init(&parsed_envelope_map, &doc);
+  config = lj_default_config();
+  config.clear_destination_by_default = 0;
+  config.write_pretty = 1;
+  runtime = lj_new(&config, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  lj_init(runtime, &parsed_envelope_map, &doc);
   status = lj_json_value_enable_parse_capture(&doc.selector, &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "selector capture setup failed: %s\n", error.message);
+    lj_free(runtime);
     return 1;
   }
   status = lj_json_value_enable_parse_capture(&doc.fields, &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "fields capture setup failed: %s\n", error.message);
     lj_cleanup(&parsed_envelope_map, &doc);
+    lj_free(runtime);
     return 1;
   }
   status = lj_json_value_enable_parse_capture(&doc.last_error, &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "last_error capture setup failed: %s\n", error.message);
     lj_cleanup(&parsed_envelope_map, &doc);
+    lj_free(runtime);
     return 1;
   }
 
-  parse_options = lj_default_parse_options();
-  parse_options.clear_destination = 0;
-  status = lj_parse_cstr(&parsed_envelope_map, &doc, inbound_json, &parse_options,
+  status = lj_parse_cstr(runtime, &parsed_envelope_map, &doc, inbound_json,
                          &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
+    lj_free(runtime);
     return 1;
   }
 
@@ -65,12 +76,12 @@ int main(void) {
   printf("last_error compact=%s\n",
          doc.last_error.json ? doc.last_error.json : "null");
 
-  options = lj_default_write_options();
-  options.pretty = 1;
-  pretty = lj_serialize_alloc(&parsed_envelope_map, &doc, NULL, &options, &error);
+  pretty = lj_serialize_alloc(runtime, &parsed_envelope_map, &doc, NULL,
+                              &error);
   if (pretty == NULL) {
     fprintf(stderr, "pretty serialize failed: %s\n", error.message);
     lj_cleanup(&parsed_envelope_map, &doc);
+    lj_free(runtime);
     return 1;
   }
 
@@ -78,5 +89,6 @@ int main(void) {
 
   LONEJSON_FREE(pretty);
   lj_cleanup(&parsed_envelope_map, &doc);
+  lj_free(runtime);
   return 0;
 }

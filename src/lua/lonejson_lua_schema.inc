@@ -1,5 +1,20 @@
 static void ljlua_schema_destroy(ljlua_schema *schema);
 
+static lonejson_uint64 ljlua_next_map_cookie(void) {
+  static unsigned int counter = 1u;
+  unsigned int value;
+
+  LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
+  value = ++counter;
+  if (value == 0u ||
+      value == (unsigned int)(LONEJSON__MAP_COOKIE_VALUE & 0xffffffffu)) {
+    value = ++counter;
+  }
+  LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
+  return (LONEJSON__MAP_COOKIE_VALUE & ~((lonejson_uint64)0xffffffffu)) |
+         ((lonejson_uint64)value & 0xffffffffu);
+}
+
 static size_t ljlua_member_size_for_kind(const ljlua_field_meta *meta) {
   switch (meta->lua_kind) {
   case LJLUA_FIELD_STRING:
@@ -62,7 +77,8 @@ static int ljlua_field_kind_is_nullable_primitive(ljlua_field_kind kind) {
          kind == LJLUA_FIELD_F64 || kind == LJLUA_FIELD_BOOL;
 }
 
-static int ljlua_compile_field(lua_State *L, int index, ljlua_field_meta *meta);
+static int ljlua_compile_field(lua_State *L, lonejson *runtime, int index,
+                               ljlua_field_meta *meta);
 static int ljlua_finalize_schema(ljlua_schema *schema);
 static FILE *ljlua_check_file(lua_State *L, int index);
 static ljlua_path_ud *ljlua_check_path(lua_State *L, int index);
@@ -73,8 +89,6 @@ ljlua_compile_path(lua_State *L, ljlua_schema *schema, const char *path);
 static int ljlua_push_compiled_path_value(lua_State *L, void *record,
                                           ljlua_compiled_path *compiled,
                                           int owner_index);
-static lonejson_read_result
-ljlua_mem_stream_read(void *user, unsigned char *buffer, size_t capacity);
 static lonejson_read_result
 ljlua_array_mem_stream_read(void *user, unsigned char *buffer, size_t capacity);
 static int ljlua_monotonic_ns(lua_State *L);
@@ -103,7 +117,7 @@ static int ljlua_check_fd_like(lua_State *L, int index) {
   return fileno(ljlua_check_file(L, index));
 }
 
-static int ljlua_compile_nested_schema(lua_State *L, int index,
+static int ljlua_compile_nested_schema(lua_State *L, lonejson *runtime, int index,
                                        ljlua_schema **out_schema) {
   ljlua_schema *schema;
   size_t count;
@@ -115,6 +129,7 @@ static int ljlua_compile_nested_schema(lua_State *L, int index,
   if (schema == NULL) {
     return luaL_error(L, "failed to allocate schema");
   }
+  schema->runtime = runtime;
   schema->name = ljlua_strdup("nested");
   schema->map.name = schema->name;
   schema->field_count = count;
@@ -130,7 +145,8 @@ static int ljlua_compile_nested_schema(lua_State *L, int index,
   }
   for (i = 0u; i < count; ++i) {
     lua_rawgeti(L, index, (lua_Integer)i + 1);
-    if (ljlua_compile_field(L, lua_gettop(L), &schema->metas[i]) != 0) {
+    if (ljlua_compile_field(L, runtime, lua_gettop(L), &schema->metas[i]) !=
+        0) {
       lua_pop(L, 1);
       ljlua_schema_destroy(schema);
       return lua_error(L);
@@ -142,7 +158,7 @@ static int ljlua_compile_nested_schema(lua_State *L, int index,
   return 0;
 }
 
-static int ljlua_compile_field(lua_State *L, int index,
+static int ljlua_compile_field(lua_State *L, lonejson *runtime, int index,
                                ljlua_field_meta *meta) {
   const char *kind_name;
   int nullable;
@@ -210,33 +226,28 @@ static int ljlua_compile_field(lua_State *L, int index,
     break;
   case LJLUA_FIELD_SPOOLED_TEXT:
   case LJLUA_FIELD_SPOOLED_BYTES: {
-    lonejson_spool_options *opts;
-
     meta->field.kind = (meta->lua_kind == LJLUA_FIELD_SPOOLED_TEXT)
                            ? LONEJSON_FIELD_KIND_STRING_STREAM
                            : LONEJSON_FIELD_KIND_BASE64_STREAM;
     meta->field.storage = LONEJSON_STORAGE_FIXED;
-    opts = (lonejson_spool_options *)calloc(1u, sizeof(*opts));
-    if (opts == NULL) {
-      return luaL_error(L, "failed to allocate spool options");
-    }
-    *opts = lonejson_default_spool_options();
-    lua_getfield(L, index, "memory_limit");
-    if (lua_isinteger(L, -1) && lua_tointeger(L, -1) > 0) {
-      opts->memory_limit = (size_t)lua_tointeger(L, -1);
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, index, "max_bytes");
-    if (lua_isinteger(L, -1) && lua_tointeger(L, -1) > 0) {
-      opts->max_bytes = (size_t)lua_tointeger(L, -1);
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, index, "temp_dir");
+    meta->field.spool_class = (meta->lua_kind == LJLUA_FIELD_SPOOLED_BYTES)
+                                  ? LONEJSON_SPOOL_CLASS_BLOB
+                                  : LONEJSON_SPOOL_CLASS_DEFAULT;
+    lua_getfield(L, index, "class");
     if (!lua_isnil(L, -1)) {
-      opts->temp_dir = ljlua_strdup(luaL_checkstring(L, -1));
+      const char *name = luaL_checkstring(L, -1);
+
+      if (strcmp(name, "default") == 0) {
+        meta->field.spool_class = LONEJSON_SPOOL_CLASS_DEFAULT;
+      } else if (strcmp(name, "blob") == 0) {
+        meta->field.spool_class = LONEJSON_SPOOL_CLASS_BLOB;
+      } else if (strcmp(name, "large_text") == 0) {
+        meta->field.spool_class = LONEJSON_SPOOL_CLASS_LARGE_TEXT;
+      } else {
+        return luaL_error(L, "unsupported spool class '%s'", name);
+      }
     }
     lua_pop(L, 1);
-    meta->field.spool_options = opts;
     break;
   }
   case LJLUA_FIELD_JSON_VALUE:
@@ -263,7 +274,8 @@ static int ljlua_compile_field(lua_State *L, int index,
   case LJLUA_FIELD_OBJECT:
   case LJLUA_FIELD_OBJECT_ARRAY:
     lua_getfield(L, index, "fields");
-    if (ljlua_compile_nested_schema(L, lua_gettop(L), &meta->subschema) != 0) {
+    if (ljlua_compile_nested_schema(L, runtime, lua_gettop(L),
+                                    &meta->subschema) != 0) {
       lua_pop(L, 1);
       return 1;
     }
@@ -367,6 +379,7 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
   size_t i;
 
   schema->has_json_value = 0;
+  schema->needs_record_init = 0;
   offset = 0u;
   for (i = 0u; i < schema->field_count; ++i) {
     ljlua_field_meta *meta = &schema->metas[i];
@@ -377,6 +390,14 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
           meta->lua_kind == LJLUA_FIELD_OBJECT_ARRAY) &&
          meta->subschema != NULL && meta->subschema->has_json_value)) {
       schema->has_json_value = 1;
+    }
+    if (meta->fixed_array_capacity != 0u ||
+        meta->lua_kind == LJLUA_FIELD_SPOOLED_TEXT ||
+        meta->lua_kind == LJLUA_FIELD_SPOOLED_BYTES ||
+        meta->lua_kind == LJLUA_FIELD_JSON_VALUE ||
+        (meta->lua_kind == LJLUA_FIELD_OBJECT && meta->subschema != NULL &&
+         meta->subschema->needs_record_init)) {
+      schema->needs_record_init = 1;
     }
     if (meta->member_size >= sizeof(void *)) {
       align = sizeof(void *);
@@ -412,6 +433,8 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
   schema->map.struct_size = schema->record_size;
   schema->map.field_count = schema->field_count;
   schema->map.fields = schema->fields;
+  schema->map._map_identity = &schema->map;
+  schema->map._map_cookie = ljlua_next_map_cookie();
   return 0;
 }
 
@@ -426,10 +449,6 @@ static void ljlua_schema_destroy(ljlua_schema *schema) {
     free(schema->metas[i].name);
     if (schema->metas[i].subschema != NULL) {
       ljlua_schema_destroy(schema->metas[i].subschema);
-    }
-    if (schema->metas[i].field.spool_options != NULL) {
-      free((char *)schema->metas[i].field.spool_options->temp_dir);
-      free((void *)schema->metas[i].field.spool_options);
     }
   }
   compiled = schema->path_cache;
@@ -480,6 +499,9 @@ static void ljlua_prepare_record_storage(ljlua_schema *schema, void *record) {
   size_t i;
 
   memset(record, 0, schema->record_size);
+  if (!schema->needs_record_init) {
+    return;
+  }
   for (i = 0u; i < schema->field_count; ++i) {
     ljlua_field_meta *meta = &schema->metas[i];
     unsigned char *base = (unsigned char *)record + meta->field.struct_offset;
@@ -536,7 +558,8 @@ static void ljlua_prepare_record_storage(ljlua_schema *schema, void *record) {
       break;
     }
   }
-  lonejson__init_map(&schema->map, record);
+  lonejson__init_map_with_allocator(&schema->map, record, NULL,
+                                    lonejson__runtime_const(schema->runtime));
 }
 
 static ljlua_schema_ud *ljlua_check_schema(lua_State *L, int index) {

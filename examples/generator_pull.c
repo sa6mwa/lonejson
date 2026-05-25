@@ -16,19 +16,28 @@ static const lonejson_field example_record_fields[] = {
 LONEJSON_MAP_DEFINE(example_record_map, example_record, example_record_fields);
 
 int main(void) {
+  lonejson *lj;
   example_record record;
   lonejson_generator generator;
   unsigned char buffer[16];
   size_t out_len;
   int eof;
+  lonejson_error error;
+
+  lj = lonejson_new(NULL, &error);
+  if (lj == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
 
   memset(&record, 0, sizeof(record));
   memcpy(record.id, "evt-1", 6u);
   record.ok = true;
 
-  if (lonejson_generator_init(&generator, &example_record_map, &record, NULL) !=
+  if (lonejson_generator_init(lj, &generator, &example_record_map, &record) !=
       LONEJSON_STATUS_OK) {
     fprintf(stderr, "generator init failed: %s\n", generator.error.message);
+    lonejson_free(lj);
     return 1;
   }
 
@@ -38,6 +47,7 @@ int main(void) {
                                 &eof) != LONEJSON_STATUS_OK) {
       fprintf(stderr, "generator read failed: %s\n", generator.error.message);
       lonejson_generator_cleanup(&generator);
+      lonejson_free(lj);
       return 1;
     }
     if (out_len != 0u) {
@@ -46,5 +56,6 @@ int main(void) {
   }
   fputc('\n', stdout);
   lonejson_generator_cleanup(&generator);
+  lonejson_free(lj);
   return 0;
 }

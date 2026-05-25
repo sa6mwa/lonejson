@@ -8,7 +8,7 @@ static void test_array_stream_mapped_items_from_root_key(void) {
   lonejson_error error;
   test_item item;
 
-  stream = lonejson_array_stream_open_reader("items", test_state_reader, &state,
+  stream = test_array_stream_open_reader("items", test_state_reader, &state,
                                              NULL, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
@@ -45,8 +45,8 @@ static void test_array_stream_raw_values_from_root_array(void) {
   test_buffer_sink sink;
   unsigned char raw[128];
 
-  lonejson_json_value_init(&value);
-  stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+  lonejson_json_value_init(test_default_runtime(), &value);
+  stream = test_array_stream_open_reader("", test_state_reader, &state,
                                              NULL, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
@@ -108,7 +108,7 @@ static void test_array_stream_open_path_and_fd_sources(void) {
     return;
   }
   close(fd);
-  stream = lonejson_array_stream_open_path("items", path, NULL, &error);
+  stream = test_array_stream_open_path("items", path, NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     result = lonejson_array_stream_next(stream, &test_item_map, &item, &error);
@@ -124,7 +124,7 @@ static void test_array_stream_open_path_and_fd_sources(void) {
   fd = open(path, O_RDONLY);
   EXPECT(fd >= 0);
   if (fd >= 0) {
-    stream = lonejson_array_stream_open_fd("items", fd, NULL, &error);
+    stream = test_array_stream_open_fd("items", fd, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
       result =
@@ -148,7 +148,7 @@ static void test_array_stream_open_path_and_fd_sources(void) {
       EXPECT(fcntl(pipe_fds[0], F_SETFL, flags | O_NONBLOCK) == 0);
     }
 
-    stream = lonejson_array_stream_open_fd("items", pipe_fds[0], NULL, &error);
+    stream = test_array_stream_open_fd("items", pipe_fds[0], NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
       result =
@@ -205,7 +205,7 @@ static void test_array_stream_failure_modes(void) {
 
   {
     test_reader_state dotted_state = {"{}", 0u, 8u};
-    stream = lonejson_array_stream_open_reader(
+    stream = test_array_stream_open_reader(
         "boards.items", test_state_reader, &dotted_state, NULL, &error);
   }
   EXPECT(stream == NULL);
@@ -216,7 +216,7 @@ static void test_array_stream_failure_modes(void) {
     state.json = cases[i];
     state.offset = 0u;
     state.chunk_size = 4u;
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream == NULL) {
@@ -276,7 +276,7 @@ static void test_array_stream_streaming_invariants(void) {
   state.json = json;
   state.offset = 0u;
   state.chunk_size = 1u;
-  stream = lonejson_array_stream_open_reader("items", test_state_reader, &state,
+  stream = test_array_stream_open_reader("items", test_state_reader, &state,
                                              NULL, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
@@ -317,8 +317,8 @@ static void test_array_stream_delimiter_validation_before_yield(void) {
     state.json = raw_root_cases[i];
     state.offset = 0u;
     state.chunk_size = 1u;
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("", test_state_reader, &state,
                                                NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -337,8 +337,8 @@ static void test_array_stream_delimiter_validation_before_yield(void) {
     lonejson_error error;
     lonejson_json_value value;
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -357,7 +357,7 @@ static void test_array_stream_delimiter_validation_before_yield(void) {
     lonejson_error error;
     test_item item;
 
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -374,7 +374,7 @@ static void test_array_stream_mapped_items_do_not_materialize_item(void) {
   test_reader_state state = {
       "[{\"id\":9,\"label\":\"large-label-that-truncates\"}]", 0u, 1u};
   lonejson_allocator allocator = lonejson_default_allocator();
-  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson__parse_options options = lonejson__default_parse_options();
   lonejson_array_stream *stream;
   lonejson_array_stream_result result;
   lonejson_error error;
@@ -384,7 +384,7 @@ static void test_array_stream_mapped_items_do_not_materialize_item(void) {
   allocator.realloc_fn = test_no_realloc_realloc;
   allocator.free_fn = test_no_realloc_free;
   options.allocator = &allocator;
-  stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+  stream = test_array_stream_open_reader("", test_state_reader, &state,
                                              &options, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
@@ -409,7 +409,7 @@ static void test_array_stream_skips_do_not_materialize_values(void) {
   test_reader_state state;
   test_realloc_limit_state limit = {128u, 0u};
   lonejson_allocator allocator = lonejson_default_allocator();
-  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson__parse_options options = lonejson__default_parse_options();
   lonejson_array_stream *stream;
   lonejson_array_stream_result result;
   lonejson_error error;
@@ -437,7 +437,7 @@ static void test_array_stream_skips_do_not_materialize_values(void) {
   state.json = json;
   state.offset = 0u;
   state.chunk_size = 3u;
-  stream = lonejson_array_stream_open_reader("items", test_state_reader, &state,
+  stream = test_array_stream_open_reader("items", test_state_reader, &state,
                                              &options, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
@@ -482,7 +482,7 @@ static void test_array_stream_escaped_key_path_matching(void) {
     state.json = cases[i].json;
     state.offset = 0u;
     state.chunk_size = 1u;
-    stream = lonejson_array_stream_open_reader(cases[i].path, test_state_reader,
+    stream = test_array_stream_open_reader(cases[i].path, test_state_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream == NULL) {
@@ -508,7 +508,7 @@ static void test_array_stream_escaped_key_failure_modes(void) {
   size_t i;
 
   {
-    lonejson_parse_options options = lonejson_default_parse_options();
+    lonejson__parse_options options = lonejson__default_parse_options();
     test_reader_state state = {"{\"items\":[],\"it\\u0065ms\":[]}", 0u, 1u};
     lonejson_array_stream *stream;
     lonejson_array_stream_result result;
@@ -516,7 +516,7 @@ static void test_array_stream_escaped_key_failure_modes(void) {
     test_item item;
 
     options.reject_duplicate_keys = 1;
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -538,7 +538,7 @@ static void test_array_stream_escaped_key_failure_modes(void) {
     state.json = invalid_keys[i];
     state.offset = 0u;
     state.chunk_size = 1u;
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream == NULL) {
@@ -552,7 +552,7 @@ static void test_array_stream_escaped_key_failure_modes(void) {
 }
 
 static void test_array_stream_duplicate_rejection_invariants(void) {
-  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson__parse_options options = lonejson__default_parse_options();
   lonejson_array_stream *stream;
   lonejson_array_stream_result result;
   lonejson_error error;
@@ -564,8 +564,8 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
   {
     test_reader_state state = {"[{\"a\":1,\"\\u0061\":2}]", 0u, 1u};
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("", test_state_reader, &state,
                                                &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -580,8 +580,8 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
   {
     test_reader_state state = {"[{\"\":1,\"\":2}]", 0u, 1u};
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("", test_state_reader, &state,
                                                &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -596,8 +596,8 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
   {
     test_reader_state state = {"[{\"a\":1,\"nested\":{\"a\":2}}]", 0u, 1u};
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("", test_state_reader, &state,
                                                &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -613,7 +613,7 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
     test_reader_state state = {
         "{\"meta\":1,\"\\u006deta\":2,\"items\":[{\"id\":1}]}", 0u, 1u};
 
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -629,7 +629,7 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
     test_reader_state state = {
         "{\"meta\":{\"x\":1,\"\\u0078\":2},\"items\":[{\"id\":1}]}", 0u, 1u};
 
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -645,7 +645,7 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
     test_reader_state state = {
         "{\"meta\":[{\"x\":1,\"x\":2}],\"items\":[{\"id\":1}]}", 0u, 1u};
 
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -661,7 +661,7 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
     test_reader_state state = {"{\"\":1,\"\":2,\"items\":[{\"id\":1}]}", 0u,
                                1u};
 
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -677,7 +677,7 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
     test_reader_state state = {
         "{\"items\":[{\"id\":2}],\"meta\":{\"x\":1,\"x\":2}}", 0u, 1u};
 
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -699,7 +699,7 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
     test_reader_state state = {"{\"items\":[{\"id\":2}],\"meta\":1,\"meta\":2}",
                                0u, 1u};
 
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -721,8 +721,8 @@ static void test_array_stream_duplicate_rejection_invariants(void) {
     test_reader_state state = {"[{\"a\":1,\"a\":2}]", 0u, 1u};
 
     options.reject_duplicate_keys = 0;
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("", test_state_reader, &state,
                                                &options, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -739,6 +739,8 @@ static void test_array_stream_raw_duplicate_check_allows_large_values(void) {
   static const size_t big_string_len = 1024u * 1024u + 1024u;
   static const size_t big_number_len = 300u;
   static const size_t big_key_len = 64u * 1024u + 128u;
+  lonejson_config config;
+  lonejson *large_value_lj;
   char *json;
   test_reader_state state;
   lonejson_array_stream *stream;
@@ -746,6 +748,17 @@ static void test_array_stream_raw_duplicate_check_allows_large_values(void) {
   lonejson_error error;
   lonejson_json_value value;
   size_t pos;
+
+  config = lonejson_default_config();
+  config.json_value_max_string_bytes = big_string_len + 2u;
+  config.json_value_max_number_bytes = big_number_len;
+  config.json_value_max_key_bytes = big_key_len;
+  config.json_value_max_total_bytes = big_string_len + 2u;
+  large_value_lj = lonejson_new(&config, &error);
+  EXPECT(large_value_lj != NULL);
+  if (large_value_lj == NULL) {
+    return;
+  }
 
   json = (char *)malloc(big_string_len + 5u);
   EXPECT(json != NULL);
@@ -760,8 +773,8 @@ static void test_array_stream_raw_duplicate_check_allows_large_values(void) {
     state.json = json;
     state.offset = 0u;
     state.chunk_size = 4096u;
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+    lonejson_json_value_init(large_value_lj, &value);
+    stream = test_array_stream_open_reader("", test_state_reader, &state,
                                                NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -788,8 +801,8 @@ static void test_array_stream_raw_duplicate_check_allows_large_values(void) {
     state.json = json;
     state.offset = 0u;
     state.chunk_size = 17u;
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+    lonejson_json_value_init(large_value_lj, &value);
+    stream = test_array_stream_open_reader("", test_state_reader, &state,
                                                NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -823,8 +836,8 @@ static void test_array_stream_raw_duplicate_check_allows_large_values(void) {
     state.json = json;
     state.offset = 0u;
     state.chunk_size = 97u;
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+    lonejson_json_value_init(large_value_lj, &value);
+    stream = test_array_stream_open_reader("", test_state_reader, &state,
                                                NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -838,6 +851,8 @@ static void test_array_stream_raw_duplicate_check_allows_large_values(void) {
     lonejson_json_value_cleanup(&value);
     free(json);
   }
+
+  lonejson_free(large_value_lj);
 }
 
 static void test_array_stream_reader_tolerates_empty_reads(void) {
@@ -850,8 +865,8 @@ static void test_array_stream_reader_tolerates_empty_reads(void) {
   {
     test_empty_read_state state = {{"[]", 0u, 1u}, 2u};
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_empty_then_state_reader,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("", test_empty_then_state_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -869,7 +884,7 @@ static void test_array_stream_reader_tolerates_empty_reads(void) {
     test_empty_read_state state = {
         {"{\"items\":[{\"id\":42,\"label\":\"ok\"}]}", 0u, 1u}, 3u};
 
-    stream = lonejson_array_stream_open_reader(
+    stream = test_array_stream_open_reader(
         "items", test_empty_then_state_reader, &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -894,8 +909,8 @@ static void test_array_stream_reader_tolerates_empty_reads(void) {
     test_intermittent_empty_read_state state = {
         {"[\"ab\",{\"k\":[1,2]},true]", 0u, 1u}, 1, 0u};
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader(
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader(
         "", test_intermittent_empty_reader, &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -905,21 +920,21 @@ static void test_array_stream_reader_tolerates_empty_reads(void) {
       EXPECT(value.len == 4u);
       lonejson_json_value_cleanup(&value);
 
-      lonejson_json_value_init(&value);
+      lonejson_json_value_init(test_default_runtime(), &value);
       result = lonejson_array_stream_next_value(stream, &value, &error);
       EXPECT(result == LONEJSON_ARRAY_STREAM_ITEM);
       EXPECT(error.code == LONEJSON_STATUS_OK);
       EXPECT(value.len == 11u);
       lonejson_json_value_cleanup(&value);
 
-      lonejson_json_value_init(&value);
+      lonejson_json_value_init(test_default_runtime(), &value);
       result = lonejson_array_stream_next_value(stream, &value, &error);
       EXPECT(result == LONEJSON_ARRAY_STREAM_ITEM);
       EXPECT(error.code == LONEJSON_STATUS_OK);
       EXPECT(value.len == 4u);
       lonejson_json_value_cleanup(&value);
 
-      lonejson_json_value_init(&value);
+      lonejson_json_value_init(test_default_runtime(), &value);
       result = lonejson_array_stream_next_value(stream, &value, &error);
       EXPECT(result == LONEJSON_ARRAY_STREAM_EOF);
       EXPECT(error.code == LONEJSON_STATUS_OK);
@@ -942,7 +957,7 @@ static void test_array_stream_reader_tolerates_empty_reads(void) {
         1,
         0u};
 
-    stream = lonejson_array_stream_open_reader(
+    stream = test_array_stream_open_reader(
         "items", test_intermittent_empty_reader, &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -975,8 +990,8 @@ static void test_array_stream_reader_tolerates_empty_reads(void) {
   {
     test_intermittent_empty_read_state state = {{"[1x]", 0u, 1u}, 1, 0u};
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader(
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader(
         "", test_intermittent_empty_reader, &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -999,7 +1014,7 @@ static void test_array_stream_additional_failure_modes(void) {
 
   {
     test_reader_state state = {"{\"meta\":{bad},\"items\":[]}", 0u, 2u};
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1013,8 +1028,8 @@ static void test_array_stream_additional_failure_modes(void) {
 
   {
     test_reader_state state = {"{\"items\":[01]}", 0u, 1u};
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1028,7 +1043,7 @@ static void test_array_stream_additional_failure_modes(void) {
 
   {
     test_reader_state state = {"{\"items\":[{\"id\":1}", 0u, 8u};
-    stream = lonejson_array_stream_open_reader(
+    stream = test_array_stream_open_reader(
         "items", test_error_after_prefix_reader, &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1044,7 +1059,7 @@ static void test_array_stream_additional_failure_modes(void) {
   {
     test_reader_state state = {"[{\"id\":1}]", 0u, 6u};
 
-    stream = lonejson_array_stream_open_reader(
+    stream = test_array_stream_open_reader(
         "", test_error_after_prefix_reader, &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1060,8 +1075,8 @@ static void test_array_stream_additional_failure_modes(void) {
   {
     test_reader_state state = {"[{\"id\":1}]", 0u, 6u};
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader(
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader(
         "", test_error_after_prefix_reader, &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1076,7 +1091,7 @@ static void test_array_stream_additional_failure_modes(void) {
 
   {
     test_reader_state state = {"{\"items\":[{\"id\":1}]}", 0u, 16u};
-    stream = lonejson_array_stream_open_reader("items", test_state_reader,
+    stream = test_array_stream_open_reader("items", test_state_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1099,7 +1114,7 @@ static void test_array_stream_would_block_boundaries(void) {
   {
     test_would_block_read_state state = {"[{\"id\":1}]", 0u, 8u, 0u, 0};
 
-    stream = lonejson_array_stream_open_reader("", test_would_block_once_reader,
+    stream = test_array_stream_open_reader("", test_would_block_once_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1124,8 +1139,8 @@ static void test_array_stream_would_block_boundaries(void) {
   {
     test_would_block_read_state state = {"[{\"id\":2}]", 0u, 8u, 0u, 0};
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_would_block_once_reader,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("", test_would_block_once_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1143,7 +1158,7 @@ static void test_array_stream_would_block_boundaries(void) {
     test_would_block_read_state state = {"{\"meta\":1,\"items\":[{\"id\":1}]}",
                                          0u, 4u, 8u, 0};
 
-    stream = lonejson_array_stream_open_reader(
+    stream = test_array_stream_open_reader(
         "items", test_would_block_once_reader, &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1165,7 +1180,7 @@ static void test_array_stream_would_block_boundaries(void) {
   {
     test_would_block_read_state state = {"[{\"id\":1}]", 0u, 4u, 6u, 0};
 
-    stream = lonejson_array_stream_open_reader("", test_would_block_once_reader,
+    stream = test_array_stream_open_reader("", test_would_block_once_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1191,7 +1206,7 @@ static void test_array_stream_would_block_boundaries(void) {
 
     first.id = 99;
     second.id = 77;
-    stream = lonejson_array_stream_open_reader("", test_would_block_once_reader,
+    stream = test_array_stream_open_reader("", test_would_block_once_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1214,8 +1229,8 @@ static void test_array_stream_would_block_boundaries(void) {
   {
     test_would_block_read_state state = {"[1,2]", 0u, 4u, 2u, 0};
 
-    lonejson_json_value_init(&value);
-    stream = lonejson_array_stream_open_reader("", test_would_block_once_reader,
+    lonejson_json_value_init(test_default_runtime(), &value);
+    stream = test_array_stream_open_reader("", test_would_block_once_reader,
                                                &state, NULL, &error);
     EXPECT(stream != NULL);
     if (stream != NULL) {
@@ -1246,7 +1261,7 @@ static void test_array_stream_would_block_boundaries(void) {
       state.chunk_size = 3u;
       state.block_after = block_at;
       state.blocked = 0;
-      stream = lonejson_array_stream_open_reader(
+      stream = test_array_stream_open_reader(
           "items", test_would_block_once_reader, &state, NULL, &error);
       EXPECT(stream != NULL);
       if (stream == NULL) {
@@ -1306,8 +1321,8 @@ static void test_array_stream_would_block_boundaries(void) {
       state.chunk_size = 2u;
       state.block_after = block_at;
       state.blocked = 0;
-      lonejson_json_value_init(&value);
-      stream = lonejson_array_stream_open_reader(
+      lonejson_json_value_init(test_default_runtime(), &value);
+      stream = test_array_stream_open_reader(
           "", test_would_block_once_reader, &state, NULL, &error);
       EXPECT(stream != NULL);
       if (stream == NULL) {
@@ -1342,7 +1357,7 @@ static void test_array_stream_would_block_boundaries(void) {
 
 static void test_array_stream_depth_limit_and_argument_guards(void) {
   test_reader_state state = {"[[[[]]]]", 0u, 2u};
-  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson__parse_options options = lonejson__default_parse_options();
   lonejson_array_stream *stream;
   lonejson_array_stream_result result;
   lonejson_error error;
@@ -1350,8 +1365,8 @@ static void test_array_stream_depth_limit_and_argument_guards(void) {
   test_item item;
 
   options.max_depth = 2u;
-  lonejson_json_value_init(&value);
-  stream = lonejson_array_stream_open_reader("", test_state_reader, &state,
+  lonejson_json_value_init(test_default_runtime(), &value);
+  stream = test_array_stream_open_reader("", test_state_reader, &state,
                                              &options, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
@@ -1366,6 +1381,66 @@ static void test_array_stream_depth_limit_and_argument_guards(void) {
   EXPECT(lonejson_array_stream_next_value(NULL, &value, &error) ==
          LONEJSON_ARRAY_STREAM_ERROR);
   lonejson_json_value_cleanup(&value);
+}
+
+static void test_array_stream_runtime_parse_depth_overrides_value_depth(void) {
+  enum { test_depth = 4 };
+  char json[2u * test_depth + 4u];
+  size_t pos = 0u;
+  size_t i;
+  lonejson_config config;
+  lonejson *runtime;
+  test_reader_state state;
+  lonejson_array_stream *stream;
+  lonejson_array_stream_result result;
+  lonejson_error error;
+  lonejson_json_value value;
+
+  json[pos++] = '[';
+  for (i = 0u; i < test_depth; ++i) {
+    json[pos++] = '[';
+  }
+  json[pos++] = '0';
+  for (i = 0u; i < test_depth; ++i) {
+    json[pos++] = ']';
+  }
+  json[pos++] = ']';
+  json[pos] = '\0';
+
+  config = lonejson_default_config();
+  config.max_depth = 0u;
+  config.json_value_max_depth = 1u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+
+  state.json = json;
+  state.offset = 0u;
+  state.chunk_size = 3u;
+  lonejson_json_value_init(runtime, &value);
+  stream = lonejson_array_stream_open_reader(runtime, "", test_state_reader,
+                                             &state, &error);
+  EXPECT(stream != NULL);
+  if (stream == NULL) {
+    lonejson_json_value_cleanup(&value);
+    lonejson_free(runtime);
+    return;
+  }
+
+  result = lonejson_array_stream_next_value(stream, &value, &error);
+  EXPECT(result == LONEJSON_ARRAY_STREAM_ITEM);
+  EXPECT(error.code == LONEJSON_STATUS_OK);
+  EXPECT(value.kind == LONEJSON_JSON_VALUE_BUFFER);
+
+  result = lonejson_array_stream_next_value(stream, &value, &error);
+  EXPECT(result == LONEJSON_ARRAY_STREAM_EOF);
+  EXPECT(error.code == LONEJSON_STATUS_OK);
+
+  lonejson_array_stream_close(stream);
+  lonejson_json_value_cleanup(&value);
+  lonejson_free(runtime);
 }
 
 typedef struct test_array_stream_push_seen {
@@ -1531,7 +1606,7 @@ static void test_array_stream_push_api(void) {
   size_t i;
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("items", NULL, &error);
+  stream = test_array_stream_open_push("items", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     for (i = 0u; i < strlen(json); ++i) {
@@ -1555,7 +1630,7 @@ static void test_array_stream_push_api(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("", NULL, &error);
+  stream = test_array_stream_open_push("", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     status = lonejson_array_stream_push(
@@ -1573,7 +1648,7 @@ static void test_array_stream_push_api(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("", NULL, &error);
+  stream = test_array_stream_open_push("", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     status = lonejson_array_stream_push(
@@ -1589,7 +1664,7 @@ static void test_array_stream_push_api(void) {
     lonejson_array_stream_close(stream);
   }
 
-  stream = lonejson_array_stream_open_push("", NULL, &error);
+  stream = test_array_stream_open_push("", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     status = lonejson_array_stream_finish(stream, &test_item_map, &item,
@@ -1599,11 +1674,11 @@ static void test_array_stream_push_api(void) {
     lonejson_array_stream_close(stream);
   }
 
-  stream = lonejson_array_stream_open_push("boards.items", NULL, &error);
+  stream = test_array_stream_open_push("boards.items", NULL, &error);
   EXPECT(stream == NULL);
   EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
 
-  stream = lonejson_array_stream_open_reader("", test_state_reader, NULL, NULL,
+  stream = test_array_stream_open_reader("", test_state_reader, NULL, NULL,
                                              &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
@@ -1614,7 +1689,7 @@ static void test_array_stream_push_api(void) {
     lonejson_array_stream_close(stream);
   }
 
-  stream = lonejson_array_stream_open_push("", NULL, &error);
+  stream = test_array_stream_open_push("", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     status = lonejson_array_stream_push(stream, &test_item_map, &item, "[]", 2u,
@@ -1629,7 +1704,7 @@ static void test_array_stream_push_api(void) {
 }
 
 static void test_array_stream_push_invariant_failure_modes(void) {
-  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson__parse_options options = lonejson__default_parse_options();
   lonejson_array_stream *stream;
   lonejson_error error;
   lonejson_status status;
@@ -1638,7 +1713,7 @@ static void test_array_stream_push_invariant_failure_modes(void) {
 
   options.reject_duplicate_keys = 1;
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("items", &options, &error);
+  stream = test_array_stream_open_push("items", &options, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     static const char json[] =
@@ -1652,7 +1727,7 @@ static void test_array_stream_push_invariant_failure_modes(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("items", NULL, &error);
+  stream = test_array_stream_open_push("items", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     static const char json[] = "{\"meta\":true}";
@@ -1665,7 +1740,7 @@ static void test_array_stream_push_invariant_failure_modes(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("items", &options, &error);
+  stream = test_array_stream_open_push("items", &options, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     static const char json[] =
@@ -1680,7 +1755,7 @@ static void test_array_stream_push_invariant_failure_modes(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("items", NULL, &error);
+  stream = test_array_stream_open_push("items", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     static const char json[] = "{\"items\":[{\"id\":3}],\"tail\":{bad}}";
@@ -1694,7 +1769,7 @@ static void test_array_stream_push_invariant_failure_modes(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("items", NULL, &error);
+  stream = test_array_stream_open_push("items", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     static const char json[] =
@@ -1713,7 +1788,7 @@ static void test_array_stream_push_invariant_failure_modes(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("", NULL, &error);
+  stream = test_array_stream_open_push("", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     status = lonejson_array_stream_push(
@@ -1730,7 +1805,7 @@ static void test_array_stream_push_invariant_failure_modes(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("", NULL, &error);
+  stream = test_array_stream_open_push("", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     status = lonejson_array_stream_push(
@@ -1757,7 +1832,7 @@ static void test_array_stream_push_does_not_materialize_response(void) {
   size_t pos = 0u;
   size_t i;
   lonejson_allocator allocator = lonejson_default_allocator();
-  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson__parse_options options = lonejson__default_parse_options();
   test_realloc_limit_state limit = {128u, 0u};
   lonejson_array_stream *stream;
   lonejson_error error;
@@ -1781,7 +1856,7 @@ static void test_array_stream_push_does_not_materialize_response(void) {
   options.allocator = &allocator;
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("items", &options, &error);
+  stream = test_array_stream_open_push("items", &options, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
     return;
@@ -1804,7 +1879,7 @@ static void test_array_stream_push_does_not_materialize_response(void) {
 static void test_array_stream_push_cleans_reused_destination(void) {
   static const char json[] = "[{\"name\":\"one\",\"tags\":[\"a\",\"b\"]},"
                              "{\"name\":\"two\",\"tags\":[\"c\",\"d\"]}]";
-  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson__parse_options options = lonejson__default_parse_options();
   test_allocator_state alloc_state;
   lonejson_array_stream *stream;
   lonejson_error error;
@@ -1815,7 +1890,7 @@ static void test_array_stream_push_cleans_reused_destination(void) {
   test_allocator_init(&alloc_state);
   options.allocator = &alloc_state.allocator;
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("", &options, &error);
+  stream = test_array_stream_open_push("", &options, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
     return;
@@ -1836,7 +1911,7 @@ static void test_array_stream_push_cleans_reused_destination(void) {
   EXPECT(alloc_state.stats.bytes_live == 0u);
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("", &options, &error);
+  stream = test_array_stream_open_push("", &options, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
     return;
@@ -1864,7 +1939,7 @@ static void test_array_stream_push_string_items(void) {
   size_t i;
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  stream = test_array_stream_open_push("keys", NULL, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
     return;
@@ -1897,7 +1972,7 @@ static void test_array_stream_push_string_item_callback(void) {
   size_t i;
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  stream = test_array_stream_open_push("keys", NULL, &error);
   EXPECT(stream != NULL);
   if (stream == NULL) {
     return;
@@ -1922,7 +1997,7 @@ static void test_array_stream_push_string_item_callback(void) {
 
   memset(&seen, 0, sizeof(seen));
   seen.fail_after_chunks = 1u;
-  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  stream = test_array_stream_open_push("keys", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     status = lonejson_array_stream_push_string_items(
@@ -1940,12 +2015,12 @@ static void test_array_stream_push_string_item_callback_bounds(void) {
   lonejson_error error;
   lonejson_status status;
   test_array_stream_string_seen seen;
-  lonejson_value_limits limits;
+  lonejson__value_limits limits;
   char *json;
   size_t string_len;
   size_t total;
 
-  limits = lonejson_default_value_limits();
+  limits = lonejson__default_value_limits();
   string_len = limits.max_string_bytes + 1u;
   total = strlen(prefix) + string_len + strlen(suffix);
   json = (char *)malloc(total + 1u);
@@ -1959,7 +2034,7 @@ static void test_array_stream_push_string_item_callback_bounds(void) {
   json[total] = '\0';
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  stream = test_array_stream_open_push("keys", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     status = lonejson_array_stream_push_string_items(
@@ -1971,6 +2046,70 @@ static void test_array_stream_push_string_item_callback_bounds(void) {
   free(json);
 }
 
+static void test_array_stream_push_string_runtime_value_limits(void) {
+  static const char json[] = "{\"keys\":[\"alpha\"]}";
+  lonejson_config config;
+  lonejson *strict_lj;
+  lonejson *default_lj;
+  lonejson_array_stream *stream;
+  lonejson_array_stream_string_handler handler =
+      test_array_stream_string_handler();
+  lonejson_error error;
+  lonejson_status status;
+  test_array_stream_string_seen seen;
+
+  config = lonejson_default_config();
+  config.json_value_max_string_bytes = 4u;
+  config.json_value_max_total_bytes = 4u;
+  strict_lj = lonejson_new(&config, &error);
+  EXPECT(strict_lj != NULL);
+  default_lj = lonejson_new(NULL, &error);
+  EXPECT(default_lj != NULL);
+  if (strict_lj == NULL || default_lj == NULL) {
+    lonejson_free(strict_lj);
+    lonejson_free(default_lj);
+    return;
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  stream = lonejson_array_stream_open_push(strict_lj, "keys", &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    status = lonejson_array_stream_push_string(stream, json, strlen(json),
+                                               &handler, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    lonejson_array_stream_close(stream);
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  stream = lonejson_array_stream_open_push(default_lj, "keys", &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    status = lonejson_array_stream_push_string(stream, json, strlen(json),
+                                               &handler, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    status =
+        lonejson_array_stream_finish_string(stream, &handler, &seen, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(strcmp(seen.items[0], "alpha") == 0);
+    lonejson_array_stream_close(stream);
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  stream = lonejson_array_stream_open_push(strict_lj, "keys", &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    status = lonejson_array_stream_push_string_items(
+        stream, json, strlen(json), test_array_stream_string_item, &seen,
+        &error);
+    EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+    lonejson_array_stream_close(stream);
+  }
+
+  lonejson_free(strict_lj);
+  lonejson_free(default_lj);
+}
+
 static void test_array_stream_push_string_failure_modes(void) {
   lonejson_array_stream_string_handler handler =
       test_array_stream_string_handler();
@@ -1980,7 +2119,7 @@ static void test_array_stream_push_string_failure_modes(void) {
   test_array_stream_string_seen seen;
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  stream = test_array_stream_open_push("keys", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     static const char json[] = "{\"keys\":[\"ok\",42]}";
@@ -1992,7 +2131,7 @@ static void test_array_stream_push_string_failure_modes(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  stream = test_array_stream_open_push("keys", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     static const char json[] = "{\"keys\":[\"ok\"x]}";
@@ -2005,7 +2144,7 @@ static void test_array_stream_push_string_failure_modes(void) {
   }
 
   memset(&seen, 0, sizeof(seen));
-  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  stream = test_array_stream_open_push("keys", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     static const char json[] = "{\"meta\":true}";
@@ -2018,7 +2157,7 @@ static void test_array_stream_push_string_failure_modes(void) {
 
   memset(&seen, 0, sizeof(seen));
   seen.fail_after_chunks = 1u;
-  stream = lonejson_array_stream_open_push("keys", NULL, &error);
+  stream = test_array_stream_open_push("keys", NULL, &error);
   EXPECT(stream != NULL);
   if (stream != NULL) {
     static const char json[] = "{\"keys\":[\"fail\"]}";
@@ -2061,10 +2200,10 @@ static void test_array_stream_mapped_string_field_envelope(void) {
 
   memset(&seen, 0, sizeof(seen));
   handler = test_array_stream_string_handler();
-  lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+  lonejson_init(test_default_runtime(), &test_mapped_string_array_stream_doc_map, &doc);
   EXPECT(lonejson_string_array_stream_set_handler(
              &doc.keys, &handler, &seen, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_parse_reader(&test_mapped_string_array_stream_doc_map, &doc,
+  EXPECT(test_parse_reader(&test_mapped_string_array_stream_doc_map, &doc,
                                test_state_reader, &state, NULL,
                                &error) == LONEJSON_STATUS_OK);
   EXPECT(seen.begins == 3u);
@@ -2085,7 +2224,7 @@ static void test_array_stream_mapped_string_field_metadata_and_long_item(void) {
   test_mapped_string_array_stream_doc doc;
   test_array_stream_string_seen seen;
   lonejson_array_stream_string_handler handler;
-  lonejson_parse_options options;
+  lonejson__parse_options options;
   test_buffer_sink sink;
   test_reader_state state;
   lonejson_error error;
@@ -2106,9 +2245,9 @@ static void test_array_stream_mapped_string_field_metadata_and_long_item(void) {
 
   memset(&seen, 0, sizeof(seen));
   handler = test_array_stream_string_handler();
-  options = lonejson_default_parse_options();
+  options = lonejson__default_parse_options();
   options.clear_destination = 0;
-  lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+  lonejson_init(test_default_runtime(), &test_mapped_string_array_stream_doc_map, &doc);
   EXPECT(lonejson_string_array_stream_set_handler(
              &doc.keys, &handler, &seen, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_json_value_enable_parse_capture(&doc.metadata, &error) ==
@@ -2116,7 +2255,7 @@ static void test_array_stream_mapped_string_field_metadata_and_long_item(void) {
   state.json = json;
   state.offset = 0u;
   state.chunk_size = 17u;
-  EXPECT(lonejson_parse_reader(&test_mapped_string_array_stream_doc_map, &doc,
+  EXPECT(test_parse_reader(&test_mapped_string_array_stream_doc_map, &doc,
                                test_state_reader, &state, &options,
                                &error) == LONEJSON_STATUS_OK);
   EXPECT(seen.begins == 1u);
@@ -2165,10 +2304,10 @@ static void test_array_stream_mapped_string_field_failure_modes(void) {
     lonejson_status status;
 
     memset(&seen, 0, sizeof(seen));
-    lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+    lonejson_init(test_default_runtime(), &test_mapped_string_array_stream_doc_map, &doc);
     EXPECT(lonejson_string_array_stream_set_handler(
                &doc.keys, &handler, &seen, &error) == LONEJSON_STATUS_OK);
-    status = lonejson_parse_cstr(&test_mapped_string_array_stream_doc_map, &doc,
+    status = test_parse_cstr(&test_mapped_string_array_stream_doc_map, &doc,
                                  jsons[i], NULL, &error);
     EXPECT(status == expected[i]);
     lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
@@ -2183,10 +2322,10 @@ static void test_array_stream_mapped_string_field_failure_modes(void) {
 
     memset(&seen, 0, sizeof(seen));
     seen.fail_after_chunks = 1u;
-    lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+    lonejson_init(test_default_runtime(), &test_mapped_string_array_stream_doc_map, &doc);
     EXPECT(lonejson_string_array_stream_set_handler(
                &doc.keys, &handler, &seen, &error) == LONEJSON_STATUS_OK);
-    EXPECT(lonejson_parse_cstr(&test_mapped_string_array_stream_doc_map, &doc,
+    EXPECT(test_parse_cstr(&test_mapped_string_array_stream_doc_map, &doc,
                                "{\"keys\":[\"fail\"],\"cursor\":\"x\","
                                "\"index_seq\":1}",
                                NULL, &error) == LONEJSON_STATUS_IO_ERROR);
@@ -2199,10 +2338,10 @@ static void test_array_stream_mapped_string_field_serialize_rejected(void) {
   lonejson_error error;
   char buffer[64];
 
-  lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+  lonejson_init(test_default_runtime(), &test_mapped_string_array_stream_doc_map, &doc);
   strcpy(doc.cursor, "x");
   doc.index_seq = 1u;
-  EXPECT(lonejson_serialize_buffer(&test_mapped_string_array_stream_doc_map,
+  EXPECT(test_serialize_buffer(&test_mapped_string_array_stream_doc_map,
                                    &doc, buffer, sizeof(buffer), NULL, NULL,
                                    &error) == LONEJSON_STATUS_TYPE_MISMATCH);
   lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
@@ -2448,9 +2587,9 @@ static void test_array_stream_mapped_field_nested_items(void) {
   memset(&store, 0, sizeof(store));
   memset(&board, 0, sizeof(board));
 
-  lonejson_init(&test_mapped_stream_store_map, &store);
-  lonejson_init(&test_mapped_stream_board_map, &board);
-  lonejson_init(&test_item_map, &item);
+  lonejson_init(test_default_runtime(), &test_mapped_stream_store_map, &store);
+  lonejson_init(test_default_runtime(), &test_mapped_stream_board_map, &board);
+  lonejson_init(test_default_runtime(), &test_item_map, &item);
 
   seen.active_board = &board;
   item_handler.item_map = &test_item_map;
@@ -2467,7 +2606,7 @@ static void test_array_stream_mapped_field_nested_items(void) {
   EXPECT(lonejson_mapped_array_stream_set_handler(
              &store.boards, &board_handler, &error) == LONEJSON_STATUS_OK);
 
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store, json, NULL,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store, json, NULL,
                              &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(store.tail, "done") == 0);
   EXPECT(seen.item_count == 3u);
@@ -2495,7 +2634,7 @@ static void test_array_stream_mapped_field_nested_json_value_sink_reuse(void) {
   test_mapped_json_value_stream_item item;
   test_mapped_json_value_stream_seen seen;
   lonejson_mapped_array_stream_handler handler;
-  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson__parse_options options = lonejson__default_parse_options();
   lonejson_error error;
   lonejson_status status;
   unsigned char payload_buf[128];
@@ -2510,8 +2649,8 @@ static void test_array_stream_mapped_field_nested_json_value_sink_reuse(void) {
   payload_sink.capacity = sizeof(payload_buf);
   seen.sink = &payload_sink;
 
-  lonejson_init(&test_mapped_json_value_stream_doc_map, &doc);
-  lonejson_init(&test_mapped_json_value_stream_item_map, &item);
+  lonejson_init(test_default_runtime(), &test_mapped_json_value_stream_doc_map, &doc);
+  lonejson_init(test_default_runtime(), &test_mapped_json_value_stream_item_map, &item);
   status = lonejson_json_value_set_parse_sink(
       &item.payload, test_buffer_sink_write, &payload_sink, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
@@ -2524,7 +2663,7 @@ static void test_array_stream_mapped_field_nested_json_value_sink_reuse(void) {
          LONEJSON_STATUS_OK);
 
   options.clear_destination = 0;
-  status = lonejson_parse_cstr(&test_mapped_json_value_stream_doc_map, &doc,
+  status = test_parse_cstr(&test_mapped_json_value_stream_doc_map, &doc,
                                json, &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(doc.tail, "done") == 0);
@@ -2547,7 +2686,7 @@ test_array_stream_mapped_field_nested_json_value_capture_budget_reuse(void) {
   test_mapped_json_value_stream_item item;
   lonejson_mapped_array_stream_handler handler;
   test_allocator_state alloc;
-  lonejson_parse_options options = lonejson_default_parse_options();
+  lonejson__parse_options options = lonejson__default_parse_options();
   lonejson_error error;
   lonejson_status status;
 
@@ -2556,8 +2695,8 @@ test_array_stream_mapped_field_nested_json_value_capture_budget_reuse(void) {
   memset(&handler, 0, sizeof(handler));
   test_allocator_init(&alloc);
 
-  lonejson_init(&test_mapped_json_value_stream_doc_map, &doc);
-  lonejson_init(&test_mapped_json_value_stream_item_map, &item);
+  lonejson_init(test_default_runtime(), &test_mapped_json_value_stream_doc_map, &doc);
+  lonejson_init(test_default_runtime(), &test_mapped_json_value_stream_item_map, &item);
   status = lonejson_json_value_enable_parse_capture(&item.payload, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
 
@@ -2570,7 +2709,7 @@ test_array_stream_mapped_field_nested_json_value_capture_budget_reuse(void) {
   options.clear_destination = 0;
   options.max_alloc_bytes = 16u;
   options.allocator = &alloc.allocator;
-  status = lonejson_parse_cstr(&test_mapped_json_value_stream_doc_map, &doc,
+  status = test_parse_cstr(&test_mapped_json_value_stream_doc_map, &doc,
                                json, &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(doc.tail, "done") == 0);
@@ -2609,11 +2748,11 @@ static void test_array_stream_mapped_field_failure_modes(void) {
   test_mapped_stream_seen seen;
   lonejson_mapped_array_stream_handler board_handler;
   lonejson_mapped_array_stream_handler item_handler;
-  lonejson_parse_options options;
+  lonejson__parse_options options;
   lonejson_error error;
   char buffer[128];
 
-  options = lonejson_default_parse_options();
+  options = lonejson__default_parse_options();
   options.clear_destination = 0;
   memset(&seen, 0, sizeof(seen));
   memset(&board_handler, 0, sizeof(board_handler));
@@ -2622,9 +2761,9 @@ static void test_array_stream_mapped_field_failure_modes(void) {
              NULL, &item_handler, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(lonejson_mapped_array_stream_set_handler(&board.items, NULL, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
-  lonejson_init(&test_mapped_stream_store_map, &store);
-  lonejson_init(&test_mapped_stream_board_map, &board);
-  lonejson_init(&test_item_map, &item);
+  lonejson_init(test_default_runtime(), &test_mapped_stream_store_map, &store);
+  lonejson_init(test_default_runtime(), &test_mapped_stream_board_map, &board);
+  lonejson_init(test_default_runtime(), &test_item_map, &item);
 
   seen.active_board = &board;
   item_handler.item_map = &test_item_map;
@@ -2639,25 +2778,25 @@ static void test_array_stream_mapped_field_failure_modes(void) {
   board_handler.user = &seen;
   EXPECT(lonejson_mapped_array_stream_set_handler(
              &store.boards, &board_handler, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store, bad_item,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store, bad_item,
                              NULL, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store, non_array,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store, non_array,
                              NULL, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store,
                              missing_boards, NULL,
                              &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store,
                              duplicate_boards, NULL,
                              &error) == LONEJSON_STATUS_DUPLICATE_FIELD);
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store,
                              duplicate_nested_items, NULL,
                              &error) == LONEJSON_STATUS_DUPLICATE_FIELD);
   memset(&seen, 0, sizeof(seen));
   seen.active_board = &board;
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store, bad_item,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store, bad_item,
                              &options,
                              &error) == LONEJSON_STATUS_TYPE_MISMATCH);
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store,
                              valid_after_failure, &options,
                              &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(store.tail, "ok") == 0);
@@ -2668,14 +2807,14 @@ static void test_array_stream_mapped_field_failure_modes(void) {
   memset(&seen, 0, sizeof(seen));
   seen.active_board = &board;
   seen.fail_after_items = 1u;
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store,
                              callback_failure, &options,
                              &error) == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(seen.item_count == 1u);
   EXPECT(strcmp(item.label, "") == 0);
   memset(&seen, 0, sizeof(seen));
   seen.active_board = &board;
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store,
                              valid_after_failure, &options,
                              &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(store.tail, "ok") == 0);
@@ -2688,19 +2827,19 @@ static void test_array_stream_mapped_field_failure_modes(void) {
 
   memset(&store, 0, sizeof(store));
   memset(&board, 0, sizeof(board));
-  lonejson_init(&test_mapped_stream_store_map, &store);
-  lonejson_init(&test_mapped_stream_board_map, &board);
+  lonejson_init(test_default_runtime(), &test_mapped_stream_store_map, &store);
+  lonejson_init(test_default_runtime(), &test_mapped_stream_board_map, &board);
   board_handler.item_map = &test_mapped_stream_board_map;
   board_handler.item_dst = &board;
   board_handler.item = test_mapped_stream_board_item;
   board_handler.user = &seen;
   EXPECT(lonejson_mapped_array_stream_set_handler(
              &store.boards, &board_handler, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_parse_cstr(&test_mapped_stream_store_map, &store,
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store,
                              missing_handler, NULL,
                              &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
-  EXPECT(lonejson_serialize_buffer(&test_mapped_stream_store_map, &store,
+  EXPECT(test_serialize_buffer(&test_mapped_stream_store_map, &store,
                                    buffer, sizeof(buffer), NULL, NULL,
                                    &error) == LONEJSON_STATUS_TYPE_MISMATCH);
 
@@ -2726,20 +2865,20 @@ static void test_array_stream_mapped_field_failure_cleans_alloc_items(void) {
   test_allocator_state alloc_state;
   lonejson_mapped_array_stream_handler parent_handler;
   lonejson_mapped_array_stream_handler child_handler;
-  lonejson_parse_options options;
+  lonejson__parse_options options;
   lonejson_error error;
 
   memset(&seen, 0, sizeof(seen));
   memset(&parent_handler, 0, sizeof(parent_handler));
   memset(&child_handler, 0, sizeof(child_handler));
   test_allocator_init(&alloc_state);
-  options = lonejson_default_parse_options();
+  options = lonejson__default_parse_options();
   options.clear_destination = 0;
   options.allocator = &alloc_state.allocator;
 
-  lonejson_init(&test_alloc_mapped_doc_map, &doc);
-  lonejson_init(&test_alloc_mapped_parent_map, &parent);
-  lonejson_init(&test_alloc_mapped_child_map, &child);
+  lonejson_init(test_default_runtime(), &test_alloc_mapped_doc_map, &doc);
+  lonejson_init(test_default_runtime(), &test_alloc_mapped_parent_map, &parent);
+  lonejson_init(test_default_runtime(), &test_alloc_mapped_child_map, &child);
 
   child_handler.item_map = &test_alloc_mapped_child_map;
   child_handler.item_dst = &child;
@@ -2755,14 +2894,14 @@ static void test_array_stream_mapped_field_failure_cleans_alloc_items(void) {
   EXPECT(lonejson_mapped_array_stream_set_handler(
              &doc.parents, &parent_handler, &error) == LONEJSON_STATUS_OK);
 
-  EXPECT(lonejson_parse_cstr(&test_alloc_mapped_doc_map, &doc, missing_child_id,
+  EXPECT(test_parse_cstr(&test_alloc_mapped_doc_map, &doc, missing_child_id,
                              &options,
                              &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
   EXPECT(alloc_state.stats.bytes_live == 0u);
   EXPECT(parent.name == NULL);
   EXPECT(child.name == NULL);
 
-  EXPECT(lonejson_parse_cstr(&test_alloc_mapped_doc_map, &doc,
+  EXPECT(test_parse_cstr(&test_alloc_mapped_doc_map, &doc,
                              child_type_mismatch, &options,
                              &error) == LONEJSON_STATUS_TYPE_MISMATCH);
   EXPECT(alloc_state.stats.bytes_live == 0u);
@@ -2770,7 +2909,7 @@ static void test_array_stream_mapped_field_failure_cleans_alloc_items(void) {
   EXPECT(child.name == NULL);
 
   memset(&seen, 0, sizeof(seen));
-  EXPECT(lonejson_parse_cstr(&test_alloc_mapped_doc_map, &doc,
+  EXPECT(test_parse_cstr(&test_alloc_mapped_doc_map, &doc,
                              valid_after_failure, &options,
                              &error) == LONEJSON_STATUS_OK);
   EXPECT(alloc_state.stats.bytes_live == 0u);
@@ -2809,9 +2948,9 @@ static void test_array_stream_mapped_field_curl_facade(void) {
   memset(&item_handler, 0, sizeof(item_handler));
   memset(&store, 0, sizeof(store));
   memset(&board, 0, sizeof(board));
-  lonejson_init(&test_mapped_stream_store_map, &store);
-  lonejson_init(&test_mapped_stream_board_map, &board);
-  lonejson_init(&test_item_map, &item);
+  lonejson_init(test_default_runtime(), &test_mapped_stream_store_map, &store);
+  lonejson_init(test_default_runtime(), &test_mapped_stream_board_map, &board);
+  lonejson_init(test_default_runtime(), &test_item_map, &item);
 
   seen.active_board = &board;
   item_handler.item_map = &test_item_map;
@@ -2827,8 +2966,9 @@ static void test_array_stream_mapped_field_curl_facade(void) {
   EXPECT(lonejson_mapped_array_stream_set_handler(
              &store.boards, &board_handler, &error) == LONEJSON_STATUS_OK);
 
-  EXPECT(lonejson_curl_parse_init(&parse, &test_mapped_stream_store_map, &store,
-                                  NULL) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_parse_init(
+             &parse, test_default_runtime(), &test_mapped_stream_store_map,
+             &store) == LONEJSON_STATUS_OK);
   for (i = 0u; i < strlen(json); ++i) {
     EXPECT(lonejson_curl_write_callback((char *)json + i, 1u, 1u, &parse) ==
            1u);
@@ -2864,12 +3004,13 @@ static void test_array_stream_mapped_string_field_curl_facade(void) {
 
   memset(&seen, 0, sizeof(seen));
   handler = test_array_stream_string_handler();
-  lonejson_init(&test_mapped_string_array_stream_doc_map, &doc);
+  lonejson_init(test_default_runtime(), &test_mapped_string_array_stream_doc_map, &doc);
   EXPECT(lonejson_string_array_stream_set_handler(
              &doc.keys, &handler, &seen, &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_curl_parse_init(&parse,
-                                  &test_mapped_string_array_stream_doc_map,
-                                  &doc, NULL) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_parse_init(
+             &parse, test_default_runtime(),
+             &test_mapped_string_array_stream_doc_map, &doc) ==
+         LONEJSON_STATUS_OK);
   for (i = 0u; i < strlen(json); ++i) {
     EXPECT(lonejson_curl_write_callback((char *)json + i, 1u, 1u, &parse) ==
            1u);

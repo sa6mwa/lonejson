@@ -97,18 +97,16 @@ fuzz_writer_value_read(void *user, unsigned char *buffer, size_t capacity) {
   return result;
 }
 
-static int fuzz_spooled_prepare(fuzz_spooled_state *state, const uint8_t *data,
-                                size_t size, uint8_t control) {
-  lonejson_spool_options options;
+static int fuzz_spooled_prepare(lonejson *runtime, fuzz_spooled_state *state,
+                                const uint8_t *data, size_t size,
+                                uint8_t control) {
   lonejson_error error;
   unsigned char scratch[8];
   size_t pre;
   size_t consumed = 0u;
 
   memset(state, 0, sizeof(*state));
-  memset(&options, 0, sizeof(options));
-  options.memory_limit = (size_t)(control & 7u);
-  lonejson_spooled_init(&state->value, &options);
+  lonejson_spooled_init(runtime, &state->value);
   state->initialized = 1;
   if (lonejson_spooled_append(&state->value, data, size, &error) !=
       LONEJSON_STATUS_OK) {
@@ -175,9 +173,10 @@ static void fuzz_spooled_check_and_cleanup(fuzz_spooled_state *state,
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  lonejson_config config;
+  lonejson *runtime;
   lonejson_writer writer;
   lonejson_writer_value_stream stream;
-  lonejson_value_limits limits;
   lonejson_error error;
   lonejson_status status;
   fuzz_writer_value_sink sink;
@@ -199,18 +198,26 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   if ((control & 0x40u) != 0u) {
     sink.fail_after = 1u + (size_t)(control & 0x1Fu);
   }
-  limits = lonejson_default_value_limits();
-  limits.max_depth = 1u + (size_t)(control & 0x0Fu);
-  limits.max_string_bytes = 1u + (size_t)(control * 8u);
-  limits.max_key_bytes = 1u + (size_t)(control * 4u);
-  limits.max_number_bytes = 1u + (size_t)(control & 0x3Fu);
-  limits.max_total_bytes = (control & 0x80u) != 0u ? 1u + size / 2u : 0u;
+  config = lonejson_default_config();
+  config.json_value_max_depth = 1u + (size_t)(control & 0x0Fu);
+  config.json_value_max_string_bytes = 1u + (size_t)(control * 8u);
+  config.json_value_max_key_bytes = 1u + (size_t)(control * 4u);
+  config.json_value_max_number_bytes = 1u + (size_t)(control & 0x3Fu);
+  config.json_value_max_total_bytes =
+      (control & 0x80u) != 0u ? 1u + size / 2u : 0u;
+  config.spool_default.memory_limit = (size_t)(control & 7u);
+  runtime = lonejson_new(&config, &error);
+  if (runtime == NULL) {
+    return 0;
+  }
   chunk_size = 1u + (size_t)(control % 17u);
   array_items_mode = (control & 0x30u) == 0x30u;
 
-  status = lonejson_writer_init_sink(&writer, fuzz_writer_value_sink_write,
-                                     &sink, NULL, &error);
+  status = lonejson_writer_init_sink(runtime, &writer,
+                                     fuzz_writer_value_sink_write, &sink,
+                                     &error);
   if (status != LONEJSON_STATUS_OK) {
+    lonejson_free(runtime);
     return 0;
   }
   if (array_items_mode) {
@@ -228,9 +235,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (array_items_mode) {
       const char *selector = (control & 8u) != 0u ? "items" : NULL;
       if ((control & 0x80u) != 0u &&
-          fuzz_spooled_prepare(&spool, data, size, control)) {
+          fuzz_spooled_prepare(runtime, &spool, data, size, control)) {
         status = lonejson_writer_array_items_spooled(
-            &writer, selector, &spool.value, NULL, &error);
+            &writer, selector, &spool.value, &error);
       } else if ((control & 4u) != 0u) {
         memset(&reader, 0, sizeof(reader));
         reader.data = data;
@@ -238,20 +245,18 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         reader.chunk_size = chunk_size;
         reader.fail = (control & 2u) != 0u;
         status = lonejson_writer_array_items_reader(
-            &writer, selector, fuzz_writer_value_read, &reader, NULL, &error);
+            &writer, selector, fuzz_writer_value_read, &reader, &error);
       } else {
         status = lonejson_writer_array_items_buffer(&writer, selector, data,
-                                                    size, NULL, &error);
+                                                    size, &error);
       }
     } else if ((control & 0x30u) == 0x10u) {
-      status = lonejson_writer_json_value_buffer(&writer, data, size, &limits,
-                                                 &error);
+      status = lonejson_writer_json_value_buffer(&writer, data, size, &error);
     } else if ((control & 0x30u) == 0x20u) {
       if ((control & 0x80u) != 0u &&
-          fuzz_spooled_prepare(&spool, data, size, control)) {
-        status =
-            lonejson_writer_json_value_spooled(&writer, &spool.value, &limits,
-                                               &error);
+          fuzz_spooled_prepare(runtime, &spool, data, size, control)) {
+        status = lonejson_writer_json_value_spooled(&writer, &spool.value,
+                                                    &error);
       } else {
         memset(&reader, 0, sizeof(reader));
         reader.data = data;
@@ -259,11 +264,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         reader.chunk_size = chunk_size;
         reader.fail = (control & 4u) != 0u;
         status = lonejson_writer_json_value_reader(
-            &writer, fuzz_writer_value_read, &reader, &limits, &error);
+            &writer, fuzz_writer_value_read, &reader, &error);
       }
     } else {
-      status =
-          lonejson_writer_value_stream_open(&stream, &writer, &limits, &error);
+      status = lonejson_writer_value_stream_open(&stream, &writer, &error);
       if (status == LONEJSON_STATUS_OK) {
         if ((control & 2u) != 0u) {
           (void)lonejson_writer_null(&writer, &error);
@@ -282,9 +286,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   }
   status = lonejson_writer_finish(&writer, &error);
   if (status == LONEJSON_STATUS_OK) {
-    (void)lonejson_validate_buffer(sink.data, sink.len, &error);
+    (void)lonejson_validate_buffer(runtime, sink.data, sink.len, &error);
   }
   fuzz_spooled_check_and_cleanup(&spool, data, size);
   lonejson_writer_cleanup(&writer);
+  lonejson_free(runtime);
   return 0;
 }

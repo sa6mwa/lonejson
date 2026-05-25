@@ -207,9 +207,20 @@ require_archive_consumer_metadata() {
 #include <lonejson.h>
 
 int main(void) {
+    lonejson *runtime;
     lonejson_error error;
+
     lonejson_error_init(&error);
-    return lonejson_validate_cstr("{\"ok\":true}", &error) == LONEJSON_STATUS_OK ? 0 : 1;
+    runtime = lonejson_new(NULL, &error);
+    if (runtime == NULL) {
+        return 1;
+    }
+    if (lonejson_validate_cstr(runtime, "{\"ok\":true}", &error) != LONEJSON_STATUS_OK) {
+        lonejson_free(runtime);
+        return 1;
+    }
+    lonejson_free(runtime);
+    return 0;
 }
 EOF
 

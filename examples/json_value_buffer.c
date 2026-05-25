@@ -23,18 +23,26 @@ int main(void) {
   static const char selector_json[] =
       "{\"kind\":\"term\",\"field\":\"name\",\"value\":\"alice\"}";
   static const char fields_json[] = "[\"id\",\"name\",\"created_at\"]";
+  lj *runtime;
   query_request req;
   lj_error error;
   lj_status status;
   char *json;
 
-  lj_init(&query_request_map, &req);
+  runtime = lj_new(NULL, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  lj_init(runtime, &query_request_map, &req);
   strcpy(req.namespace_, "default");
 
   status = lj_json_value_set_buffer(&req.selector, selector_json,
                                     strlen(selector_json), &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "selector setup failed: %s\n", error.message);
+    lj_free(runtime);
     return 1;
   }
   status =
@@ -43,13 +51,15 @@ int main(void) {
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "fields setup failed: %s\n", error.message);
     lj_cleanup(&query_request_map, &req);
+    lj_free(runtime);
     return 1;
   }
 
-  json = lj_serialize_alloc(&query_request_map, &req, NULL, NULL, &error);
+  json = lj_serialize_alloc(runtime, &query_request_map, &req, NULL, &error);
   if (json == NULL) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
     lj_cleanup(&query_request_map, &req);
+    lj_free(runtime);
     return 1;
   }
 
@@ -57,5 +67,6 @@ int main(void) {
 
   LONEJSON_FREE(json);
   lj_cleanup(&query_request_map, &req);
+  lj_free(runtime);
   return 0;
 }

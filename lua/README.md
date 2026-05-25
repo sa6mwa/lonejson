@@ -7,10 +7,11 @@ reusable records, object-framed streams, selected-array streams, and explicit
 handling of large values; the Lua surface keeps those strengths instead of
 hiding them behind a looser API that would allocate more and explain less.
 
-At the top level, the binding is loaded with:
+At the top level, load the module and instantiate one runtime:
 
 ```lua
-local lj = require("lonejson")
+local lonejson = require("lonejson")
+local lj = lonejson.new()
 ```
 
 The main repository README explains the overall project. This document focuses
@@ -87,9 +88,9 @@ The example program in [`examples/lua_binding.lua`](../examples/lua_binding.lua)
 is a good companion to this document.
 
 When you also use the C API around the Lua binding, follow the same
-initialization rule as the rest of lonejson: use the public `*_init` and
-`lonejson_default_*` helpers for public structs instead of manual `memset`
-or `{0}`.
+initialization rule as the rest of lonejson: instantiate one runtime with
+`lonejson_new()`/`lonejson_default_config()` and use the public `*_init`
+helpers for public structs instead of manual `memset` or `{0}`.
 
 ## The schema DSL
 
@@ -99,7 +100,8 @@ type, and any relevant options such as `required`, `fixed_capacity`,
 `overflow`, or spool settings.
 
 ```lua
-local lj = require("lonejson")
+local lonejson = require("lonejson")
+local lj = lonejson.new()
 
 local Address = lj.object {
   fields = {
@@ -202,40 +204,44 @@ assert(q.fields[3].metrics[2] == lj.json_null)
 The shape is intentionally explicit. A schema is not an afterthought; it is the
 contract that makes the rest of the API efficient and predictable.
 
-## Parse options
+## Runtime config
 
-Schema decode and stream entrypoints accept an optional parse-options table.
-The Lua binding supports the same main ceilings as the C surface:
+Decode, stream, and encode policy comes from the instantiated runtime rather
+than per-call option tables. Schemas, reusable records, object streams,
+selected-array streams, and encoders created from one `lj` all inherit that
+runtime's policy. The main runtime fields are:
 
-- `clear_destination`
-- `reject_duplicate_keys`
+- `clear_destination_by_default`
+- `reject_duplicate_keys_by_default`
 - `max_depth`
 - `max_dynamic_string_bytes`
 - `max_alloc_bytes`
-- `fixed_string_scratch`
+- `write_pretty`
+- `write_max_output_bytes`
 
 Reused non-empty fixed-capacity string fields (`lj.string { fixed_capacity = N
-}` with `clear_destination = false`) stage replacement bytes before commit so a
-parse failure does not clobber the old value. By default the Lua binding uses
-temporary lonejson-owned staging for that path, and that staging competes under
-`max_alloc_bytes`.
+}` with `clear_destination_by_default = false`) stage replacement bytes before
+commit so a parse failure does not clobber the old value. By default the Lua
+binding uses temporary lonejson-owned staging for that path, and that staging
+competes under `max_alloc_bytes`.
 
 When you want that reuse path to stay allocation-free, create a reusable
-scratch object and pass it in parse options:
+scratch object and pass it into `lonejson.new({...})`:
 
 ```lua
-local scratch = lj.fixed_string_scratch(8192)
-local rec = MySchema:new_record()
-
-MySchema:decode_into(rec, json, {
-  clear_destination = false,
+local lonejson = require("lonejson")
+local scratch = lonejson.fixed_string_scratch(8192)
+local lj = lonejson.new({
+  clear_destination_by_default = false,
   max_alloc_bytes = 1024,
   fixed_string_scratch = scratch,
 })
+local MySchema = lj.schema("MySchema", { ... })
 ```
 
-Streams and array streams retain the scratch object for the parser lifetime, so
-the same scratch can be reused safely across repeated `:next(...)` calls.
+Streams and array streams retain the runtime-owned scratch object for the
+parser lifetime, so the same runtime can safely reuse it across repeated
+`:next(...)` calls.
 
 ## Table mode
 
@@ -255,7 +261,7 @@ local json = User:encode({
   name = "Ada",
   age = 37,
   active = true,
-}, { pretty = true })
+})
 ```
 
 Convenience entry points exist for the common sources:
@@ -263,8 +269,8 @@ Convenience entry points exist for the common sources:
 - `schema:decode(json_string)`
 - `schema:decode_path(path)`
 - `schema:decode_fd(file_handle)`
-- `schema:write_path(value, path [, options])`
-- `schema:write_fd(value, file_handle [, options])`
+- `schema:write_path(value, path)`
+- `schema:write_fd(value, file_handle)`
 
 Pretty printing is optional and matches the C library: two-space indentation
 with stable object and array formatting.

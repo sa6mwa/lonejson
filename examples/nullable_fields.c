@@ -22,12 +22,12 @@ static const lj_field job_status_fields[] = {
                                    "enabled")};
 LJ_MAP_DEFINE(job_status_map, job_status, job_status_fields);
 
-static int parse_and_print(const char *json) {
+static int parse_and_print(lj *runtime, const char *json) {
   job_status status;
   lj_error error;
 
-  lj_init(&job_status_map, &status);
-  if (lj_parse_cstr(&job_status_map, &status, json, NULL, &error) !=
+  lj_init(runtime, &job_status_map, &status);
+  if (lj_parse_cstr(runtime, &job_status_map, &status, json, &error) !=
       LJ_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
     return 1;
@@ -53,19 +53,29 @@ static int parse_and_print(const char *json) {
 }
 
 int main(void) {
+  lj *runtime;
   job_status out;
   lj_error error;
   char *json;
 
-  if (parse_and_print(
-          "{\"name\":\"queued\",\"attempts\":null,\"enabled\":true}") != 0) {
-    return 1;
-  }
-  if (parse_and_print("{\"name\":\"new\"}") != 0) {
+  runtime = lj_new(NULL, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
     return 1;
   }
 
-  lj_init(&job_status_map, &out);
+  if (parse_and_print(
+          runtime,
+          "{\"name\":\"queued\",\"attempts\":null,\"enabled\":true}") != 0) {
+    lj_free(runtime);
+    return 1;
+  }
+  if (parse_and_print(runtime, "{\"name\":\"new\"}") != 0) {
+    lj_free(runtime);
+    return 1;
+  }
+
+  lj_init(runtime, &job_status_map, &out);
   snprintf(out.name, sizeof(out.name), "%s", "retrying");
   out.attempts = 3u;
   out.has_attempts = 1;
@@ -73,14 +83,16 @@ int main(void) {
   out.enabled = false;
   out.has_enabled = 1;
 
-  json = lj_serialize_alloc(&job_status_map, &out, NULL, NULL, &error);
+  json = lj_serialize_alloc(runtime, &job_status_map, &out, NULL, &error);
   if (json == NULL) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
+    lj_free(runtime);
     return 1;
   }
 
   puts(json);
   LJ_FREE(json);
   lj_cleanup(&job_status_map, &out);
+  lj_free(runtime);
   return 0;
 }

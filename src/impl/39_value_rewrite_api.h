@@ -17,7 +17,7 @@ typedef struct lonejson__value_rewrite_frame {
 typedef struct lonejson__value_rewrite_state {
   lonejson_writer writer;
   lonejson_value_rewrite_options options;
-  lonejson_parse_options parse_options;
+  lonejson__parse_options parse_options;
   lonejson_allocator allocator;
   lonejson_error *error;
   lonejson_value_rewrite_old_value old_value;
@@ -1063,12 +1063,13 @@ lonejson__value_rewrite_cleanup(lonejson__value_rewrite_state *state) {
 }
 
 static void lonejson__value_rewrite_resolve_limits(
-    const lonejson_parse_options *options, lonejson_value_limits *limits) {
-  *limits = lonejson_default_value_limits();
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    lonejson__value_limits *limits) {
+  *limits = runtime != NULL ? runtime->value_limits
+                            : lonejson__default_value_limits();
   if (options != NULL && options->max_depth != 0u) {
     limits->max_depth = options->max_depth;
   }
-  (void)options;
 }
 
 static lonejson_status lonejson__value_rewrite_validate_options(
@@ -1115,23 +1116,17 @@ static lonejson_status lonejson__value_rewrite_validate_options(
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "invalid value rewrite action");
   }
-  if (options->parse_options != NULL &&
-      !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->parse_options->allocator)) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u,
-                               "allocator must provide either all callbacks "
-                               "or none");
-  }
   return LONEJSON_STATUS_OK;
 }
 
-lonejson_status lonejson_value_rewrite_reader(
+static lonejson_status lonejson__value_rewrite_reader_with_options(
     lonejson_reader_fn reader, void *reader_user, lonejson_sink_fn sink,
-    void *sink_user, const lonejson_value_rewrite_options *options,
-    lonejson_error *error) {
+    void *sink_user, const lonejson__parse_options *parse_options,
+    const lonejson_runtime *runtime,
+    const lonejson_value_rewrite_options *options, lonejson_error *error) {
   lonejson__value_rewrite_state state;
   lonejson_value_visitor visitor;
-  lonejson_value_limits limits;
+  lonejson__value_limits limits;
   lonejson_status status;
 
   if (reader == NULL || sink == NULL) {
@@ -1142,16 +1137,23 @@ lonejson_status lonejson_value_rewrite_reader(
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
+  if (parse_options != NULL &&
+      !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(parse_options->allocator)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "allocator must provide either all callbacks "
+                               "or none");
+  }
   memset(&state, 0, sizeof(state));
   state.options = *options;
-  state.parse_options = options->parse_options != NULL
-                            ? *options->parse_options
-                            : lonejson_default_parse_options();
+  state.parse_options =
+      parse_options != NULL ? *parse_options : lonejson__default_parse_options();
   state.allocator = lonejson__allocator_resolve(state.parse_options.allocator);
   state.error = error;
   lonejson__clear_error(error);
-  status = lonejson_writer_init_sink(&state.writer, sink, sink_user, NULL,
-                                     error);
+  status = lonejson__writer_init_sink_with_options(
+      &state.writer, sink, sink_user,
+      runtime != NULL ? &runtime->write_options : NULL, runtime, error);
   if (status == LONEJSON_STATUS_OK) {
     visitor = lonejson_default_value_visitor();
     visitor.object_begin = lonejson__value_rewrite_object_begin;
@@ -1169,10 +1171,12 @@ lonejson_status lonejson_value_rewrite_reader(
     visitor.number_end = lonejson__value_rewrite_number_end;
     visitor.boolean_value = lonejson__value_rewrite_boolean;
     visitor.null_value = lonejson__value_rewrite_null;
-    lonejson__value_rewrite_resolve_limits(&state.parse_options, &limits);
+    lonejson__value_rewrite_resolve_limits(&state.parse_options, runtime,
+                                           &limits);
     state.number_limit = limits.max_number_bytes;
-    status = lonejson_visit_value_reader(reader, reader_user, &visitor, &state,
-                                         &limits, error);
+    status = lonejson__visit_value_reader_with_limits(
+        reader, reader_user, &visitor, &state, &limits, &state.allocator,
+        error);
   }
   if (status == LONEJSON_STATUS_OK && !state.found &&
       state.options.action != LONEJSON_VALUE_REWRITE_KEEP) {
@@ -1186,9 +1190,29 @@ lonejson_status lonejson_value_rewrite_reader(
   return status;
 }
 
-lonejson_status lonejson_value_rewrite_buffer(
-    const void *data, size_t len, lonejson_sink_fn sink, void *sink_user,
+lonejson_status lonejson_value_rewrite_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    lonejson_sink_fn sink, void *sink_user,
     const lonejson_value_rewrite_options *options, lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  lonejson_status status;
+
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__value_rewrite_reader_with_options(
+      reader, reader_user, sink, sink_user, &runtime_state->parse_options,
+      runtime_state, options, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
+}
+
+lonejson_status lonejson_value_rewrite_buffer(
+    lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+    void *sink_user, const lonejson_value_rewrite_options *options,
+    lonejson_error *error) {
   lonejson_buffer_reader reader;
 
   if (data == NULL && len != 0u) {
@@ -1196,34 +1220,35 @@ lonejson_status lonejson_value_rewrite_buffer(
                                0u, "JSON buffer is required");
   }
   lonejson_buffer_reader_init(&reader, data, len);
-  return lonejson_value_rewrite_reader(lonejson_buffer_reader_read, &reader,
-                                       sink, sink_user, options, error);
+  return lonejson_value_rewrite_reader(
+      runtime, lonejson_buffer_reader_read, &reader, sink, sink_user, options,
+      error);
 }
 
 lonejson_status lonejson_value_rewrite_filep(
-    FILE *fp, lonejson_sink_fn sink, void *sink_user,
+    lonejson *runtime, FILE *fp, lonejson_sink_fn sink, void *sink_user,
     const lonejson_value_rewrite_options *options, lonejson_error *error) {
   if (fp == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "input file is required");
   }
-  return lonejson_value_rewrite_reader(lonejson__file_reader, fp, sink,
+  return lonejson_value_rewrite_reader(runtime, lonejson__file_reader, fp, sink,
                                        sink_user, options, error);
 }
 
 lonejson_status lonejson_value_rewrite_fd(
-    int fd, lonejson_sink_fn sink, void *sink_user,
+    lonejson *runtime, int fd, lonejson_sink_fn sink, void *sink_user,
     const lonejson_value_rewrite_options *options, lonejson_error *error) {
   if (fd < 0) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "input fd must be non-negative");
   }
-  return lonejson_value_rewrite_reader(lonejson__fd_reader, &fd, sink,
+  return lonejson_value_rewrite_reader(runtime, lonejson__fd_reader, &fd, sink,
                                        sink_user, options, error);
 }
 
 lonejson_status lonejson_value_rewrite_path(
-    const char *input_path, const char *output_path,
+    lonejson *runtime, const char *input_path, const char *output_path,
     const lonejson_value_rewrite_options *options, lonejson_error *error) {
   struct stat input_stat;
   struct stat output_stat;
@@ -1234,6 +1259,13 @@ lonejson_status lonejson_value_rewrite_path(
   if (input_path == NULL || output_path == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "input and output paths are required");
+  }
+  {
+    lonejson__runtime_borrow borrow;
+    if (lonejson__require_runtime_borrow(runtime, &borrow, error) == NULL) {
+      return LONEJSON_STATUS_INVALID_ARGUMENT;
+    }
+    lonejson__runtime_borrow_release(&borrow);
   }
   if (stat(input_path, &input_stat) == 0 &&
       stat(output_path, &output_stat) == 0 &&
@@ -1261,8 +1293,8 @@ lonejson_status lonejson_value_rewrite_path(
     return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
                                "failed to open value rewrite output path");
   }
-  status = lonejson_value_rewrite_filep(in, lonejson__sink_file, out, options,
-                                        error);
+  status = lonejson_value_rewrite_filep(runtime, in, lonejson__sink_file, out,
+                                        options, error);
   if (fclose(out) != 0 && status == LONEJSON_STATUS_OK) {
     if (error != NULL) {
       error->system_errno = errno;
@@ -1276,9 +1308,9 @@ lonejson_status lonejson_value_rewrite_path(
 
 static lonejson_status lonejson__value_rewrite_selector_to_options(
     const lonejson_value_rewrite_selector_options *selector_options,
+    const lonejson__parse_options *parse_options,
     lonejson_value_rewrite_options *options,
     lonejson__value_rewrite_selector *selector, lonejson_error *error) {
-  lonejson_parse_options parse_options;
   lonejson_status status;
 
   if (selector_options == NULL || options == NULL || selector == NULL) {
@@ -1286,16 +1318,13 @@ static lonejson_status lonejson__value_rewrite_selector_to_options(
                                0u,
                                "value rewrite selector options are required");
   }
-  parse_options = selector_options->parse_options != NULL
-                      ? *selector_options->parse_options
-                      : lonejson_default_parse_options();
   status = lonejson__value_rewrite_parse_selector(
-      selector, selector_options->selector, parse_options.allocator, error);
+      selector, selector_options->selector,
+      parse_options != NULL ? parse_options->allocator : NULL, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
   memset(options, 0, sizeof(*options));
-  options->parse_options = selector_options->parse_options;
   options->target_segments = (const char *const *)selector->segments;
   options->target_segment_count = selector->segment_count;
   options->action = selector_options->action;
@@ -1308,26 +1337,36 @@ static lonejson_status lonejson__value_rewrite_selector_to_options(
 }
 
 lonejson_status lonejson_value_rewrite_selector_reader(
-    lonejson_reader_fn reader, void *reader_user, lonejson_sink_fn sink,
-    void *sink_user, const lonejson_value_rewrite_selector_options *options,
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    lonejson_sink_fn sink, void *sink_user,
+    const lonejson_value_rewrite_selector_options *options,
     lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
   lonejson__value_rewrite_selector selector;
   lonejson_value_rewrite_options normalized;
   lonejson_status status;
 
-  memset(&selector, 0, sizeof(selector));
-  status = lonejson__value_rewrite_selector_to_options(options, &normalized,
-                                                       &selector, error);
-  if (status == LONEJSON_STATUS_OK) {
-    status = lonejson_value_rewrite_reader(reader, reader_user, sink, sink_user,
-                                           &normalized, error);
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
   }
+  memset(&selector, 0, sizeof(selector));
+  status = lonejson__value_rewrite_selector_to_options(
+      options, &runtime_state->parse_options, &normalized, &selector, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__value_rewrite_reader_with_options(
+        reader, reader_user, sink, sink_user, &runtime_state->parse_options,
+        runtime_state, &normalized, error);
+  }
+  lonejson__runtime_borrow_release(&borrow);
   lonejson__value_rewrite_selector_cleanup(&selector);
   return status;
 }
 
 lonejson_status lonejson_value_rewrite_selector_buffer(
-    const void *data, size_t len, lonejson_sink_fn sink, void *sink_user,
+    lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+    void *sink_user,
     const lonejson_value_rewrite_selector_options *options,
     lonejson_error *error) {
   lonejson_buffer_reader reader;
@@ -1338,47 +1377,55 @@ lonejson_status lonejson_value_rewrite_selector_buffer(
   }
   lonejson_buffer_reader_init(&reader, data, len);
   return lonejson_value_rewrite_selector_reader(
-      lonejson_buffer_reader_read, &reader, sink, sink_user, options, error);
+      runtime, lonejson_buffer_reader_read, &reader, sink, sink_user, options,
+      error);
 }
 
 lonejson_status lonejson_value_rewrite_selector_filep(
-    FILE *fp, lonejson_sink_fn sink, void *sink_user,
+    lonejson *runtime, FILE *fp, lonejson_sink_fn sink, void *sink_user,
     const lonejson_value_rewrite_selector_options *options,
     lonejson_error *error) {
   if (fp == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "input file is required");
   }
-  return lonejson_value_rewrite_selector_reader(lonejson__file_reader, fp, sink,
-                                                sink_user, options, error);
+  return lonejson_value_rewrite_selector_reader(
+      runtime, lonejson__file_reader, fp, sink, sink_user, options, error);
 }
 
 lonejson_status lonejson_value_rewrite_selector_fd(
-    int fd, lonejson_sink_fn sink, void *sink_user,
+    lonejson *runtime, int fd, lonejson_sink_fn sink, void *sink_user,
     const lonejson_value_rewrite_selector_options *options,
     lonejson_error *error) {
   if (fd < 0) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "input fd must be non-negative");
   }
-  return lonejson_value_rewrite_selector_reader(lonejson__fd_reader, &fd, sink,
-                                                sink_user, options, error);
+  return lonejson_value_rewrite_selector_reader(
+      runtime, lonejson__fd_reader, &fd, sink, sink_user, options, error);
 }
 
 lonejson_status lonejson_value_rewrite_selector_path(
-    const char *input_path, const char *output_path,
+    lonejson *runtime, const char *input_path, const char *output_path,
     const lonejson_value_rewrite_selector_options *options,
     lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
   lonejson__value_rewrite_selector selector;
   lonejson_value_rewrite_options normalized;
   lonejson_status status;
 
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
   memset(&selector, 0, sizeof(selector));
-  status = lonejson__value_rewrite_selector_to_options(options, &normalized,
-                                                       &selector, error);
+  status = lonejson__value_rewrite_selector_to_options(
+      options, &runtime_state->parse_options, &normalized, &selector, error);
+  lonejson__runtime_borrow_release(&borrow);
   if (status == LONEJSON_STATUS_OK) {
-    status =
-        lonejson_value_rewrite_path(input_path, output_path, &normalized, error);
+    status = lonejson_value_rewrite_path(runtime, input_path, output_path,
+                                         &normalized, error);
   }
   lonejson__value_rewrite_selector_cleanup(&selector);
   return status;

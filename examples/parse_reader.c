@@ -38,17 +38,26 @@ static lj_read_result chunk_reader(void *user, unsigned char *buffer,
 
 int main(void) {
   chunk_reader_state state = {"{\"source\":\"sensor-a\",\"value\":12.75}", 0u};
+  lj *runtime;
   metric_sample sample;
   lj_error error;
   lj_stream *stream;
   lj_stream_result result;
 
-  lj_init(&metric_sample_map, &sample);
+  runtime = lj_new(NULL, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
 
-  stream = lj_stream_open_reader(&metric_sample_map, chunk_reader, &state, NULL,
-                                 &error);
+  lj_init(runtime, &metric_sample_map, &sample);
+
+  stream =
+      lj_stream_open_reader(runtime, &metric_sample_map, chunk_reader, &state,
+                            &error);
   if (stream == NULL) {
     fprintf(stderr, "stream open failed: %s\n", error.message);
+    lj_free(runtime);
     return 1;
   }
 
@@ -56,11 +65,13 @@ int main(void) {
   if (result != LJ_STREAM_OBJECT) {
     fprintf(stderr, "stream parse failed: %s\n", error.message);
     lj_stream_close(stream);
+    lj_free(runtime);
     return 1;
   }
 
   printf("source=%s value=%.2f\n", sample.source, sample.value);
   lj_cleanup(&metric_sample_map, &sample);
   lj_stream_close(stream);
+  lj_free(runtime);
   return 0;
 }

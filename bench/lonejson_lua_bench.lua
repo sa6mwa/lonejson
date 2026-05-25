@@ -1,5 +1,8 @@
-local lj = require("lonejson")
-local core = lj.core
+local lonejson = require("lonejson")
+local lj = lonejson.new()
+local lj_reuse = lonejson.new({ clear_destination_by_default = false })
+local lj_pretty = lonejson.new({ write_pretty = true })
+local core = lonejson.core
 local HAVE_CJSON, cjson = pcall(require, "cjson")
 
 local BENCH_SAMPLE_COUNT = 5
@@ -178,16 +181,22 @@ local Item = lj.object {
   },
 }
 
-local FixedRecord = lj.schema("BenchFixed", {
-  lj.field("name", lj.string { required = true, fixed_capacity = 24, overflow = "fail" }),
-  lj.field("nickname", lj.string { fixed_capacity = 16, overflow = "truncate" }),
-  lj.field("age", lj.i64()),
-  lj.field("score", lj.f64()),
-  lj.field("active", lj.bool()),
-  lj.field("address", lj.object { required = true, fields = Address.fields }),
-  lj.field("lucky_numbers", lj.i64_array { fixed_capacity = 8, overflow = "fail" }),
-  lj.field("items", lj.object_array { fields = Item.fields, fixed_capacity = 8, overflow = "fail" }),
-})
+local function build_fixed_record_schema(runtime, name)
+  return runtime.schema(name, {
+    lj.field("name", lj.string { required = true, fixed_capacity = 24, overflow = "fail" }),
+    lj.field("nickname", lj.string { fixed_capacity = 16, overflow = "truncate" }),
+    lj.field("age", lj.i64()),
+    lj.field("score", lj.f64()),
+    lj.field("active", lj.bool()),
+    lj.field("address", lj.object { required = true, fields = Address.fields }),
+    lj.field("lucky_numbers", lj.i64_array { fixed_capacity = 8, overflow = "fail" }),
+    lj.field("items", lj.object_array { fields = Item.fields, fixed_capacity = 8, overflow = "fail" }),
+  })
+end
+
+local FixedRecord = build_fixed_record_schema(lj, "BenchFixed")
+local FixedRecordReuse = build_fixed_record_schema(lj_reuse, "BenchFixedReuse")
+local FixedRecordPretty = build_fixed_record_schema(lj_pretty, "BenchFixedPretty")
 
 local DynamicRecord = lj.schema("BenchDynamic", {
   lj.field("name", lj.string { required = true }),
@@ -274,35 +283,40 @@ local WorkloadCase = lj.object {
   },
 }
 
-local WorkloadRun = lj.schema("BenchWorkloadRun", {
-  lj.field("run_id", lj.string { required = true, fixed_capacity = 64, overflow = "fail" }),
-  lj.field("timestamp", lj.string { required = true, fixed_capacity = 32, overflow = "fail" }),
-  lj.field("history_branch", lj.string { fixed_capacity = 32, overflow = "fail" }),
-  lj.field("preset", lj.string { required = true, fixed_capacity = 16, overflow = "fail" }),
-  lj.field("backend", lj.string { required = true, fixed_capacity = 16, overflow = "fail" }),
-  lj.field("store", lj.string { fixed_capacity = 32, overflow = "fail" }),
-  lj.field("disk_root", lj.string { fixed_capacity = 128, overflow = "fail" }),
-  lj.field("git", lj.object {
-    required = true,
-    fields = {
-      lj.field("short_sha", lj.string { required = true, fixed_capacity = 16, overflow = "fail" }),
-      lj.field("dirty", lj.bool { required = true }),
-    },
-  }),
-  lj.field("golden", lj.bool()),
-  lj.field("config", lj.object {
-    required = true,
-    fields = {
-      lj.field("ha_mode", lj.string { required = true, fixed_capacity = 16, overflow = "fail" }),
-      lj.field("concurrency", lj.i64 { required = true }),
-      lj.field("runs", lj.i64 { required = true }),
-      lj.field("warmup", lj.i64 { required = true }),
-      lj.field("query_return", lj.string { fixed_capacity = 16, overflow = "fail" }),
-      lj.field("qrf_disabled", lj.bool()),
-    },
-  }),
-  lj.field("cases", lj.object_array { fields = WorkloadCase.fields, fixed_capacity = 16, overflow = "fail" }),
-})
+local function build_workload_run_schema(runtime, name)
+  return runtime.schema(name, {
+    lj.field("run_id", lj.string { required = true, fixed_capacity = 64, overflow = "fail" }),
+    lj.field("timestamp", lj.string { required = true, fixed_capacity = 32, overflow = "fail" }),
+    lj.field("history_branch", lj.string { fixed_capacity = 32, overflow = "fail" }),
+    lj.field("preset", lj.string { required = true, fixed_capacity = 16, overflow = "fail" }),
+    lj.field("backend", lj.string { required = true, fixed_capacity = 16, overflow = "fail" }),
+    lj.field("store", lj.string { fixed_capacity = 32, overflow = "fail" }),
+    lj.field("disk_root", lj.string { fixed_capacity = 128, overflow = "fail" }),
+    lj.field("git", lj.object {
+      required = true,
+      fields = {
+        lj.field("short_sha", lj.string { required = true, fixed_capacity = 16, overflow = "fail" }),
+        lj.field("dirty", lj.bool { required = true }),
+      },
+    }),
+    lj.field("golden", lj.bool()),
+    lj.field("config", lj.object {
+      required = true,
+      fields = {
+        lj.field("ha_mode", lj.string { required = true, fixed_capacity = 16, overflow = "fail" }),
+        lj.field("concurrency", lj.i64 { required = true }),
+        lj.field("runs", lj.i64 { required = true }),
+        lj.field("warmup", lj.i64 { required = true }),
+        lj.field("query_return", lj.string { fixed_capacity = 16, overflow = "fail" }),
+        lj.field("qrf_disabled", lj.bool()),
+      },
+    }),
+    lj.field("cases", lj.object_array { fields = WorkloadCase.fields, fixed_capacity = 16, overflow = "fail" }),
+  })
+end
+
+local WorkloadRun = build_workload_run_schema(lj, "BenchWorkloadRun")
+local WorkloadRunReuse = build_workload_run_schema(lj_reuse, "BenchWorkloadRunReuse")
 
 local BenchResultSchema = lj.object {
   fields = {
@@ -336,10 +350,17 @@ local CLatestResult = lj.object {
   fields = {
     lj.field("name", lj.string { required = true, fixed_capacity = 64, overflow = "fail" }),
     lj.field("mib_per_sec", lj.f64 { required = true }),
+    lj.field("mismatch_count", lj.i64 {}),
   },
 }
 
 local CLatestRun = lj.schema("CBenchRunSubset", {
+  lj.field("schema_version", lj.i64 { required = true }),
+  lj.field("iterations", lj.i64 { required = true }),
+  lj.field("parser_buffer_size", lj.i64 { required = true }),
+  lj.field("push_parser_buffer_size", lj.i64 { required = true }),
+  lj.field("reader_buffer_size", lj.i64 { required = true }),
+  lj.field("stream_buffer_size", lj.i64 { required = true }),
   lj.field("results", lj.object_array { required = true, fields = CLatestResult.fields, fixed_capacity = 64, overflow = "fail" }),
 })
 
@@ -399,6 +420,25 @@ local FIXED_PATHS = {
   item2_label = FixedRecord:compile_get("items[2].label"),
 }
 
+local FIXED_PATHS_REUSE = {
+  name = FixedRecordReuse:compile_get("name"),
+  nickname = FixedRecordReuse:compile_get("nickname"),
+  age = FixedRecordReuse:compile_get("age"),
+  score = FixedRecordReuse:compile_get("score"),
+  active = FixedRecordReuse:compile_get("active"),
+  address_city = FixedRecordReuse:compile_get("address.city"),
+  address_zip = FixedRecordReuse:compile_get("address.zip"),
+  lucky_numbers_count = FixedRecordReuse:compile_count("lucky_numbers"),
+  lucky_1 = FixedRecordReuse:compile_get("lucky_numbers[1]"),
+  lucky_2 = FixedRecordReuse:compile_get("lucky_numbers[2]"),
+  lucky_3 = FixedRecordReuse:compile_get("lucky_numbers[3]"),
+  items_count = FixedRecordReuse:compile_count("items"),
+  item1_id = FixedRecordReuse:compile_get("items[1].id"),
+  item1_label = FixedRecordReuse:compile_get("items[1].label"),
+  item2_id = FixedRecordReuse:compile_get("items[2].id"),
+  item2_label = FixedRecordReuse:compile_get("items[2].label"),
+}
+
 local WORKLOAD_PATHS = {
   run_id = WorkloadRun:compile_get("run_id"),
   git_short_sha = WorkloadRun:compile_get("git.short_sha"),
@@ -411,36 +451,48 @@ local WORKLOAD_PATHS = {
   case1_acquire_ops = WorkloadRun:compile_get("cases[1].phases.acquire.ops"),
 }
 
-local function assert_fixed_record(rec)
-  if FIXED_PATHS.name(rec) ~= "Alice" or FIXED_PATHS.nickname(rec) ~= "Wonderland" or FIXED_PATHS.age(rec) ~= 34 or FIXED_PATHS.score(rec) ~= 99.5 or FIXED_PATHS.active(rec) ~= true then
+local WORKLOAD_PATHS_REUSE = {
+  run_id = WorkloadRunReuse:compile_get("run_id"),
+  git_short_sha = WorkloadRunReuse:compile_get("git.short_sha"),
+  git_dirty = WorkloadRunReuse:compile_get("git.dirty"),
+  config_concurrency = WorkloadRunReuse:compile_get("config.concurrency"),
+  cases_count = WorkloadRunReuse:compile_count("cases"),
+  case1_workload = WorkloadRunReuse:compile_get("cases[1].workload"),
+  case5_workload = WorkloadRunReuse:compile_get("cases[5].workload"),
+  case9_workload = WorkloadRunReuse:compile_get("cases[9].workload"),
+  case1_acquire_ops = WorkloadRunReuse:compile_get("cases[1].phases.acquire.ops"),
+}
+
+local function assert_fixed_record_with_paths(paths, rec, item2_label)
+  if paths.name(rec) ~= "Alice" or paths.nickname(rec) ~= "Wonderland" or paths.age(rec) ~= 34 or paths.score(rec) ~= 99.5 or paths.active(rec) ~= true then
     return false
   end
-  if FIXED_PATHS.address_city(rec) ~= "Stockholm" or FIXED_PATHS.address_zip(rec) ~= 12345 then
+  if paths.address_city(rec) ~= "Stockholm" or paths.address_zip(rec) ~= 12345 then
     return false
   end
-  if FIXED_PATHS.lucky_numbers_count(rec) ~= 3 or FIXED_PATHS.lucky_1(rec) ~= 7 or FIXED_PATHS.lucky_2(rec) ~= 11 or FIXED_PATHS.lucky_3(rec) ~= 42 then
+  if paths.lucky_numbers_count(rec) ~= 3 or paths.lucky_1(rec) ~= 7 or paths.lucky_2(rec) ~= 11 or paths.lucky_3(rec) ~= 42 then
     return false
   end
-  if FIXED_PATHS.items_count(rec) ~= 2 or FIXED_PATHS.item1_id(rec) ~= 1 or FIXED_PATHS.item1_label(rec) ~= "alpha" or FIXED_PATHS.item2_id(rec) ~= 2 or FIXED_PATHS.item2_label(rec) ~= EXPECTED_LABEL then
+  if paths.items_count(rec) ~= 2 or paths.item1_id(rec) ~= 1 or paths.item1_label(rec) ~= "alpha" or paths.item2_id(rec) ~= 2 or paths.item2_label(rec) ~= item2_label then
     return false
   end
   return true
 end
 
+local function assert_fixed_record(rec)
+  return assert_fixed_record_with_paths(FIXED_PATHS, rec, EXPECTED_LABEL)
+end
+
+local function assert_fixed_record_reuse(rec)
+  return assert_fixed_record_with_paths(FIXED_PATHS_REUSE, rec, EXPECTED_LABEL)
+end
+
 local function assert_stream_fixed_record(rec)
-  if FIXED_PATHS.name(rec) ~= "Alice" or FIXED_PATHS.nickname(rec) ~= "Wonderland" or FIXED_PATHS.age(rec) ~= 34 or FIXED_PATHS.score(rec) ~= 99.5 or FIXED_PATHS.active(rec) ~= true then
-    return false
-  end
-  if FIXED_PATHS.address_city(rec) ~= "Stockholm" or FIXED_PATHS.address_zip(rec) ~= 12345 then
-    return false
-  end
-  if FIXED_PATHS.lucky_numbers_count(rec) ~= 3 or FIXED_PATHS.lucky_1(rec) ~= 7 or FIXED_PATHS.lucky_2(rec) ~= 11 or FIXED_PATHS.lucky_3(rec) ~= 42 then
-    return false
-  end
-  if FIXED_PATHS.items_count(rec) ~= 2 or FIXED_PATHS.item1_id(rec) ~= 1 or FIXED_PATHS.item1_label(rec) ~= "alpha" or FIXED_PATHS.item2_id(rec) ~= 2 or FIXED_PATHS.item2_label(rec) ~= "bravo" then
-    return false
-  end
-  return true
+  return assert_fixed_record_with_paths(FIXED_PATHS, rec, "bravo")
+end
+
+local function assert_stream_fixed_record_reuse(rec)
+  return assert_fixed_record_with_paths(FIXED_PATHS_REUSE, rec, "bravo")
 end
 
 local function assert_dynamic_record(obj)
@@ -565,11 +617,35 @@ local function load_c_siblings(path)
   return index
 end
 
+local function shell_quote(s)
+  return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
 local function best_sample(samples)
   table.sort(samples, function(a, b)
     return a.ns_per_byte < b.ns_per_byte
   end)
   return samples[1]
+end
+
+local function build_bench_result(case, sample, sibling_mib)
+  local result = {
+    name = case.name,
+    group = case.group,
+    elapsed_ns = sample.elapsed_ns,
+    total_bytes = sample.total_bytes,
+    total_documents = sample.total_documents,
+    mismatch_count = sample.mismatch_count,
+    mib_per_sec = mib_per_sec(sample.total_bytes, sample.elapsed_ns),
+    docs_per_sec = docs_per_sec(sample.total_documents, sample.elapsed_ns),
+    ns_per_byte = ns_per_byte(sample.total_bytes, sample.elapsed_ns),
+    sibling_name = case.sibling_name,
+  }
+  if sibling_mib ~= nil and sibling_mib > 0.0 then
+    result.sibling_mib_per_sec = sibling_mib
+    result.sibling_ratio = result.mib_per_sec / sibling_mib
+  end
+  return result
 end
 
 local function measure_case(case, iterations)
@@ -873,7 +949,7 @@ local function bench_cases()
   end
 
   do
-    local rec = FixedRecord:new_record()
+    local rec = FixedRecordReuse:new_record()
     cases[#cases + 1] = {
       name = "decode/record_fixed_prepared/lua",
       group = "decode",
@@ -883,8 +959,8 @@ local function bench_cases()
       docs_per_call = 1,
       run_once = function()
         rec:clear()
-        FixedRecord:decode_into(rec, PARSE_JSON, { clear_destination = false })
-        return assert_fixed_record(rec)
+        FixedRecordReuse:decode_into(rec, PARSE_JSON)
+        return assert_fixed_record_reuse(rec)
       end,
     }
   end
@@ -930,14 +1006,14 @@ local function bench_cases()
       bytes_per_call = #STREAM_JSON,
       docs_per_call = 8,
       run_once = function()
-        local stream = FixedRecord:stream_string(STREAM_JSON, { clear_destination = false })
-        local rec = FixedRecord:new_record()
+        local stream = FixedRecordReuse:stream_string(STREAM_JSON)
+        local rec = FixedRecordReuse:new_record()
         local seen = 0
         while true do
           rec:clear()
           local obj, err, status = stream:next(rec)
           if status == "object" then
-            if not assert_stream_fixed_record(obj) then
+            if not assert_stream_fixed_record_reuse(obj) then
               stream:close()
               return false
             end
@@ -1129,8 +1205,8 @@ local function bench_cases()
       bytes_per_call = #WORKLOAD_JSONL,
       docs_per_call = 5,
       run_once = function()
-        local stream = WorkloadRun:stream_string(WORKLOAD_JSONL, { clear_destination = false })
-        local rec = WorkloadRun:new_record()
+        local stream = WorkloadRunReuse:stream_string(WORKLOAD_JSONL)
+        local rec = WorkloadRunReuse:new_record()
         local ids = {
           "20260322T130525Z-b62770c-dirty-fast-disk",
           "20260322T141810Z-b62770c-dirty-fast-disk",
@@ -1144,11 +1220,11 @@ local function bench_cases()
           local obj, err, status = stream:next(rec)
           if status == "object" then
             count = count + 1
-            if WORKLOAD_PATHS.run_id(rec) ~= ids[count] or WORKLOAD_PATHS.git_short_sha(rec) == nil or WORKLOAD_PATHS.git_dirty(rec) == nil or WORKLOAD_PATHS.config_concurrency(rec) ~= 8 or WORKLOAD_PATHS.cases_count(rec) ~= 9 then
+            if WORKLOAD_PATHS_REUSE.run_id(rec) ~= ids[count] or WORKLOAD_PATHS_REUSE.git_short_sha(rec) == nil or WORKLOAD_PATHS_REUSE.git_dirty(rec) == nil or WORKLOAD_PATHS_REUSE.config_concurrency(rec) ~= 8 or WORKLOAD_PATHS_REUSE.cases_count(rec) ~= 9 then
               stream:close()
               return false
             end
-            if WORKLOAD_PATHS.case1_workload(rec) ~= "attachments" or WORKLOAD_PATHS.case5_workload(rec) ~= "public-read" or WORKLOAD_PATHS.case9_workload(rec) ~= "xa-rollback" or WORKLOAD_PATHS.case1_acquire_ops(rec) ~= 4000 then
+            if WORKLOAD_PATHS_REUSE.case1_workload(rec) ~= "attachments" or WORKLOAD_PATHS_REUSE.case5_workload(rec) ~= "public-read" or WORKLOAD_PATHS_REUSE.case9_workload(rec) ~= "xa-rollback" or WORKLOAD_PATHS_REUSE.case1_acquire_ops(rec) ~= 4000 then
               stream:close()
               return false
             end
@@ -1167,7 +1243,9 @@ local function bench_cases()
 
   do
     local rec = FixedRecord:new_record()
+    local rec_pretty = FixedRecordPretty:new_record()
     FixedRecord:assign(rec, build_serialize_source())
+    FixedRecordPretty:assign(rec_pretty, build_serialize_source())
     cases[#cases + 1] = {
       name = "encode/record_buffer/lua",
       group = "encode",
@@ -1185,7 +1263,7 @@ local function bench_cases()
       bytes_per_call = #EXPECTED_PRETTY_JSON,
       docs_per_call = 1,
       run_once = function()
-        return FixedRecord:encode(rec, { pretty = true }) == EXPECTED_PRETTY_JSON
+        return FixedRecordPretty:encode(rec_pretty) == EXPECTED_PRETTY_JSON
       end,
     }
   end
@@ -1203,23 +1281,7 @@ local function build_run(iterations, c_latest_path)
   for i = 1, #cases do
     local sample = measure_case(cases[i], iterations)
     local sibling_mib = c_siblings[cases[i].sibling_name]
-    local result = {
-      name = cases[i].name,
-      group = cases[i].group,
-      elapsed_ns = sample.elapsed_ns,
-      total_bytes = sample.total_bytes,
-      total_documents = sample.total_documents,
-      mismatch_count = sample.mismatch_count,
-      mib_per_sec = mib_per_sec(sample.total_bytes, sample.elapsed_ns),
-      docs_per_sec = docs_per_sec(sample.total_documents, sample.elapsed_ns),
-      ns_per_byte = ns_per_byte(sample.total_bytes, sample.elapsed_ns),
-      sibling_name = cases[i].sibling_name,
-    }
-    if sibling_mib ~= nil and sibling_mib > 0.0 then
-      result.sibling_mib_per_sec = sibling_mib
-      result.sibling_ratio = result.mib_per_sec / sibling_mib
-    end
-    results[#results + 1] = result
+    results[#results + 1] = build_bench_result(cases[i], sample, sibling_mib)
   end
 
   return {
@@ -1234,43 +1296,38 @@ local function build_run(iterations, c_latest_path)
   }
 end
 
-local function run_single_case(case_name, iterations, c_latest_path)
+local function find_case_by_name(case_name)
   local cases = bench_cases()
-  local c_siblings = load_c_siblings(c_latest_path)
   local i
 
   for i = 1, #cases do
     if cases[i].name == case_name then
-      local sample = measure_case(cases[i], iterations)
-      local sibling_mib = c_siblings[cases[i].sibling_name]
-      local result = {
-        name = cases[i].name,
-        group = cases[i].group,
-        elapsed_ns = sample.elapsed_ns,
-        total_bytes = sample.total_bytes,
-        total_documents = sample.total_documents,
-        mismatch_count = sample.mismatch_count,
-        mib_per_sec = mib_per_sec(sample.total_bytes, sample.elapsed_ns),
-        docs_per_sec = docs_per_sec(sample.total_documents, sample.elapsed_ns),
-        ns_per_byte = ns_per_byte(sample.total_bytes, sample.elapsed_ns),
-        sibling_name = cases[i].sibling_name,
-      }
-      if sibling_mib ~= nil and sibling_mib > 0.0 then
-        result.sibling_mib_per_sec = sibling_mib
-        result.sibling_ratio = result.mib_per_sec / sibling_mib
-      end
-      print(string.format("%s %s %.3f MiB/s %.1f docs/s mismatch=%d c_sib=%s ratio=%s",
-        result.name,
-        result.group,
-        result.mib_per_sec,
-        result.docs_per_sec,
-        result.mismatch_count,
-        format_sibling_mib(result.sibling_mib_per_sec),
-        format_sibling_ratio(result.sibling_ratio)))
-      return
+      return cases[i]
     end
   end
-  error("unknown benchmark case: " .. case_name)
+  return nil
+end
+
+local function run_single_case(case_name, iterations, c_latest_path)
+  local c_siblings = load_c_siblings(c_latest_path)
+  local case = find_case_by_name(case_name)
+  local sample
+  local result
+
+  if case == nil then
+    error("unknown benchmark case: " .. case_name)
+  end
+  sample = measure_case(case, iterations)
+  result = build_bench_result(case, sample, c_siblings[case.sibling_name])
+  print(string.format("%s %s %.3f MiB/s %.1f docs/s mismatch=%d c_sib=%s ratio=%s",
+    result.name,
+    result.group,
+    result.mib_per_sec,
+    result.docs_per_sec,
+    result.mismatch_count,
+    format_sibling_mib(result.sibling_mib_per_sec),
+    format_sibling_ratio(result.sibling_ratio)))
+  return result
 end
 
 local function print_run(run)
@@ -1458,10 +1515,162 @@ local function gate_runs(baseline_path, latest_path)
   end
 end
 
+local function c_is_retry_worthy(prior, current)
+  if prior == nil then
+    return true
+  end
+  if (current.mismatch_count or 0) ~= 0 then
+    return true
+  end
+  return is_small_regression(prior, current) or is_material_regression(prior, current)
+end
+
+local function lua_is_retry_worthy(prior, current)
+  if not gate_tracked_result(current) then
+    return false
+  end
+  if prior == nil then
+    return true
+  end
+  if (current.mismatch_count or 0) ~= 0 then
+    return true
+  end
+  return is_small_regression(prior, current) or is_material_regression(prior, current)
+end
+
+local function print_retry_delta(label, prior, current)
+  local delta_pct = 0.0
+  if prior ~= nil and prior.mib_per_sec ~= 0.0 then
+    delta_pct = ((current.mib_per_sec - prior.mib_per_sec) / prior.mib_per_sec) * 100.0
+  end
+  io.stderr:write(string.format(
+    "%s retry %s: latest=%.3f baseline=%s delta=%.2f%% mismatch=%d\n",
+    label,
+    current.name,
+    current.mib_per_sec,
+    prior and string.format("%.3f", prior.mib_per_sec) or "-",
+    delta_pct,
+    current.mismatch_count or 0))
+end
+
+local function parse_c_case_output(line)
+  local name, mib_per_sec, docs_per_sec, ns_per_byte, mismatch_count =
+    line:match("^(%S+)%s+([%+%-]?%d+%.?%d*)%s+MiB/s%s+([%+%-]?%d+%.?%d*)%s+docs/s%s+([%+%-]?%d+%.?%d*)%s+ns/byte%s+mismatches=(%d+)")
+  if name == nil then
+    name, mib_per_sec, docs_per_sec, mismatch_count =
+      line:match("^(%S+)%s+%S+%s+([%+%-]?%d+%.?%d*)%s+MiB/s%s+([%+%-]?%d+%.?%d*)%s+docs/s%s+mismatch=(%d+)")
+  end
+  if name == nil then
+    return nil
+  end
+  return {
+    name = name,
+    mib_per_sec = tonumber(mib_per_sec),
+    docs_per_sec = tonumber(docs_per_sec),
+    ns_per_byte = tonumber(ns_per_byte),
+    mismatch_count = tonumber(mismatch_count),
+  }
+end
+
+local function run_c_case(bench_bin, case_name, iterations)
+  local cmd = string.format("%s case %s %d 2>/dev/null",
+    shell_quote(bench_bin), shell_quote(case_name), iterations)
+  local pipe = assert(io.popen(cmd, "r"))
+  local output = pipe:read("*a")
+  local ok, _, status = pipe:close()
+  local line
+
+  if ok ~= true or status ~= 0 then
+    error("c benchmark case command failed for " .. case_name)
+  end
+  line = output:match("([^\r\n]+)")
+  if line == nil then
+    error("c benchmark case command produced no output for " .. case_name)
+  end
+  local result = parse_c_case_output(line)
+  if result == nil then
+    error("failed to parse c benchmark case output for " .. case_name .. ": " .. line)
+  end
+  return result
+end
+
+local function confirm_c_gate(bench_bin, baseline_path, latest_path, iterations)
+  local baseline = CLatestRun:decode_path(baseline_path)
+  local latest = CLatestRun:decode_path(latest_path)
+  local baseline_index = index_results(baseline)
+  local schema_mismatch = baseline.schema_version ~= latest.schema_version
+  local config_mismatch =
+    baseline.iterations ~= latest.iterations or
+    baseline.parser_buffer_size ~= latest.parser_buffer_size or
+    baseline.push_parser_buffer_size ~= latest.push_parser_buffer_size or
+    baseline.reader_buffer_size ~= latest.reader_buffer_size or
+    baseline.stream_buffer_size ~= latest.stream_buffer_size
+  local i
+
+  if schema_mismatch then
+    io.stderr:write("c benchmark retry cannot confirm a schema mismatch\n")
+    os.exit(1)
+  end
+  if config_mismatch then
+    io.stderr:write("c benchmark retry cannot confirm a config mismatch\n")
+    os.exit(1)
+  end
+
+  for i = 1, #latest.results do
+    local current = latest.results[i]
+    local prior = baseline_index[current.name]
+    if c_is_retry_worthy(prior, current) then
+      local retry
+      io.stderr:write(string.format("retrying c benchmark case once: %s\n", current.name))
+      retry = run_c_case(bench_bin, current.name, iterations)
+      print_retry_delta("c", prior, retry)
+      if c_is_retry_worthy(prior, retry) then
+        io.stderr:write("c benchmark retry confirmed the failure; stopping immediately\n")
+        os.exit(1)
+      end
+    end
+  end
+end
+
+local function confirm_lua_gate(c_latest_path, baseline_path, latest_path, iterations)
+  local baseline = BenchRunSchema:decode_path(baseline_path)
+  local latest = BenchRunSchema:decode_path(latest_path)
+  local baseline_index = index_results(baseline)
+  local c_siblings = load_c_siblings(c_latest_path)
+  local i
+
+  if baseline.schema_version ~= latest.schema_version then
+    io.stderr:write("lua benchmark retry cannot confirm a schema mismatch\n")
+    os.exit(1)
+  end
+
+  for i = 1, #latest.results do
+    local current = latest.results[i]
+    local prior = baseline_index[current.name]
+    if lua_is_retry_worthy(prior, current) then
+      local case = find_case_by_name(current.name)
+      local retry
+      if case == nil then
+        io.stderr:write("lua benchmark retry cannot find case: " .. current.name .. "\n")
+        os.exit(1)
+      end
+      io.stderr:write(string.format("retrying lua benchmark case once: %s\n", current.name))
+      retry = build_bench_result(case, measure_case(case, iterations), c_siblings[case.sibling_name])
+      print_retry_delta("lua", prior, retry)
+      if lua_is_retry_worthy(prior, retry) then
+        io.stderr:write("lua benchmark retry confirmed the failure; stopping immediately\n")
+        os.exit(1)
+      end
+    end
+  end
+end
+
 local function usage()
   io.stderr:write("usage:\n")
   io.stderr:write("  lua bench/lonejson_lua_bench.lua run <c_latest> <latest> <history> <archive_dir> <iterations>\n")
   io.stderr:write("  lua bench/lonejson_lua_bench.lua case <c_latest> <case_name> <iterations>\n")
+  io.stderr:write("  lua bench/lonejson_lua_bench.lua confirm-c <bench_bin> <baseline> <latest> <iterations>\n")
+  io.stderr:write("  lua bench/lonejson_lua_bench.lua confirm-lua <c_latest> <baseline> <latest> <iterations>\n")
   io.stderr:write("  lua bench/lonejson_lua_bench.lua freeze-baseline <history> <baseline>\n")
   io.stderr:write("  lua bench/lonejson_lua_bench.lua compare <baseline> <latest>\n")
   io.stderr:write("  lua bench/lonejson_lua_bench.lua gate <baseline> <latest>\n")
@@ -1483,6 +1692,10 @@ elseif cmd == "freeze-baseline" then
   freeze_baseline(arg[2], arg[3])
 elseif cmd == "case" then
   run_single_case(arg[3], tonumber(arg[4]) or 1, arg[2])
+elseif cmd == "confirm-c" then
+  confirm_c_gate(arg[2], arg[3], arg[4], tonumber(arg[5]) or 1)
+elseif cmd == "confirm-lua" then
+  confirm_lua_gate(arg[2], arg[3], arg[4], tonumber(arg[5]) or 1)
 elseif cmd == "compare" then
   compare_runs(arg[2], arg[3])
 elseif cmd == "gate" then

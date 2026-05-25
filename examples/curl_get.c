@@ -36,10 +36,19 @@ int main(void) {
   const char *ca_path;
   remote_payload payload;
   lonejson_curl_parse parse_ctx;
+  lonejson *runtime;
+  lonejson_error error;
 
-  if (lonejson_curl_parse_init(&parse_ctx, &remote_payload_map, &payload,
-                               NULL) != LONEJSON_STATUS_OK) {
+  runtime = lonejson_new(NULL, &error);
+  if (runtime == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  if (lonejson_curl_parse_init(&parse_ctx, runtime, &remote_payload_map,
+                               &payload) != LONEJSON_STATUS_OK) {
     fprintf(stderr, "parse init failed: %s\n", parse_ctx.error.message);
+    lonejson_free(runtime);
     return 1;
   }
 
@@ -47,6 +56,7 @@ int main(void) {
   if (curl == NULL) {
     fprintf(stderr, "curl_easy_init failed\n");
     lonejson_curl_parse_cleanup(&parse_ctx);
+    lonejson_free(runtime);
     return 1;
   }
 
@@ -55,6 +65,7 @@ int main(void) {
     fprintf(stderr, "could not locate docker/nginx/certs/server.crt\n");
     curl_easy_cleanup(curl);
     lonejson_curl_parse_cleanup(&parse_ctx);
+    lonejson_free(runtime);
     return 1;
   }
 
@@ -75,6 +86,7 @@ int main(void) {
     }
     curl_easy_cleanup(curl);
     lonejson_curl_parse_cleanup(&parse_ctx);
+    lonejson_free(runtime);
     return 1;
   }
 
@@ -82,5 +94,6 @@ int main(void) {
   curl_easy_cleanup(curl);
   lonejson_cleanup(&remote_payload_map, &payload);
   lonejson_curl_parse_cleanup(&parse_ctx);
+  lonejson_free(runtime);
   return 0;
 }

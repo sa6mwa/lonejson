@@ -1,67 +1,12 @@
-static int ljlua_parse_parse_options(lua_State *L, int index,
-                                     lonejson_parse_options *options) {
-  lua_Integer value;
-
-  *options = lonejson_default_parse_options();
-  if (index == 0 || lua_isnoneornil(L, index)) {
-    return 1;
+static void ljlua_reject_legacy_options(lua_State *L, int index,
+                                        const char *api_name) {
+  if (index != 0 && !lua_isnoneornil(L, index)) {
+    luaL_error(
+        L,
+        "%s no longer accepts per-call options; configure lonejson.new({...}) "
+        "instead",
+        api_name);
   }
-  luaL_checktype(L, index, LUA_TTABLE);
-  lua_getfield(L, index, "clear_destination");
-  if (!lua_isnil(L, -1)) {
-    options->clear_destination = lua_toboolean(L, -1);
-  }
-  lua_pop(L, 1);
-  lua_getfield(L, index, "reject_duplicate_keys");
-  if (!lua_isnil(L, -1)) {
-    options->reject_duplicate_keys = lua_toboolean(L, -1);
-  }
-  lua_pop(L, 1);
-  lua_getfield(L, index, "max_depth");
-  if (lua_isinteger(L, -1) && lua_tointeger(L, -1) > 0) {
-    options->max_depth = (size_t)lua_tointeger(L, -1);
-  }
-  lua_pop(L, 1);
-  lua_getfield(L, index, "max_dynamic_string_bytes");
-  if (!lua_isnil(L, -1)) {
-    value = luaL_checkinteger(L, -1);
-    luaL_argcheck(L, value >= 0, index,
-                  "max_dynamic_string_bytes must be non-negative");
-    options->max_dynamic_string_bytes = (size_t)value;
-  }
-  lua_pop(L, 1);
-  lua_getfield(L, index, "max_alloc_bytes");
-  if (!lua_isnil(L, -1)) {
-    value = luaL_checkinteger(L, -1);
-    luaL_argcheck(L, value >= 0, index,
-                  "max_alloc_bytes must be non-negative");
-    options->max_alloc_bytes = (size_t)value;
-  }
-  lua_pop(L, 1);
-  lua_getfield(L, index, "fixed_string_scratch");
-  if (!lua_isnil(L, -1)) {
-    ljlua_fixed_string_scratch_ud *scratch =
-        ljlua_check_fixed_string_scratch(L, -1);
-    options->fixed_string_scratch = scratch->data;
-    options->fixed_string_scratch_size = scratch->size;
-  }
-  lua_pop(L, 1);
-  return 1;
-}
-
-static int ljlua_parse_options_fixed_string_scratch_ref(lua_State *L,
-                                                        int index) {
-  if (index == 0 || lua_isnoneornil(L, index)) {
-    return LUA_NOREF;
-  }
-  luaL_checktype(L, index, LUA_TTABLE);
-  lua_getfield(L, index, "fixed_string_scratch");
-  if (lua_isnil(L, -1)) {
-    lua_pop(L, 1);
-    return LUA_NOREF;
-  }
-  (void)ljlua_check_fixed_string_scratch(L, -1);
-  return luaL_ref(L, LUA_REGISTRYINDEX);
 }
 
 static int ljlua_schema_compile_path(lua_State *L) {
@@ -76,7 +21,7 @@ static int ljlua_schema_compile_path(lua_State *L) {
   if (compiled == NULL) {
     compiled = ljlua_compile_path(L, schema_ud->schema, path);
   }
-  path_ud = (ljlua_path_ud *)lua_newuserdatauv(L, sizeof(*path_ud), 0);
+  path_ud = (ljlua_path_ud *)ljlua_newuserdata_slots(L, sizeof(*path_ud), 0);
   memset(path_ud, 0, sizeof(*path_ud));
   path_ud->magic = LJLUA_PATH_MAGIC;
   path_ud->schema = schema_ud->schema;
@@ -97,7 +42,7 @@ static int ljlua_schema_compile_get(lua_State *L) {
   if (compiled == NULL) {
     compiled = ljlua_compile_path(L, schema_ud->schema, path);
   }
-  path_ud = (ljlua_path_ud *)lua_newuserdatauv(L, sizeof(*path_ud), 0);
+  path_ud = (ljlua_path_ud *)ljlua_newuserdata_slots(L, sizeof(*path_ud), 0);
   memset(path_ud, 0, sizeof(*path_ud));
   path_ud->magic = LJLUA_PATH_MAGIC;
   path_ud->schema = schema_ud->schema;
@@ -120,7 +65,7 @@ static int ljlua_schema_compile_count(lua_State *L) {
   if (compiled == NULL) {
     compiled = ljlua_compile_path(L, schema_ud->schema, path);
   }
-  path_ud = (ljlua_path_ud *)lua_newuserdatauv(L, sizeof(*path_ud), 0);
+  path_ud = (ljlua_path_ud *)ljlua_newuserdata_slots(L, sizeof(*path_ud), 0);
   memset(path_ud, 0, sizeof(*path_ud));
   path_ud->magic = LJLUA_PATH_MAGIC;
   path_ud->schema = schema_ud->schema;
@@ -133,51 +78,13 @@ static int ljlua_schema_compile_count(lua_State *L) {
   return 1;
 }
 
-static const lonejson_write_options *
-ljlua_get_write_options(lua_State *L, int index,
-                        lonejson_write_options *options) {
-  if (index == 0 || lua_isnoneornil(L, index)) {
-    return NULL;
-  }
-  luaL_checktype(L, index, LUA_TTABLE);
-  *options = lonejson_default_write_options();
-  lua_getfield(L, index, "overflow");
-  if (!lua_isnil(L, -1)) {
-    const char *name = luaL_checkstring(L, -1);
-    if (strcmp(name, "fail") == 0) {
-      options->overflow_policy = LONEJSON_OVERFLOW_FAIL;
-    } else if (strcmp(name, "truncate") == 0) {
-      options->overflow_policy = LONEJSON_OVERFLOW_TRUNCATE;
-    } else if (strcmp(name, "truncate_silent") == 0) {
-      options->overflow_policy = LONEJSON_OVERFLOW_TRUNCATE_SILENT;
-    } else {
-      luaL_error(L, "unsupported overflow policy '%s'", name);
-    }
-  }
-  lua_pop(L, 1);
-  lua_getfield(L, index, "pretty");
-  if (!lua_isnil(L, -1)) {
-    options->pretty = lua_toboolean(L, -1) ? 1 : 0;
-  }
-  lua_pop(L, 1);
-  lua_getfield(L, index, "max_output_bytes");
-  if (!lua_isnil(L, -1)) {
-    lua_Integer max_output = luaL_checkinteger(L, -1);
-    luaL_argcheck(L, max_output >= 0, index,
-                  "max_output_bytes must be non-negative");
-    options->max_output_bytes = (size_t)max_output;
-  }
-  lua_pop(L, 1);
-  return options;
-}
-
 static int ljlua_push_spool(lua_State *L, lonejson_spooled *spool, int kind,
                             int owner_index, int copy_value) {
   ljlua_spool_ud *ud;
   lonejson_error error;
   unsigned char buffer[4096];
 
-  ud = (ljlua_spool_ud *)lua_newuserdatauv(L, sizeof(*ud), 0);
+  ud = (ljlua_spool_ud *)ljlua_newuserdata_slots(L, sizeof(*ud), 0);
   memset(ud, 0, sizeof(*ud));
   ud->magic = LJLUA_SPOOL_MAGIC;
   luaL_setmetatable(L, LJLUA_SPOOL_MT);
@@ -191,14 +98,14 @@ static int ljlua_push_spool(lua_State *L, lonejson_spooled *spool, int kind,
     }
     return 1;
   }
-  lonejson_spooled_init(&ud->owned, NULL);
+  lonejson_spooled_init_with_allocator(&ud->owned, NULL, NULL);
   if (spool->memory_limit != 0u || spool->max_bytes != 0u ||
       spool->temp_dir != NULL) {
-    lonejson_spool_options opts;
+    lonejson__spool_options opts;
     opts.memory_limit = spool->memory_limit;
     opts.max_bytes = spool->max_bytes;
     opts.temp_dir = spool->temp_dir;
-    lonejson_spooled_init(&ud->owned, &opts);
+    lonejson_spooled_init_with_allocator(&ud->owned, &opts, NULL);
   }
   if (lonejson_spooled_rewind(spool, &error) != LONEJSON_STATUS_OK) {
     return luaL_error(L, "failed to rewind spool: %s", error.message);
@@ -356,7 +263,7 @@ static int ljlua_decode_context_prepare_table_mode(lua_State *L,
       ctx->json_values[i].visitor.null_value = ljlua_json_value_null;
       ctx->json_values[i].active = 1;
       if (lonejson_json_value_set_parse_visitor(
-              value, &ctx->json_values[i].visitor, &ctx->json_values[i], NULL,
+              value, &ctx->json_values[i].visitor, &ctx->json_values[i],
               NULL) != LONEJSON_STATUS_OK) {
         return luaL_error(L, "failed to configure Lua JSON parse visitor");
       }
@@ -375,7 +282,6 @@ static void ljlua_json_value_enable_parse_capture_preserving_runtime(
   value->parse_sink_user = NULL;
   value->parse_visitor = NULL;
   value->parse_visitor_user = NULL;
-  value->parse_visitor_limits = lonejson_default_value_limits();
 }
 
 static int ljlua_prepare_record_json_value_capture(lua_State *L,
@@ -805,11 +711,11 @@ static int ljlua_assign_table_to_record(lua_State *L, ljlua_schema *schema,
                                         void *record, int table_index);
 
 static void ljlua_init_helper_parser(lonejson_parser *parser) {
-  static const lonejson_map helper_map = {"lua-helper", 0u, NULL, 0u};
+  static const lonejson_map helper_map = {"lua-helper", 0u, NULL, 0u, NULL, 0u};
   static unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
 
-  lonejson__parser_init_state(parser, &helper_map, NULL, NULL, 0, workspace,
-                              sizeof(workspace));
+  lonejson__parser_init_state(parser, &helper_map, NULL, NULL, NULL, 0,
+                              0, 0, 0u, workspace, sizeof(workspace));
 }
 
 static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
@@ -842,8 +748,9 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
     lonejson_parser parser;
     unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
 
-    lonejson__parser_init_state(&parser, &schema->map, record, NULL, 0,
-                                workspace, sizeof(workspace));
+    lonejson__parser_init_state(&parser, &schema->map, record, NULL,
+                                lonejson__runtime_const(schema->runtime), 0,
+                                0, 0, 0u, workspace, sizeof(workspace));
     if (lonejson__assign_string(&parser, &meta->field, ptr, text, len) !=
         LONEJSON_STATUS_OK) {
       return luaL_error(L, "%s", parser.error.message);

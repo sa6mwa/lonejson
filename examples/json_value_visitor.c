@@ -113,15 +113,24 @@ int main(void) {
       "\"selector\":{\"op\":\"and\",\"clauses\":[{\"field\":\"/status\","
       "\"value\":\"open\"},{\"field\":\"/priority\",\"gte\":3}]},"
       "\"fields\":[\"/id\",{\"include\":[true,null,\"wide-string\"]}]}";
+  lonejson *lj;
   query_envelope doc;
   visit_log selector_log;
   visit_log fields_log;
   lj_value_visitor visitor;
-  lj_parse_options options;
+  lj_config config;
   lj_error error;
   lj_status status;
 
-  lj_init(&query_envelope_map, &doc);
+  config = lj_default_config();
+  config.clear_destination_by_default = 0;
+  lj = lj_new(&config, &error);
+  if (lj == NULL) {
+    fprintf(stderr, "runtime init failed: %s\n", error.message);
+    return 1;
+  }
+
+  lj_init(lj, &query_envelope_map, &doc);
   memset(&selector_log, 0, sizeof(selector_log));
   memset(&fields_log, 0, sizeof(fields_log));
   visitor = lj_default_value_visitor();
@@ -142,27 +151,26 @@ int main(void) {
   visitor.null_value = on_null;
 
   status = lj_json_value_set_parse_visitor(&doc.selector, &visitor,
-                                           &selector_log, NULL, &error);
+                                           &selector_log, &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "selector visitor setup failed: %s\n", error.message);
+    lj_free(lj);
     return 1;
   }
-  status =
-      lj_json_value_set_parse_visitor(&doc.fields, &visitor, &fields_log, NULL,
-                                      &error);
+  status = lj_json_value_set_parse_visitor(&doc.fields, &visitor, &fields_log,
+                                           &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "fields visitor setup failed: %s\n", error.message);
     lj_cleanup(&query_envelope_map, &doc);
+    lj_free(lj);
     return 1;
   }
 
-  options = lj_default_parse_options();
-  options.clear_destination = 0;
-  status = lj_parse_cstr(&query_envelope_map, &doc, inbound_json, &options,
-                         &error);
+  status = lj_parse_cstr(lj, &query_envelope_map, &doc, inbound_json, &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
     lj_cleanup(&query_envelope_map, &doc);
+    lj_free(lj);
     return 1;
   }
 
@@ -170,5 +178,6 @@ int main(void) {
   printf("fields events=%s\n", fields_log.text);
 
   lj_cleanup(&query_envelope_map, &doc);
+  lj_free(lj);
   return 0;
 }

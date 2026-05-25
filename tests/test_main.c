@@ -1,3 +1,4 @@
+#define LONEJSON_TEST_RUNTIME_BORROW_HOOK 1
 #include "test_support.inc"
 /* clang-format off */
 #include "test_protocol_framing.inc"
@@ -82,6 +83,7 @@ int main(void) {
   test_array_stream_additional_failure_modes();
   test_array_stream_would_block_boundaries();
   test_array_stream_depth_limit_and_argument_guards();
+  test_array_stream_runtime_parse_depth_overrides_value_depth();
   test_array_stream_push_api();
   test_array_stream_push_invariant_failure_modes();
   test_array_stream_push_does_not_materialize_response();
@@ -89,6 +91,7 @@ int main(void) {
   test_array_stream_push_string_items();
   test_array_stream_push_string_item_callback();
   test_array_stream_push_string_item_callback_bounds();
+  test_array_stream_push_string_runtime_value_limits();
   test_array_stream_push_string_failure_modes();
   test_array_stream_mapped_string_field_envelope();
   test_array_stream_mapped_string_field_metadata_and_long_item();
@@ -113,6 +116,7 @@ int main(void) {
   test_array_rewrite_reader_uses_configured_allocator();
   test_array_rewrite_reader_allocator_failure();
   test_array_rewrite_item_parse_and_limit_failures();
+  test_array_rewrite_runtime_json_value_limits();
   test_array_rewrite_source_and_parent_failures();
   test_array_rewrite_append_only_and_object_path();
   test_array_rewrite_empty_all_drop_and_all_append();
@@ -126,6 +130,7 @@ int main(void) {
   test_array_rewrite_owned_parent_cleanup_on_failures();
   test_array_rewrite_path_helper();
   test_array_rewrite_helper_failures();
+  test_array_rewrite_path_rejects_invalid_runtime_without_truncating();
   test_array_rewrite_fd_to_fd_helper();
   test_file_and_buffer_helpers();
   test_jsonl_helpers();
@@ -139,6 +144,7 @@ int main(void) {
   test_sse_json_value_capture_large_sequence_and_filtering();
   test_sse_json_value_sink_and_visitor_root_modes();
   test_sse_json_value_failure_cleanup_and_reuse();
+  test_sse_json_rejects_runtime_changes_mid_event();
   test_sse_json_mixed_map_and_value_failures_preserve_prior_results();
   test_sse_retry_and_json_metadata_only_events();
   test_sse_callback_failure_status();
@@ -152,11 +158,71 @@ int main(void) {
   test_multipart_limits_and_invalid_usage();
   test_multipart_failures_are_reported();
   test_fixed_capacity_object_array();
+  test_recursive_schema_analysis_accepts_self_cycles();
+  test_recursive_schema_analysis_accepts_mutual_cycles();
   test_dynamic_object_array_alignment();
   test_formatting_variants_and_roundtrip();
   test_duplicate_key_policy();
   test_public_api_argument_and_serialization_guards();
   test_public_initializers_and_defaults();
+  test_runtime_defaults_and_method_dispatch();
+  test_runtime_method_json_value_init_null_does_not_leak_pin();
+  test_runtime_copy_free_leaves_owner_live();
+  test_runtime_bundle_uses_custom_allocator();
+  test_runtime_copy_free_does_not_retire_owner();
+  test_runtime_custom_allocator_handle_not_cached();
+  test_runtime_copy_rejects_calls_after_owner_free();
+  test_runtime_stale_copy_stays_dead_after_handle_reuse();
+  test_runtime_custom_allocator_copy_rejects_calls_after_owner_free();
+  test_runtime_stale_copy_json_value_init_is_safe_default();
+  test_runtime_stale_copy_init_safely_initializes_stateful_fields();
+  test_runtime_stale_copy_reset_safely_reseeds_stateful_fields();
+#if LONEJSON_TEST_HAS_PTHREAD && defined(LONEJSON_TEST_RUNTIME_BORROW_HOOK)
+  test_runtime_copy_use_waits_for_owner_free();
+  test_runtime_owner_use_waits_for_owner_free();
+  test_runtime_owner_stream_open_waits_for_owner_free();
+  test_runtime_owner_array_stream_open_waits_for_owner_free();
+  test_runtime_copy_array_stream_open_waits_for_owner_free();
+  test_runtime_copy_serialize_uses_snapshot_after_owner_free();
+  test_runtime_copy_sse_push_waits_for_owner_free();
+  test_runtime_owner_json_value_init_waits_for_owner_free();
+  test_runtime_copy_json_value_init_waits_for_owner_free();
+  test_runtime_owner_spooled_init_waits_for_owner_free();
+  test_runtime_copy_spooled_init_waits_for_owner_free();
+#endif
+  test_runtime_rejects_raw_partial_configs();
+  test_runtime_owns_config_backing_storage();
+  test_runtime_preserves_caller_owned_fixed_string_scratch();
+  test_runtime_instance_limits_are_isolated();
+  test_runtime_handle_counters_use_native_width();
+  test_mutated_map_analysis_recomputes();
+  test_heap_map_cookie_change_invalidates_cache();
+  test_macro_map_cookies_are_unique_and_non_sentinel();
+  test_copied_macro_map_parse_revalidates_layout();
+  test_macro_map_copy_is_not_cacheable();
+  test_mutated_map_parse_revalidates_layout();
+  test_runtime_init_seeds_mapped_json_value_limits();
+  test_runtime_json_value_set_buffer_preserves_limits();
+  test_runtime_json_value_reset_preserves_limits();
+  test_runtime_reuse_reseeds_json_value_limits();
+  test_spooled_invalid_class_uses_default_runtime_policy();
+  test_stream_field_invalid_class_uses_default_runtime_policy();
+  test_runtime_reuse_reseeds_spool_policy();
+  test_spooled_handle_owns_temp_dir_after_runtime_free();
+  test_spooled_reset_preserves_long_temp_dir();
+  test_runtime_init_spooled_field_owns_temp_dir_after_runtime_free();
+  test_runtime_parse_counts_stream_temp_dir_against_alloc_budget();
+  test_runtime_stream_counts_stream_temp_dir_against_alloc_budget();
+  test_runtime_array_stream_counts_stream_temp_dir_against_alloc_budget();
+  test_spooled_temp_dir_oom_falls_back_to_anonymous_spill();
+  test_runtime_reset_preserves_field_allocators();
+  test_runtime_streams_survive_runtime_free();
+  test_runtime_instances_operate_independently_interleaved();
+  test_runtime_instances_operate_independently_in_threads();
+  test_runtime_writer_survives_runtime_free();
+  test_runtime_nonparse_snapshots_skip_fixed_string_scratch_copy();
+  test_runtime_writer_snapshot_preserves_fixed_string_scratch();
+  test_runtime_snapshot_disables_borrowed_fixed_string_scratch();
   test_nullable_presence_primitives();
   test_nullable_presence_primitive_failures();
   test_small_valid_spec_fixtures();
@@ -208,6 +274,8 @@ int main(void) {
   test_explicit_default_allocator_raw_serialize_alloc_is_allowed();
   test_explicit_default_allocator_raw_serialize_jsonl_alloc_is_allowed();
   test_custom_allocator_json_value_capture_preserves_handle_allocator();
+  test_runtime_allocator_visit_value_buffer_and_cstr();
+  test_runtime_allocator_value_rewrite_reader();
   test_partial_allocator_parse_is_rejected();
   test_partial_allocator_parse_reader_is_rejected();
   test_partial_allocator_serialize_alloc_is_rejected();
@@ -244,6 +312,9 @@ int main(void) {
   test_writer_generator_streams_mapped_without_materializing();
   test_writer_generator_string_reader_preserves_chunks();
   test_value_rewrite_replace_drop_and_root();
+  test_value_rewrite_runtime_json_value_limits();
+  test_value_rewrite_callbacks_use_runtime_writer_policy();
+  test_value_rewrite_path_rejects_invalid_runtime_without_truncating();
   test_value_rewrite_callback_replacement();
   test_value_rewrite_replace_with_and_buffer_adapters();
   test_value_rewrite_replace_with_old_value_metadata();
@@ -261,13 +332,20 @@ int main(void) {
   test_serialize_declarative_conditional_helpers();
   test_rewindability_edges_and_measure_preserves_sources();
 #ifdef LONEJSON_WITH_CURL
+  test_curl_parse_survives_runtime_free();
+  test_curl_parse_reinit_releases_previous_parser();
+  test_curl_parse_init_accepts_poisoned_stack_state();
   test_curl_upload_cleanup_default_allocator();
   test_curl_upload_custom_allocator_balance();
   test_curl_upload_streaming_does_not_buffer_payload();
+  test_curl_upload_reinit_releases_previous_generator();
   test_curl_array_parse_streams_selected_arrays();
   test_curl_array_parse_failure_cleanup_and_truncation();
+  test_curl_array_parse_reinit_releases_previous_stream();
   test_curl_string_array_parse_streams_keys();
+  test_curl_string_array_parse_reinit_releases_previous_stream();
   test_curl_string_items_parse_streams_keys();
+  test_curl_string_items_parse_reinit_releases_previous_stream();
 #endif
   test_clear_destination_ignores_poisoned_stream_and_json_value_state();
   test_prepared_fixed_object_array_parse_preserves_storage();
