@@ -136,6 +136,70 @@ void lonejson_json_value_init_with_allocator(
 void lonejson_spooled_init_with_allocator(lonejson_spooled *value,
                                           const lonejson__spool_options *options,
                                           const lonejson_allocator *allocator);
+void lonejson_source_cleanup(lonejson_source *value);
+void lonejson_source_reset(lonejson_source *value);
+lonejson_status lonejson_source_set_file(lonejson_source *value, FILE *fp,
+                                         lonejson_error *error);
+lonejson_status lonejson_source_set_fd(lonejson_source *value, int fd,
+                                       lonejson_error *error);
+lonejson_status lonejson_source_set_path(lonejson_source *value,
+                                         const char *path,
+                                         lonejson_error *error);
+lonejson_status lonejson_source_write_to_sink(const lonejson_source *value,
+                                              lonejson_sink_fn sink, void *user,
+                                              lonejson_error *error);
+int lonejson_source_is_rewindable(const lonejson_source *value);
+void lonejson_json_value_reset(lonejson_json_value *value);
+void lonejson_json_value_cleanup(lonejson_json_value *value);
+lonejson_status lonejson_json_value_set_buffer(lonejson_json_value *value,
+                                               const void *data, size_t len,
+                                               lonejson_error *error);
+lonejson_status lonejson_json_value_set_parse_sink(lonejson_json_value *value,
+                                                   lonejson_sink_fn sink,
+                                                   void *user,
+                                                   lonejson_error *error);
+lonejson_status lonejson_json_value_set_parse_visitor(
+    lonejson_json_value *value, const lonejson_value_visitor *visitor,
+    void *user, lonejson_error *error);
+lonejson_status lonejson_json_value_enable_parse_capture(
+    lonejson_json_value *value, lonejson_error *error);
+lonejson_status lonejson_json_value_set_reader(lonejson_json_value *value,
+                                               lonejson_reader_fn reader,
+                                               void *user,
+                                               lonejson_error *error);
+lonejson_status lonejson_json_value_set_file(lonejson_json_value *value,
+                                             FILE *fp,
+                                             lonejson_error *error);
+lonejson_status lonejson_json_value_set_fd(lonejson_json_value *value, int fd,
+                                           lonejson_error *error);
+lonejson_status lonejson_json_value_set_path(lonejson_json_value *value,
+                                             const char *path,
+                                             lonejson_error *error);
+lonejson_status lonejson_json_value_write_to_sink(const lonejson_json_value *value,
+                                                  lonejson_sink_fn sink,
+                                                  void *user,
+                                                  lonejson_error *error);
+int lonejson_json_value_is_rewindable(const lonejson_json_value *value);
+void lonejson_spooled_reset(lonejson_spooled *value);
+void lonejson_spooled_cleanup(lonejson_spooled *value);
+size_t lonejson_spooled_size(const lonejson_spooled *value);
+int lonejson_spooled_spilled(const lonejson_spooled *value);
+lonejson_status lonejson_spooled_append(lonejson_spooled *value,
+                                        const void *data, size_t len,
+                                        lonejson_error *error);
+lonejson_status lonejson_spooled_rewind(lonejson_spooled *value,
+                                        lonejson_error *error);
+lonejson_read_result lonejson_spooled_read(lonejson_spooled *value,
+                                           unsigned char *buffer,
+                                           size_t capacity);
+lonejson_status lonejson_spooled_write_to_sink(const lonejson_spooled *value,
+                                               lonejson_sink_fn sink,
+                                               void *user,
+                                               lonejson_error *error);
+static void lonejson__source_assign_methods(lonejson_source *value);
+static void lonejson__json_value_assign_methods(lonejson_json_value *value);
+static void lonejson__spooled_assign_methods(lonejson_spooled *value);
+static const lonejson_json_value_methods g_lonejson_json_value_methods;
 
 static LONEJSON__INLINE unsigned lonejson__init_cookie(const void *ptr,
                                                        unsigned base_magic) {
@@ -283,7 +347,7 @@ typedef enum lonejson_stream_source_kind {
   LONEJSON_STREAM_SOURCE_MEMORY = 4
 } lonejson_stream_source_kind;
 
-struct lonejson_stream {
+typedef struct lonejson__stream_state {
   lonejson_reader_fn reader;
   void *reader_user;
   FILE *fp;
@@ -306,10 +370,10 @@ struct lonejson_stream {
   const lonejson_runtime *runtime;
   lonejson_runtime runtime_storage;
   lonejson__parse_options options;
-  lonejson_error error;
   unsigned char io_buffer[LONEJSON_STREAM_BUFFER_SIZE];
   lonejson_allocator allocator;
-};
+  lonejson_stream public;
+} lonejson__stream_state;
 
 typedef struct lonejson__byte_buffer {
   char *data;
@@ -374,7 +438,7 @@ typedef struct lonejson__array_stream_dup_state {
   lonejson__byte_buffer key;
 } lonejson__array_stream_dup_state;
 
-struct lonejson_array_stream {
+typedef struct lonejson__array_stream_state {
   lonejson_reader_fn reader;
   void *reader_user;
   FILE *fp;
@@ -420,7 +484,6 @@ struct lonejson_array_stream {
   const lonejson_runtime *runtime;
   lonejson_runtime runtime_storage;
   lonejson__parse_options options;
-  lonejson_error error;
   lonejson_allocator allocator;
   lonejson_parser value_parser;
   lonejson_json_value skip_value;
@@ -443,7 +506,44 @@ struct lonejson_array_stream {
   lonejson__byte_buffer item;
   lonejson__byte_buffer key;
   lonejson__byte_buffer root_keys;
-};
+  lonejson_array_stream public;
+} lonejson__array_stream_state;
+
+static LONEJSON__INLINE lonejson__stream_state *
+lonejson__stream_state_mut(lonejson_stream *stream) {
+  return stream != NULL
+             ? (lonejson__stream_state *)((char *)stream -
+                                         offsetof(lonejson__stream_state,
+                                                  public))
+             : NULL;
+}
+
+static LONEJSON__INLINE const lonejson__stream_state *
+lonejson__stream_state_const(const lonejson_stream *stream) {
+  return stream != NULL
+             ? (const lonejson__stream_state *)(
+                   (const char *)stream -
+                   offsetof(lonejson__stream_state, public))
+             : NULL;
+}
+
+static LONEJSON__INLINE lonejson__array_stream_state *
+lonejson__array_stream_state_mut(lonejson_array_stream *stream) {
+  return stream != NULL
+             ? (lonejson__array_stream_state *)(
+                   (char *)stream -
+                   offsetof(lonejson__array_stream_state, public))
+             : NULL;
+}
+
+static LONEJSON__INLINE const lonejson__array_stream_state *
+lonejson__array_stream_state_const(const lonejson_array_stream *stream) {
+  return stream != NULL
+             ? (const lonejson__array_stream_state *)(
+                   (const char *)stream -
+                   offsetof(lonejson__array_stream_state, public))
+             : NULL;
+}
 
 struct lonejson_sse {
   lonejson_sse_options options;
@@ -636,6 +736,14 @@ lonejson__allocator_resolve(const lonejson_allocator *allocator) {
     return lonejson_default_allocator();
   }
   return *allocator;
+}
+
+static LONEJSON__INLINE int
+lonejson__allocator_equal(const lonejson_allocator *a,
+                          const lonejson_allocator *b) {
+  return a != NULL && b != NULL && a->malloc_fn == b->malloc_fn &&
+         a->realloc_fn == b->realloc_fn && a->free_fn == b->free_fn &&
+         a->ctx == b->ctx && a->stats == b->stats;
 }
 
 static int
@@ -1086,17 +1194,36 @@ lonejson__json_value_apply_allocator(lonejson_json_value *value,
 static LONEJSON__INLINE int
 lonejson__json_value_is_initialized(const lonejson_json_value *value) {
   return value != NULL &&
+         value->methods == &g_lonejson_json_value_methods &&
          value->_lonejson_magic ==
              lonejson__init_cookie(value, LONEJSON__JSON_VALUE_MAGIC);
+}
+
+static void lonejson__source_assign_methods(lonejson_source *value) {
+  static const lonejson_source template_methods = {
+      0, NULL, -1, NULL,
+      lonejson_source_cleanup,
+      lonejson_source_reset,
+      lonejson_source_set_file,
+      lonejson_source_set_fd,
+      lonejson_source_set_path,
+      lonejson_source_write_to_sink,
+      lonejson_source_is_rewindable};
+  if (value == NULL) {
+    return;
+  }
+  memcpy(&value->cleanup, &template_methods.cleanup,
+         sizeof(*value) - offsetof(lonejson_source, cleanup));
 }
 
 void lonejson_source_init(lonejson_source *value) {
   if (value == NULL) {
     return;
   }
-  memset(value, 0, sizeof(*value));
+  memset(value, 0, offsetof(lonejson_source, cleanup));
   value->kind = LONEJSON_SOURCE_NONE;
   value->fd = -1;
+  lonejson__source_assign_methods(value);
 }
 
 void lonejson_source_cleanup(lonejson_source *value) {
@@ -1129,15 +1256,44 @@ void lonejson_json_value_init(lonejson *runtime, lonejson_json_value *value) {
   lonejson__runtime_borrow_release(&borrow);
 }
 
+static const lonejson_json_value_methods
+    g_lonejson_json_value_methods = {
+        lonejson_json_value_reset,
+        lonejson_json_value_cleanup,
+        lonejson_json_value_set_buffer,
+        lonejson_json_value_set_parse_sink,
+        lonejson_json_value_set_parse_visitor,
+        lonejson_json_value_enable_parse_capture,
+        lonejson_json_value_set_reader,
+        lonejson_json_value_set_file,
+        lonejson_json_value_set_fd,
+        lonejson_json_value_set_path,
+        lonejson_json_value_write_to_sink,
+        lonejson_json_value_is_rewindable};
+
+static void lonejson__json_value_assign_methods(lonejson_json_value *value) {
+  if (value == NULL) {
+    return;
+  }
+  value->methods = &g_lonejson_json_value_methods;
+}
+
 void lonejson_json_value_init_with_allocator(
     lonejson_json_value *value, const lonejson_allocator *allocator) {
   if (value == NULL) {
     return;
   }
-  memset(value, 0, sizeof(*value));
   value->kind = LONEJSON_JSON_VALUE_NULL;
+  value->json = NULL;
+  value->len = 0u;
+  value->reader = NULL;
+  value->reader_user = NULL;
+  value->fp = NULL;
   value->fd = -1;
+  value->path = NULL;
   value->parse_mode = LONEJSON_JSON_VALUE_PARSE_NONE;
+  value->parse_sink = NULL;
+  value->parse_sink_user = NULL;
   value->parse_visitor = NULL;
   value->parse_visitor_user = NULL;
   value->parse_visitor_limits = lonejson__default_value_limits();
@@ -1146,6 +1302,7 @@ void lonejson_json_value_init_with_allocator(
   lonejson__json_value_apply_allocator(value, allocator);
   value->_lonejson_magic =
       lonejson__init_cookie(value, LONEJSON__JSON_VALUE_MAGIC);
+  lonejson__json_value_assign_methods(value);
 }
 
 void lonejson_json_value_cleanup(lonejson_json_value *value) {
@@ -1162,19 +1319,19 @@ void lonejson_json_value_cleanup(lonejson_json_value *value) {
   runtime_limits = value->runtime_parse_visitor_limits;
   follow_runtime = value->parse_limits_follow_runtime;
   lonejson__owned_free(value->json);
-  lonejson__owned_free(value->path);
+  if (value->kind == LONEJSON_JSON_VALUE_PATH) {
+    lonejson__owned_free(value->path);
+  }
   value->json = NULL;
-  value->path = NULL;
   value->len = 0u;
   value->reader = NULL;
   value->reader_user = NULL;
   value->fp = NULL;
   value->fd = -1;
+  value->path = NULL;
   value->kind = LONEJSON_JSON_VALUE_NULL;
   value->parse_sink = NULL;
   value->parse_sink_user = NULL;
-  value->parse_visitor = NULL;
-  value->parse_visitor_user = NULL;
   value->parse_visitor_limits = limits;
   value->runtime_parse_visitor_limits = runtime_limits;
   value->parse_limits_follow_runtime = follow_runtime;
@@ -1192,21 +1349,33 @@ static void lonejson__json_value_clear_runtime(lonejson_json_value *value) {
   if (value == NULL) {
     return;
   }
+  if (value->kind == LONEJSON_JSON_VALUE_NULL && value->json == NULL &&
+      value->len == 0u && value->reader == NULL && value->reader_user == NULL &&
+      value->fp == NULL && value->fd == -1 && value->path == NULL) {
+    return;
+  }
   lonejson__owned_free(value->json);
-  lonejson__owned_free(value->path);
+  if (value->kind == LONEJSON_JSON_VALUE_PATH) {
+    lonejson__owned_free(value->path);
+  }
   value->json = NULL;
-  value->path = NULL;
   value->len = 0u;
   value->reader = NULL;
   value->reader_user = NULL;
   value->fp = NULL;
   value->fd = -1;
+  value->path = NULL;
   value->kind = LONEJSON_JSON_VALUE_NULL;
 }
 
 static void lonejson__json_value_clear_runtime_parse(lonejson_parser *parser,
                                                      lonejson_json_value *value) {
   if (value == NULL) {
+    return;
+  }
+  if (value->kind == LONEJSON_JSON_VALUE_NULL && value->json == NULL &&
+      value->len == 0u && value->reader == NULL && value->reader_user == NULL &&
+      value->fp == NULL && value->fd == -1 && value->path == NULL) {
     return;
   }
   lonejson__parser_alloc_note_release(parser, value->json);
@@ -1347,6 +1516,40 @@ void lonejson_spooled_init_class(lonejson *runtime, lonejson_spooled *value,
   lonejson__runtime_borrow_release(&borrow);
 }
 
+static void lonejson__spooled_assign_methods(lonejson_spooled *value) {
+  static const lonejson_spooled template_methods = {
+      NULL,
+      0u,
+      0u,
+      0u,
+      0u,
+      0u,
+      NULL,
+      NULL,
+      0,
+      "",
+#if defined(LONEJSON_INTERNAL_BUILD) || defined(LONEJSON_IMPLEMENTATION)
+      NULL,
+#else
+      NULL,
+#endif
+      {NULL, NULL, NULL, NULL, NULL},
+      0u,
+      lonejson_spooled_reset,
+      lonejson_spooled_cleanup,
+      lonejson_spooled_size,
+      lonejson_spooled_spilled,
+      lonejson_spooled_append,
+      lonejson_spooled_rewind,
+      lonejson_spooled_read,
+      lonejson_spooled_write_to_sink};
+  if (value == NULL) {
+    return;
+  }
+  memcpy(&value->reset, &template_methods.reset,
+         sizeof(*value) - offsetof(lonejson_spooled, reset));
+}
+
 void lonejson_spooled_init_with_allocator(lonejson_spooled *value,
                                           const lonejson__spool_options *options,
                                           const lonejson_allocator *allocator) {
@@ -1358,13 +1561,14 @@ void lonejson_spooled_init_with_allocator(lonejson_spooled *value,
   if (options != NULL) {
     temp_dir = options->temp_dir;
   }
-  memset(value, 0, sizeof(*value));
+  memset(value, 0, offsetof(lonejson_spooled, reset));
   lonejson__spooled_apply_allocator(value, allocator);
   value->owned_temp_dir = lonejson__owned_strdup(&value->allocator, temp_dir);
   lonejson__spooled_apply_options(value, options);
   value->temp_dir = value->owned_temp_dir;
   value->_lonejson_magic =
       lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
+  lonejson__spooled_assign_methods(value);
 }
 
 static void lonejson__spooled_close_temp(lonejson_spooled *value) {

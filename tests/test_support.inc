@@ -1355,6 +1355,16 @@ typedef struct test_would_block_read_state {
   int blocked;
 } test_would_block_read_state;
 
+typedef struct test_would_block_tripwire_read_state {
+  const char *json;
+  size_t offset;
+  size_t chunk_size;
+  size_t block_after;
+  int blocked;
+  size_t call_count;
+  int reentered_after_block;
+} test_would_block_tripwire_read_state;
+
 typedef struct test_counting_sink {
   size_t total;
 } test_counting_sink;
@@ -1928,6 +1938,52 @@ static lonejson_read_result test_would_block_once_reader(void *user,
   if (chunk == 0u) {
     rr.would_block = 1;
     st->blocked = 1;
+    return rr;
+  }
+  memcpy(buffer, st->json + st->offset, chunk);
+  st->offset += chunk;
+  rr.bytes_read = chunk;
+  rr.eof = (st->json[st->offset] == '\0') ? 1 : 0;
+  return rr;
+}
+
+static lonejson_read_result
+test_would_block_tripwire_reader(void *user, unsigned char *buffer,
+                                 size_t capacity) {
+  test_would_block_tripwire_read_state *st =
+      (test_would_block_tripwire_read_state *)user;
+  lonejson_read_result rr;
+  size_t remaining = strlen(st->json) - st->offset;
+  size_t chunk = st->chunk_size;
+
+  memset(&rr, 0, sizeof(rr));
+  st->call_count++;
+  if (st->blocked) {
+    st->reentered_after_block = 1;
+    rr.error_code = EDEADLK;
+    return rr;
+  }
+  if (st->offset >= st->block_after) {
+    st->blocked = 1;
+    rr.would_block = 1;
+    return rr;
+  }
+  if (remaining == 0u) {
+    rr.eof = 1;
+    return rr;
+  }
+  if (st->offset + chunk > st->block_after) {
+    chunk = st->block_after - st->offset;
+  }
+  if (chunk > remaining) {
+    chunk = remaining;
+  }
+  if (chunk > capacity) {
+    chunk = capacity;
+  }
+  if (chunk == 0u) {
+    st->blocked = 1;
+    rr.would_block = 1;
     return rr;
   }
   memcpy(buffer, st->json + st->offset, chunk);

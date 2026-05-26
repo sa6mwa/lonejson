@@ -491,7 +491,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 12
+#define LONEJSON_ABI_VERSION 13
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -919,6 +919,34 @@ typedef struct lonejson__spool_options {
 } lonejson__spool_options;
 #endif
 
+/** Result returned by reader callbacks and `lonejson_spooled_read`. Use
+ * `lonejson_default_read_result()` when constructing one manually inside a
+ * reader callback instead of open-coding `memset` or `{0}`.
+ *
+ * `would_block` is only supported by lonejson APIs that retain resumable
+ * state across calls, such as object streams, array streams, and push or
+ * backpressure writer surfaces. One-shot reader helpers fail closed on
+ * `would_block` instead of spinning or attempting an implicit retry.
+ */
+typedef struct lonejson_read_result {
+  /** Number of bytes placed into the supplied buffer. */
+  size_t bytes_read;
+  /** Non-zero when the input source reached end-of-stream. */
+  int eof;
+  /** Non-zero when the source would block and the caller should retry later. */
+  int would_block;
+  /** `errno`-style failure code. Zero indicates success. */
+  int error_code;
+} lonejson_read_result;
+
+/** Callback type used by reader-backed parse and stream APIs. */
+typedef lonejson_read_result (*lonejson_reader_fn)(void *user,
+                                                   unsigned char *buffer,
+                                                   size_t capacity);
+/** Generic sink callback used by serializer APIs and raw spool writers. */
+typedef lonejson_status (*lonejson_sink_fn)(void *user, const void *data,
+                                            size_t len, lonejson_error *error);
+
 /** Spill-backed storage used by streamed text and decoded byte fields.
  * Applications typically treat this as an opaque handle and interact through
  * the `lonejson_spooled_*` helpers. */
@@ -958,6 +986,27 @@ typedef struct lonejson_spooled {
    * handles from uninitialized memory. Treat as opaque.
    */
   unsigned _lonejson_magic;
+  /** Clears stored contents while preserving configured spool limits. */
+  void (*reset)(struct lonejson_spooled *value);
+  /** Releases all resources owned by the spool handle. */
+  void (*cleanup)(struct lonejson_spooled *value);
+  /** Returns the logical byte length held by the handle. */
+  size_t (*size_fn)(const struct lonejson_spooled *value);
+  /** Returns non-zero once the handle has spilled beyond memory. */
+  int (*spilled_fn)(const struct lonejson_spooled *value);
+  /** Appends raw bytes to the handle. */
+  lonejson_status (*append)(struct lonejson_spooled *value, const void *data,
+                            size_t len, lonejson_error *error);
+  /** Rewinds the raw read cursor to the beginning. */
+  lonejson_status (*rewind)(struct lonejson_spooled *value,
+                            lonejson_error *error);
+  /** Reads raw bytes sequentially from the current read cursor. */
+  lonejson_read_result (*read)(struct lonejson_spooled *value,
+                               unsigned char *buffer, size_t capacity);
+  /** Streams the stored bytes to a generic sink callback. */
+  lonejson_status (*write_to_sink)(const struct lonejson_spooled *value,
+                                   lonejson_sink_fn sink, void *user,
+                                   lonejson_error *error);
 } lonejson_spooled;
 
 /** Serialize-only outbound source used by streamed text/base64 source fields.
@@ -973,6 +1022,27 @@ typedef struct lonejson_source {
   int fd;
   /** Owned filesystem path when `kind == LONEJSON_SOURCE_PATH`. */
   char *path;
+  /** Resets the handle to the empty `null` state and releases owned path
+   * storage.
+   */
+  void (*cleanup)(struct lonejson_source *value);
+  /** Alias for `cleanup()` in receiver-method form. */
+  void (*reset)(struct lonejson_source *value);
+  /** Configures the handle to stream from an open `FILE *`. */
+  lonejson_status (*set_file)(struct lonejson_source *value, FILE *fp,
+                              lonejson_error *error);
+  /** Configures the handle to stream from a file descriptor. */
+  lonejson_status (*set_fd)(struct lonejson_source *value, int fd,
+                            lonejson_error *error);
+  /** Configures the handle to stream from a reopenable filesystem path. */
+  lonejson_status (*set_path)(struct lonejson_source *value, const char *path,
+                              lonejson_error *error);
+  /** Streams the configured source bytes to a sink callback. */
+  lonejson_status (*write_to_sink)(const struct lonejson_source *value,
+                                   lonejson_sink_fn sink, void *user,
+                                   lonejson_error *error);
+  /** Returns non-zero when the configured source can be replayed. */
+  int (*is_rewindable)(const struct lonejson_source *value);
 } lonejson_source;
 
 /** Dynamically sized array of NUL-terminated strings. */
@@ -1058,10 +1128,26 @@ typedef struct lonejson_object_array {
 typedef struct lonejson_field lonejson_field;
 /** Forward declaration for one schema map describing a C struct. */
 typedef struct lonejson_map lonejson_map;
-/** Opaque object-framed JSON stream parser state. */
+/** Forward declarations for rewrite option struct tags used by runtime methods. */
+struct lonejson_array_rewrite_options;
+struct lonejson_value_rewrite_options;
+struct lonejson_value_rewrite_selector_options;
+/** Object-framed JSON stream cursor. */
 typedef struct lonejson_stream lonejson_stream;
-/** Opaque selected-array item stream parser state. */
+/** Selected-array item stream cursor. */
 typedef struct lonejson_array_stream lonejson_array_stream;
+struct lonejson_array_stream_string_handler;
+/** Callback invoked after one push-fed selected array item has been parsed into
+ * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
+ * so callers that need to retain an item must copy it here.
+ */
+typedef lonejson_status (*lonejson_array_stream_item_fn)(void *user, void *dst);
+/** Callback invoked after one push-fed selected string-array item has been
+ * decoded into a bounded, NUL-terminated temporary buffer. The pointer is valid
+ * only for the duration of the callback.
+ */
+typedef lonejson_status (*lonejson_array_stream_string_fn)(
+    void *user, const char *data, size_t len, lonejson_error *error);
 /** Opaque incremental Server-Sent Events parser state. */
 typedef struct lonejson_sse lonejson_sse;
 /** Opaque incremental MIME multipart parser state. */
@@ -1204,28 +1290,6 @@ typedef struct lonejson__parse_options {
 } lonejson__parse_options;
 #endif
 
-/** Result returned by reader callbacks and `lonejson_spooled_read`. Use
- * `lonejson_default_read_result()` when constructing one manually inside a
- * reader callback instead of open-coding `memset` or `{0}`.
- */
-typedef struct lonejson_read_result {
-  /** Number of bytes placed into the supplied buffer. */
-  size_t bytes_read;
-  /** Non-zero when the input source reached end-of-stream. */
-  int eof;
-  /** Non-zero when the source would block and the caller should retry later. */
-  int would_block;
-  /** `errno`-style failure code. Zero indicates success. */
-  int error_code;
-} lonejson_read_result;
-
-/** Callback type used by reader-backed parse and stream APIs. */
-typedef lonejson_read_result (*lonejson_reader_fn)(void *user,
-                                                   unsigned char *buffer,
-                                                   size_t capacity);
-/** Generic sink callback used by serializer APIs and raw spool writers. */
-typedef lonejson_status (*lonejson_sink_fn)(void *user, const void *data,
-                                            size_t len, lonejson_error *error);
 struct lonejson_json_value;
 
 /** Header name/value pair exposed while processing multipart part headers.
@@ -1554,6 +1618,37 @@ typedef struct lonejson_value_visitor {
   lonejson_value_event_fn null_value;
 } lonejson_value_visitor;
 
+struct lonejson_json_value;
+typedef struct lonejson_json_value_methods {
+  void (*reset)(struct lonejson_json_value *value);
+  void (*cleanup)(struct lonejson_json_value *value);
+  lonejson_status (*set_buffer)(struct lonejson_json_value *value,
+                                const void *data, size_t len,
+                                lonejson_error *error);
+  lonejson_status (*set_parse_sink)(struct lonejson_json_value *value,
+                                    lonejson_sink_fn sink, void *user,
+                                    lonejson_error *error);
+  lonejson_status (*set_parse_visitor)(
+      struct lonejson_json_value *value,
+      const lonejson_value_visitor *visitor, void *user,
+      lonejson_error *error);
+  lonejson_status (*enable_parse_capture)(struct lonejson_json_value *value,
+                                          lonejson_error *error);
+  lonejson_status (*set_reader)(struct lonejson_json_value *value,
+                                lonejson_reader_fn reader, void *user,
+                                lonejson_error *error);
+  lonejson_status (*set_file)(struct lonejson_json_value *value, FILE *fp,
+                              lonejson_error *error);
+  lonejson_status (*set_fd)(struct lonejson_json_value *value, int fd,
+                            lonejson_error *error);
+  lonejson_status (*set_path)(struct lonejson_json_value *value,
+                              const char *path, lonejson_error *error);
+  lonejson_status (*write_to_sink)(const struct lonejson_json_value *value,
+                                   lonejson_sink_fn sink, void *user,
+                                   lonejson_error *error);
+  int (*is_rewindable)(const struct lonejson_json_value *value);
+} lonejson_json_value_methods;
+
 /** Opaque JSON value handle used by embedded arbitrary JSON fields. Parsing is
  * stream-first: the caller must configure either a parse sink, a parse
  * visitor, or explicit parse capture before decoding inbound JSON into this
@@ -1599,12 +1694,16 @@ typedef struct lonejson_json_value {
 #if defined(LONEJSON_INTERNAL_BUILD) || defined(LONEJSON_IMPLEMENTATION)
   lonejson__value_limits parse_visitor_limits;
   lonejson__value_limits runtime_parse_visitor_limits;
-  int parse_limits_follow_runtime;
 #else
-  size_t _reserved_parse_visitor_limits[11];
+  /** Opaque storage for lonejson-managed parse-visitor limit state. */
+  size_t _reserved_parse_visitor_limits[10];
 #endif
+  /** Receiver-owned method table. */
+  const lonejson_json_value_methods *methods;
   /** Allocator used for lonejson-owned captured JSON and path state. */
   lonejson_allocator allocator;
+  /** Whether `parse_visitor_limits` still follows the runtime defaults. */
+  int parse_limits_follow_runtime;
   /** Internal state marker used by lonejson to distinguish initialized
    * handles from uninitialized memory. Treat as opaque.
    */
@@ -1688,6 +1787,52 @@ struct lonejson {
   lonejson_status (*parse_path)(lonejson *runtime, const lonejson_map *map,
                                 void *dst, const char *path,
                                 lonejson_error *error);
+  /** Validates one caller-owned JSON buffer. */
+  lonejson_status (*validate_buffer)(lonejson *runtime, const void *data,
+                                     size_t len, lonejson_error *error);
+  /** Validates one NUL-terminated JSON string. */
+  lonejson_status (*validate_cstr)(lonejson *runtime, const char *json,
+                                   lonejson_error *error);
+  /** Validates JSON from a reader callback. */
+  lonejson_status (*validate_reader)(lonejson *runtime,
+                                     lonejson_reader_fn reader, void *user,
+                                     lonejson_error *error);
+  /** Validates JSON from an open `FILE *`. */
+  lonejson_status (*validate_filep)(lonejson *runtime, FILE *fp,
+                                    lonejson_error *error);
+  /** Validates JSON from a filesystem path. */
+  lonejson_status (*validate_path)(lonejson *runtime, const char *path,
+                                   lonejson_error *error);
+  /** Visits exactly one JSON value from a caller-owned buffer. */
+  lonejson_status (*visit_value_buffer)(
+      lonejson *runtime, const void *data, size_t len,
+      const lonejson_value_visitor *visitor, void *user,
+      lonejson_error *error);
+  /** Visits exactly one JSON value from a NUL-terminated string. */
+  lonejson_status (*visit_value_cstr)(lonejson *runtime, const char *json,
+                                      const lonejson_value_visitor *visitor,
+                                      void *user, lonejson_error *error);
+  /** Visits exactly one JSON value from a reader callback. */
+  lonejson_status (*visit_value_reader)(
+      lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+      const lonejson_value_visitor *visitor, void *user,
+      lonejson_error *error);
+  /** Visits exactly one JSON value from an open `FILE *`. */
+  lonejson_status (*visit_value_filep)(lonejson *runtime, FILE *fp,
+                                       const lonejson_value_visitor *visitor,
+                                       void *user, lonejson_error *error);
+  /** Visits exactly one JSON value from a filesystem path. */
+  lonejson_status (*visit_value_path)(lonejson *runtime, const char *path,
+                                      const lonejson_value_visitor *visitor,
+                                      void *user, lonejson_error *error);
+  /** Visits exactly one JSON value from a file descriptor. */
+  lonejson_status (*visit_value_fd)(lonejson *runtime, int fd,
+                                    const lonejson_value_visitor *visitor,
+                                    void *user, lonejson_error *error);
+  /** Initializes a mapped value according to one schema. */
+  void (*init)(lonejson *runtime, const lonejson_map *map, void *value);
+  /** Resets a mapped value while preserving caller-owned fixed backing. */
+  void (*reset)(lonejson *runtime, const lonejson_map *map, void *value);
   /** Opens an object-framed stream over a reader callback. */
   lonejson_stream *(*stream_open_reader)(lonejson *runtime, const lonejson_map *map,
                                          lonejson_reader_fn reader, void *user,
@@ -1722,10 +1867,112 @@ struct lonejson {
   lonejson_array_stream *(*array_stream_open_push)(lonejson *runtime,
                                                    const char *path,
                                                    lonejson_error *error);
+  /** Initializes one spool handle with the runtime default spool policy. */
+  void (*spooled_init)(lonejson *runtime, lonejson_spooled *value);
+  /** Initializes one spool handle with one named runtime spool policy. */
+  void (*spooled_init_class)(lonejson *runtime, lonejson_spooled *value,
+                             lonejson_spool_class spool_class);
   /** Initializes one stack-owned arbitrary JSON value handle. */
   void (*json_value_init)(lonejson *runtime, lonejson_json_value *value);
   /** Releases one stack-owned arbitrary JSON value handle. */
   void (*json_value_cleanup)(lonejson *runtime, lonejson_json_value *value);
+  /** Rewrites one selected array from a reader callback to a sink. */
+  lonejson_status (*array_rewrite_reader)(
+      lonejson *runtime, const char *selector, lonejson_reader_fn reader,
+      void *reader_user, lonejson_sink_fn sink, void *sink_user,
+      const struct lonejson_array_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one selected array from a reader callback to an open file. */
+  lonejson_status (*array_rewrite_reader_to_filep)(
+      lonejson *runtime, const char *selector, lonejson_reader_fn reader,
+      void *reader_user, FILE *output,
+      const struct lonejson_array_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one selected array from a reader callback to a file descriptor. */
+  lonejson_status (*array_rewrite_reader_to_fd)(
+      lonejson *runtime, const char *selector, lonejson_reader_fn reader,
+      void *reader_user, int fd,
+      const struct lonejson_array_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one selected array from an open file to a sink. */
+  lonejson_status (*array_rewrite_filep)(
+      lonejson *runtime, const char *selector, FILE *fp, lonejson_sink_fn sink,
+      void *sink_user, const struct lonejson_array_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one selected array from file to file. */
+  lonejson_status (*array_rewrite_filep_to_filep)(
+      lonejson *runtime, const char *selector, FILE *input, FILE *output,
+      const struct lonejson_array_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one selected array from file descriptor to sink. */
+  lonejson_status (*array_rewrite_fd)(
+      lonejson *runtime, const char *selector, int fd, lonejson_sink_fn sink,
+      void *sink_user, const struct lonejson_array_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one selected array from file descriptor to file descriptor. */
+  lonejson_status (*array_rewrite_fd_to_fd)(
+      lonejson *runtime, const char *selector, int input_fd, int output_fd,
+      const struct lonejson_array_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one selected array from input path to output path. */
+  lonejson_status (*array_rewrite_path)(
+      lonejson *runtime, const char *selector, const char *input_path,
+      const char *output_path,
+      const struct lonejson_array_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value from a reader callback to a sink. */
+  lonejson_status (*value_rewrite_reader)(
+      lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+      lonejson_sink_fn sink, void *sink_user,
+      const struct lonejson_value_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value from a buffer to a sink. */
+  lonejson_status (*value_rewrite_buffer)(
+      lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+      void *sink_user, const struct lonejson_value_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value from an open file to a sink. */
+  lonejson_status (*value_rewrite_filep)(
+      lonejson *runtime, FILE *fp, lonejson_sink_fn sink, void *sink_user,
+      const struct lonejson_value_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value from a file descriptor to a sink. */
+  lonejson_status (*value_rewrite_fd)(
+      lonejson *runtime, int fd, lonejson_sink_fn sink, void *sink_user,
+      const struct lonejson_value_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value from input path to output path. */
+  lonejson_status (*value_rewrite_path)(
+      lonejson *runtime, const char *input_path, const char *output_path,
+      const struct lonejson_value_rewrite_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value with a selector from a reader callback. */
+  lonejson_status (*value_rewrite_selector_reader)(
+      lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+      lonejson_sink_fn sink, void *sink_user,
+      const struct lonejson_value_rewrite_selector_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value with a selector from a buffer. */
+  lonejson_status (*value_rewrite_selector_buffer)(
+      lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+      void *sink_user,
+      const struct lonejson_value_rewrite_selector_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value with a selector from an open file. */
+  lonejson_status (*value_rewrite_selector_filep)(
+      lonejson *runtime, FILE *fp, lonejson_sink_fn sink, void *sink_user,
+      const struct lonejson_value_rewrite_selector_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value with a selector from a file descriptor. */
+  lonejson_status (*value_rewrite_selector_fd)(
+      lonejson *runtime, int fd, lonejson_sink_fn sink, void *sink_user,
+      const struct lonejson_value_rewrite_selector_options *options,
+      lonejson_error *error);
+  /** Rewrites one arbitrary JSON value with a selector from input path to output path. */
+  lonejson_status (*value_rewrite_selector_path)(
+      lonejson *runtime, const char *input_path, const char *output_path,
+      const struct lonejson_value_rewrite_selector_options *options,
+      lonejson_error *error);
   /** Initializes one pull generator using runtime defaults. */
   lonejson_status (*generator_init)(lonejson *runtime, lonejson_generator *generator,
                                     const lonejson_map *map, const void *src);
@@ -1769,6 +2016,11 @@ struct lonejson_generator {
   int eof;
   /** Last generator error. Cleared by init and cleanup. */
   lonejson_error error;
+  /** Pulls the next serialized bytes from the generator. */
+  lonejson_status (*read)(lonejson_generator *generator, unsigned char *buffer,
+                          size_t capacity, size_t *out_len, int *out_eof);
+  /** Releases resources owned by the generator. */
+  void (*cleanup)(lonejson_generator *generator);
 };
 
 /** Public state for a streaming JSON writer.
@@ -1782,6 +2034,135 @@ struct lonejson_writer {
   void *state;
   /** Last writer error. Cleared by init and cleanup. */
   lonejson_error error;
+  /** Releases resources owned by the writer. */
+  void (*cleanup)(lonejson_writer *writer);
+  /** Begins a JSON object value. */
+  lonejson_status (*begin_object)(lonejson_writer *writer,
+                                  lonejson_error *error);
+  /** Ends the current JSON object. */
+  lonejson_status (*end_object)(lonejson_writer *writer,
+                                lonejson_error *error);
+  /** Begins a JSON array value. */
+  lonejson_status (*begin_array)(lonejson_writer *writer,
+                                 lonejson_error *error);
+  /** Ends the current JSON array. */
+  lonejson_status (*end_array)(lonejson_writer *writer,
+                               lonejson_error *error);
+  /** Emits one object member key. */
+  lonejson_status (*key)(lonejson_writer *writer, const char *key,
+                         size_t key_len, lonejson_error *error);
+  /** Emits one JSON string value from a buffer. */
+  lonejson_status (*string)(lonejson_writer *writer, const void *data,
+                            size_t len, lonejson_error *error);
+  /** Begins a chunked JSON string value. */
+  lonejson_status (*string_begin)(lonejson_writer *writer,
+                                  lonejson_error *error);
+  /** Emits one raw chunk into an open chunked JSON string. */
+  lonejson_status (*string_chunk)(lonejson_writer *writer, const void *data,
+                                  size_t len, lonejson_error *error);
+  /** Ends a chunked JSON string value. */
+  lonejson_status (*string_end)(lonejson_writer *writer,
+                                lonejson_error *error);
+  /** Emits one JSON string by streaming from a reader callback. */
+  lonejson_status (*string_reader)(lonejson_writer *writer,
+                                   lonejson_reader_fn reader,
+                                   void *reader_user,
+                                   lonejson_error *error);
+  /** Emits one JSON string from a rewindable spooled value. */
+  lonejson_status (*string_spooled)(lonejson_writer *writer,
+                                    const lonejson_spooled *value,
+                                    lonejson_error *error);
+  /** Emits one JSON string from a rewindable outbound source. */
+  lonejson_status (*source_text)(lonejson_writer *writer,
+                                 const lonejson_source *value,
+                                 lonejson_error *error);
+  /** Emits one base64 string from a rewindable spooled value. */
+  lonejson_status (*spooled_base64)(lonejson_writer *writer,
+                                    const lonejson_spooled *value,
+                                    lonejson_error *error);
+  /** Emits one base64 string from a rewindable outbound source. */
+  lonejson_status (*source_base64)(lonejson_writer *writer,
+                                   const lonejson_source *value,
+                                   lonejson_error *error);
+  /** Emits one validated JSON number token. */
+  lonejson_status (*number_text)(lonejson_writer *writer, const char *data,
+                                 size_t len, lonejson_error *error);
+  /** Emits one signed 64-bit JSON integer. */
+  lonejson_status (*i64)(lonejson_writer *writer, lonejson_int64 value,
+                         lonejson_error *error);
+  /** Emits one unsigned 64-bit JSON integer. */
+  lonejson_status (*u64)(lonejson_writer *writer, lonejson_uint64 value,
+                         lonejson_error *error);
+  /** Emits one finite double value. */
+  lonejson_status (*f64)(lonejson_writer *writer, double value,
+                         lonejson_error *error);
+  /** Emits one JSON boolean value. */
+  lonejson_status (*bool_fn)(lonejson_writer *writer, int value,
+                             lonejson_error *error);
+  /** Emits one JSON `null`. */
+  lonejson_status (*null_fn)(lonejson_writer *writer,
+                             lonejson_error *error);
+  /** Emits one arbitrary JSON value from a configured handle. */
+  lonejson_status (*json_value)(lonejson_writer *writer,
+                                const lonejson_json_value *value,
+                                lonejson_error *error);
+  /** Streams one arbitrary JSON value from a reader callback. */
+  lonejson_status (*json_value_reader)(lonejson_writer *writer,
+                                       lonejson_reader_fn reader,
+                                       void *reader_user,
+                                       lonejson_error *error);
+  /** Streams one arbitrary JSON value from a buffer. */
+  lonejson_status (*json_value_buffer)(lonejson_writer *writer,
+                                       const void *data, size_t len,
+                                       lonejson_error *error);
+  /** Streams one arbitrary JSON value from an open `FILE *`. */
+  lonejson_status (*json_value_file)(lonejson_writer *writer, FILE *fp,
+                                     lonejson_error *error);
+  /** Streams one arbitrary JSON value from a file descriptor. */
+  lonejson_status (*json_value_fd)(lonejson_writer *writer, int fd,
+                                   lonejson_error *error);
+  /** Streams one arbitrary JSON value from a filesystem path. */
+  lonejson_status (*json_value_path)(lonejson_writer *writer,
+                                     const char *path,
+                                     lonejson_error *error);
+  /** Streams one arbitrary JSON value from a rewindable spooled value. */
+  lonejson_status (*json_value_spooled)(lonejson_writer *writer,
+                                        const lonejson_spooled *value,
+                                        lonejson_error *error);
+  /** Appends selected array items from a reader callback into the current array. */
+  lonejson_status (*array_items_reader)(lonejson_writer *writer,
+                                        const char *selector,
+                                        lonejson_reader_fn reader,
+                                        void *reader_user,
+                                        lonejson_error *error);
+  /** Appends selected array items from a buffer into the current array. */
+  lonejson_status (*array_items_buffer)(lonejson_writer *writer,
+                                        const char *selector,
+                                        const void *data, size_t len,
+                                        lonejson_error *error);
+  /** Appends selected array items from an open `FILE *`. */
+  lonejson_status (*array_items_filep)(lonejson_writer *writer,
+                                       const char *selector, FILE *fp,
+                                       lonejson_error *error);
+  /** Appends selected array items from a file descriptor. */
+  lonejson_status (*array_items_fd)(lonejson_writer *writer,
+                                    const char *selector, int fd,
+                                    lonejson_error *error);
+  /** Appends selected array items from a filesystem path. */
+  lonejson_status (*array_items_path)(lonejson_writer *writer,
+                                      const char *selector,
+                                      const char *path,
+                                      lonejson_error *error);
+  /** Appends selected array items from a rewindable spooled value. */
+  lonejson_status (*array_items_spooled)(lonejson_writer *writer,
+                                         const char *selector,
+                                         const lonejson_spooled *value,
+                                         lonejson_error *error);
+  /** Emits one mapped struct value through the normal serializer. */
+  lonejson_status (*mapped)(lonejson_writer *writer, const lonejson_map *map,
+                            const void *src, lonejson_error *error);
+  /** Finalizes the writer after one complete JSON document. */
+  lonejson_status (*finish)(lonejson_writer *writer, lonejson_error *error);
 };
 
 /** Public state for a push-fed arbitrary JSON value inside a writer. */
@@ -1790,6 +2171,18 @@ struct lonejson_writer_value_stream {
   void *state;
   /** Last value-stream error. Cleared by open and cleanup. */
   lonejson_error error;
+  /** Opens one push-fed arbitrary JSON value on the current writer position. */
+  lonejson_status (*open)(lonejson_writer_value_stream *stream,
+                          lonejson_writer *writer, lonejson_error *error);
+  /** Feeds one byte chunk into an open writer value stream. */
+  lonejson_status (*push)(lonejson_writer_value_stream *stream,
+                          const void *data, size_t len,
+                          lonejson_error *error);
+  /** Finalizes an open writer value stream at source EOF. */
+  lonejson_status (*close)(lonejson_writer_value_stream *stream,
+                           lonejson_error *error);
+  /** Releases resources owned by a writer value stream. */
+  void (*cleanup)(lonejson_writer_value_stream *stream);
 };
 
 /** Producer callback used by `lonejson_writer_generator_init()`.
@@ -3332,6 +3725,71 @@ typedef enum lonejson_array_stream_result {
   LONEJSON_ARRAY_STREAM_ERROR
 } lonejson_array_stream_result;
 
+/** Public state for an object-framed JSON stream cursor.
+ *
+ * Stream handles are created by `lonejson_stream_open_*()` and must be closed
+ * with `lonejson_stream_close()` or `stream->close(stream)`.
+ */
+struct lonejson_stream {
+  /** Last stream error. Cleared when a complete object is emitted. */
+  lonejson_error error;
+  /** Parses the next top-level object into `dst`. */
+  lonejson_stream_result (*next)(lonejson_stream *stream, void *dst,
+                                 lonejson_error *error);
+  /** Closes the stream and releases its resources. */
+  void (*close)(lonejson_stream *stream);
+};
+
+/** Public state for a selected-array item stream cursor.
+ *
+ * Array-stream handles are created by `lonejson_array_stream_open_*()` and
+ * must be closed with `lonejson_array_stream_close()` or `stream->close(stream)`.
+ */
+struct lonejson_array_stream {
+  /** Last array-stream error. Cleared when an item is emitted. */
+  lonejson_error error;
+  /** Parses the next selected item through `map` into `dst`. */
+  lonejson_array_stream_result (*next)(lonejson_array_stream *stream,
+                                       const lonejson_map *map, void *dst,
+                                       lonejson_error *error);
+  /** Captures the next selected item as one compact JSON value. */
+  lonejson_array_stream_result (*next_value)(lonejson_array_stream *stream,
+                                             lonejson_json_value *value,
+                                             lonejson_error *error);
+  /** Feeds one byte chunk into a push-fed mapped-item stream. */
+  lonejson_status (*push)(lonejson_array_stream *stream, const lonejson_map *map,
+                          void *dst, const void *bytes, size_t len,
+                          lonejson_array_stream_item_fn callback, void *user,
+                          lonejson_error *error);
+  /** Finalizes a push-fed mapped-item stream after source EOF. */
+  lonejson_status (*finish)(lonejson_array_stream *stream,
+                            const lonejson_map *map, void *dst,
+                            lonejson_array_stream_item_fn callback, void *user,
+                            lonejson_error *error);
+  /** Feeds one byte chunk into a push-fed selected string stream. */
+  lonejson_status (*push_string)(
+      lonejson_array_stream *stream, const void *bytes, size_t len,
+      const lonejson_array_stream_string_handler *handler, void *user,
+      lonejson_error *error);
+  /** Finalizes a push-fed selected string stream after source EOF. */
+  lonejson_status (*finish_string)(
+      lonejson_array_stream *stream,
+      const lonejson_array_stream_string_handler *handler, void *user,
+      lonejson_error *error);
+  /** Feeds one byte chunk into a push-fed selected string-item stream. */
+  lonejson_status (*push_string_items)(lonejson_array_stream *stream,
+                                       const void *bytes, size_t len,
+                                       lonejson_array_stream_string_fn callback,
+                                       void *user, lonejson_error *error);
+  /** Finalizes a push-fed selected string-item stream after source EOF. */
+  lonejson_status (*finish_string_items)(
+      lonejson_array_stream *stream,
+      lonejson_array_stream_string_fn callback, void *user,
+      lonejson_error *error);
+  /** Closes the stream and releases its resources. */
+  void (*close)(lonejson_array_stream *stream);
+};
+
 /** Action returned by a selected-array rewrite item callback. The rewriter owns
  * array framing and comma placement for all actions.
  */
@@ -3542,19 +4000,6 @@ typedef struct lonejson_array_rewrite_options {
   void *user;
 } lonejson_array_rewrite_options;
 
-/** Callback invoked after one push-fed selected array item has been parsed into
- * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
- * so callers that need to retain an item must copy it here.
- */
-typedef lonejson_status (*lonejson_array_stream_item_fn)(void *user, void *dst);
-
-/** Callback invoked after one push-fed selected string-array item has been
- * decoded into a bounded, NUL-terminated temporary buffer. The pointer is valid
- * only for the duration of the callback.
- */
-typedef lonejson_status (*lonejson_array_stream_string_fn)(
-    void *user, const char *data, size_t len, lonejson_error *error);
-
 /** Opens an object-framed JSON stream over a caller-supplied reader callback.
  */
 lonejson_stream *
@@ -3668,7 +4113,10 @@ void lonejson_array_stream_close(lonejson_array_stream *stream);
 
 /** Rewrites one selected JSON array from a caller-provided reader to a generic
  * sink. The document is validated and emitted incrementally; the complete
- * document and selected arrays are never materialized.
+ * document and selected arrays are never materialized. The reader must behave
+ * like a blocking or immediately-available source for the duration of the
+ * call. `would_block` is rejected because this helper does not retain
+ * resumable reader state across calls.
  */
 lonejson_status lonejson_array_rewrite_reader(
     lonejson *runtime, const char *selector, lonejson_reader_fn reader,
@@ -3721,6 +4169,9 @@ lonejson_status lonejson_array_rewrite_path(
  * The input is validated and re-emitted as compact canonical JSON. The complete
  * input and output documents are not materialized. Replacement values are
  * emitted through lonejson serializers, so callers do not write JSON syntax.
+ * The reader must behave like a blocking or immediately-available source for
+ * the duration of the call. `would_block` is rejected because this helper does
+ * not retain resumable reader state across calls.
  */
 lonejson_status
 lonejson_value_rewrite_reader(lonejson *runtime, lonejson_reader_fn reader,
@@ -3754,7 +4205,12 @@ lonejson_value_rewrite_path(lonejson *runtime, const char *input_path,
                             const char *output_path,
                             const lonejson_value_rewrite_options *options,
                             lonejson_error *error);
-/** Rewrites one arbitrary JSON value using an escaped selector string. */
+/** Rewrites one arbitrary JSON value using an escaped selector string.
+ *
+ * The reader must behave like a blocking or immediately-available source for
+ * the duration of the call. `would_block` is rejected because this helper does
+ * not retain resumable reader state across calls.
+ */
 lonejson_status lonejson_value_rewrite_selector_reader(
     lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
     lonejson_sink_fn sink, void *sink_user,
@@ -3870,7 +4326,12 @@ lonejson_status lonejson_parse_buffer(lonejson *runtime, const lonejson_map *map
 lonejson_status lonejson_parse_cstr(lonejson *runtime, const lonejson_map *map,
                                     void *dst, const char *json,
                                     lonejson_error *error);
-/** Parses JSON from a caller-supplied reader callback into a mapped struct. */
+/** Parses JSON from a caller-supplied reader callback into a mapped struct.
+ *
+ * The reader must behave like a blocking or immediately-available source for
+ * the duration of the call. `would_block` is rejected because this helper does
+ * not retain resumable parse state across calls.
+ */
 lonejson_status lonejson_parse_reader(lonejson *runtime, const lonejson_map *map,
                                       void *dst, lonejson_reader_fn reader,
                                       void *user, lonejson_error *error);
@@ -3890,7 +4351,12 @@ lonejson_status lonejson_validate_buffer(lonejson *runtime, const void *data,
 /** Validates that a NUL-terminated string contains syntactically valid JSON. */
 lonejson_status lonejson_validate_cstr(lonejson *runtime, const char *json,
                                        lonejson_error *error);
-/** Validates JSON produced by a caller-supplied reader callback. */
+/** Validates JSON produced by a caller-supplied reader callback.
+ *
+ * The reader must behave like a blocking or immediately-available source for
+ * the duration of the call. `would_block` is rejected because this helper does
+ * not retain resumable validation state across calls.
+ */
 lonejson_status lonejson_validate_reader(lonejson *runtime,
                                          lonejson_reader_fn reader, void *user,
                                          lonejson_error *error);
@@ -3917,7 +4383,10 @@ lonejson_status lonejson_visit_value_cstr(lonejson *runtime, const char *json,
                                           void *user, lonejson_error *error);
 /** Visits exactly one JSON value from a caller-provided reader callback. The
  * call fails on malformed JSON or on trailing non-whitespace bytes after the
- * first complete value.
+ * first complete value. The reader must behave like a blocking or
+ * immediately-available source for the duration of the call. `would_block` is
+ * rejected because this helper does not retain resumable visitor state across
+ * calls.
  */
 lonejson_status
 lonejson_visit_value_reader(lonejson *runtime, lonejson_reader_fn reader,

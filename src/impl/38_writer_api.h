@@ -85,6 +85,59 @@ typedef struct lonejson__writer_value_stream_state {
   lonejson_allocator allocator;
 } lonejson__writer_value_stream_state;
 
+static void lonejson__writer_assign_methods(lonejson_writer *writer) {
+  if (writer == NULL) {
+    return;
+  }
+  writer->cleanup = lonejson_writer_cleanup;
+  writer->begin_object = lonejson_writer_begin_object;
+  writer->end_object = lonejson_writer_end_object;
+  writer->begin_array = lonejson_writer_begin_array;
+  writer->end_array = lonejson_writer_end_array;
+  writer->key = lonejson_writer_key;
+  writer->string = lonejson_writer_string;
+  writer->string_begin = lonejson_writer_string_begin;
+  writer->string_chunk = lonejson_writer_string_chunk;
+  writer->string_end = lonejson_writer_string_end;
+  writer->string_reader = lonejson_writer_string_reader;
+  writer->string_spooled = lonejson_writer_string_spooled;
+  writer->source_text = lonejson_writer_source_text;
+  writer->spooled_base64 = lonejson_writer_spooled_base64;
+  writer->source_base64 = lonejson_writer_source_base64;
+  writer->number_text = lonejson_writer_number_text;
+  writer->i64 = lonejson_writer_i64;
+  writer->u64 = lonejson_writer_u64;
+  writer->f64 = lonejson_writer_f64;
+  writer->bool_fn = lonejson_writer_bool;
+  writer->null_fn = lonejson_writer_null;
+  writer->json_value = lonejson_writer_json_value;
+  writer->json_value_reader = lonejson_writer_json_value_reader;
+  writer->json_value_buffer = lonejson_writer_json_value_buffer;
+  writer->json_value_file = lonejson_writer_json_value_file;
+  writer->json_value_fd = lonejson_writer_json_value_fd;
+  writer->json_value_path = lonejson_writer_json_value_path;
+  writer->json_value_spooled = lonejson_writer_json_value_spooled;
+  writer->array_items_reader = lonejson_writer_array_items_reader;
+  writer->array_items_buffer = lonejson_writer_array_items_buffer;
+  writer->array_items_filep = lonejson_writer_array_items_filep;
+  writer->array_items_fd = lonejson_writer_array_items_fd;
+  writer->array_items_path = lonejson_writer_array_items_path;
+  writer->array_items_spooled = lonejson_writer_array_items_spooled;
+  writer->mapped = lonejson_writer_mapped;
+  writer->finish = lonejson_writer_finish;
+}
+
+static void lonejson__writer_value_stream_assign_methods(
+    lonejson_writer_value_stream *stream) {
+  if (stream == NULL) {
+    return;
+  }
+  stream->open = lonejson_writer_value_stream_open;
+  stream->push = lonejson_writer_value_stream_push;
+  stream->close = lonejson_writer_value_stream_close;
+  stream->cleanup = lonejson_writer_value_stream_cleanup;
+}
+
 static const lonejson_runtime *
 lonejson__writer_runtime(const lonejson__writer_state *state) {
   if (state == NULL) {
@@ -542,6 +595,7 @@ static lonejson_status lonejson__writer_init_sink_with_options(
                                0u, "writer and sink are required");
   }
   memset(writer, 0, sizeof(*writer));
+  lonejson__writer_assign_methods(writer);
   if (options != NULL &&
       !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(options->allocator)) {
     return lonejson__set_error(
@@ -576,6 +630,7 @@ static lonejson_status lonejson__writer_init_sink_with_options(
   state->external_error = error;
   writer->state = state;
   lonejson__clear_error(&writer->error);
+  lonejson__writer_assign_methods(writer);
   return LONEJSON_STATUS_OK;
 }
 
@@ -614,6 +669,7 @@ void lonejson_writer_cleanup(lonejson_writer *writer) {
   lonejson__runtime_free_owned_config(&state->runtime_storage);
   lonejson__buffer_free(&state->allocator, state, sizeof(*state));
   memset(writer, 0, sizeof(*writer));
+  lonejson__writer_assign_methods(writer);
 }
 
 lonejson_status lonejson_writer_begin_object(lonejson_writer *writer,
@@ -1782,6 +1838,7 @@ static void lonejson__writer_value_destroy(
   lonejson__buffer_free(&state->allocator, state, sizeof(*state));
   if (stream != NULL) {
     stream->state = NULL;
+    lonejson__writer_value_stream_assign_methods(stream);
   }
 }
 
@@ -1833,6 +1890,7 @@ static lonejson_status lonejson__writer_value_stream_open_with_limits(
   }
   allocator = writer_state->allocator;
   memset(stream, 0, sizeof(*stream));
+  lonejson__writer_value_stream_assign_methods(stream);
   state = (lonejson__writer_value_stream_state *)lonejson__buffer_alloc(
       &allocator, sizeof(*state));
   if (state == NULL) {
@@ -2034,6 +2092,7 @@ void lonejson_writer_value_stream_cleanup(lonejson_writer_value_stream *stream) 
   state = (lonejson__writer_value_stream_state *)stream->state;
   lonejson__writer_value_destroy(stream, state, 1);
   lonejson__clear_error(&stream->error);
+  lonejson__writer_value_stream_assign_methods(stream);
 }
 
 static lonejson_status lonejson__writer_json_value_stream_reader_with_limits(
@@ -2453,7 +2512,8 @@ static lonejson_status lonejson__writer_array_items_from_stream(
   sink_state.writer = writer;
   for (;;) {
     result = lonejson__array_stream_next_sink(
-        stream, lonejson__writer_array_items_sink, &sink_state, error);
+        lonejson__array_stream_state_mut(stream),
+        lonejson__writer_array_items_sink, &sink_state, error);
     if (result == LONEJSON_ARRAY_STREAM_ITEM) {
       sink_state.emitted_any = 1;
       sink_state.started = 0;

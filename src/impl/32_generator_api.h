@@ -115,6 +115,14 @@ typedef struct lonejson__generator_state {
   int finished;
 } lonejson__generator_state;
 
+static void lonejson__generator_assign_methods(lonejson_generator *generator) {
+  if (generator == NULL) {
+    return;
+  }
+  generator->read = lonejson_generator_read;
+  generator->cleanup = lonejson_generator_cleanup;
+}
+
 static void
 lonejson__generator_clear_pending(lonejson__generator_state *state) {
   state->pending_kind = LONEJSON__GEN_PENDING_NONE;
@@ -1146,6 +1154,7 @@ static lonejson_status lonejson__generator_init_with_options(
     return LONEJSON_STATUS_INVALID_ARGUMENT;
   }
   memset(generator, 0, sizeof(*generator));
+  lonejson__generator_assign_methods(generator);
   if (map == NULL || src == NULL) {
     return lonejson__set_error(
         &generator->error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
@@ -1186,6 +1195,7 @@ static lonejson_status lonejson__generator_init_with_options(
   generator->state = state;
   generator->eof = 0;
   lonejson__clear_error(&generator->error);
+  lonejson__generator_assign_methods(generator);
   return LONEJSON_STATUS_OK;
 }
 
@@ -1373,6 +1383,7 @@ static lonejson_status lonejson__writer_generator_init_with_options(
     return LONEJSON_STATUS_INVALID_ARGUMENT;
   }
   memset(generator, 0, sizeof(*generator));
+  lonejson__generator_assign_methods(generator);
   if (producer == NULL) {
     return lonejson__set_error(&generator->error,
                                LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
@@ -1406,6 +1417,7 @@ static lonejson_status lonejson__writer_generator_init_with_options(
   }
   generator->state = state;
   lonejson__clear_error(&generator->error);
+  lonejson__generator_assign_methods(generator);
   return LONEJSON_STATUS_OK;
 }
 
@@ -1600,6 +1612,7 @@ void lonejson_generator_cleanup(lonejson_generator *generator) {
       lonejson__buffer_free(&writer_state->allocator, writer_state,
                             sizeof(*writer_state));
       memset(generator, 0, sizeof(*generator));
+      lonejson__generator_assign_methods(generator);
       return;
     }
     if (state->json_owner_valid) {
@@ -1619,4 +1632,5 @@ void lonejson_generator_cleanup(lonejson_generator *generator) {
     lonejson__buffer_free(&state->allocator, state, sizeof(*state));
   }
   memset(generator, 0, sizeof(*generator));
+  lonejson__generator_assign_methods(generator);
 }

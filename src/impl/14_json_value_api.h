@@ -141,7 +141,6 @@ lonejson_status lonejson_json_value_set_parse_visitor(
         "JSON value handle and parse visitor are required");
   }
   lonejson__json_value_clear_runtime(value);
-  lonejson__json_value_apply_allocator(value, &value->allocator);
   value->parse_mode = LONEJSON_JSON_VALUE_PARSE_VISITOR;
   value->parse_sink = NULL;
   value->parse_sink_user = NULL;
@@ -159,8 +158,12 @@ lonejson_json_value_enable_parse_capture(lonejson_json_value *value,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "JSON value handle is required");
   }
-  lonejson__json_value_clear_runtime(value);
-  lonejson__json_value_apply_allocator(value, &value->allocator);
+  if (!(value->kind == LONEJSON_JSON_VALUE_NULL && value->json == NULL &&
+        value->len == 0u && value->reader == NULL &&
+        value->reader_user == NULL && value->fp == NULL && value->fd == -1 &&
+        value->path == NULL)) {
+    lonejson__json_value_clear_runtime(value);
+  }
   value->parse_mode = LONEJSON_JSON_VALUE_PARSE_CAPTURE;
   value->parse_visitor = NULL;
   value->parse_visitor_user = NULL;

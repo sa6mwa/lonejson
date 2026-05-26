@@ -21,6 +21,7 @@ int main(void) {
   test_clear_destination_false_present_arrays_replace();
   test_clear_destination_false_fixed_capacity_string_array_reuse_frees_replaced_entries();
   test_zero_alloc_validate_path();
+  test_nonresumable_reader_apis_reject_would_block();
   test_parse_dynamic_string_limits_and_fixed_unaffected();
   test_parse_dynamic_string_limit_mid_token_reader_cleanup();
   test_parse_string_array_element_dynamic_limit();
@@ -167,6 +168,7 @@ int main(void) {
   test_public_initializers_and_defaults();
   test_runtime_defaults_and_method_dispatch();
   test_runtime_method_json_value_init_null_does_not_leak_pin();
+  test_receiver_methods_dispatch_on_public_handles();
   test_runtime_copy_free_leaves_owner_live();
   test_runtime_bundle_uses_custom_allocator();
   test_runtime_copy_free_does_not_retire_owner();
@@ -259,12 +261,15 @@ int main(void) {
   test_json_value_large_string_nested_regressions();
   test_json_value_reuse_and_cleanup_ownership();
   test_json_value_source_validation_failures();
+  test_json_value_reader_source_rejects_would_block();
   test_json_value_nonseekable_and_sink_failures();
   test_json_value_large_source_backed_serialization();
   test_json_value_parse_requires_destination_and_partial_failure();
   test_json_value_nested_failure_matrix();
   test_value_visitor_success_and_limits();
   test_value_visitor_chunking_unicode_and_failures();
+  test_visit_value_reader_rejects_would_block();
+  test_visit_value_success_clears_error();
   test_custom_allocator_parse_cleanup_and_stream();
 #ifndef NDEBUG
   test_custom_allocator_misaligned_owned_alloc_is_rejected();
@@ -313,6 +318,7 @@ int main(void) {
   test_writer_generator_string_reader_preserves_chunks();
   test_value_rewrite_replace_drop_and_root();
   test_value_rewrite_runtime_json_value_limits();
+  test_value_rewrite_reader_rejects_would_block();
   test_value_rewrite_callbacks_use_runtime_writer_policy();
   test_value_rewrite_path_rejects_invalid_runtime_without_truncating();
   test_value_rewrite_callback_replacement();

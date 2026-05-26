@@ -676,6 +676,49 @@ static lonejson_status lonejson__runtime_parse_path(lonejson *runtime,
                                                     void *dst,
                                                     const char *path,
                                                     lonejson_error *error);
+static lonejson_status lonejson__runtime_validate_buffer(lonejson *runtime,
+                                                         const void *data,
+                                                         size_t len,
+                                                         lonejson_error *error);
+static lonejson_status lonejson__runtime_validate_cstr(lonejson *runtime,
+                                                       const char *json,
+                                                       lonejson_error *error);
+static lonejson_status lonejson__runtime_validate_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *user,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_validate_filep(lonejson *runtime,
+                                                        FILE *fp,
+                                                        lonejson_error *error);
+static lonejson_status lonejson__runtime_validate_path(lonejson *runtime,
+                                                       const char *path,
+                                                       lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_value_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lonejson_value_visitor *visitor, void *user,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_value_cstr(
+    lonejson *runtime, const char *json,
+    const lonejson_value_visitor *visitor, void *user,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_value_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    const lonejson_value_visitor *visitor, void *user,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_value_filep(
+    lonejson *runtime, FILE *fp, const lonejson_value_visitor *visitor,
+    void *user, lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_value_path(
+    lonejson *runtime, const char *path,
+    const lonejson_value_visitor *visitor, void *user,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_value_fd(
+    lonejson *runtime, int fd, const lonejson_value_visitor *visitor,
+    void *user, lonejson_error *error);
+static void lonejson__runtime_init_value(lonejson *runtime,
+                                         const lonejson_map *map, void *value);
+static void lonejson__runtime_reset_value(lonejson *runtime,
+                                          const lonejson_map *map,
+                                          void *value);
 static lonejson_stream *lonejson__runtime_stream_open_reader(
     lonejson *runtime, const lonejson_map *map, lonejson_reader_fn reader,
     void *user, lonejson_error *error);
@@ -698,10 +741,84 @@ static lonejson_array_stream *lonejson__runtime_array_stream_open_fd(
     lonejson *runtime, const char *path, int fd, lonejson_error *error);
 static lonejson_array_stream *lonejson__runtime_array_stream_open_push(
     lonejson *runtime, const char *path, lonejson_error *error);
+static void lonejson__runtime_spooled_init(lonejson *runtime,
+                                           lonejson_spooled *value);
+static void lonejson__runtime_spooled_init_class(lonejson *runtime,
+                                                 lonejson_spooled *value,
+                                                 lonejson_spool_class
+                                                     spool_class);
 static void lonejson__runtime_json_value_init(lonejson *runtime,
                                               lonejson_json_value *value);
 static void lonejson__runtime_json_value_cleanup(lonejson *runtime,
                                                  lonejson_json_value *value);
+static lonejson_status lonejson__runtime_array_rewrite_reader(
+    lonejson *runtime, const char *selector, lonejson_reader_fn reader,
+    void *reader_user, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error);
+static lonejson_status lonejson__runtime_array_rewrite_reader_to_filep(
+    lonejson *runtime, const char *selector, lonejson_reader_fn reader,
+    void *reader_user, FILE *output,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error);
+static lonejson_status lonejson__runtime_array_rewrite_reader_to_fd(
+    lonejson *runtime, const char *selector, lonejson_reader_fn reader,
+    void *reader_user, int fd,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error);
+static lonejson_status lonejson__runtime_array_rewrite_filep(
+    lonejson *runtime, const char *selector, FILE *fp, lonejson_sink_fn sink,
+    void *sink_user, const struct lonejson_array_rewrite_options *options,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_array_rewrite_filep_to_filep(
+    lonejson *runtime, const char *selector, FILE *input, FILE *output,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error);
+static lonejson_status lonejson__runtime_array_rewrite_fd(
+    lonejson *runtime, const char *selector, int fd, lonejson_sink_fn sink,
+    void *sink_user, const struct lonejson_array_rewrite_options *options,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_array_rewrite_fd_to_fd(
+    lonejson *runtime, const char *selector, int input_fd, int output_fd,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error);
+static lonejson_status lonejson__runtime_array_rewrite_path(
+    lonejson *runtime, const char *selector, const char *input_path,
+    const char *output_path, const struct lonejson_array_rewrite_options *options,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_options *options, lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_buffer(
+    lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+    void *sink_user, const struct lonejson_value_rewrite_options *options,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_filep(
+    lonejson *runtime, FILE *fp, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_options *options, lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_fd(
+    lonejson *runtime, int fd, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_options *options, lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_path(
+    lonejson *runtime, const char *input_path, const char *output_path,
+    const struct lonejson_value_rewrite_options *options, lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_selector_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_selector_buffer(
+    lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+    void *sink_user, const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_selector_filep(
+    lonejson *runtime, FILE *fp, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_selector_fd(
+    lonejson *runtime, int fd, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_value_rewrite_selector_path(
+    lonejson *runtime, const char *input_path, const char *output_path,
+    const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error);
 static lonejson_status lonejson__runtime_generator_init(
     lonejson *runtime, lonejson_generator *generator, const lonejson_map *map,
     const void *src);
@@ -808,6 +925,19 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
   runtime->parse_reader = lonejson__runtime_parse_reader;
   runtime->parse_filep = lonejson__runtime_parse_filep;
   runtime->parse_path = lonejson__runtime_parse_path;
+  runtime->validate_buffer = lonejson__runtime_validate_buffer;
+  runtime->validate_cstr = lonejson__runtime_validate_cstr;
+  runtime->validate_reader = lonejson__runtime_validate_reader;
+  runtime->validate_filep = lonejson__runtime_validate_filep;
+  runtime->validate_path = lonejson__runtime_validate_path;
+  runtime->visit_value_buffer = lonejson__runtime_visit_value_buffer;
+  runtime->visit_value_cstr = lonejson__runtime_visit_value_cstr;
+  runtime->visit_value_reader = lonejson__runtime_visit_value_reader;
+  runtime->visit_value_filep = lonejson__runtime_visit_value_filep;
+  runtime->visit_value_path = lonejson__runtime_visit_value_path;
+  runtime->visit_value_fd = lonejson__runtime_visit_value_fd;
+  runtime->init = lonejson__runtime_init_value;
+  runtime->reset = lonejson__runtime_reset_value;
   runtime->stream_open_reader = lonejson__runtime_stream_open_reader;
   runtime->stream_open_filep = lonejson__runtime_stream_open_filep;
   runtime->stream_open_path = lonejson__runtime_stream_open_path;
@@ -817,8 +947,36 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
   runtime->array_stream_open_path = lonejson__runtime_array_stream_open_path;
   runtime->array_stream_open_fd = lonejson__runtime_array_stream_open_fd;
   runtime->array_stream_open_push = lonejson__runtime_array_stream_open_push;
+  runtime->spooled_init = lonejson__runtime_spooled_init;
+  runtime->spooled_init_class = lonejson__runtime_spooled_init_class;
   runtime->json_value_init = lonejson__runtime_json_value_init;
   runtime->json_value_cleanup = lonejson__runtime_json_value_cleanup;
+  runtime->array_rewrite_reader = lonejson__runtime_array_rewrite_reader;
+  runtime->array_rewrite_reader_to_filep =
+      lonejson__runtime_array_rewrite_reader_to_filep;
+  runtime->array_rewrite_reader_to_fd =
+      lonejson__runtime_array_rewrite_reader_to_fd;
+  runtime->array_rewrite_filep = lonejson__runtime_array_rewrite_filep;
+  runtime->array_rewrite_filep_to_filep =
+      lonejson__runtime_array_rewrite_filep_to_filep;
+  runtime->array_rewrite_fd = lonejson__runtime_array_rewrite_fd;
+  runtime->array_rewrite_fd_to_fd = lonejson__runtime_array_rewrite_fd_to_fd;
+  runtime->array_rewrite_path = lonejson__runtime_array_rewrite_path;
+  runtime->value_rewrite_reader = lonejson__runtime_value_rewrite_reader;
+  runtime->value_rewrite_buffer = lonejson__runtime_value_rewrite_buffer;
+  runtime->value_rewrite_filep = lonejson__runtime_value_rewrite_filep;
+  runtime->value_rewrite_fd = lonejson__runtime_value_rewrite_fd;
+  runtime->value_rewrite_path = lonejson__runtime_value_rewrite_path;
+  runtime->value_rewrite_selector_reader =
+      lonejson__runtime_value_rewrite_selector_reader;
+  runtime->value_rewrite_selector_buffer =
+      lonejson__runtime_value_rewrite_selector_buffer;
+  runtime->value_rewrite_selector_filep =
+      lonejson__runtime_value_rewrite_selector_filep;
+  runtime->value_rewrite_selector_fd =
+      lonejson__runtime_value_rewrite_selector_fd;
+  runtime->value_rewrite_selector_path =
+      lonejson__runtime_value_rewrite_selector_path;
   runtime->generator_init = lonejson__runtime_generator_init;
   runtime->writer_init_sink = lonejson__runtime_writer_init_sink;
   runtime->free = lonejson_free;
@@ -1304,6 +1462,13 @@ lonejson__parse_reader_with_options(const lonejson_map *map, void *dst,
         break;
       }
     }
+    if (chunk.would_block) {
+      status = lonejson__set_error(&parser->error,
+                                   LONEJSON_STATUS_CALLBACK_FAILED,
+                                   parser->error.offset, parser->error.line,
+                                   parser->error.column, "reader would block");
+      break;
+    }
     if (chunk.eof) {
       status = lonejson_parser_finish(parser);
       break;
@@ -1403,7 +1568,99 @@ static lonejson_status lonejson__runtime_parse_path(lonejson *runtime,
   return lonejson_parse_path(runtime, map, dst, path, error);
 }
 
-static void lonejson__stream_prepare_parser(lonejson_stream *stream,
+static lonejson_status lonejson__runtime_validate_buffer(lonejson *runtime,
+                                                         const void *data,
+                                                         size_t len,
+                                                         lonejson_error *error) {
+  return lonejson_validate_buffer(runtime, data, len, error);
+}
+
+static lonejson_status lonejson__runtime_validate_cstr(lonejson *runtime,
+                                                       const char *json,
+                                                       lonejson_error *error) {
+  return lonejson_validate_cstr(runtime, json, error);
+}
+
+static lonejson_status lonejson__runtime_validate_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *user,
+    lonejson_error *error) {
+  return lonejson_validate_reader(runtime, reader, user, error);
+}
+
+static lonejson_status lonejson__runtime_validate_filep(lonejson *runtime,
+                                                        FILE *fp,
+                                                        lonejson_error *error) {
+  return lonejson_validate_filep(runtime, fp, error);
+}
+
+static lonejson_status lonejson__runtime_validate_path(lonejson *runtime,
+                                                       const char *path,
+                                                       lonejson_error *error) {
+  return lonejson_validate_path(runtime, path, error);
+}
+
+static lonejson_status lonejson__runtime_visit_value_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lonejson_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  return lonejson_visit_value_buffer(runtime, data, len, visitor, user, error);
+}
+
+static lonejson_status lonejson__runtime_visit_value_cstr(
+    lonejson *runtime, const char *json,
+    const lonejson_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  return lonejson_visit_value_cstr(runtime, json, visitor, user, error);
+}
+
+static lonejson_status lonejson__runtime_visit_value_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    const lonejson_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  return lonejson_visit_value_reader(runtime, reader, reader_user, visitor, user,
+                                     error);
+}
+
+static lonejson_status lonejson__runtime_visit_value_filep(
+    lonejson *runtime, FILE *fp, const lonejson_value_visitor *visitor,
+    void *user, lonejson_error *error) {
+  return lonejson_visit_value_filep(runtime, fp, visitor, user, error);
+}
+
+static lonejson_status lonejson__runtime_visit_value_path(
+    lonejson *runtime, const char *path,
+    const lonejson_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  return lonejson_visit_value_path(runtime, path, visitor, user, error);
+}
+
+static lonejson_status lonejson__runtime_visit_value_fd(
+    lonejson *runtime, int fd, const lonejson_value_visitor *visitor,
+    void *user, lonejson_error *error) {
+  return lonejson_visit_value_fd(runtime, fd, visitor, user, error);
+}
+
+static void lonejson__runtime_init_value(lonejson *runtime,
+                                         const lonejson_map *map,
+                                         void *value) {
+  lonejson_init(runtime, map, value);
+}
+
+static void lonejson__runtime_reset_value(lonejson *runtime,
+                                          const lonejson_map *map,
+                                          void *value) {
+  lonejson_reset(runtime, map, value);
+}
+
+static void lonejson__stream_assign_methods(lonejson_stream *stream) {
+  if (stream == NULL) {
+    return;
+  }
+  stream->next = lonejson_stream_next;
+  stream->close = lonejson_stream_close;
+}
+
+static void lonejson__stream_prepare_parser(lonejson__stream_state *stream,
                                             void *dst) {
   lonejson__parser_restart_stream(stream->parser, dst);
   if (stream->parser->options.clear_destination) {
@@ -1418,7 +1675,7 @@ static void lonejson__stream_prepare_parser(lonejson_stream *stream,
   stream->object_in_progress = 1;
 }
 
-static lonejson_read_result lonejson__stream_read(lonejson_stream *stream) {
+static lonejson_read_result lonejson__stream_read(lonejson__stream_state *stream) {
   lonejson_read_result result;
 
   memset(&result, 0, sizeof(result));
@@ -1448,12 +1705,12 @@ static lonejson_read_result lonejson__stream_read(lonejson_stream *stream) {
   }
 }
 
-static lonejson_stream *
+static lonejson__stream_state *
 lonejson__stream_open_common(const lonejson_map *map,
                              const lonejson__parse_options *options,
                              const lonejson_runtime *runtime,
                              lonejson_error *error) {
-  lonejson_stream *stream;
+  lonejson__stream_state *stream;
   size_t parser_bytes;
   unsigned char *workspace;
 
@@ -1470,7 +1727,7 @@ lonejson__stream_open_common(const lonejson_map *map,
   }
   parser_bytes = sizeof(*stream->parser) + LONEJSON_PUSH_PARSER_BUFFER_SIZE +
                  LONEJSON__PARSER_WORKSPACE_SLACK;
-  stream = (lonejson_stream *)lonejson__buffer_alloc(
+  stream = (lonejson__stream_state *)lonejson__buffer_alloc(
       options ? options->allocator : NULL, sizeof(*stream) + parser_bytes);
   if (stream == NULL) {
     lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
@@ -1481,7 +1738,9 @@ lonejson__stream_open_common(const lonejson_map *map,
   stream->options = options ? *options : lonejson__default_parse_options();
   stream->allocator = lonejson__allocator_resolve(stream->options.allocator);
   stream->self_alloc_size = sizeof(*stream) + parser_bytes;
-  lonejson__clear_error(&stream->error);
+  memset(&stream->public, 0, sizeof(stream->public));
+  lonejson__clear_error(&stream->public.error);
+  lonejson__stream_assign_methods(&stream->public);
   stream->reader = NULL;
   stream->reader_user = NULL;
   stream->fp = NULL;
@@ -1542,7 +1801,7 @@ static lonejson_stream *lonejson__stream_open_reader_with_options(
     const lonejson_map *map, lonejson_reader_fn reader, void *user,
     const lonejson__parse_options *options, const lonejson_runtime *runtime,
     lonejson_error *error) {
-  lonejson_stream *stream;
+  lonejson__stream_state *stream;
 
   if (reader == NULL) {
     lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
@@ -1556,7 +1815,7 @@ static lonejson_stream *lonejson__stream_open_reader_with_options(
   stream->source_kind = LONEJSON_STREAM_SOURCE_READER;
   stream->reader = reader;
   stream->reader_user = user;
-  return stream;
+  return &stream->public;
 }
 
 static lonejson_stream *
@@ -1564,7 +1823,7 @@ lonejson__stream_open_filep_with_options(const lonejson_map *map, FILE *fp,
                                          const lonejson__parse_options *options,
                                          const lonejson_runtime *runtime,
                                          lonejson_error *error) {
-  lonejson_stream *stream;
+  lonejson__stream_state *stream;
 
   if (fp == NULL) {
     lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
@@ -1577,7 +1836,7 @@ lonejson__stream_open_filep_with_options(const lonejson_map *map, FILE *fp,
   }
   stream->source_kind = LONEJSON_STREAM_SOURCE_FILE;
   stream->fp = fp;
-  return stream;
+  return &stream->public;
 }
 
 static lonejson_stream *
@@ -1609,7 +1868,7 @@ lonejson__stream_open_path_with_options(const lonejson_map *map,
     fclose(fp);
     return NULL;
   }
-  stream->owns_fp = 1;
+  lonejson__stream_state_mut(stream)->owns_fp = 1;
   return stream;
 }
 
@@ -1618,7 +1877,7 @@ lonejson__stream_open_fd_with_options(const lonejson_map *map, int fd,
                                       const lonejson__parse_options *options,
                                       const lonejson_runtime *runtime,
                                       lonejson_error *error) {
-  lonejson_stream *stream;
+  lonejson__stream_state *stream;
 
   if (fd < 0) {
     lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
@@ -1631,7 +1890,7 @@ lonejson__stream_open_fd_with_options(const lonejson_map *map, int fd,
   }
   stream->source_kind = LONEJSON_STREAM_SOURCE_FD;
   stream->fd = fd;
-  return stream;
+  return &stream->public;
 }
 
 lonejson_stream *
@@ -1746,6 +2005,7 @@ static lonejson_stream *lonejson__runtime_stream_open_fd(
 
 lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
                                             lonejson_error *error) {
+  lonejson__stream_state *state;
   lonejson_status status;
 
   if (stream == NULL || dst == NULL) {
@@ -1753,18 +2013,19 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
                         "stream and destination are required");
     return LONEJSON_STREAM_ERROR;
   }
-  if (!stream->object_in_progress) {
-    lonejson__stream_prepare_parser(stream, dst);
-    if (stream->parser->failed) {
-      stream->object_in_progress = 0;
-      stream->current_dst = NULL;
-      stream->error = stream->parser->error;
+  state = lonejson__stream_state_mut(stream);
+  if (!state->object_in_progress) {
+    lonejson__stream_prepare_parser(state, dst);
+    if (state->parser->failed) {
+      state->object_in_progress = 0;
+      state->current_dst = NULL;
+      stream->error = state->parser->error;
       if (error != NULL) {
         *error = stream->error;
       }
       return LONEJSON_STREAM_ERROR;
     }
-  } else if (stream->current_dst != dst) {
+  } else if (state->current_dst != dst) {
     lonejson__set_error(&stream->error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                         0u, 0u, "resume the stream with the same destination");
     if (error != NULL) {
@@ -1774,9 +2035,9 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
   }
 
   for (;;) {
-    if (lonejson__parser_root_complete(stream->parser)) {
-      if (stream->parser->error.code == LONEJSON_STATUS_OK &&
-          !stream->parser->error.truncated) {
+    if (lonejson__parser_root_complete(state->parser)) {
+      if (state->parser->error.code == LONEJSON_STATUS_OK &&
+          !state->parser->error.truncated) {
         stream->error.code = LONEJSON_STATUS_OK;
         stream->error.line = 0u;
         stream->error.column = 0u;
@@ -1785,45 +2046,45 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
         stream->error.truncated = 0;
         stream->error.message[0] = '\0';
       } else {
-        stream->error = stream->parser->error;
+        stream->error = state->parser->error;
       }
-      stream->object_in_progress = 0;
-      stream->current_dst = NULL;
+      state->object_in_progress = 0;
+      state->current_dst = NULL;
       if (error != NULL) {
         *error = stream->error;
       }
       return LONEJSON_STREAM_OBJECT;
     }
 
-    if (stream->source_kind == LONEJSON_STREAM_SOURCE_MEMORY) {
-      if (stream->memory_input_offset >= stream->memory_input_len) {
-        stream->saw_eof = 1;
-        if (!stream->parser->root_started) {
+    if (state->source_kind == LONEJSON_STREAM_SOURCE_MEMORY) {
+      if (state->memory_input_offset >= state->memory_input_len) {
+        state->saw_eof = 1;
+        if (!state->parser->root_started) {
           if (error != NULL) {
             *error = stream->error;
           }
           return LONEJSON_STREAM_EOF;
         }
-        stream->error.code = lonejson_parser_finish(stream->parser);
-        stream->error = stream->parser->error;
-        stream->object_in_progress = 0;
-        stream->current_dst = NULL;
+        stream->error.code = lonejson_parser_finish(state->parser);
+        stream->error = state->parser->error;
+        state->object_in_progress = 0;
+        state->current_dst = NULL;
         if (error != NULL) {
           *error = stream->error;
         }
         return LONEJSON_STREAM_ERROR;
       }
 
-      if (!stream->parser->root_started) {
-        while (stream->memory_input_offset < stream->memory_input_len &&
+      if (!state->parser->root_started) {
+        while (state->memory_input_offset < state->memory_input_len &&
                lonejson__is_json_space(
-                   stream->memory_input[stream->memory_input_offset])) {
-          stream->memory_input_offset++;
+                   state->memory_input[state->memory_input_offset])) {
+          state->memory_input_offset++;
         }
-        if (stream->memory_input_offset >= stream->memory_input_len) {
+        if (state->memory_input_offset >= state->memory_input_len) {
           continue;
         }
-        if (stream->memory_input[stream->memory_input_offset] != '{') {
+        if (state->memory_input[state->memory_input_offset] != '{') {
           lonejson__set_error(&stream->error, LONEJSON_STATUS_INVALID_JSON, 0u,
                               0u, 0u, "expected top-level object");
           if (error != NULL) {
@@ -1837,23 +2098,23 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
         size_t consumed;
 
         status = lonejson__parser_feed_bytes(
-            stream->parser, stream->memory_input + stream->memory_input_offset,
-            stream->memory_input_len - stream->memory_input_offset, &consumed,
+            state->parser, state->memory_input + state->memory_input_offset,
+            state->memory_input_len - state->memory_input_offset, &consumed,
             1);
-        stream->memory_input_offset += consumed;
+        state->memory_input_offset += consumed;
       }
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
-        stream->error = stream->parser->error;
-        stream->object_in_progress = 0;
-        stream->current_dst = NULL;
+        stream->error = state->parser->error;
+        state->object_in_progress = 0;
+        state->current_dst = NULL;
         if (error != NULL) {
           *error = stream->error;
         }
         return LONEJSON_STREAM_ERROR;
       }
-      if (lonejson__parser_root_complete(stream->parser)) {
-        if (stream->parser->error.code == LONEJSON_STATUS_OK &&
-            !stream->parser->error.truncated) {
+      if (lonejson__parser_root_complete(state->parser)) {
+        if (state->parser->error.code == LONEJSON_STATUS_OK &&
+            !state->parser->error.truncated) {
           stream->error.code = LONEJSON_STATUS_OK;
           stream->error.line = 0u;
           stream->error.column = 0u;
@@ -1862,10 +2123,10 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
           stream->error.truncated = 0;
           stream->error.message[0] = '\0';
         } else {
-          stream->error = stream->parser->error;
+          stream->error = state->parser->error;
         }
-        stream->object_in_progress = 0;
-        stream->current_dst = NULL;
+        state->object_in_progress = 0;
+        state->current_dst = NULL;
         if (error != NULL) {
           *error = stream->error;
         }
@@ -1874,8 +2135,8 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
       continue;
     }
 
-    if (stream->buffered_start == stream->buffered_end) {
-      lonejson_read_result chunk = lonejson__stream_read(stream);
+    if (state->buffered_start == state->buffered_end) {
+      lonejson_read_result chunk = lonejson__stream_read(state);
       if (chunk.error_code != 0) {
         stream->error.system_errno = chunk.error_code;
         lonejson__set_error(&stream->error, LONEJSON_STATUS_IO_ERROR, 0u, 0u,
@@ -1892,38 +2153,38 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
         return LONEJSON_STREAM_WOULD_BLOCK;
       }
       if (chunk.bytes_read == 0u && chunk.eof) {
-        stream->saw_eof = 1;
-        if (!stream->parser->root_started) {
+        state->saw_eof = 1;
+        if (!state->parser->root_started) {
           if (error != NULL) {
             *error = stream->error;
           }
           return LONEJSON_STREAM_EOF;
         }
-        stream->error.code = lonejson_parser_finish(stream->parser);
-        stream->error = stream->parser->error;
-        stream->object_in_progress = 0;
-        stream->current_dst = NULL;
+        stream->error.code = lonejson_parser_finish(state->parser);
+        stream->error = state->parser->error;
+        state->object_in_progress = 0;
+        state->current_dst = NULL;
         if (error != NULL) {
           *error = stream->error;
         }
         return LONEJSON_STREAM_ERROR;
       }
-      stream->buffered_start = 0u;
-      stream->buffered_end = chunk.bytes_read;
+      state->buffered_start = 0u;
+      state->buffered_end = chunk.bytes_read;
       continue;
     }
 
-    if (!stream->parser->root_started) {
-      size_t start = stream->buffered_start;
-      while (start < stream->buffered_end &&
-             lonejson__is_json_space(stream->io_buffer[start])) {
+    if (!state->parser->root_started) {
+      size_t start = state->buffered_start;
+      while (start < state->buffered_end &&
+             lonejson__is_json_space(state->io_buffer[start])) {
         start++;
       }
-      stream->buffered_start = start;
-      if (stream->buffered_start == stream->buffered_end) {
+      state->buffered_start = start;
+      if (state->buffered_start == state->buffered_end) {
         continue;
       }
-      if (stream->io_buffer[stream->buffered_start] != '{') {
+      if (state->io_buffer[state->buffered_start] != '{') {
         lonejson__set_error(&stream->error, LONEJSON_STATUS_INVALID_JSON, 0u,
                             0u, 0u, "expected top-level object");
         if (error != NULL) {
@@ -1937,22 +2198,22 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
       size_t consumed;
 
       status = lonejson__parser_feed_bytes(
-          stream->parser, stream->io_buffer + stream->buffered_start,
-          stream->buffered_end - stream->buffered_start, &consumed, 1);
-      stream->buffered_start += consumed;
+          state->parser, state->io_buffer + state->buffered_start,
+          state->buffered_end - state->buffered_start, &consumed, 1);
+      state->buffered_start += consumed;
     }
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
-      stream->error = stream->parser->error;
-      stream->object_in_progress = 0;
-      stream->current_dst = NULL;
+      stream->error = state->parser->error;
+      state->object_in_progress = 0;
+      state->current_dst = NULL;
       if (error != NULL) {
         *error = stream->error;
       }
       return LONEJSON_STREAM_ERROR;
     }
-    if (lonejson__parser_root_complete(stream->parser)) {
-      if (stream->parser->error.code == LONEJSON_STATUS_OK &&
-          !stream->parser->error.truncated) {
+    if (lonejson__parser_root_complete(state->parser)) {
+      if (state->parser->error.code == LONEJSON_STATUS_OK &&
+          !state->parser->error.truncated) {
         stream->error.code = LONEJSON_STATUS_OK;
         stream->error.line = 0u;
         stream->error.column = 0u;
@@ -1961,10 +2222,10 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
         stream->error.truncated = 0;
         stream->error.message[0] = '\0';
       } else {
-        stream->error = stream->parser->error;
+        stream->error = state->parser->error;
       }
-      stream->object_in_progress = 0;
-      stream->current_dst = NULL;
+      state->object_in_progress = 0;
+      state->current_dst = NULL;
       if (error != NULL) {
         *error = stream->error;
       }
@@ -1978,18 +2239,21 @@ const lonejson_error *lonejson_stream_error(const lonejson_stream *stream) {
 }
 
 void lonejson_stream_close(lonejson_stream *stream) {
+  lonejson__stream_state *state;
+
   if (stream == NULL) {
     return;
   }
-  lonejson_parser_destroy(stream->parser);
-  if (stream->owns_fp && stream->fp != NULL) {
-    fclose(stream->fp);
+  state = lonejson__stream_state_mut(stream);
+  lonejson_parser_destroy(state->parser);
+  if (state->owns_fp && state->fp != NULL) {
+    fclose(state->fp);
   }
-  if (stream->owns_fd && stream->fd >= 0) {
-    close(stream->fd);
+  if (state->owns_fd && state->fd >= 0) {
+    close(state->fd);
   }
-  lonejson__runtime_free_owned_config(&stream->runtime_storage);
-  lonejson__buffer_free(&stream->allocator, stream, stream->self_alloc_size);
+  lonejson__runtime_free_owned_config(&state->runtime_storage);
+  lonejson__buffer_free(&state->allocator, state, state->self_alloc_size);
 }
 
 static lonejson_array_stream *lonejson__runtime_array_stream_open_reader(
@@ -2019,6 +2283,18 @@ static lonejson_array_stream *lonejson__runtime_array_stream_open_push(
   return lonejson_array_stream_open_push(runtime, path, error);
 }
 
+static void lonejson__runtime_spooled_init(lonejson *runtime,
+                                           lonejson_spooled *value) {
+  lonejson_spooled_init(runtime, value);
+}
+
+static void lonejson__runtime_spooled_init_class(lonejson *runtime,
+                                                 lonejson_spooled *value,
+                                                 lonejson_spool_class
+                                                     spool_class) {
+  lonejson_spooled_init_class(runtime, value, spool_class);
+}
+
 static void lonejson__runtime_json_value_init(lonejson *runtime,
                                               lonejson_json_value *value) {
   const lonejson_runtime *runtime_state;
@@ -2040,6 +2316,148 @@ static void lonejson__runtime_json_value_cleanup(lonejson *runtime,
                                                  lonejson_json_value *value) {
   (void)runtime;
   lonejson_json_value_cleanup(value);
+}
+
+static lonejson_status lonejson__runtime_array_rewrite_reader(
+    lonejson *runtime, const char *selector, lonejson_reader_fn reader,
+    void *reader_user, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error) {
+  return lonejson_array_rewrite_reader(runtime, selector, reader, reader_user,
+                                       sink, sink_user, options, error);
+}
+
+static lonejson_status lonejson__runtime_array_rewrite_reader_to_filep(
+    lonejson *runtime, const char *selector, lonejson_reader_fn reader,
+    void *reader_user, FILE *output,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error) {
+  return lonejson_array_rewrite_reader_to_filep(runtime, selector, reader,
+                                                reader_user, output, options,
+                                                error);
+}
+
+static lonejson_status lonejson__runtime_array_rewrite_reader_to_fd(
+    lonejson *runtime, const char *selector, lonejson_reader_fn reader,
+    void *reader_user, int fd,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error) {
+  return lonejson_array_rewrite_reader_to_fd(runtime, selector, reader,
+                                             reader_user, fd, options, error);
+}
+
+static lonejson_status lonejson__runtime_array_rewrite_filep(
+    lonejson *runtime, const char *selector, FILE *fp, lonejson_sink_fn sink,
+    void *sink_user, const struct lonejson_array_rewrite_options *options,
+    lonejson_error *error) {
+  return lonejson_array_rewrite_filep(runtime, selector, fp, sink, sink_user,
+                                      options, error);
+}
+
+static lonejson_status lonejson__runtime_array_rewrite_filep_to_filep(
+    lonejson *runtime, const char *selector, FILE *input, FILE *output,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error) {
+  return lonejson_array_rewrite_filep_to_filep(runtime, selector, input, output,
+                                               options, error);
+}
+
+static lonejson_status lonejson__runtime_array_rewrite_fd(
+    lonejson *runtime, const char *selector, int fd, lonejson_sink_fn sink,
+    void *sink_user, const struct lonejson_array_rewrite_options *options,
+    lonejson_error *error) {
+  return lonejson_array_rewrite_fd(runtime, selector, fd, sink, sink_user,
+                                   options, error);
+}
+
+static lonejson_status lonejson__runtime_array_rewrite_fd_to_fd(
+    lonejson *runtime, const char *selector, int input_fd, int output_fd,
+    const struct lonejson_array_rewrite_options *options, lonejson_error *error) {
+  return lonejson_array_rewrite_fd_to_fd(runtime, selector, input_fd, output_fd,
+                                         options, error);
+}
+
+static lonejson_status lonejson__runtime_array_rewrite_path(
+    lonejson *runtime, const char *selector, const char *input_path,
+    const char *output_path, const struct lonejson_array_rewrite_options *options,
+    lonejson_error *error) {
+  return lonejson_array_rewrite_path(runtime, selector, input_path, output_path,
+                                     options, error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_options *options, lonejson_error *error) {
+  return lonejson_value_rewrite_reader(runtime, reader, reader_user, sink,
+                                       sink_user, options, error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_buffer(
+    lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+    void *sink_user, const struct lonejson_value_rewrite_options *options,
+    lonejson_error *error) {
+  return lonejson_value_rewrite_buffer(runtime, data, len, sink, sink_user,
+                                       options, error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_filep(
+    lonejson *runtime, FILE *fp, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_options *options, lonejson_error *error) {
+  return lonejson_value_rewrite_filep(runtime, fp, sink, sink_user, options,
+                                      error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_fd(
+    lonejson *runtime, int fd, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_options *options, lonejson_error *error) {
+  return lonejson_value_rewrite_fd(runtime, fd, sink, sink_user, options,
+                                   error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_path(
+    lonejson *runtime, const char *input_path, const char *output_path,
+    const struct lonejson_value_rewrite_options *options, lonejson_error *error) {
+  return lonejson_value_rewrite_path(runtime, input_path, output_path, options,
+                                     error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_selector_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error) {
+  return lonejson_value_rewrite_selector_reader(runtime, reader, reader_user,
+                                                sink, sink_user, options,
+                                                error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_selector_buffer(
+    lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+    void *sink_user, const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error) {
+  return lonejson_value_rewrite_selector_buffer(runtime, data, len, sink,
+                                                sink_user, options, error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_selector_filep(
+    lonejson *runtime, FILE *fp, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error) {
+  return lonejson_value_rewrite_selector_filep(runtime, fp, sink, sink_user,
+                                               options, error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_selector_fd(
+    lonejson *runtime, int fd, lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error) {
+  return lonejson_value_rewrite_selector_fd(runtime, fd, sink, sink_user,
+                                            options, error);
+}
+
+static lonejson_status lonejson__runtime_value_rewrite_selector_path(
+    lonejson *runtime, const char *input_path, const char *output_path,
+    const struct lonejson_value_rewrite_selector_options *options,
+    lonejson_error *error) {
+  return lonejson_value_rewrite_selector_path(runtime, input_path, output_path,
+                                              options, error);
 }
 
 static lonejson_status lonejson__runtime_generator_init(
@@ -2142,6 +2560,13 @@ lonejson_status lonejson_validate_reader(lonejson *runtime,
         break;
       }
     }
+    if (chunk.would_block) {
+      status = lonejson__set_error(&parser->error,
+                                   LONEJSON_STATUS_CALLBACK_FAILED,
+                                   parser->error.offset, parser->error.line,
+                                   parser->error.column, "reader would block");
+      break;
+    }
     if (chunk.eof) {
       status = lonejson_parser_finish(parser);
       break;
@@ -2207,6 +2632,7 @@ static lonejson_status lonejson__visit_value_buffer_with_limits(
     void *user, const lonejson__value_limits *limits,
     const lonejson_allocator *allocator, lonejson_error *error) {
   lonejson__json_cursor cursor;
+  lonejson_status status;
 
   if (data == NULL || visitor == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -2215,8 +2641,12 @@ static lonejson_status lonejson__visit_value_buffer_with_limits(
   memset(&cursor, 0, sizeof(cursor));
   cursor.buffer = (const unsigned char *)data;
   cursor.buffer_len = len;
-  return lonejson__json_visit_cursor(&cursor, allocator, visitor, user, limits,
-                                     error);
+  status = lonejson__json_visit_cursor(&cursor, allocator, visitor, user, limits,
+                                       error);
+  if (status == LONEJSON_STATUS_OK) {
+    lonejson__clear_error(error);
+  }
+  return status;
 }
 
 static lonejson_status lonejson__visit_value_cstr_with_limits(
@@ -2237,6 +2667,7 @@ static lonejson_status lonejson__visit_value_reader_with_limits(
     const lonejson__value_limits *limits,
     const lonejson_allocator *allocator, lonejson_error *error) {
   lonejson__json_cursor cursor;
+  lonejson_status status;
 
   if (reader == NULL || visitor == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -2245,8 +2676,12 @@ static lonejson_status lonejson__visit_value_reader_with_limits(
   memset(&cursor, 0, sizeof(cursor));
   cursor.reader = reader;
   cursor.reader_user = reader_user;
-  return lonejson__json_visit_cursor(&cursor, allocator, visitor, user, limits,
-                                     error);
+  status = lonejson__json_visit_cursor(&cursor, allocator, visitor, user, limits,
+                                       error);
+  if (status == LONEJSON_STATUS_OK) {
+    lonejson__clear_error(error);
+  }
+  return status;
 }
 
 static lonejson_status lonejson__runtime_snapshot_visit_policy(

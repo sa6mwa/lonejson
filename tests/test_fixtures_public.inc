@@ -581,16 +581,38 @@ static void test_public_initializers_and_defaults(void) {
   lonejson_spooled_cleanup(&spool);
 }
 
+static lonejson_status test_runtime_array_rewrite_keep_item(
+    void *user, const lonejson_array_rewrite_context *context, void *item,
+    lonejson_array_rewrite_result *result, lonejson_error *error) {
+  (void)user;
+  (void)context;
+  (void)item;
+  (void)result;
+  (void)error;
+  return LONEJSON_STATUS_OK;
+}
+
 static void test_runtime_defaults_and_method_dispatch(void) {
   lonejson_config config;
   lonejson *lj;
   lonejson_error error;
   test_person person;
   lonejson_json_value value;
+  lonejson_spooled spool;
+  test_visit_chunk_state visit_state;
+  lonejson_value_visitor visitor;
+  test_buffer_sink sink;
+  unsigned char sink_buffer[128];
+  lonejson_value_rewrite_options value_rewrite_options;
+  lonejson_array_rewrite_options array_rewrite_options;
+  lonejson_buffer_reader array_reader;
   const char *json =
       "{\"name\":\"Ada\",\"nickname\":\"A\",\"age\":37,\"score\":1.25,"
       "\"active\":true,\"address\":{\"city\":\"Lund\",\"zip\":22222},"
       "\"lucky_numbers\":[7],\"tags\":[\"x\"],\"items\":[]}";
+  const char *value_json = "{\"ok\":true}";
+  const char *array_json = "[{\"id\":1,\"label\":\"one\"}]";
+  test_item item;
 
   config = lonejson_default_config();
   EXPECT(config.max_alloc_bytes == LONEJSON_PARSE_MAX_ALLOC_BYTES);
@@ -623,6 +645,19 @@ static void test_runtime_defaults_and_method_dispatch(void) {
   EXPECT(lj->parse_reader != NULL);
   EXPECT(lj->parse_filep != NULL);
   EXPECT(lj->parse_path != NULL);
+  EXPECT(lj->validate_buffer != NULL);
+  EXPECT(lj->validate_cstr != NULL);
+  EXPECT(lj->validate_reader != NULL);
+  EXPECT(lj->validate_filep != NULL);
+  EXPECT(lj->validate_path != NULL);
+  EXPECT(lj->visit_value_buffer != NULL);
+  EXPECT(lj->visit_value_cstr != NULL);
+  EXPECT(lj->visit_value_reader != NULL);
+  EXPECT(lj->visit_value_filep != NULL);
+  EXPECT(lj->visit_value_path != NULL);
+  EXPECT(lj->visit_value_fd != NULL);
+  EXPECT(lj->init != NULL);
+  EXPECT(lj->reset != NULL);
   EXPECT(lj->stream_open_reader != NULL);
   EXPECT(lj->stream_open_filep != NULL);
   EXPECT(lj->stream_open_path != NULL);
@@ -632,11 +667,37 @@ static void test_runtime_defaults_and_method_dispatch(void) {
   EXPECT(lj->array_stream_open_path != NULL);
   EXPECT(lj->array_stream_open_fd != NULL);
   EXPECT(lj->array_stream_open_push != NULL);
+  EXPECT(lj->spooled_init != NULL);
+  EXPECT(lj->spooled_init_class != NULL);
   EXPECT(lj->json_value_init != NULL);
   EXPECT(lj->json_value_cleanup != NULL);
+  EXPECT(lj->array_rewrite_reader != NULL);
+  EXPECT(lj->array_rewrite_reader_to_filep != NULL);
+  EXPECT(lj->array_rewrite_reader_to_fd != NULL);
+  EXPECT(lj->array_rewrite_filep != NULL);
+  EXPECT(lj->array_rewrite_filep_to_filep != NULL);
+  EXPECT(lj->array_rewrite_fd != NULL);
+  EXPECT(lj->array_rewrite_fd_to_fd != NULL);
+  EXPECT(lj->array_rewrite_path != NULL);
+  EXPECT(lj->value_rewrite_reader != NULL);
+  EXPECT(lj->value_rewrite_buffer != NULL);
+  EXPECT(lj->value_rewrite_filep != NULL);
+  EXPECT(lj->value_rewrite_fd != NULL);
+  EXPECT(lj->value_rewrite_path != NULL);
+  EXPECT(lj->value_rewrite_selector_reader != NULL);
+  EXPECT(lj->value_rewrite_selector_buffer != NULL);
+  EXPECT(lj->value_rewrite_selector_filep != NULL);
+  EXPECT(lj->value_rewrite_selector_fd != NULL);
+  EXPECT(lj->value_rewrite_selector_path != NULL);
   EXPECT(lj->generator_init != NULL);
   EXPECT(lj->writer_init_sink != NULL);
   EXPECT(lj->free != NULL);
+
+  poison_bytes(&person, sizeof(person), 0xCDu);
+  lj->init(lj, &test_person_map, &person);
+  EXPECT(person.name == NULL);
+  EXPECT(person.lucky_numbers.items == NULL);
+  EXPECT(person.tags.items == NULL);
 
   memset(&person, 0, sizeof(person));
   EXPECT(lj->parse_cstr(lj, &test_person_map, &person, json, &error) ==
@@ -645,7 +706,51 @@ static void test_runtime_defaults_and_method_dispatch(void) {
   EXPECT(strcmp(person.address.city, "Lund") == 0);
   EXPECT(person.age == 37);
   EXPECT(person.active == true);
-  lonejson_cleanup(&test_person_map, &person);
+  lj->reset(lj, &test_person_map, &person);
+  EXPECT(person.name == NULL);
+  EXPECT(person.tags.count == 0u);
+
+  EXPECT(lj->validate_cstr(lj, value_json, &error) == LONEJSON_STATUS_OK);
+
+  memset(&visit_state, 0, sizeof(visit_state));
+  visitor = test_counting_value_visitor();
+  EXPECT(lj->visit_value_cstr(lj, value_json, &visitor, &visit_state, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(visit_state.object_count == 1u);
+  EXPECT(visit_state.bool_count == 1u);
+
+  poison_bytes(&spool, sizeof(spool), 0xCDu);
+  lj->spooled_init(lj, &spool);
+  EXPECT(lonejson__spooled_is_initialized(&spool));
+  lonejson_spooled_cleanup(&spool);
+
+  memset(&sink, 0, sizeof(sink));
+  memset(sink_buffer, 0, sizeof(sink_buffer));
+  sink.buffer = sink_buffer;
+  sink.capacity = sizeof(sink_buffer);
+  memset(&value_rewrite_options, 0, sizeof(value_rewrite_options));
+  EXPECT(lj->value_rewrite_buffer(lj, value_json, strlen(value_json),
+                                  test_buffer_sink_write, &sink,
+                                  &value_rewrite_options, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)sink.buffer, value_json) == 0);
+
+  memset(&sink, 0, sizeof(sink));
+  memset(sink_buffer, 0, sizeof(sink_buffer));
+  sink.buffer = sink_buffer;
+  sink.capacity = sizeof(sink_buffer);
+  memset(&array_rewrite_options, 0, sizeof(array_rewrite_options));
+  memset(&item, 0, sizeof(item));
+  array_rewrite_options.item_map = &test_item_map;
+  array_rewrite_options.item_dst = &item;
+  array_rewrite_options.item = test_runtime_array_rewrite_keep_item;
+  lonejson_buffer_reader_init(&array_reader, (const unsigned char *)array_json,
+                              strlen(array_json));
+  EXPECT(lj->array_rewrite_reader(lj, NULL, lonejson_buffer_reader_read,
+                                  &array_reader, test_buffer_sink_write, &sink,
+                                  &array_rewrite_options, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)sink.buffer, array_json) == 0);
 
   poison_bytes(&value, sizeof(value), 0xCDu);
   lj->json_value_init(lj, &value);
@@ -669,6 +774,269 @@ static void test_runtime_method_json_value_init_null_does_not_leak_pin(void) {
   bundle = (lonejson__runtime_bundle *)lj;
   lj->json_value_init(lj, NULL);
   EXPECT(bundle->live_handle.active_pins == 0u);
+  lonejson_free(lj);
+}
+
+static void test_receiver_methods_dispatch_on_public_handles(void) {
+  lonejson *lj;
+  lonejson_error error;
+  lonejson_spooled spool;
+  lonejson_json_value value;
+  lonejson_source source;
+  lonejson_generator generator;
+  lonejson_writer writer;
+  lonejson_writer_value_stream value_stream;
+  lonejson_stream *stream;
+  lonejson_array_stream *array_stream;
+  test_buffer_sink sink;
+  unsigned char sink_buffer[512];
+  unsigned char read_buffer[32];
+  lonejson_read_result read_result;
+  test_event event;
+  char path[] = "/tmp/lonejson-methods-XXXXXX";
+  int fd;
+  const char *framed = "{\"id\":\"evt-1\",\"ok\":true}{\"id\":\"evt-2\",\"ok\":false}";
+  const char *array_json = "[{\"id\":\"evt-1\",\"ok\":true}]";
+  lonejson_stream_result stream_result;
+  lonejson_array_stream_result array_result;
+  lonejson_buffer_reader framed_reader;
+  lonejson_buffer_reader array_reader;
+  size_t out_len;
+  int out_eof;
+  lonejson_status status;
+
+  lj = lonejson_new(NULL, &error);
+  EXPECT(lj != NULL);
+  if (lj == NULL) {
+    return;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(sink_buffer, 0, sizeof(sink_buffer));
+  sink.buffer = sink_buffer;
+  sink.capacity = sizeof(sink_buffer);
+
+  memset(&spool, 0, sizeof(spool));
+  lj->spooled_init(lj, &spool);
+  EXPECT(spool.reset != NULL);
+  EXPECT(spool.cleanup != NULL);
+  EXPECT(spool.size_fn != NULL);
+  EXPECT(spool.spilled_fn != NULL);
+  EXPECT(spool.append != NULL);
+  EXPECT(spool.rewind != NULL);
+  EXPECT(spool.read != NULL);
+  EXPECT(spool.write_to_sink != NULL);
+  EXPECT(spool.append(&spool, "hello", 5u, &error) == LONEJSON_STATUS_OK);
+  EXPECT(spool.size_fn(&spool) == 5u);
+  EXPECT(spool.spilled_fn(&spool) == 0);
+  EXPECT(spool.rewind(&spool, &error) == LONEJSON_STATUS_OK);
+  read_result = spool.read(&spool, read_buffer, sizeof(read_buffer));
+  EXPECT(read_result.bytes_read == 5u);
+  EXPECT(memcmp(read_buffer, "hello", 5u) == 0);
+  EXPECT(spool.write_to_sink(&spool, test_buffer_sink_write, &sink, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)sink.buffer, "hello") == 0);
+  spool.reset(&spool);
+  EXPECT(spool.size_fn(&spool) == 0u);
+  spool.cleanup(&spool);
+
+  memset(&value, 0, sizeof(value));
+  lj->json_value_init(lj, &value);
+  EXPECT(value.methods != NULL);
+  EXPECT(value.methods->reset != NULL);
+  EXPECT(value.methods->cleanup != NULL);
+  EXPECT(value.methods->set_buffer != NULL);
+  EXPECT(value.methods->set_parse_sink != NULL);
+  EXPECT(value.methods->set_parse_visitor != NULL);
+  EXPECT(value.methods->enable_parse_capture != NULL);
+  EXPECT(value.methods->set_reader != NULL);
+  EXPECT(value.methods->set_file != NULL);
+  EXPECT(value.methods->set_fd != NULL);
+  EXPECT(value.methods->set_path != NULL);
+  EXPECT(value.methods->write_to_sink != NULL);
+  EXPECT(value.methods->is_rewindable != NULL);
+  EXPECT(value.methods->set_buffer(&value, "true", 4u, &error) ==
+         LONEJSON_STATUS_OK);
+  memset(&sink, 0, sizeof(sink));
+  memset(sink_buffer, 0, sizeof(sink_buffer));
+  sink.buffer = sink_buffer;
+  sink.capacity = sizeof(sink_buffer);
+  EXPECT(value.methods->is_rewindable(&value) != 0);
+  EXPECT(value.methods->write_to_sink(&value, test_buffer_sink_write, &sink,
+                                      &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)sink.buffer, "true") == 0);
+  value.methods->reset(&value);
+  EXPECT(value.kind == LONEJSON_JSON_VALUE_NULL);
+  value.methods->cleanup(&value);
+
+  memset(&source, 0, sizeof(source));
+  lonejson_source_init(&source);
+  EXPECT(source.cleanup != NULL);
+  EXPECT(source.reset != NULL);
+  EXPECT(source.set_file != NULL);
+  EXPECT(source.set_fd != NULL);
+  EXPECT(source.set_path != NULL);
+  EXPECT(source.write_to_sink != NULL);
+  EXPECT(source.is_rewindable != NULL);
+  fd = mkstemp(path);
+  EXPECT(fd >= 0);
+  if (fd >= 0) {
+    EXPECT(write(fd, "world", 5u) == 5);
+    close(fd);
+    EXPECT(source.set_path(&source, path, &error) == LONEJSON_STATUS_OK);
+    memset(&sink, 0, sizeof(sink));
+    memset(sink_buffer, 0, sizeof(sink_buffer));
+    sink.buffer = sink_buffer;
+    sink.capacity = sizeof(sink_buffer);
+    EXPECT(source.is_rewindable(&source) != 0);
+    EXPECT(source.write_to_sink(&source, test_buffer_sink_write, &sink,
+                                &error) == LONEJSON_STATUS_OK);
+    EXPECT(strcmp((const char *)sink.buffer, "world") == 0);
+    unlink(path);
+  }
+  source.cleanup(&source);
+
+  memset(&event, 0, sizeof(event));
+  strcpy(event.id, "evt-1");
+  event.ok = true;
+  memset(&generator, 0, sizeof(generator));
+  EXPECT(lj->generator_init(lj, &generator, &test_event_map, &event) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(generator.read != NULL);
+  EXPECT(generator.cleanup != NULL);
+  memset(&sink, 0, sizeof(sink));
+  memset(sink_buffer, 0, sizeof(sink_buffer));
+  sink.buffer = sink_buffer;
+  sink.capacity = sizeof(sink_buffer);
+  for (;;) {
+    status = generator.read(&generator, read_buffer, sizeof(read_buffer),
+                            &out_len, &out_eof);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(test_buffer_sink_write(&sink, read_buffer, out_len, &error) ==
+           LONEJSON_STATUS_OK);
+    if (out_eof) {
+      break;
+    }
+  }
+  EXPECT(strcmp((const char *)sink.buffer, "{\"id\":\"evt-1\",\"ok\":true}") ==
+         0);
+  generator.cleanup(&generator);
+
+  memset(&writer, 0, sizeof(writer));
+  memset(&sink, 0, sizeof(sink));
+  memset(sink_buffer, 0, sizeof(sink_buffer));
+  sink.buffer = sink_buffer;
+  sink.capacity = sizeof(sink_buffer);
+  EXPECT(lj->writer_init_sink(lj, &writer, test_buffer_sink_write, &sink,
+                              &error) == LONEJSON_STATUS_OK);
+  EXPECT(writer.cleanup != NULL);
+  EXPECT(writer.begin_object != NULL);
+  EXPECT(writer.end_object != NULL);
+  EXPECT(writer.begin_array != NULL);
+  EXPECT(writer.end_array != NULL);
+  EXPECT(writer.key != NULL);
+  EXPECT(writer.string != NULL);
+  EXPECT(writer.string_begin != NULL);
+  EXPECT(writer.string_chunk != NULL);
+  EXPECT(writer.string_end != NULL);
+  EXPECT(writer.string_reader != NULL);
+  EXPECT(writer.string_spooled != NULL);
+  EXPECT(writer.source_text != NULL);
+  EXPECT(writer.spooled_base64 != NULL);
+  EXPECT(writer.source_base64 != NULL);
+  EXPECT(writer.number_text != NULL);
+  EXPECT(writer.i64 != NULL);
+  EXPECT(writer.u64 != NULL);
+  EXPECT(writer.f64 != NULL);
+  EXPECT(writer.bool_fn != NULL);
+  EXPECT(writer.null_fn != NULL);
+  EXPECT(writer.json_value != NULL);
+  EXPECT(writer.json_value_reader != NULL);
+  EXPECT(writer.json_value_buffer != NULL);
+  EXPECT(writer.json_value_file != NULL);
+  EXPECT(writer.json_value_fd != NULL);
+  EXPECT(writer.json_value_path != NULL);
+  EXPECT(writer.json_value_spooled != NULL);
+  EXPECT(writer.array_items_reader != NULL);
+  EXPECT(writer.array_items_buffer != NULL);
+  EXPECT(writer.array_items_filep != NULL);
+  EXPECT(writer.array_items_fd != NULL);
+  EXPECT(writer.array_items_path != NULL);
+  EXPECT(writer.array_items_spooled != NULL);
+  EXPECT(writer.mapped != NULL);
+  EXPECT(writer.finish != NULL);
+  EXPECT(writer.begin_object(&writer, &error) == LONEJSON_STATUS_OK);
+  EXPECT(writer.key(&writer, "ok", 2u, &error) == LONEJSON_STATUS_OK);
+  EXPECT(writer.bool_fn(&writer, 1, &error) == LONEJSON_STATUS_OK);
+  EXPECT(writer.end_object(&writer, &error) == LONEJSON_STATUS_OK);
+  EXPECT(writer.finish(&writer, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)sink.buffer, "{\"ok\":true}") == 0);
+  writer.cleanup(&writer);
+
+  memset(&writer, 0, sizeof(writer));
+  memset(&value_stream, 0, sizeof(value_stream));
+  memset(&sink, 0, sizeof(sink));
+  memset(sink_buffer, 0, sizeof(sink_buffer));
+  sink.buffer = sink_buffer;
+  sink.capacity = sizeof(sink_buffer);
+  EXPECT(lj->writer_init_sink(lj, &writer, test_buffer_sink_write, &sink,
+                              &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_writer_value_stream_open(&value_stream, &writer, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(value_stream.open != NULL);
+  EXPECT(value_stream.push != NULL);
+  EXPECT(value_stream.close != NULL);
+  EXPECT(value_stream.cleanup != NULL);
+  EXPECT(value_stream.push(&value_stream, "true", 4u, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(value_stream.close(&value_stream, &error) == LONEJSON_STATUS_OK);
+  EXPECT(writer.finish(&writer, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)sink.buffer, "true") == 0);
+  value_stream.cleanup(&value_stream);
+  writer.cleanup(&writer);
+
+  lonejson_buffer_reader_init(&framed_reader, (const unsigned char *)framed,
+                              strlen(framed));
+  stream = lj->stream_open_reader(lj, &test_event_map,
+                                  lonejson_buffer_reader_read, &framed_reader,
+                                  &error);
+  EXPECT(stream != NULL);
+  if (stream != NULL) {
+    EXPECT(stream->next != NULL);
+    EXPECT(stream->close != NULL);
+    memset(&event, 0, sizeof(event));
+    stream_result = stream->next(stream, &event, &error);
+    EXPECT(stream_result == LONEJSON_STREAM_OBJECT);
+    EXPECT(strcmp(event.id, "evt-1") == 0);
+    EXPECT(event.ok == true);
+    stream->close(stream);
+  }
+
+  lonejson_buffer_reader_init(&array_reader, (const unsigned char *)array_json,
+                              strlen(array_json));
+  array_stream = lj->array_stream_open_reader(
+      lj, NULL, lonejson_buffer_reader_read, &array_reader, &error);
+  EXPECT(array_stream != NULL);
+  if (array_stream != NULL) {
+    EXPECT(array_stream->next != NULL);
+    EXPECT(array_stream->next_value != NULL);
+    EXPECT(array_stream->push != NULL);
+    EXPECT(array_stream->finish != NULL);
+    EXPECT(array_stream->push_string != NULL);
+    EXPECT(array_stream->finish_string != NULL);
+    EXPECT(array_stream->push_string_items != NULL);
+    EXPECT(array_stream->finish_string_items != NULL);
+    EXPECT(array_stream->close != NULL);
+    memset(&event, 0, sizeof(event));
+    array_result = array_stream->next(array_stream, &test_event_map, &event,
+                                      &error);
+    EXPECT(array_result == LONEJSON_ARRAY_STREAM_ITEM);
+    EXPECT(strcmp(event.id, "evt-1") == 0);
+    EXPECT(event.ok == true);
+    array_stream->close(array_stream);
+  }
+
   lonejson_free(lj);
 }
 

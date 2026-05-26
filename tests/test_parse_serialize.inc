@@ -125,6 +125,93 @@ static void test_zero_alloc_validate_path(void) {
   EXPECT(g_alloc_record_count == 0u);
 }
 
+static void test_nonresumable_reader_apis_reject_would_block(void) {
+  static const char json[] =
+      "{\"name\":\"Block\",\"address\":{\"city\":\"Oslo\",\"zip\":7},"
+      "\"active\":true,\"lucky_numbers\":[],\"tags\":[],\"items\":[]}";
+  test_person doc;
+  test_would_block_tripwire_read_state parse_state;
+  test_would_block_tripwire_read_state validate_state;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson *runtime = test_default_runtime();
+
+  poison_bytes(&doc, sizeof(doc), 0xA5u);
+
+  memset(&parse_state, 0, sizeof(parse_state));
+  parse_state.json = json;
+  parse_state.chunk_size = 32u;
+  parse_state.block_after = 32u;
+  status = test_parse_reader(&test_person_map, &doc,
+                             test_would_block_tripwire_reader, &parse_state,
+                             NULL, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(parse_state.blocked);
+  EXPECT(!parse_state.reentered_after_block);
+  EXPECT(parse_state.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+  lonejson_cleanup(&test_person_map, &doc);
+
+  poison_bytes(&doc, sizeof(doc), 0xA5u);
+  memset(&parse_state, 0, sizeof(parse_state));
+  parse_state.json = json;
+  parse_state.chunk_size = 32u;
+  parse_state.block_after = 32u;
+  status = runtime->parse_reader(runtime, &test_person_map, &doc,
+                                 test_would_block_tripwire_reader,
+                                 &parse_state, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(parse_state.blocked);
+  EXPECT(!parse_state.reentered_after_block);
+  EXPECT(parse_state.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+  lonejson_cleanup(&test_person_map, &doc);
+
+  poison_bytes(&doc, sizeof(doc), 0xA5u);
+  memset(&parse_state, 0, sizeof(parse_state));
+  parse_state.json = json;
+  parse_state.chunk_size = 32u;
+  parse_state.block_after = 32u;
+  status = runtime->parse_reader(runtime, &test_person_map, &doc,
+                                 test_would_block_tripwire_reader,
+                                 &parse_state, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(parse_state.blocked);
+  EXPECT(!parse_state.reentered_after_block);
+  EXPECT(parse_state.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+  lonejson_cleanup(&test_person_map, &doc);
+
+  memset(&validate_state, 0, sizeof(validate_state));
+  validate_state.json = json;
+  validate_state.chunk_size = 32u;
+  validate_state.block_after = 32u;
+  status = lonejson_validate_reader(runtime, test_would_block_tripwire_reader,
+                                    &validate_state, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(validate_state.blocked);
+  EXPECT(!validate_state.reentered_after_block);
+  EXPECT(validate_state.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+
+  memset(&validate_state, 0, sizeof(validate_state));
+  validate_state.json = json;
+  validate_state.chunk_size = 32u;
+  validate_state.block_after = 32u;
+  status = runtime->validate_reader(runtime, test_would_block_tripwire_reader,
+                                    &validate_state, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(validate_state.blocked);
+  EXPECT(!validate_state.reentered_after_block);
+  EXPECT(validate_state.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+}
+
 static void test_parse_dynamic_string_limits_and_fixed_unaffected(void) {
   size_t text_len = LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES + 1u;
   char *text = make_repeating_text(text_len);

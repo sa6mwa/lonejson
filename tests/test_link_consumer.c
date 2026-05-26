@@ -14,6 +14,12 @@ typedef struct consumer_log {
   lonejson_string_array tags;
 } consumer_log;
 
+typedef struct consumer_sink {
+  char *buffer;
+  size_t len;
+  size_t capacity;
+} consumer_sink;
+
 static const lonejson_field consumer_person_fields[] = {
     LONEJSON_FIELD_STRING_FIXED_REQ(consumer_person, name, "name",
                                     LONEJSON_OVERFLOW_FAIL),
@@ -40,14 +46,32 @@ static lonejson *consumer_runtime(void) {
   return runtime;
 }
 
+static lonejson_status consumer_sink_write(void *user, const void *data,
+                                           size_t len, lonejson_error *error) {
+  consumer_sink *sink;
+
+  (void)error;
+  sink = (consumer_sink *)user;
+  if (sink->len + len + 1u > sink->capacity) {
+    return LONEJSON_STATUS_OVERFLOW;
+  }
+  memcpy(sink->buffer + sink->len, data, len);
+  sink->len += len;
+  sink->buffer[sink->len] = '\0';
+  return LONEJSON_STATUS_OK;
+}
+
 int main(void) {
   static const char json[] =
       "{\"person\":{\"name\":\"Alice\",\"age\":37,\"active\":true},"
       "\"tags\":[\"prod\",\"edge\"]}";
   consumer_log log_record;
+  lonejson_json_value value;
+  consumer_sink sink;
   lonejson_error error;
   lonejson_status status;
   char buffer[256];
+  char value_buffer[16];
 
   lonejson_init(consumer_runtime(), &consumer_log_map, &log_record);
   lonejson_error_init(&error);
@@ -76,6 +100,27 @@ int main(void) {
   }
   if (strstr(buffer, "\"name\": \"Alice\"") == NULL ||
       strstr(buffer, "\"tags\": [") == NULL) {
+    return 1;
+  }
+
+  consumer_runtime()->json_value_init(consumer_runtime(), &value);
+  if (value.methods == NULL || value.methods->set_buffer == NULL ||
+      value.methods->write_to_sink == NULL || value.methods->cleanup == NULL) {
+    return 1;
+  }
+  status = value.methods->set_buffer(&value, "true", 4u, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    value.methods->cleanup(&value);
+    return 1;
+  }
+  memset(value_buffer, 0, sizeof(value_buffer));
+  sink.buffer = value_buffer;
+  sink.len = 0u;
+  sink.capacity = sizeof(value_buffer);
+  status =
+      value.methods->write_to_sink(&value, consumer_sink_write, &sink, &error);
+  value.methods->cleanup(&value);
+  if (status != LONEJSON_STATUS_OK || strcmp(value_buffer, "true") != 0) {
     return 1;
   }
   return 0;

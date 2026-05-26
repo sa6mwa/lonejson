@@ -82,6 +82,23 @@ target_raw_link_flags() {
     esac
 }
 
+target_raw_compile_flags() {
+    target_id="$1"
+
+    case "$target_id" in
+        arm64-apple-darwin)
+            printf '%s\n' "-mmacosx-version-min=$(target_darwin_deployment_target)"
+            ;;
+        *)
+            printf '%s\n' ""
+            ;;
+    esac
+}
+
+target_darwin_deployment_target() {
+    printf '%s\n' "${LONEJSON_MACOS_DEPLOYMENT_TARGET:-15.0}"
+}
+
 release_archive_path() {
     target_id="$1"
 
@@ -226,9 +243,10 @@ EOF
 
     require_command pkg-config
     pkg_config_flags="$(PKG_CONFIG_PATH="$package_root/lib/pkgconfig" pkg-config --cflags --libs lonejson)"
+    raw_compile_flags="$(target_raw_compile_flags "$target_id")"
     raw_link_flags="$(target_raw_link_flags "$target_id")"
     # shellcheck disable=SC2086
-    "$compiler" "$consumer_source" $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
+    "$compiler" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
 
     cmake_source_dir="$tmp_dir/cmake-consumer"
     cmake_build_dir="$tmp_dir/cmake-build"
@@ -243,6 +261,7 @@ target_link_libraries(lonejson_archive_consumer PRIVATE lonejson::lonejson)
 EOF
 
     if [ "${target_id#*apple-darwin}" != "$target_id" ]; then
+        darwin_deployment_target="$(target_darwin_deployment_target)"
         cmake_args=(
             -S "$cmake_source_dir"
             -B "$cmake_build_dir"
@@ -250,6 +269,8 @@ EOF
             -D "CMAKE_PREFIX_PATH=$package_root"
             -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
             -D "CMAKE_TOOLCHAIN_FILE=$repo_root/cmake/toolchains/arm64-apple-darwin.cmake"
+            -D "LONEJSON_MACOS_DEPLOYMENT_TARGET=$darwin_deployment_target"
+            -D "CMAKE_OSX_DEPLOYMENT_TARGET=$darwin_deployment_target"
         )
     else
         cmake_system_name="$(target_cmake_system_name "$target_id")"

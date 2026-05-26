@@ -182,6 +182,142 @@ static void test_value_visitor_chunking_unicode_and_failures(void) {
   }
 }
 
+static void test_visit_value_reader_rejects_would_block(void) {
+  static const char json[] =
+      "{\"name\":\"visit\",\"items\":[1,2],\"ok\":true}";
+  lonejson_value_visitor visitor = test_value_visitor();
+  test_visit_state state;
+  test_would_block_tripwire_read_state reader;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson *runtime = test_default_runtime();
+
+  memset(&state, 0, sizeof(state));
+  memset(&reader, 0, sizeof(reader));
+  reader.json = json;
+  reader.chunk_size = 12u;
+  reader.block_after = 12u;
+  status = lonejson_visit_value_reader(runtime, test_would_block_tripwire_reader,
+                                       &reader, &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(reader.blocked);
+  EXPECT(!reader.reentered_after_block);
+  EXPECT(reader.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+
+  memset(&state, 0, sizeof(state));
+  memset(&reader, 0, sizeof(reader));
+  reader.json = json;
+  reader.chunk_size = 12u;
+  reader.block_after = 12u;
+  status = runtime->visit_value_reader(runtime, test_would_block_tripwire_reader,
+                                       &reader, &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(reader.blocked);
+  EXPECT(!reader.reentered_after_block);
+  EXPECT(reader.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+}
+
+static void test_visit_value_success_clears_error(void) {
+  static const char json[] = "{\"name\":\"visit\",\"items\":[1,2],\"ok\":true}";
+  lonejson_value_visitor visitor = test_value_visitor();
+  lonejson_error error;
+  lonejson_status status;
+  test_visit_state state;
+  test_reader_state reader;
+  lonejson *runtime = test_default_runtime();
+  char path[] = "/tmp/lonejson-visit-clear-XXXXXX";
+  int fd;
+  FILE *fp;
+
+  memset(&state, 0, sizeof(state));
+  error.code = LONEJSON_STATUS_INVALID_JSON;
+  error.system_errno = EIO;
+  snprintf(error.message, sizeof(error.message), "stale");
+  status = lonejson_visit_value_buffer(runtime, json, strlen(json), &visitor,
+                                       &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(error.code == LONEJSON_STATUS_OK);
+  EXPECT(error.system_errno == 0);
+  EXPECT(error.message[0] == '\0');
+
+  memset(&state, 0, sizeof(state));
+  error.code = LONEJSON_STATUS_INVALID_JSON;
+  error.system_errno = EIO;
+  snprintf(error.message, sizeof(error.message), "stale");
+  status = runtime->visit_value_cstr(runtime, json, &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(error.code == LONEJSON_STATUS_OK);
+  EXPECT(error.system_errno == 0);
+  EXPECT(error.message[0] == '\0');
+
+  memset(&state, 0, sizeof(state));
+  memset(&reader, 0, sizeof(reader));
+  reader.json = json;
+  reader.chunk_size = 5u;
+  error.code = LONEJSON_STATUS_INVALID_JSON;
+  error.system_errno = EIO;
+  snprintf(error.message, sizeof(error.message), "stale");
+  status = lonejson_visit_value_reader(runtime, test_state_reader, &reader,
+                                       &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(error.code == LONEJSON_STATUS_OK);
+  EXPECT(error.system_errno == 0);
+  EXPECT(error.message[0] == '\0');
+
+  memset(&state, 0, sizeof(state));
+  fp = tmpfile();
+  EXPECT(fp != NULL);
+  if (fp != NULL) {
+    fwrite(json, 1u, strlen(json), fp);
+    rewind(fp);
+    error.code = LONEJSON_STATUS_INVALID_JSON;
+    error.system_errno = EIO;
+    snprintf(error.message, sizeof(error.message), "stale");
+    status = lonejson_visit_value_filep(runtime, fp, &visitor, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(error.code == LONEJSON_STATUS_OK);
+    EXPECT(error.system_errno == 0);
+    EXPECT(error.message[0] == '\0');
+    fclose(fp);
+  }
+
+  fd = write_temp_text_file(path, json);
+  EXPECT(fd >= 0);
+  if (fd >= 0) {
+    close(fd);
+    memset(&state, 0, sizeof(state));
+    error.code = LONEJSON_STATUS_INVALID_JSON;
+    error.system_errno = EIO;
+    snprintf(error.message, sizeof(error.message), "stale");
+    status = lonejson_visit_value_path(runtime, path, &visitor, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(error.code == LONEJSON_STATUS_OK);
+    EXPECT(error.system_errno == 0);
+    EXPECT(error.message[0] == '\0');
+
+    fd = open(path, O_RDONLY);
+    EXPECT(fd >= 0);
+    if (fd >= 0) {
+      memset(&state, 0, sizeof(state));
+      error.code = LONEJSON_STATUS_INVALID_JSON;
+      error.system_errno = EIO;
+      snprintf(error.message, sizeof(error.message), "stale");
+      status = runtime->visit_value_fd(runtime, fd, &visitor, &state, &error);
+      EXPECT(status == LONEJSON_STATUS_OK);
+      EXPECT(error.code == LONEJSON_STATUS_OK);
+      EXPECT(error.system_errno == 0);
+      EXPECT(error.message[0] == '\0');
+      close(fd);
+    }
+
+    unlink(path);
+  }
+}
+
 static void test_custom_allocator_parse_cleanup_and_stream(void) {
   static const char json[] =
       "{\"name\":\"alpha\",\"body\":\"hello world\",\"tags\":[\"x\",\"y\"]}";

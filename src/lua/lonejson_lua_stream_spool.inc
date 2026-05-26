@@ -320,6 +320,7 @@ static int ljlua_array_stream_next_value(lua_State *L) {
 
 static int ljlua_stream_next(lua_State *L) {
   ljlua_stream_ud *ud = ljlua_check_stream(L, 1);
+  lonejson__stream_state *stream_state = lonejson__stream_state_mut(ud->stream);
   lonejson_error error;
   lonejson_stream_result result;
   ljlua_record_ud *record_ud = ljlua_test_record(L, 2);
@@ -335,8 +336,8 @@ static int ljlua_stream_next(lua_State *L) {
       ljlua_prepare_record_json_value_capture(L, ud->schema, record_ud->data,
                                               ud->clear_destination ? 0 : 1);
     } else if (ud->clear_destination && record_ud->cleared &&
-               ud->stream->prepared_dst == record_ud->data) {
-      ud->stream->prepared_dst = NULL;
+               stream_state->prepared_dst == record_ud->data) {
+      stream_state->prepared_dst = NULL;
     }
     result = lonejson_stream_next(ud->stream, record_ud->data, &error);
     if (result == LONEJSON_STREAM_OBJECT) {

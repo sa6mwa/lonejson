@@ -1538,12 +1538,19 @@ static void lonejson__init_json_value_field(
 static void lonejson__reseed_json_value_field(
     lonejson_json_value *value, const lonejson_allocator *allocator,
     const lonejson_runtime *runtime, unsigned flags) {
+  lonejson_allocator resolved_allocator;
+
   if (!lonejson__json_value_is_initialized(value)) {
     lonejson__init_json_value_field(value, allocator, runtime, flags);
     return;
   }
   lonejson__json_value_clear_runtime(value);
-  lonejson__json_value_apply_allocator(value, allocator);
+  resolved_allocator = LONEJSON__ALLOCATOR_IS_VALID_CONFIG(allocator)
+                           ? lonejson__allocator_resolve(allocator)
+                           : lonejson_default_allocator();
+  if (!lonejson__allocator_equal(&value->allocator, &resolved_allocator)) {
+    value->allocator = resolved_allocator;
+  }
   if (runtime != NULL && value->parse_limits_follow_runtime) {
     value->parse_visitor_limits = runtime->value_limits;
   }
@@ -1559,13 +1566,18 @@ static void lonejson__reseed_json_value_field(
 static void lonejson__reseed_json_value_field_parse(lonejson_parser *parser,
                                                     lonejson_json_value *value,
                                                     unsigned flags) {
+  lonejson_allocator resolved_allocator;
+
   if (!lonejson__json_value_is_initialized(value)) {
     lonejson__init_json_value_field(value, &parser->allocator, parser->runtime,
                                     flags);
     return;
   }
   lonejson__json_value_clear_runtime_parse(parser, value);
-  lonejson__json_value_apply_allocator(value, &parser->allocator);
+  resolved_allocator = lonejson__allocator_resolve(&parser->allocator);
+  if (!lonejson__allocator_equal(&value->allocator, &resolved_allocator)) {
+    value->allocator = resolved_allocator;
+  }
   if (parser->runtime != NULL && value->parse_limits_follow_runtime) {
     value->parse_visitor_limits = parser->runtime->value_limits;
   }

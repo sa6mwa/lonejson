@@ -595,7 +595,7 @@ ljlua_stream_open_memory_with_options(const lonejson_map *map,
                                       const lonejson__parse_options *options,
                                       const lonejson_runtime *runtime,
                                       lonejson_error *error) {
-  lonejson_stream *stream;
+  lonejson__stream_state *stream;
 
   if (input == NULL && input_len != 0u) {
     lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
@@ -610,7 +610,7 @@ ljlua_stream_open_memory_with_options(const lonejson_map *map,
   stream->memory_input = input;
   stream->memory_input_len = input_len;
   stream->memory_input_offset = 0u;
-  return stream;
+  return &stream->public;
 }
 
 static lonejson_stream *

@@ -26,7 +26,7 @@ option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "12" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "13" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -266,6 +266,11 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_cmake_threads_optional_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_threads_optional.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_run_release_matrix_darwin_target_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_run_release_matrix_darwin_target.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 

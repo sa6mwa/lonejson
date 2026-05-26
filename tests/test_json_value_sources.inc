@@ -1532,6 +1532,7 @@ static void test_json_value_reuse_and_cleanup_ownership(void) {
   lonejson_status status;
   char *serialized;
   int fd;
+  lonejson__parse_options options = lonejson__default_parse_options();
 
   reset_lonejson_alloc_stats();
   lonejson_json_value_init(NULL, &value);
@@ -1567,6 +1568,38 @@ static void test_json_value_reuse_and_cleanup_ownership(void) {
 
   lonejson_cleanup(&test_json_value_doc_map, &doc);
   lonejson_json_value_cleanup(&value);
+  EXPECT(g_alloc_record_count == 0u);
+
+  poison_bytes(&doc, sizeof(doc), 0xB7u);
+  test_init_map(&test_json_value_doc_map, &doc);
+  status = lonejson_json_value_set_path(&doc.selector, selector_path, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_PATH);
+  EXPECT(doc.selector.path != NULL);
+
+  lonejson_json_value_cleanup(&doc.selector);
+  EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_NULL);
+  EXPECT(doc.selector.path == NULL);
+  EXPECT(doc.selector.fp == NULL);
+  EXPECT(doc.selector.fd == -1);
+
+  status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_json_value_enable_parse_capture(&doc.fields, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_json_value_enable_parse_capture(&doc.last_error, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+  status = test_parse_cstr(&test_json_value_doc_map, &doc,
+                               "{\"id\":\"reuse-parse\",\"selector\":1,"
+                               "\"fields\":2,\"last_error\":3}",
+                               &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(doc.selector.json, "1") == 0);
+  EXPECT(strcmp(doc.fields.json, "2") == 0);
+  EXPECT(strcmp(doc.last_error.json, "3") == 0);
+
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
   EXPECT(g_alloc_record_count == 0u);
 }
 
@@ -1672,6 +1705,51 @@ static void test_json_value_source_validation_failures(void) {
     unlink(invalid_path2);
   }
 
+  lonejson_json_value_cleanup(&value);
+}
+
+static void test_json_value_reader_source_rejects_would_block(void) {
+  static const char json[] = "{\"nested\":true}";
+  lonejson_json_value value;
+  lonejson_error error;
+  lonejson_status status;
+  test_would_block_tripwire_read_state reader;
+  test_counting_sink sink;
+
+  lonejson_json_value_init(test_default_runtime(), &value);
+  memset(&reader, 0, sizeof(reader));
+  reader.json = json;
+  reader.chunk_size = 8u;
+  reader.block_after = 8u;
+  status = lonejson_json_value_set_reader(&value, test_would_block_tripwire_reader,
+                                          &reader, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  memset(&sink, 0, sizeof(sink));
+  status = lonejson_json_value_write_to_sink(&value, test_counting_sink_write,
+                                             &sink, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(reader.blocked);
+  EXPECT(!reader.reentered_after_block);
+  EXPECT(reader.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+
+  memset(&reader, 0, sizeof(reader));
+  reader.json = json;
+  reader.chunk_size = 8u;
+  reader.block_after = 8u;
+  status = value.methods->set_reader(&value, test_would_block_tripwire_reader,
+                                     &reader, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  memset(&sink, 0, sizeof(sink));
+  status = value.methods->write_to_sink(&value, test_counting_sink_write,
+                                        &sink, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(reader.blocked);
+  EXPECT(!reader.reentered_after_block);
+  EXPECT(reader.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
   lonejson_json_value_cleanup(&value);
 }
 

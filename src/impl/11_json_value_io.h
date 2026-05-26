@@ -199,9 +199,12 @@ lonejson__json_cursor_getc(lonejson__json_io *io) {
       if (result.eof) {
         return EOF;
       }
-      if (!result.would_block) {
-        return EOF;
+      if (result.would_block) {
+        lonejson__set_error(io->error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
+                            0u, "reader would block");
+        return -2;
       }
+      return EOF;
     }
   }
   if (io->cursor->use_fd) {

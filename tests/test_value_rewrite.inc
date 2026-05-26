@@ -119,6 +119,86 @@ static void test_value_rewrite_runtime_json_value_limits(void) {
   lonejson_free(default_lj);
 }
 
+static void test_value_rewrite_reader_rejects_would_block(void) {
+  static const char json[] = "{\"user\":{\"name\":\"old\",\"id\":7}}";
+  unsigned char out[128];
+  test_buffer_sink sink;
+  test_would_block_tripwire_read_state reader;
+  lonejson_value_rewrite_options options;
+  lonejson_value_rewrite_selector_options selector_options;
+  lonejson_error error;
+  const char *path_user_name[] = {"user", "name"};
+  lonejson_status status;
+  lonejson *runtime = test_default_runtime();
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.target_segments = path_user_name;
+  options.target_segment_count = 2u;
+  options.action = LONEJSON_VALUE_REWRITE_KEEP;
+
+  memset(&reader, 0, sizeof(reader));
+  reader.json = json;
+  reader.chunk_size = 10u;
+  reader.block_after = 10u;
+  status = test_value_rewrite_reader(test_would_block_tripwire_reader, &reader,
+                                     test_buffer_sink_write, &sink, &options,
+                                     &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(reader.blocked);
+  EXPECT(!reader.reentered_after_block);
+  EXPECT(reader.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+
+  memset(&reader, 0, sizeof(reader));
+  reader.json = json;
+  reader.chunk_size = 10u;
+  reader.block_after = 10u;
+  status = runtime->value_rewrite_reader(runtime, test_would_block_tripwire_reader,
+                                         &reader, test_buffer_sink_write,
+                                         &sink, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(reader.blocked);
+  EXPECT(!reader.reentered_after_block);
+  EXPECT(reader.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+
+  memset(&selector_options, 0, sizeof(selector_options));
+  selector_options.selector = "user.name";
+  selector_options.action = LONEJSON_VALUE_REWRITE_KEEP;
+  memset(&reader, 0, sizeof(reader));
+  reader.json = json;
+  reader.chunk_size = 10u;
+  reader.block_after = 10u;
+  status = test_value_rewrite_selector_reader(
+      test_would_block_tripwire_reader, &reader, test_buffer_sink_write, &sink,
+      &selector_options, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(reader.blocked);
+  EXPECT(!reader.reentered_after_block);
+  EXPECT(reader.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+
+  memset(&reader, 0, sizeof(reader));
+  reader.json = json;
+  reader.chunk_size = 10u;
+  reader.block_after = 10u;
+  status = runtime->value_rewrite_selector_reader(
+      runtime, test_would_block_tripwire_reader, &reader,
+      test_buffer_sink_write, &sink, &selector_options, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(reader.blocked);
+  EXPECT(!reader.reentered_after_block);
+  EXPECT(reader.call_count == 2u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(strstr(error.message, "reader would block") != NULL);
+}
+
 typedef struct test_value_rewrite_increment {
   lonejson_int64 delta;
 } test_value_rewrite_increment;
