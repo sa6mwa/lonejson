@@ -491,7 +491,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 14
+#define LONEJSON_ABI_VERSION 15
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -2041,6 +2041,10 @@ struct lonejson {
   lonejson_status (*write_json_string_spooled_sink)(
       lonejson *runtime, const lonejson_spooled *value, lonejson_sink_fn sink,
       void *sink_user, lonejson_error *error);
+  /** Serializes one mapped struct to a sink. */
+  lonejson_status (*serialize_sink)(
+      lonejson *runtime, const lonejson_map *map, const void *src,
+      lonejson_sink_fn sink, void *sink_user, lonejson_error *error);
   /** Serializes one mapped struct into a caller buffer. */
   lonejson_status (*serialize_buffer)(lonejson *runtime, const lonejson_map *map,
                                       const void *src, char *buffer,

@@ -95,7 +95,27 @@ int main(void) {
   }
   if (string_stream.set_handler == NULL || mapped_stream.set_handler == NULL ||
       consumer_runtime()->cleanup == NULL ||
+      consumer_runtime()->serialize_sink == NULL ||
       consumer_runtime()->serialize_buffer == NULL) {
+    consumer_runtime()->cleanup(consumer_runtime(), &consumer_log_map,
+                                &log_record);
+    return 1;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(buffer, 0, sizeof(buffer));
+  sink.buffer = buffer;
+  sink.capacity = sizeof(buffer);
+  status = consumer_runtime()->serialize_sink(
+      consumer_runtime(), &consumer_log_map, &log_record, consumer_sink_write,
+      &sink, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    consumer_runtime()->cleanup(consumer_runtime(), &consumer_log_map,
+                                &log_record);
+    return 1;
+  }
+  if (strstr(buffer, "\"name\": \"Alice\"") == NULL ||
+      strstr(buffer, "\"tags\": [") == NULL) {
     consumer_runtime()->cleanup(consumer_runtime(), &consumer_log_map,
                                 &log_record);
     return 1;

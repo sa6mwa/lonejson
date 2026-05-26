@@ -829,6 +829,7 @@ static void test_receiver_methods_dispatch_on_public_handles(void) {
   EXPECT(lj->write_json_string_sink != NULL);
   EXPECT(lj->write_json_string_buffer_sink != NULL);
   EXPECT(lj->write_json_string_spooled_sink != NULL);
+  EXPECT(lj->serialize_sink != NULL);
   EXPECT(lj->serialize_buffer != NULL);
   EXPECT(lj->serialize_alloc != NULL);
   EXPECT(lj->serialize_owned != NULL);
@@ -967,6 +968,14 @@ static void test_receiver_methods_dispatch_on_public_handles(void) {
          LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)sink.buffer, "\"beta\"") == 0);
   spool.cleanup(&spool);
+
+  memset(&sink, 0, sizeof(sink));
+  memset(sink_buffer, 0, sizeof(sink_buffer));
+  sink.buffer = sink_buffer;
+  sink.capacity = sizeof(sink_buffer);
+  EXPECT(lj->serialize_sink(lj, &test_event_map, &event, test_buffer_sink_write,
+                            &sink, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strstr((const char *)sink.buffer, "\"id\":\"evt-1\"") != NULL);
 
   memset(sink_buffer, 0, sizeof(sink_buffer));
   EXPECT(lj->serialize_buffer(lj, &test_event_map, &event, (char *)sink_buffer,

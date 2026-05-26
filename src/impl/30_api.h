@@ -1006,6 +1006,7 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
   runtime->write_json_string_buffer_sink = lonejson_write_json_string_buffer_sink;
   runtime->write_json_string_spooled_sink =
       lonejson_write_json_string_spooled_sink;
+  runtime->serialize_sink = lonejson_serialize_sink;
   runtime->serialize_buffer = lonejson_serialize_buffer;
   runtime->serialize_alloc = lonejson_serialize_alloc;
   runtime->serialize_owned = lonejson_serialize_owned;
