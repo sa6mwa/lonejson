@@ -491,7 +491,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 13
+#define LONEJSON_ABI_VERSION 14
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -1132,6 +1132,13 @@ typedef struct lonejson_map lonejson_map;
 struct lonejson_array_rewrite_options;
 struct lonejson_value_rewrite_options;
 struct lonejson_value_rewrite_selector_options;
+#ifdef LONEJSON_WITH_CURL
+typedef struct lonejson_curl_parse lonejson_curl_parse;
+typedef struct lonejson_curl_array_parse lonejson_curl_array_parse;
+typedef struct lonejson_curl_string_array_parse lonejson_curl_string_array_parse;
+typedef struct lonejson_curl_string_items_parse lonejson_curl_string_items_parse;
+typedef struct lonejson_curl_upload lonejson_curl_upload;
+#endif
 /** Object-framed JSON stream cursor. */
 typedef struct lonejson_stream lonejson_stream;
 /** Selected-array item stream cursor. */
@@ -1166,14 +1173,24 @@ typedef struct lonejson_generator lonejson_generator;
 typedef struct lonejson_writer lonejson_writer;
 /** Public state for a push-fed arbitrary JSON value inside a writer.
  *
- * Zero-initialize the struct before first use. The `state` pointer is owned by
- * lonejson after a successful `lonejson_writer_value_stream_open()` call. Feed
- * chunks with
- * `lonejson_writer_value_stream_push()`, validate EOF and return the writer to
- * normal use with `lonejson_writer_value_stream_close()`, and release any
- * remaining stream resources with `lonejson_writer_value_stream_cleanup()`.
+ * If you use the receiver-method surface (`stream.open(...)`), initialize the
+ * struct first with `lonejson_writer_value_stream_init()` or
+ * `LONEJSON_WRITER_VALUE_STREAM_INIT`. Plain zero-initialization remains valid
+ * when you only use the free functions such as
+ * `lonejson_writer_value_stream_open(...)`. The `state` pointer is owned by
+ * lonejson after a successful open call. Feed chunks with `push()`, validate
+ * EOF and return the writer to normal use with `close()`, and release any
+ * remaining stream resources with `cleanup()`.
  */
 typedef struct lonejson_writer_value_stream lonejson_writer_value_stream;
+
+/** Static initializer for one writer value stream receiver. */
+#define LONEJSON_WRITER_VALUE_STREAM_INIT                                    \
+  {                                                                          \
+    NULL, {0}, lonejson_writer_value_stream_open,                            \
+        lonejson_writer_value_stream_push, lonejson_writer_value_stream_close,\
+        lonejson_writer_value_stream_cleanup                                 \
+  }
 
 /* lonejson runtime is defined later in the header once callback and helper
  * object types are available.
@@ -1514,9 +1531,14 @@ typedef struct lonejson_array_stream_string_handler {
   lonejson_value_event_fn end;
 } lonejson_array_stream_string_handler;
 
-/** Destination member for `LONEJSON_FIELD_STRING_ARRAY_STREAM*` fields. Set the
- * handler before parsing; lonejson preserves the configured callbacks across
- * destination clearing and only resets per-parse internal state.
+/** Destination member for `LONEJSON_FIELD_STRING_ARRAY_STREAM*` fields.
+ *
+ * This is a configured parse-field helper, not a standalone receiver handle.
+ * Configure it with `lonejson_string_array_stream_set_handler()` before
+ * parsing; lonejson preserves the configured callbacks across destination
+ * clearing and only resets per-parse internal state. The free-function setup
+ * helper accepts either explicit `lonejson_string_array_stream_init()` output
+ * or plain zeroed storage and auto-initializes the field when needed.
  */
 typedef struct lonejson_string_array_stream {
   /** Configured callbacks used while parsing the string-array field. */
@@ -1527,7 +1549,17 @@ typedef struct lonejson_string_array_stream {
   int active;
   /** Internal state marker used by lonejson. Treat as opaque. */
   unsigned _lonejson_magic;
+  /** Configures callbacks for this stream field. */
+  lonejson_status (*set_handler)(
+      struct lonejson_string_array_stream *stream,
+      const lonejson_array_stream_string_handler *handler, void *user,
+      lonejson_error *error);
 } lonejson_string_array_stream;
+
+/** Static initializer for one mapped string-array stream field helper. */
+#define LONEJSON_STRING_ARRAY_STREAM_INIT                                     \
+  {{NULL, NULL, NULL}, NULL, 0, 0u,                                           \
+   lonejson_string_array_stream_set_handler}
 
 /** Callback invoked after one mapped array-stream item has been parsed into
  * the configured reusable item destination. The destination is valid only for
@@ -1565,6 +1597,12 @@ typedef struct lonejson_mapped_array_stream_handler {
  * parsed into the configured reusable destination, delivered to the callback,
  * then cleaned before the next item. Item maps may themselves contain mapped
  * array-stream fields, so nested streamed arrays compose through normal maps.
+ *
+ * This is a configured parse-field helper, not a standalone receiver handle.
+ * Configure it with `lonejson_mapped_array_stream_set_handler()` before
+ * parsing. The free-function setup helper accepts either explicit
+ * `lonejson_mapped_array_stream_init()` output or plain zeroed storage and
+ * auto-initializes the field when needed.
  */
 typedef struct lonejson_mapped_array_stream {
   /** Configured item map, reusable destination, callback, and user pointer. */
@@ -1573,7 +1611,16 @@ typedef struct lonejson_mapped_array_stream {
   int active;
   /** Internal state marker used by lonejson. Treat as opaque. */
   unsigned _lonejson_magic;
+  /** Configures callbacks and reusable item storage for this stream field. */
+  lonejson_status (*set_handler)(struct lonejson_mapped_array_stream *stream,
+                                 const lonejson_mapped_array_stream_handler
+                                     *handler,
+                                 lonejson_error *error);
 } lonejson_mapped_array_stream;
+
+/** Static initializer for one mapped object-array stream field helper. */
+#define LONEJSON_MAPPED_ARRAY_STREAM_INIT                                     \
+  {{NULL, NULL, NULL, NULL}, 0, 0u, lonejson_mapped_array_stream_set_handler}
 
 /** Visitor callbacks for one arbitrary JSON value. String values and object
  * keys are delivered as decoded UTF-8 in chunks. Number values are delivered as
@@ -1833,6 +1880,8 @@ struct lonejson {
   void (*init)(lonejson *runtime, const lonejson_map *map, void *value);
   /** Resets a mapped value while preserving caller-owned fixed backing. */
   void (*reset)(lonejson *runtime, const lonejson_map *map, void *value);
+  /** Releases dynamic storage owned by one mapped value. */
+  void (*cleanup)(lonejson *runtime, const lonejson_map *map, void *value);
   /** Opens an object-framed stream over a reader callback. */
   lonejson_stream *(*stream_open_reader)(lonejson *runtime, const lonejson_map *map,
                                          lonejson_reader_fn reader, void *user,
@@ -1980,6 +2029,91 @@ struct lonejson {
   lonejson_status (*writer_init_sink)(lonejson *runtime, lonejson_writer *writer,
                                       lonejson_sink_fn sink, void *sink_user,
                                       lonejson_error *error);
+  /** Writes one top-level JSON string from a reader to a sink. */
+  lonejson_status (*write_json_string_sink)(
+      lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+      lonejson_sink_fn sink, void *sink_user, lonejson_error *error);
+  /** Writes one top-level JSON string from a buffer to a sink. */
+  lonejson_status (*write_json_string_buffer_sink)(
+      lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
+      void *sink_user, lonejson_error *error);
+  /** Writes one top-level JSON string from a spooled value to a sink. */
+  lonejson_status (*write_json_string_spooled_sink)(
+      lonejson *runtime, const lonejson_spooled *value, lonejson_sink_fn sink,
+      void *sink_user, lonejson_error *error);
+  /** Serializes one mapped struct into a caller buffer. */
+  lonejson_status (*serialize_buffer)(lonejson *runtime, const lonejson_map *map,
+                                      const void *src, char *buffer,
+                                      size_t capacity, size_t *needed,
+                                      lonejson_error *error);
+  /** Serializes one mapped struct into a newly allocated string. */
+  char *(*serialize_alloc)(lonejson *runtime, const lonejson_map *map,
+                           const void *src, size_t *out_len,
+                           lonejson_error *error);
+  /** Serializes one mapped struct into an owned output buffer. */
+  lonejson_status (*serialize_owned)(lonejson *runtime, const lonejson_map *map,
+                                     const void *src,
+                                     lonejson_owned_buffer *out,
+                                     lonejson_error *error);
+  /** Serializes one mapped struct to an open file. */
+  lonejson_status (*serialize_filep)(lonejson *runtime, const lonejson_map *map,
+                                     const void *src, FILE *fp,
+                                     lonejson_error *error);
+  /** Serializes one mapped struct to a filesystem path. */
+  lonejson_status (*serialize_path)(lonejson *runtime, const lonejson_map *map,
+                                    const void *src, const char *path,
+                                    lonejson_error *error);
+  /** Serializes mapped structs as JSONL to a sink. */
+  lonejson_status (*serialize_jsonl_sink)(
+      lonejson *runtime, const lonejson_map *map, const void *items,
+      size_t count, size_t stride, lonejson_sink_fn sink, void *user,
+      lonejson_error *error);
+  /** Serializes mapped structs as JSONL into a caller buffer. */
+  lonejson_status (*serialize_jsonl_buffer)(
+      lonejson *runtime, const lonejson_map *map, const void *items,
+      size_t count, size_t stride, char *buffer, size_t capacity,
+      size_t *needed, lonejson_error *error);
+  /** Serializes mapped structs as JSONL into a newly allocated string. */
+  char *(*serialize_jsonl_alloc)(lonejson *runtime, const lonejson_map *map,
+                                 const void *items, size_t count,
+                                 size_t stride, size_t *out_len,
+                                 lonejson_error *error);
+  /** Serializes mapped structs as JSONL into an owned output buffer. */
+  lonejson_status (*serialize_jsonl_owned)(
+      lonejson *runtime, const lonejson_map *map, const void *items,
+      size_t count, size_t stride, lonejson_owned_buffer *out,
+      lonejson_error *error);
+  /** Serializes mapped structs as JSONL to an open file. */
+  lonejson_status (*serialize_jsonl_filep)(
+      lonejson *runtime, const lonejson_map *map, const void *items,
+      size_t count, size_t stride, FILE *fp, lonejson_error *error);
+  /** Serializes mapped structs as JSONL to a filesystem path. */
+  lonejson_status (*serialize_jsonl_path)(
+      lonejson *runtime, const lonejson_map *map, const void *items,
+      size_t count, size_t stride, const char *path, lonejson_error *error);
+#ifdef LONEJSON_WITH_CURL
+  /** Initializes one curl parse adapter. */
+  lonejson_status (*curl_parse_init)(lonejson *runtime, lonejson_curl_parse *ctx,
+                                     const lonejson_map *map, void *dst);
+  /** Initializes one curl selected-array parse adapter. */
+  lonejson_status (*curl_array_parse_init)(
+      lonejson *runtime, lonejson_curl_array_parse *ctx, const char *path,
+      const lonejson_map *map, void *dst,
+      lonejson_array_stream_item_fn callback, void *user);
+  /** Initializes one curl selected string-array parse adapter. */
+  lonejson_status (*curl_string_array_parse_init)(
+      lonejson *runtime, lonejson_curl_string_array_parse *ctx,
+      const char *path, const lonejson_array_stream_string_handler *handler,
+      void *user);
+  /** Initializes one curl selected string-items parse adapter. */
+  lonejson_status (*curl_string_items_parse_init)(
+      lonejson *runtime, lonejson_curl_string_items_parse *ctx,
+      const char *path, lonejson_array_stream_string_fn callback, void *user);
+  /** Initializes one curl upload adapter for a mapped struct. */
+  lonejson_status (*curl_upload_init)(lonejson *runtime,
+                                      lonejson_curl_upload *ctx,
+                                      const lonejson_map *map, const void *src);
+#endif
   /** Releases the runtime and all runtime-owned state. */
   void (*free)(lonejson *runtime);
 };
@@ -3521,7 +3655,13 @@ lonejson_read_result lonejson_buffer_reader_read(void *user,
 lonejson_value_visitor lonejson_default_value_visitor(void);
 /** Initializes a mapped string-array stream field with no handler. */
 void lonejson_string_array_stream_init(lonejson_string_array_stream *stream);
-/** Configures callbacks for a mapped string-array stream field. */
+/** Configures callbacks for a mapped string-array stream field.
+ *
+ * `stream` may point at either explicit `lonejson_string_array_stream_init()`
+ * output or plain zeroed storage. This helper auto-initializes the field when
+ * needed and preserves the configured callbacks across later destination
+ * clearing.
+ */
 lonejson_status lonejson_string_array_stream_set_handler(
     lonejson_string_array_stream *stream,
     const lonejson_array_stream_string_handler *handler, void *user,
@@ -3530,12 +3670,19 @@ lonejson_status lonejson_string_array_stream_set_handler(
 void lonejson_mapped_array_stream_init(lonejson_mapped_array_stream *stream);
 /** Configures callbacks and reusable item storage for a mapped array-stream
  * field.
+ *
+ * `stream` may point at either explicit `lonejson_mapped_array_stream_init()`
+ * output or plain zeroed storage. This helper auto-initializes the field when
+ * needed and preserves the configured handler across later destination
+ * clearing.
  */
 lonejson_status lonejson_mapped_array_stream_set_handler(
     lonejson_mapped_array_stream *stream,
     const lonejson_mapped_array_stream_handler *handler, lonejson_error *error);
 /** Initializes a spool handle with the runtime's default spool policy. */
 void lonejson_spooled_init(lonejson *runtime, lonejson_spooled *value);
+/** Initializes a writer value stream receiver for method-style use. */
+void lonejson_writer_value_stream_init(lonejson_writer_value_stream *stream);
 /** Initializes a spool handle with one named runtime spool policy. Unknown
  * classes fall back to `LONEJSON_SPOOL_CLASS_DEFAULT`.
  */
@@ -4829,7 +4976,13 @@ lonejson_serialize_jsonl_path(lonejson *runtime, const lonejson_map *map,
                               const char *path,
                               lonejson_error *error);
 
-/** Frees dynamic storage owned by a mapped value. */
+/** Frees dynamic storage owned by a mapped value.
+ *
+ * Cleanup remains available as a free function because it is runtime-
+ * independent: it only releases storage already owned by `value` according to
+ * `map` and does not depend on any instance policy. `lonejson` also exposes a
+ * method twin for API symmetry on runtime-owned entrypoints.
+ */
 void lonejson_cleanup(const lonejson_map *map, void *value);
 /** Initializes a mapped value according to its field descriptors. Use this
  * instead of manual `memset` when you need a known reusable starting state,
@@ -4846,7 +4999,7 @@ void lonejson_reset(lonejson *runtime, const lonejson_map *map, void *value);
 
 /** Curl response parse adapter state for incremental `CURLOPT_WRITEFUNCTION`
  * parsing. */
-typedef struct lonejson_curl_parse {
+struct lonejson_curl_parse {
   /** Opaque push-parser state owned by the curl parse adapter. */
   void *parser;
 #if defined(LONEJSON_INTERNAL_BUILD) || defined(LONEJSON_IMPLEMENTATION)
@@ -4859,12 +5012,19 @@ typedef struct lonejson_curl_parse {
   lonejson_error error;
   /** Reserved opaque lifecycle state for the curl parse adapter. */
   unsigned char _reserved_state[8];
-} lonejson_curl_parse;
+  /** Feeds one curl write chunk into this parse adapter. */
+  size_t (*write_callback)(struct lonejson_curl_parse *ctx, char *ptr,
+                           size_t size, size_t nmemb);
+  /** Finalizes this parse adapter after curl EOF. */
+  lonejson_status (*finish)(struct lonejson_curl_parse *ctx);
+  /** Releases resources owned by this parse adapter. */
+  void (*cleanup)(struct lonejson_curl_parse *ctx);
+};
 
 /** Curl response adapter state for streaming selected array items from
  * `CURLOPT_WRITEFUNCTION` chunks.
  */
-typedef struct lonejson_curl_array_parse {
+struct lonejson_curl_array_parse {
   /** Push-fed selected-array stream owned by the curl adapter. */
   lonejson_array_stream *stream;
   /** Map used to parse each selected array item. */
@@ -4879,12 +5039,19 @@ typedef struct lonejson_curl_array_parse {
   lonejson_error error;
   /** Reserved opaque lifecycle state for the curl array adapter. */
   unsigned char _reserved_state[8];
-} lonejson_curl_array_parse;
+  /** Feeds one curl write chunk into this array parse adapter. */
+  size_t (*write_callback)(struct lonejson_curl_array_parse *ctx, char *ptr,
+                           size_t size, size_t nmemb);
+  /** Finalizes this array parse adapter after curl EOF. */
+  lonejson_status (*finish)(struct lonejson_curl_array_parse *ctx);
+  /** Releases resources owned by this array parse adapter. */
+  void (*cleanup)(struct lonejson_curl_array_parse *ctx);
+};
 
 /** Curl response adapter state for streaming selected string array items from
  * `CURLOPT_WRITEFUNCTION` chunks.
  */
-typedef struct lonejson_curl_string_array_parse {
+struct lonejson_curl_string_array_parse {
   /** Push-fed selected-array stream owned by the curl adapter. */
   lonejson_array_stream *stream;
   /** Handler invoked for decoded string item chunks. */
@@ -4895,12 +5062,19 @@ typedef struct lonejson_curl_string_array_parse {
   lonejson_error error;
   /** Reserved opaque lifecycle state for the curl string-array adapter. */
   unsigned char _reserved_state[8];
-} lonejson_curl_string_array_parse;
+  /** Feeds one curl write chunk into this string-array parse adapter. */
+  size_t (*write_callback)(struct lonejson_curl_string_array_parse *ctx,
+                           char *ptr, size_t size, size_t nmemb);
+  /** Finalizes this string-array parse adapter after curl EOF. */
+  lonejson_status (*finish)(struct lonejson_curl_string_array_parse *ctx);
+  /** Releases resources owned by this string-array parse adapter. */
+  void (*cleanup)(struct lonejson_curl_string_array_parse *ctx);
+};
 
 /** Curl response adapter state for selected string array items reported once
  * per decoded item from `CURLOPT_WRITEFUNCTION` chunks.
  */
-typedef struct lonejson_curl_string_items_parse {
+struct lonejson_curl_string_items_parse {
   /** Push-fed selected-array stream owned by the curl adapter. */
   lonejson_array_stream *stream;
   /** Callback invoked for each complete decoded string item. */
@@ -4911,15 +5085,29 @@ typedef struct lonejson_curl_string_items_parse {
   lonejson_error error;
   /** Reserved opaque lifecycle state for the curl string-items adapter. */
   unsigned char _reserved_state[8];
-} lonejson_curl_string_items_parse;
+  /** Feeds one curl write chunk into this string-items parse adapter. */
+  size_t (*write_callback)(struct lonejson_curl_string_items_parse *ctx,
+                           char *ptr, size_t size, size_t nmemb);
+  /** Finalizes this string-items parse adapter after curl EOF. */
+  lonejson_status (*finish)(struct lonejson_curl_string_items_parse *ctx);
+  /** Releases resources owned by this string-items parse adapter. */
+  void (*cleanup)(struct lonejson_curl_string_items_parse *ctx);
+};
 
 /** Curl upload adapter state for streaming generated JSON to libcurl. */
-typedef struct lonejson_curl_upload {
+struct lonejson_curl_upload {
   /** Underlying pull-style JSON generator used by the curl adapter. */
   lonejson_generator generator;
   /** Reserved opaque lifecycle state for the curl upload adapter. */
   unsigned char _reserved_state[8];
-} lonejson_curl_upload;
+  /** Reads one curl upload chunk from this adapter. */
+  size_t (*read_callback)(struct lonejson_curl_upload *ctx, char *ptr,
+                          size_t size, size_t nmemb);
+  /** Returns the upload size this adapter reports to curl. */
+  curl_off_t (*size_fn)(const struct lonejson_curl_upload *ctx);
+  /** Releases resources owned by this upload adapter. */
+  void (*cleanup)(struct lonejson_curl_upload *ctx);
+};
 
 /** Initializes a curl parse adapter suitable for `CURLOPT_WRITEFUNCTION`. */
 lonejson_status lonejson_curl_parse_init(lonejson_curl_parse *ctx,
@@ -5496,11 +5684,18 @@ typedef lonejson_value_visitor lj_value_visitor;
  * array and enclosing document are still validated before parse completion.
  */
 typedef lonejson_array_stream_string_handler lj_array_stream_string_handler;
-/** Destination member for `LONEJSON_FIELD_STRING_ARRAY_STREAM*` fields. Set the
- * handler before parsing; lonejson preserves the configured callbacks across
- * destination clearing and only resets per-parse internal state.
+/** Destination member for `LONEJSON_FIELD_STRING_ARRAY_STREAM*` fields.
+ *
+ * This is a configured parse-field helper, not a standalone receiver handle.
+ * Configure it with `lj_string_array_stream_set_handler()` before parsing;
+ * lonejson preserves the configured callbacks across destination clearing and
+ * only resets per-parse internal state.
  */
 typedef lonejson_string_array_stream lj_string_array_stream;
+/** Static initializer for one short-alias mapped string-array stream field
+ * helper.
+ */
+#define LJ_STRING_ARRAY_STREAM_INIT LONEJSON_STRING_ARRAY_STREAM_INIT
 /** Callback invoked after one mapped array-stream item has been parsed into
  * the configured reusable item destination. The destination is valid only for
  * the duration of the callback; lonejson cleans and reuses it before parsing
@@ -5527,6 +5722,10 @@ typedef lonejson_mapped_array_stream_handler lj_mapped_array_stream_handler;
  * array-stream fields, so nested streamed arrays compose through normal maps.
  */
 typedef lonejson_mapped_array_stream lj_mapped_array_stream;
+/** Static initializer for one short-alias mapped object-array stream field
+ * helper.
+ */
+#define LJ_MAPPED_ARRAY_STREAM_INIT LONEJSON_MAPPED_ARRAY_STREAM_INIT
 /** Storage model used by a mapped field. */
 typedef lonejson_storage_kind lj_storage_kind;
 /** Behavior used when a fixed-capacity output or mapped field is too small. */
@@ -5604,14 +5803,18 @@ typedef lonejson_map lj_map;
 typedef lonejson_writer lj_writer;
 /** Public state for a push-fed arbitrary JSON value inside a writer.
  *
- * Zero-initialize the struct before first use. The `state` pointer is owned by
- * lonejson after a successful `lonejson_writer_value_stream_open()` call. Feed
- * chunks with
- * `lonejson_writer_value_stream_push()`, validate EOF and return the writer to
- * normal use with `lonejson_writer_value_stream_close()`, and release any
- * remaining stream resources with `lonejson_writer_value_stream_cleanup()`.
+ * If you use the receiver-method surface (`stream.open(...)`), initialize the
+ * struct first with `lonejson_writer_value_stream_init()` or
+ * `LONEJSON_WRITER_VALUE_STREAM_INIT`. Plain zero-initialization remains valid
+ * when you only use the free functions such as
+ * `lonejson_writer_value_stream_open(...)`. The `state` pointer is owned by
+ * lonejson after a successful open call. Feed chunks with `push()`, validate
+ * EOF and return the writer to normal use with `close()`, and release any
+ * remaining stream resources with `cleanup()`.
  */
 typedef lonejson_writer_value_stream lj_writer_value_stream;
+/** Short alias for `LONEJSON_WRITER_VALUE_STREAM_INIT`. */
+#define LJ_WRITER_VALUE_STREAM_INIT LONEJSON_WRITER_VALUE_STREAM_INIT
 /** Producer callback used by `lonejson_writer_generator_init()`.
  *
  * The callback emits zero or more writer events into `writer`. Return
@@ -5888,6 +6091,11 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_mapped_array_stream_set_handler(
 LONEJSON_SHORT_ALIAS_INLINE void lj_spooled_init(lonejson *runtime,
                                                  lj_spooled *value) {
   lonejson_spooled_init(runtime, value);
+}
+/** Initializes a writer value stream receiver for method-style use. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_writer_value_stream_init(lj_writer_value_stream *stream) {
+  lonejson_writer_value_stream_init(stream);
 }
 /** Initializes a spool handle with one named runtime spool policy. */
 LONEJSON_SHORT_ALIAS_INLINE void

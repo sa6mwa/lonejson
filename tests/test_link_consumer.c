@@ -66,6 +66,8 @@ int main(void) {
       "{\"person\":{\"name\":\"Alice\",\"age\":37,\"active\":true},"
       "\"tags\":[\"prod\",\"edge\"]}";
   consumer_log log_record;
+  lonejson_string_array_stream string_stream = LONEJSON_STRING_ARRAY_STREAM_INIT;
+  lonejson_mapped_array_stream mapped_stream = LONEJSON_MAPPED_ARRAY_STREAM_INIT;
   lonejson_json_value value;
   consumer_sink sink;
   lonejson_error error;
@@ -87,14 +89,23 @@ int main(void) {
       log_record.tags.count != 2u ||
       strcmp(log_record.tags.items[0], "prod") != 0 ||
       strcmp(log_record.tags.items[1], "edge") != 0) {
-    lonejson_cleanup(&consumer_log_map, &log_record);
+    consumer_runtime()->cleanup(consumer_runtime(), &consumer_log_map,
+                                &log_record);
+    return 1;
+  }
+  if (string_stream.set_handler == NULL || mapped_stream.set_handler == NULL ||
+      consumer_runtime()->cleanup == NULL ||
+      consumer_runtime()->serialize_buffer == NULL) {
+    consumer_runtime()->cleanup(consumer_runtime(), &consumer_log_map,
+                                &log_record);
     return 1;
   }
 
-  status = lonejson_serialize_buffer(consumer_runtime(), &consumer_log_map,
-                                     &log_record, buffer, sizeof(buffer), NULL,
-                                     &error);
-  lonejson_cleanup(&consumer_log_map, &log_record);
+  status = consumer_runtime()->serialize_buffer(
+      consumer_runtime(), &consumer_log_map, &log_record, buffer,
+      sizeof(buffer), NULL, &error);
+  consumer_runtime()->cleanup(consumer_runtime(), &consumer_log_map,
+                              &log_record);
   if (status != LONEJSON_STATUS_OK) {
     return 1;
   }

@@ -1976,6 +1976,15 @@ lonejson_status lonejson_writer_value_stream_open(
                                                         error);
 }
 
+void lonejson_writer_value_stream_init(lonejson_writer_value_stream *stream) {
+  if (stream == NULL) {
+    return;
+  }
+  memset(stream, 0, sizeof(*stream));
+  lonejson__writer_value_stream_assign_methods(stream);
+  lonejson__clear_error(&stream->error);
+}
+
 lonejson_status lonejson_writer_value_stream_push(
     lonejson_writer_value_stream *stream, const void *data, size_t len,
     lonejson_error *error) {

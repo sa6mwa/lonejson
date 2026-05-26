@@ -1199,6 +1199,22 @@ lonejson__json_value_is_initialized(const lonejson_json_value *value) {
              lonejson__init_cookie(value, LONEJSON__JSON_VALUE_MAGIC);
 }
 
+static void lonejson__string_array_stream_assign_methods(
+    lonejson_string_array_stream *stream) {
+  if (stream == NULL) {
+    return;
+  }
+  stream->set_handler = lonejson_string_array_stream_set_handler;
+}
+
+static void lonejson__mapped_array_stream_assign_methods(
+    lonejson_mapped_array_stream *stream) {
+  if (stream == NULL) {
+    return;
+  }
+  stream->set_handler = lonejson_mapped_array_stream_set_handler;
+}
+
 static void lonejson__source_assign_methods(lonejson_source *value) {
   static const lonejson_source template_methods = {
       0, NULL, -1, NULL,

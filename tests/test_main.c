@@ -95,10 +95,14 @@ int main(void) {
   test_array_stream_push_string_runtime_value_limits();
   test_array_stream_push_string_failure_modes();
   test_array_stream_mapped_string_field_envelope();
+  test_array_stream_mapped_string_field_zeroed_set_handler();
+  test_array_stream_mapped_string_field_lifecycle_preserves_set_handler_method();
   test_array_stream_mapped_string_field_metadata_and_long_item();
   test_array_stream_mapped_string_field_failure_modes();
   test_array_stream_mapped_string_field_serialize_rejected();
   test_array_stream_mapped_field_nested_items();
+  test_array_stream_mapped_field_zeroed_set_handler();
+  test_array_stream_mapped_field_lifecycle_preserves_set_handler_method();
   test_array_stream_mapped_field_nested_json_value_sink_reuse();
   test_array_stream_mapped_field_nested_json_value_capture_budget_reuse();
   test_array_stream_mapped_field_failure_modes();
@@ -294,6 +298,7 @@ int main(void) {
   test_writer_invalid_state_and_sink_failure();
   test_writer_number_text_rejects_non_numbers();
   test_writer_value_stream_success_and_commas();
+  test_writer_value_stream_method_initializers();
   test_writer_value_stream_root_scalars();
   test_writer_value_stream_failure_modes();
   test_writer_value_stream_state_and_sink_failures();

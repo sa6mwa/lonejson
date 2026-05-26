@@ -825,6 +825,28 @@ static lonejson_status lonejson__runtime_generator_init(
 static lonejson_status lonejson__runtime_writer_init_sink(
     lonejson *runtime, lonejson_writer *writer, lonejson_sink_fn sink,
     void *sink_user, lonejson_error *error);
+static void lonejson__runtime_cleanup_value(lonejson *runtime,
+                                            const lonejson_map *map,
+                                            void *value);
+#ifdef LONEJSON_WITH_CURL
+static lonejson_status lonejson__runtime_curl_parse_init(
+    lonejson *runtime, lonejson_curl_parse *ctx, const lonejson_map *map,
+    void *dst);
+static lonejson_status lonejson__runtime_curl_array_parse_init(
+    lonejson *runtime, lonejson_curl_array_parse *ctx, const char *path,
+    const lonejson_map *map, void *dst,
+    lonejson_array_stream_item_fn callback, void *user);
+static lonejson_status lonejson__runtime_curl_string_array_parse_init(
+    lonejson *runtime, lonejson_curl_string_array_parse *ctx,
+    const char *path, const lonejson_array_stream_string_handler *handler,
+    void *user);
+static lonejson_status lonejson__runtime_curl_string_items_parse_init(
+    lonejson *runtime, lonejson_curl_string_items_parse *ctx,
+    const char *path, lonejson_array_stream_string_fn callback, void *user);
+static lonejson_status lonejson__runtime_curl_upload_init(
+    lonejson *runtime, lonejson_curl_upload *ctx, const lonejson_map *map,
+    const void *src);
+#endif
 
 lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
   lonejson_config resolved = lonejson_default_config();
@@ -938,6 +960,7 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
   runtime->visit_value_fd = lonejson__runtime_visit_value_fd;
   runtime->init = lonejson__runtime_init_value;
   runtime->reset = lonejson__runtime_reset_value;
+  runtime->cleanup = lonejson__runtime_cleanup_value;
   runtime->stream_open_reader = lonejson__runtime_stream_open_reader;
   runtime->stream_open_filep = lonejson__runtime_stream_open_filep;
   runtime->stream_open_path = lonejson__runtime_stream_open_path;
@@ -979,6 +1002,30 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
       lonejson__runtime_value_rewrite_selector_path;
   runtime->generator_init = lonejson__runtime_generator_init;
   runtime->writer_init_sink = lonejson__runtime_writer_init_sink;
+  runtime->write_json_string_sink = lonejson_write_json_string_sink;
+  runtime->write_json_string_buffer_sink = lonejson_write_json_string_buffer_sink;
+  runtime->write_json_string_spooled_sink =
+      lonejson_write_json_string_spooled_sink;
+  runtime->serialize_buffer = lonejson_serialize_buffer;
+  runtime->serialize_alloc = lonejson_serialize_alloc;
+  runtime->serialize_owned = lonejson_serialize_owned;
+  runtime->serialize_filep = lonejson_serialize_filep;
+  runtime->serialize_path = lonejson_serialize_path;
+  runtime->serialize_jsonl_sink = lonejson_serialize_jsonl_sink;
+  runtime->serialize_jsonl_buffer = lonejson_serialize_jsonl_buffer;
+  runtime->serialize_jsonl_alloc = lonejson_serialize_jsonl_alloc;
+  runtime->serialize_jsonl_owned = lonejson_serialize_jsonl_owned;
+  runtime->serialize_jsonl_filep = lonejson_serialize_jsonl_filep;
+  runtime->serialize_jsonl_path = lonejson_serialize_jsonl_path;
+#ifdef LONEJSON_WITH_CURL
+  runtime->curl_parse_init = lonejson__runtime_curl_parse_init;
+  runtime->curl_array_parse_init = lonejson__runtime_curl_array_parse_init;
+  runtime->curl_string_array_parse_init =
+      lonejson__runtime_curl_string_array_parse_init;
+  runtime->curl_string_items_parse_init =
+      lonejson__runtime_curl_string_items_parse_init;
+  runtime->curl_upload_init = lonejson__runtime_curl_upload_init;
+#endif
   runtime->free = lonejson_free;
 
   lonejson__clear_error(error);
@@ -1059,6 +1106,7 @@ void lonejson_string_array_stream_init(lonejson_string_array_stream *stream) {
   memset(stream, 0, sizeof(*stream));
   stream->_lonejson_magic =
       lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+  lonejson__string_array_stream_assign_methods(stream);
 }
 
 lonejson_status lonejson_string_array_stream_set_handler(
@@ -1088,6 +1136,7 @@ void lonejson_mapped_array_stream_init(lonejson_mapped_array_stream *stream) {
   memset(stream, 0, sizeof(*stream));
   stream->_lonejson_magic =
       lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
+  lonejson__mapped_array_stream_assign_methods(stream);
 }
 
 lonejson_status lonejson_mapped_array_stream_set_handler(
@@ -1650,6 +1699,13 @@ static void lonejson__runtime_reset_value(lonejson *runtime,
                                           const lonejson_map *map,
                                           void *value) {
   lonejson_reset(runtime, map, value);
+}
+
+static void lonejson__runtime_cleanup_value(lonejson *runtime,
+                                            const lonejson_map *map,
+                                            void *value) {
+  (void)runtime;
+  lonejson_cleanup(map, value);
 }
 
 static void lonejson__stream_assign_methods(lonejson_stream *stream) {
@@ -2471,6 +2527,43 @@ static lonejson_status lonejson__runtime_writer_init_sink(
     void *sink_user, lonejson_error *error) {
   return lonejson_writer_init_sink(runtime, writer, sink, sink_user, error);
 }
+
+#ifdef LONEJSON_WITH_CURL
+static lonejson_status lonejson__runtime_curl_parse_init(
+    lonejson *runtime, lonejson_curl_parse *ctx, const lonejson_map *map,
+    void *dst) {
+  return lonejson_curl_parse_init(ctx, runtime, map, dst);
+}
+
+static lonejson_status lonejson__runtime_curl_array_parse_init(
+    lonejson *runtime, lonejson_curl_array_parse *ctx, const char *path,
+    const lonejson_map *map, void *dst,
+    lonejson_array_stream_item_fn callback, void *user) {
+  return lonejson_curl_array_parse_init(ctx, runtime, path, map, dst, callback,
+                                        user);
+}
+
+static lonejson_status lonejson__runtime_curl_string_array_parse_init(
+    lonejson *runtime, lonejson_curl_string_array_parse *ctx,
+    const char *path, const lonejson_array_stream_string_handler *handler,
+    void *user) {
+  return lonejson_curl_string_array_parse_init(ctx, runtime, path, handler,
+                                               user);
+}
+
+static lonejson_status lonejson__runtime_curl_string_items_parse_init(
+    lonejson *runtime, lonejson_curl_string_items_parse *ctx,
+    const char *path, lonejson_array_stream_string_fn callback, void *user) {
+  return lonejson_curl_string_items_parse_init(ctx, runtime, path, callback,
+                                               user);
+}
+
+static lonejson_status lonejson__runtime_curl_upload_init(
+    lonejson *runtime, lonejson_curl_upload *ctx, const lonejson_map *map,
+    const void *src) {
+  return lonejson_curl_upload_init(ctx, runtime, map, src);
+}
+#endif
 
 lonejson_status lonejson_validate_buffer(lonejson *runtime, const void *data,
                                          size_t len, lonejson_error *error) {

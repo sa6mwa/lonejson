@@ -634,6 +634,7 @@ static lonejson_status lonejson__stream_value_begin(lonejson_parser *parser,
         return status;
       }
     }
+    lonejson__string_array_stream_assign_methods(stream);
     stream->active = 1;
     parser->stream_value_active = 1;
     parser->stream_field = field;

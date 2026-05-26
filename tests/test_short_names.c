@@ -80,6 +80,8 @@ int main(void) {
   static const char payload[] = "short alias text";
   static const char parse_json[] =
       "{\"name\":\"Alias\",\"age\":42,\"active\":true}";
+  lj_string_array_stream macro_string_stream = LJ_STRING_ARRAY_STREAM_INIT;
+  lj_mapped_array_stream macro_mapped_stream = LJ_MAPPED_ARRAY_STREAM_INIT;
   short_doc doc;
   short_parse_doc short_record;
   short_parse_doc long_record;
@@ -98,6 +100,10 @@ int main(void) {
   lj_init(short_runtime(), &short_parse_doc_map, &short_record);
   lonejson_init(short_runtime(), &short_parse_doc_map, &long_record);
   lj_init(short_runtime(), &short_stream_doc_map, &stream_doc);
+  if (macro_string_stream.set_handler != lonejson_string_array_stream_set_handler ||
+      macro_mapped_stream.set_handler != lonejson_mapped_array_stream_set_handler) {
+    return 1;
+  }
   strcpy(doc.id, "ok");
 
   fd = mkstemp(path);

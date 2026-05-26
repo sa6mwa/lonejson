@@ -11,6 +11,109 @@ static void lonejson__curl_state_mark_live(unsigned char state[8]) {
   memcpy(state, lonejson__curl_state_magic, sizeof(lonejson__curl_state_magic));
 }
 
+static size_t lonejson__curl_parse_write_method(lonejson_curl_parse *ctx,
+                                                char *ptr, size_t size,
+                                                size_t nmemb) {
+  return lonejson_curl_write_callback(ptr, size, nmemb, ctx);
+}
+
+static lonejson_status
+lonejson__curl_parse_finish_method(lonejson_curl_parse *ctx) {
+  return lonejson_curl_parse_finish(ctx);
+}
+
+static size_t lonejson__curl_array_write_method(lonejson_curl_array_parse *ctx,
+                                                char *ptr, size_t size,
+                                                size_t nmemb) {
+  return lonejson_curl_array_write_callback(ptr, size, nmemb, ctx);
+}
+
+static lonejson_status
+lonejson__curl_array_finish_method(lonejson_curl_array_parse *ctx) {
+  return lonejson_curl_array_parse_finish(ctx);
+}
+
+static size_t lonejson__curl_string_array_write_method(
+    lonejson_curl_string_array_parse *ctx, char *ptr, size_t size,
+    size_t nmemb) {
+  return lonejson_curl_string_array_write_callback(ptr, size, nmemb, ctx);
+}
+
+static lonejson_status lonejson__curl_string_array_finish_method(
+    lonejson_curl_string_array_parse *ctx) {
+  return lonejson_curl_string_array_parse_finish(ctx);
+}
+
+static size_t lonejson__curl_string_items_write_method(
+    lonejson_curl_string_items_parse *ctx, char *ptr, size_t size,
+    size_t nmemb) {
+  return lonejson_curl_string_items_write_callback(ptr, size, nmemb, ctx);
+}
+
+static lonejson_status lonejson__curl_string_items_finish_method(
+    lonejson_curl_string_items_parse *ctx) {
+  return lonejson_curl_string_items_parse_finish(ctx);
+}
+
+static size_t lonejson__curl_upload_read_method(lonejson_curl_upload *ctx,
+                                                char *ptr, size_t size,
+                                                size_t nmemb) {
+  return lonejson_curl_read_callback(ptr, size, nmemb, ctx);
+}
+
+static curl_off_t
+lonejson__curl_upload_size_method(const lonejson_curl_upload *ctx) {
+  return lonejson_curl_upload_size(ctx);
+}
+
+static void lonejson__curl_parse_assign_methods(lonejson_curl_parse *ctx) {
+  if (ctx == NULL) {
+    return;
+  }
+  ctx->write_callback = lonejson__curl_parse_write_method;
+  ctx->finish = lonejson__curl_parse_finish_method;
+  ctx->cleanup = lonejson_curl_parse_cleanup;
+}
+
+static void
+lonejson__curl_array_parse_assign_methods(lonejson_curl_array_parse *ctx) {
+  if (ctx == NULL) {
+    return;
+  }
+  ctx->write_callback = lonejson__curl_array_write_method;
+  ctx->finish = lonejson__curl_array_finish_method;
+  ctx->cleanup = lonejson_curl_array_parse_cleanup;
+}
+
+static void lonejson__curl_string_array_parse_assign_methods(
+    lonejson_curl_string_array_parse *ctx) {
+  if (ctx == NULL) {
+    return;
+  }
+  ctx->write_callback = lonejson__curl_string_array_write_method;
+  ctx->finish = lonejson__curl_string_array_finish_method;
+  ctx->cleanup = lonejson_curl_string_array_parse_cleanup;
+}
+
+static void lonejson__curl_string_items_parse_assign_methods(
+    lonejson_curl_string_items_parse *ctx) {
+  if (ctx == NULL) {
+    return;
+  }
+  ctx->write_callback = lonejson__curl_string_items_write_method;
+  ctx->finish = lonejson__curl_string_items_finish_method;
+  ctx->cleanup = lonejson_curl_string_items_parse_cleanup;
+}
+
+static void lonejson__curl_upload_assign_methods(lonejson_curl_upload *ctx) {
+  if (ctx == NULL) {
+    return;
+  }
+  ctx->read_callback = lonejson__curl_upload_read_method;
+  ctx->size_fn = lonejson__curl_upload_size_method;
+  ctx->cleanup = lonejson_curl_upload_cleanup;
+}
+
 lonejson_status
 lonejson_curl_parse_init(lonejson_curl_parse *ctx, lonejson *runtime,
                          const lonejson_map *map, void *dst) {
@@ -26,6 +129,7 @@ lonejson_curl_parse_init(lonejson_curl_parse *ctx, lonejson *runtime,
     lonejson_curl_parse_cleanup(ctx);
   }
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_parse_assign_methods(ctx);
   lonejson__curl_state_mark_live(ctx->_reserved_state);
   runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
   if (runtime_state == NULL) {
@@ -104,6 +208,7 @@ void lonejson_curl_parse_cleanup(lonejson_curl_parse *ctx) {
                                                 runtime_snapshot);
   }
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_parse_assign_methods(ctx);
 }
 
 lonejson_status lonejson_curl_array_parse_init(
@@ -120,6 +225,7 @@ lonejson_status lonejson_curl_array_parse_init(
     lonejson_curl_array_parse_cleanup(ctx);
   }
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_array_parse_assign_methods(ctx);
   lonejson__curl_state_mark_live(ctx->_reserved_state);
   runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
   if (runtime_state == NULL) {
@@ -179,6 +285,7 @@ void lonejson_curl_array_parse_cleanup(lonejson_curl_array_parse *ctx) {
   }
   lonejson_array_stream_close(ctx->stream);
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_array_parse_assign_methods(ctx);
 }
 
 lonejson_status lonejson_curl_string_array_parse_init(
@@ -194,6 +301,7 @@ lonejson_status lonejson_curl_string_array_parse_init(
     lonejson_curl_string_array_parse_cleanup(ctx);
   }
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_string_array_parse_assign_methods(ctx);
   lonejson__curl_state_mark_live(ctx->_reserved_state);
   runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
   if (runtime_state == NULL) {
@@ -249,6 +357,7 @@ void lonejson_curl_string_array_parse_cleanup(
   }
   lonejson_array_stream_close(ctx->stream);
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_string_array_parse_assign_methods(ctx);
 }
 
 lonejson_status lonejson_curl_string_items_parse_init(
@@ -264,6 +373,7 @@ lonejson_status lonejson_curl_string_items_parse_init(
     lonejson_curl_string_items_parse_cleanup(ctx);
   }
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_string_items_parse_assign_methods(ctx);
   lonejson__curl_state_mark_live(ctx->_reserved_state);
   runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
   if (runtime_state == NULL) {
@@ -319,6 +429,7 @@ void lonejson_curl_string_items_parse_cleanup(
   }
   lonejson_array_stream_close(ctx->stream);
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_string_items_parse_assign_methods(ctx);
 }
 
 lonejson_status
@@ -335,6 +446,7 @@ lonejson_curl_upload_init(lonejson_curl_upload *ctx, lonejson *runtime,
     lonejson_curl_upload_cleanup(ctx);
   }
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_upload_assign_methods(ctx);
   lonejson__curl_state_mark_live(ctx->_reserved_state);
   runtime_state =
       lonejson__require_runtime_borrow(runtime, &borrow, &ctx->generator.error);
@@ -390,5 +502,6 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx) {
   }
   lonejson_generator_cleanup(&ctx->generator);
   memset(ctx, 0, sizeof(*ctx));
+  lonejson__curl_upload_assign_methods(ctx);
 }
 #endif

@@ -269,6 +269,54 @@ static void test_writer_value_stream_success_and_commas(void) {
   lonejson_writer_cleanup(&writer);
 }
 
+static void test_writer_value_stream_method_initializers(void) {
+  unsigned char out[128];
+  test_buffer_sink sink;
+  lonejson_writer writer;
+  lonejson_writer_value_stream stream;
+  lonejson_writer_value_stream macro_stream = LONEJSON_WRITER_VALUE_STREAM_INIT;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(out, 0, sizeof(out));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink, NULL,
+                               &error) == LONEJSON_STATUS_OK);
+  lonejson_writer_value_stream_init(&stream);
+  EXPECT(stream.open != NULL);
+  EXPECT(stream.push != NULL);
+  EXPECT(stream.close != NULL);
+  EXPECT(stream.cleanup != NULL);
+  EXPECT(stream.open(&stream, &writer, &error) == LONEJSON_STATUS_OK);
+  EXPECT(stream.push(&stream, "{\"a\":1}", 7u, &error) == LONEJSON_STATUS_OK);
+  EXPECT(stream.close(&stream, &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_writer_finish(&writer, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)out, "{\"a\":1}") == 0);
+  stream.cleanup(&stream);
+  lonejson_writer_cleanup(&writer);
+
+  memset(&sink, 0, sizeof(sink));
+  memset(out, 0, sizeof(out));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink, NULL,
+                               &error) == LONEJSON_STATUS_OK);
+  EXPECT(macro_stream.open != NULL);
+  EXPECT(macro_stream.push != NULL);
+  EXPECT(macro_stream.close != NULL);
+  EXPECT(macro_stream.cleanup != NULL);
+  EXPECT(macro_stream.open(&macro_stream, &writer, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(macro_stream.push(&macro_stream, "[1,2]", 5u, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(macro_stream.close(&macro_stream, &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_writer_finish(&writer, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)out, "[1,2]") == 0);
+  macro_stream.cleanup(&macro_stream);
+  lonejson_writer_cleanup(&writer);
+}
+
 static void test_writer_value_stream_root_scalars(void) {
   static const char *values[] = {"\"x\"", "-12.5e+2", "true", "false",
                                  "null"};

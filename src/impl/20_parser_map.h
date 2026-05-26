@@ -1274,6 +1274,7 @@ static void lonejson__cleanup_value_parse(lonejson_parser *parser,
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
     }
+    lonejson__string_array_stream_assign_methods(stream);
     stream->active = 0;
     break;
   }
@@ -1285,6 +1286,7 @@ static void lonejson__cleanup_value_parse(lonejson_parser *parser,
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
     }
+    lonejson__mapped_array_stream_assign_methods(stream);
     stream->active = 0;
     break;
   }
@@ -1793,6 +1795,7 @@ static void lonejson__init_value(const lonejson_field *field, void *ptr,
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
     }
+    lonejson__string_array_stream_assign_methods(stream);
     stream->active = 0;
     break;
   }
@@ -1804,6 +1807,7 @@ static void lonejson__init_value(const lonejson_field *field, void *ptr,
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
     }
+    lonejson__mapped_array_stream_assign_methods(stream);
     stream->active = 0;
     break;
   }
@@ -1892,6 +1896,7 @@ static void lonejson__init_value_parse(lonejson_parser *parser,
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
     }
+    lonejson__string_array_stream_assign_methods(stream);
     stream->active = 0;
     break;
   }
@@ -1903,6 +1908,7 @@ static void lonejson__init_value_parse(lonejson_parser *parser,
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
     }
+    lonejson__mapped_array_stream_assign_methods(stream);
     stream->active = 0;
     break;
   }
@@ -2034,6 +2040,7 @@ static void lonejson__cleanup_value(const lonejson_field *field, void *ptr) {
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
     }
+    lonejson__string_array_stream_assign_methods(stream);
     stream->active = 0;
     break;
   }
@@ -2045,6 +2052,7 @@ static void lonejson__cleanup_value(const lonejson_field *field, void *ptr) {
       stream->_lonejson_magic =
           lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
     }
+    lonejson__mapped_array_stream_assign_methods(stream);
     stream->active = 0;
     break;
   }

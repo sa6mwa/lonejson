@@ -2216,6 +2216,60 @@ static void test_array_stream_mapped_string_field_envelope(void) {
   lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
 }
 
+static void test_array_stream_mapped_string_field_zeroed_set_handler(void) {
+  static const char json[] =
+      "{\"keys\":[\"key-a\",\"key-b\"],\"cursor\":\"next-page\","
+      "\"index_seq\":123}";
+  test_mapped_string_array_stream_doc doc;
+  test_array_stream_string_seen seen;
+  lonejson_array_stream_string_handler handler;
+  lonejson_error error;
+
+  memset(&doc, 0, sizeof(doc));
+  memset(&seen, 0, sizeof(seen));
+  handler = test_array_stream_string_handler();
+  EXPECT(lonejson_string_array_stream_set_handler(
+             &doc.keys, &handler, &seen, &error) == LONEJSON_STATUS_OK);
+  EXPECT(test_parse_cstr(&test_mapped_string_array_stream_doc_map, &doc, json,
+                             NULL, &error) == LONEJSON_STATUS_OK);
+  EXPECT(seen.begins == 2u);
+  EXPECT(seen.ends == 2u);
+  EXPECT(strcmp(seen.items[0], "key-a") == 0);
+  EXPECT(strcmp(seen.items[1], "key-b") == 0);
+  EXPECT(strcmp(doc.cursor, "next-page") == 0);
+  EXPECT(doc.index_seq == 123u);
+  lonejson_cleanup(&test_mapped_string_array_stream_doc_map, &doc);
+}
+
+static void
+test_array_stream_mapped_string_field_lifecycle_preserves_set_handler_method(
+    void) {
+  test_mapped_string_array_stream_doc doc;
+  test_array_stream_string_seen seen;
+  lonejson_array_stream_string_handler handler;
+  lonejson *runtime;
+  lonejson_error error;
+
+  memset(&doc, 0, sizeof(doc));
+  memset(&seen, 0, sizeof(seen));
+  handler = test_array_stream_string_handler();
+  runtime = test_default_runtime();
+
+  runtime->init(runtime, &test_mapped_string_array_stream_doc_map, &doc);
+  EXPECT(doc.keys.set_handler == lonejson_string_array_stream_set_handler);
+  EXPECT(doc.keys.set_handler(&doc.keys, &handler, &seen, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(doc.keys.handler.chunk == handler.chunk);
+
+  runtime->reset(runtime, &test_mapped_string_array_stream_doc_map, &doc);
+  EXPECT(doc.keys.set_handler == lonejson_string_array_stream_set_handler);
+  EXPECT(doc.keys.handler.chunk == handler.chunk);
+
+  runtime->cleanup(runtime, &test_mapped_string_array_stream_doc_map, &doc);
+  EXPECT(doc.keys.set_handler == lonejson_string_array_stream_set_handler);
+  EXPECT(doc.keys.handler.chunk == handler.chunk);
+}
+
 static void test_array_stream_mapped_string_field_metadata_and_long_item(void) {
   static const char prefix[] = "{\"keys\":[\"";
   static const char suffix[] =
@@ -2624,6 +2678,114 @@ static void test_array_stream_mapped_field_nested_items(void) {
   lonejson_cleanup(&test_item_map, &item);
   lonejson_cleanup(&test_mapped_stream_board_map, &board);
   lonejson_cleanup(&test_mapped_stream_store_map, &store);
+}
+
+static void test_array_stream_mapped_field_zeroed_set_handler(void) {
+  static const char json[] =
+      "{\"boards\":[{\"name\":\"alpha\",\"items\":[{\"id\":1,"
+      "\"label\":\"one\"}],\"seq\":7}],\"tail\":\"done\"}";
+  test_mapped_stream_store store;
+  test_mapped_stream_board board;
+  test_item item;
+  test_mapped_stream_seen seen;
+  lonejson_mapped_array_stream_handler board_handler;
+  lonejson_mapped_array_stream_handler item_handler;
+  lonejson_error error;
+
+  memset(&store, 0, sizeof(store));
+  memset(&board, 0, sizeof(board));
+  memset(&item, 0, sizeof(item));
+  memset(&seen, 0, sizeof(seen));
+  memset(&board_handler, 0, sizeof(board_handler));
+  memset(&item_handler, 0, sizeof(item_handler));
+
+  seen.active_board = &board;
+  item_handler.item_map = &test_item_map;
+  item_handler.item_dst = &item;
+  item_handler.item = test_mapped_stream_item;
+  item_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(
+             &board.items, &item_handler, &error) == LONEJSON_STATUS_OK);
+
+  board_handler.item_map = &test_mapped_stream_board_map;
+  board_handler.item_dst = &board;
+  board_handler.item = test_mapped_stream_board_item;
+  board_handler.user = &seen;
+  EXPECT(lonejson_mapped_array_stream_set_handler(
+             &store.boards, &board_handler, &error) == LONEJSON_STATUS_OK);
+
+  EXPECT(test_parse_cstr(&test_mapped_stream_store_map, &store, json, NULL,
+                             &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(store.tail, "done") == 0);
+  EXPECT(seen.item_count == 1u);
+  EXPECT(seen.board_count == 1u);
+  EXPECT(strcmp(seen.item_board_names[0], "alpha") == 0);
+  EXPECT(seen.item_ids[0] == 1);
+  EXPECT(strcmp(seen.item_labels[0], "one") == 0);
+  EXPECT(strcmp(seen.board_names[0], "alpha") == 0);
+  EXPECT(seen.board_seqs[0] == 7);
+
+  lonejson_cleanup(&test_item_map, &item);
+  lonejson_cleanup(&test_mapped_stream_board_map, &board);
+  lonejson_cleanup(&test_mapped_stream_store_map, &store);
+}
+
+static void
+test_array_stream_mapped_field_lifecycle_preserves_set_handler_method(void) {
+  test_mapped_stream_store store;
+  test_mapped_stream_board board;
+  test_item item;
+  test_mapped_stream_seen seen;
+  lonejson_mapped_array_stream_handler board_handler;
+  lonejson_mapped_array_stream_handler item_handler;
+  lonejson *runtime;
+  lonejson_error error;
+
+  memset(&store, 0, sizeof(store));
+  memset(&board, 0, sizeof(board));
+  memset(&item, 0, sizeof(item));
+  memset(&seen, 0, sizeof(seen));
+  memset(&board_handler, 0, sizeof(board_handler));
+  memset(&item_handler, 0, sizeof(item_handler));
+
+  runtime = test_default_runtime();
+  runtime->init(runtime, &test_mapped_stream_board_map, &board);
+  runtime->init(runtime, &test_mapped_stream_store_map, &store);
+  EXPECT(board.items.set_handler == lonejson_mapped_array_stream_set_handler);
+  EXPECT(store.boards.set_handler == lonejson_mapped_array_stream_set_handler);
+
+  seen.active_board = &board;
+  item_handler.item_map = &test_item_map;
+  item_handler.item_dst = &item;
+  item_handler.item = test_mapped_stream_item;
+  item_handler.user = &seen;
+  EXPECT(board.items.set_handler(&board.items, &item_handler, &error) ==
+         LONEJSON_STATUS_OK);
+
+  board_handler.item_map = &test_mapped_stream_board_map;
+  board_handler.item_dst = &board;
+  board_handler.item = test_mapped_stream_board_item;
+  board_handler.user = &seen;
+  EXPECT(store.boards.set_handler(&store.boards, &board_handler, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(store.boards.handler.item == board_handler.item);
+  EXPECT(board.items.handler.item == item_handler.item);
+
+  runtime->reset(runtime, &test_mapped_stream_board_map, &board);
+  runtime->reset(runtime, &test_mapped_stream_store_map, &store);
+  EXPECT(board.items.set_handler == lonejson_mapped_array_stream_set_handler);
+  EXPECT(store.boards.set_handler == lonejson_mapped_array_stream_set_handler);
+  EXPECT(store.boards.handler.item == board_handler.item);
+  EXPECT(board.items.handler.item == item_handler.item);
+
+  runtime->cleanup(runtime, &test_mapped_stream_board_map, &board);
+  runtime->cleanup(runtime, &test_mapped_stream_store_map, &store);
+  EXPECT(board.items.set_handler == lonejson_mapped_array_stream_set_handler);
+  EXPECT(store.boards.set_handler == lonejson_mapped_array_stream_set_handler);
+  EXPECT(store.boards.handler.item == board_handler.item);
+  EXPECT(board.items.handler.item == item_handler.item);
+
+  runtime->cleanup(runtime, &test_item_map, &item);
 }
 
 static void test_array_stream_mapped_field_nested_json_value_sink_reuse(void) {
