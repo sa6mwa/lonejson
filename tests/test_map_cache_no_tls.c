@@ -1,5 +1,12 @@
 #define LONEJSON_TEST_FORCE_NO_TLS 1
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
 #include "test_support.inc"
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 int main(void) {
   static lonejson_field fields[1];

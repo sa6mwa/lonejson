@@ -66,10 +66,15 @@ object-framed streaming, selected-array streaming, selected-array rewrites,
 spool-backed fields, and native-Lua `json_value` decoding built on the same
 visitor model.
 
+Initialize mapped destinations with `lonejson_init(...)` before the first parse
+when they contain stateful handle fields such as `lonejson_spooled`,
+`lonejson_json_value`, or mapped array-stream helpers. Reuse initialized values
+with `lonejson_reset(...)`.
+
 When you need caller-owned fixed-capacity array backing storage during parse,
-initialize the destination first with `lonejson_init(...)`, configure that
-backing storage, and parse with `clear_destination = 0` so lonejson preserves
-the configured arrays instead of rebuilding the destination from scratch.
+initialize the destination first, configure that backing storage, and parse
+with `clear_destination = 0` so lonejson preserves the configured arrays
+instead of rebuilding the destination from scratch.
 
 ## Integration
 
@@ -165,6 +170,14 @@ not need worker threads or hidden full-payload buffers. It supports the normal
 mapped serializer surface plus `lonejson_source`, `lonejson_spooled`, and
 `lonejson_json_value` fields. `json_value` fields are streamed through the
 generator directly instead of silently falling back to buffered serialization.
+
+Concurrency follows the usual runtime/handle split. Different threads may call
+into the same `lonejson *` concurrently, or use different runtimes
+concurrently, as long as they operate on distinct mutable handles or
+destination values. Mutable stateful handles such as streams, writers,
+generators, spools, and `lonejson_json_value` instances may move between
+threads, but they are not concurrently callable without external
+synchronization.
 
 ```c
 lonejson *lj = lonejson_new(NULL, &error);

@@ -1588,7 +1588,9 @@ typedef struct test_runtime_copy_parse_thread_args {
 
 typedef struct test_runtime_free_thread_args {
   lonejson *runtime;
-  volatile int done;
+  int done;
+  pthread_mutex_t *done_mutex;
+  pthread_cond_t *done_cond;
 } test_runtime_free_thread_args;
 
 static int test_runtime_borrow_wait_entered(test_runtime_borrow_barrier *barrier,
@@ -1640,8 +1642,43 @@ static void *test_runtime_owner_free_thread_main(void *user) {
   test_runtime_free_thread_args *args = (test_runtime_free_thread_args *)user;
 
   lonejson_free(args->runtime);
+  if (args->done_mutex != NULL) {
+    pthread_mutex_lock(args->done_mutex);
+  }
   args->done = 1;
+  if (args->done_cond != NULL) {
+    pthread_cond_broadcast(args->done_cond);
+  }
+  if (args->done_mutex != NULL) {
+    pthread_mutex_unlock(args->done_mutex);
+  }
   return NULL;
+}
+
+static int test_runtime_wait_free_done(test_runtime_free_thread_args *args,
+                                       long timeout_ms) {
+  struct timespec deadline;
+  int rc;
+
+  if (args->done_mutex == NULL) {
+    return args->done != 0;
+  }
+  if (clock_gettime(CLOCK_REALTIME, &deadline) != 0) {
+    return 0;
+  }
+  deadline.tv_sec += timeout_ms / 1000L;
+  deadline.tv_nsec += (timeout_ms % 1000L) * 1000000L;
+  if (deadline.tv_nsec >= 1000000000L) {
+    deadline.tv_sec += 1L;
+    deadline.tv_nsec -= 1000000000L;
+  }
+  rc = 0;
+  pthread_mutex_lock(args->done_mutex);
+  while (!args->done && rc == 0) {
+    rc = pthread_cond_timedwait(args->done_cond, args->done_mutex, &deadline);
+  }
+  pthread_mutex_unlock(args->done_mutex);
+  return rc == 0 && args->done;
 }
 
 static void test_runtime_copy_use_waits_for_owner_free(void) {
@@ -1677,6 +1714,8 @@ static void test_runtime_copy_use_waits_for_owner_free(void) {
   args.json = json;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&parse_thread, NULL, test_runtime_copy_parse_thread_main,
@@ -1694,8 +1733,7 @@ static void test_runtime_copy_use_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -1743,6 +1781,8 @@ static void test_runtime_owner_use_waits_for_owner_free(void) {
   args.json = json;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&parse_thread, NULL, test_runtime_copy_parse_thread_main,
@@ -1759,8 +1799,7 @@ static void test_runtime_owner_use_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -1916,6 +1955,8 @@ static void test_runtime_copy_array_stream_open_waits_for_owner_free(void) {
   open_args.runtime = copy;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&open_thread, NULL, test_runtime_array_stream_open_thread_main,
@@ -1933,8 +1974,7 @@ static void test_runtime_copy_array_stream_open_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -1978,6 +2018,8 @@ static void test_runtime_owner_stream_open_waits_for_owner_free(void) {
   open_args.runtime = lj;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&open_thread, NULL, test_runtime_stream_open_thread_main,
@@ -1994,8 +2036,7 @@ static void test_runtime_owner_stream_open_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -2036,6 +2077,8 @@ static void test_runtime_owner_array_stream_open_waits_for_owner_free(void) {
   open_args.runtime = lj;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&open_thread, NULL, test_runtime_array_stream_open_thread_main,
@@ -2052,8 +2095,7 @@ static void test_runtime_owner_array_stream_open_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -2104,6 +2146,8 @@ static void test_runtime_copy_serialize_uses_snapshot_after_owner_free(void) {
   strcpy(args.item.label, "runtime");
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&serialize_thread, NULL, test_runtime_serialize_thread_main,
@@ -2121,8 +2165,7 @@ static void test_runtime_copy_serialize_uses_snapshot_after_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 1);
+  EXPECT(test_runtime_wait_free_done(&free_args, 1000L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -2184,6 +2227,8 @@ static void test_runtime_copy_sse_push_waits_for_owner_free(void) {
   push_args.sse = sse;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
   memset(&options, 0, sizeof(options));
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
@@ -2203,8 +2248,7 @@ static void test_runtime_copy_sse_push_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -2250,6 +2294,8 @@ static void test_runtime_owner_json_value_init_waits_for_owner_free(void) {
   init_args.runtime = lj;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&init_thread, NULL, test_runtime_json_value_init_thread_main,
@@ -2266,8 +2312,7 @@ static void test_runtime_owner_json_value_init_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -2314,6 +2359,8 @@ static void test_runtime_copy_json_value_init_waits_for_owner_free(void) {
   init_args.runtime = copy;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&init_thread, NULL, test_runtime_json_value_init_thread_main,
@@ -2331,8 +2378,7 @@ static void test_runtime_copy_json_value_init_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -2376,6 +2422,8 @@ static void test_runtime_owner_spooled_init_waits_for_owner_free(void) {
   init_args.runtime = lj;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&init_thread, NULL, test_runtime_spooled_init_thread_main,
@@ -2392,8 +2440,7 @@ static void test_runtime_owner_spooled_init_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -2443,6 +2490,8 @@ static void test_runtime_copy_spooled_init_waits_for_owner_free(void) {
   init_args.runtime = copy;
   memset(&free_args, 0, sizeof(free_args));
   free_args.runtime = lj;
+  free_args.done_mutex = &barrier.mutex;
+  free_args.done_cond = &barrier.cond;
 
   lonejson__test_set_runtime_borrow_hook(test_runtime_borrow_hook_block, &barrier);
   EXPECT(pthread_create(&init_thread, NULL, test_runtime_spooled_init_thread_main,
@@ -2460,8 +2509,7 @@ static void test_runtime_copy_spooled_init_waits_for_owner_free(void) {
 
   EXPECT(pthread_create(&free_thread, NULL, test_runtime_owner_free_thread_main,
                         &free_args) == 0);
-  usleep(10000);
-  EXPECT(free_args.done == 0);
+  EXPECT(!test_runtime_wait_free_done(&free_args, 10L));
 
   pthread_mutex_lock(&barrier.mutex);
   barrier.release = 1;
@@ -3595,6 +3643,8 @@ static void test_runtime_instances_operate_independently_interleaved(void) {
   lonejson_cleanup(&test_nested_json_value_doc_map, &strict_doc);
   lonejson_cleanup(&test_nested_json_value_doc_map, &relaxed_doc);
 
+  memset(runtime_spool_fields, 0, sizeof(runtime_spool_fields));
+  memset(&runtime_spool_map, 0, sizeof(runtime_spool_map));
   runtime_spool_fields[0] = test_spool_limits_doc_fields[0];
   runtime_spool_fields[0].reserved_policy = NULL;
   runtime_spool_fields[0].spool_class = LONEJSON_SPOOL_CLASS_DEFAULT;
@@ -3679,6 +3729,8 @@ static void *test_runtime_instance_thread_main(void *arg) {
   lonejson_map runtime_spool_map;
   size_t i;
 
+  memset(runtime_spool_fields, 0, sizeof(runtime_spool_fields));
+  memset(&runtime_spool_map, 0, sizeof(runtime_spool_map));
   runtime_spool_fields[0] = test_spool_limits_doc_fields[0];
   runtime_spool_fields[0].reserved_policy = NULL;
   runtime_spool_fields[0].spool_class = LONEJSON_SPOOL_CLASS_DEFAULT;
@@ -3794,6 +3846,111 @@ static void test_runtime_instances_operate_independently_in_threads(void) {
 
   lonejson_free(strict_lj);
   lonejson_free(relaxed_lj);
+#endif
+}
+
+static void test_runtime_same_instance_allows_concurrent_independent_calls(void) {
+#if LONEJSON_TEST_HAS_PTHREAD
+  lonejson_config config;
+  lonejson *lj;
+  lonejson_error error;
+  pthread_t first_thread;
+  pthread_t second_thread;
+  test_runtime_thread_ctx first_ctx;
+  test_runtime_thread_ctx second_ctx;
+  const char *json =
+      "{\"type\":\"query\",\"response\":{\"status\":\"ok\",\"payload\":"
+      "{\"value\":\"ab\"}}}";
+
+  config = lonejson_default_config();
+  config.clear_destination_by_default = 0;
+  config.spool_default.max_bytes = 64u;
+  lj = lonejson_new(&config, &error);
+  EXPECT(lj != NULL);
+  if (lj == NULL) {
+    return;
+  }
+
+  memset(&first_ctx, 0, sizeof(first_ctx));
+  first_ctx.runtime = lj;
+  first_ctx.json = json;
+  first_ctx.expected_parse_status = LONEJSON_STATUS_OK;
+  first_ctx.expected_spool_status = LONEJSON_STATUS_OK;
+
+  memset(&second_ctx, 0, sizeof(second_ctx));
+  second_ctx.runtime = lj;
+  second_ctx.json = json;
+  second_ctx.expected_parse_status = LONEJSON_STATUS_OK;
+  second_ctx.expected_spool_status = LONEJSON_STATUS_OK;
+
+  EXPECT(pthread_create(&first_thread, NULL, test_runtime_instance_thread_main,
+                        &first_ctx) == 0);
+  EXPECT(pthread_create(&second_thread, NULL, test_runtime_instance_thread_main,
+                        &second_ctx) == 0);
+  EXPECT(pthread_join(first_thread, NULL) == 0);
+  EXPECT(pthread_join(second_thread, NULL) == 0);
+  EXPECT(!first_ctx.failed);
+  EXPECT(!second_ctx.failed);
+
+  lonejson_free(lj);
+#endif
+}
+
+static void
+test_runtime_same_instance_allows_concurrent_calls_with_thread_safe_allocator(
+    void) {
+#if LONEJSON_TEST_HAS_PTHREAD
+  lonejson_config config;
+  lonejson *lj;
+  lonejson_error error;
+  pthread_t first_thread;
+  pthread_t second_thread;
+  test_runtime_thread_ctx first_ctx;
+  test_runtime_thread_ctx second_ctx;
+  test_serial_allocator_state allocator_state;
+  const char *json =
+      "{\"type\":\"query\",\"response\":{\"status\":\"ok\",\"payload\":"
+      "{\"value\":\"ab\"}}}";
+
+  config = lonejson_default_config();
+  config.clear_destination_by_default = 0;
+  config.spool_default.max_bytes = 64u;
+  test_serial_allocator_init(&allocator_state);
+  config.allocator = &allocator_state.allocator;
+  lj = lonejson_new(&config, &error);
+  EXPECT(lj != NULL);
+  if (lj == NULL) {
+    test_serial_allocator_destroy(&allocator_state);
+    return;
+  }
+
+  memset(&first_ctx, 0, sizeof(first_ctx));
+  first_ctx.runtime = lj;
+  first_ctx.json = json;
+  first_ctx.expected_parse_status = LONEJSON_STATUS_OK;
+  first_ctx.expected_spool_status = LONEJSON_STATUS_OK;
+
+  memset(&second_ctx, 0, sizeof(second_ctx));
+  second_ctx.runtime = lj;
+  second_ctx.json = json;
+  second_ctx.expected_parse_status = LONEJSON_STATUS_OK;
+  second_ctx.expected_spool_status = LONEJSON_STATUS_OK;
+
+  EXPECT(pthread_create(&first_thread, NULL, test_runtime_instance_thread_main,
+                        &first_ctx) == 0);
+  EXPECT(pthread_create(&second_thread, NULL, test_runtime_instance_thread_main,
+                        &second_ctx) == 0);
+  EXPECT(pthread_join(first_thread, NULL) == 0);
+  EXPECT(pthread_join(second_thread, NULL) == 0);
+  EXPECT(!first_ctx.failed);
+  EXPECT(!second_ctx.failed);
+  EXPECT(allocator_state.overlap_detected == 0);
+  EXPECT(allocator_state.stats.alloc_calls > 0u);
+  EXPECT(allocator_state.stats.free_calls > 0u);
+
+  lonejson_free(lj);
+  EXPECT(allocator_state.stats.bytes_live == 0u);
+  test_serial_allocator_destroy(&allocator_state);
 #endif
 }
 

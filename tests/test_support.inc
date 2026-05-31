@@ -29,7 +29,16 @@ static size_t g_alloc_record_count = 0u;
 static size_t g_lonejson_alloc_calls = 0u;
 static size_t g_lonejson_free_calls = 0u;
 
-static void track_alloc_ptr(void *ptr) {
+#if LONEJSON_TEST_HAS_PTHREAD
+static pthread_mutex_t g_alloc_stats_mutex = PTHREAD_MUTEX_INITIALIZER;
+#define TEST_ALLOC_STATS_LOCK() pthread_mutex_lock(&g_alloc_stats_mutex)
+#define TEST_ALLOC_STATS_UNLOCK() pthread_mutex_unlock(&g_alloc_stats_mutex)
+#else
+#define TEST_ALLOC_STATS_LOCK() ((void)0)
+#define TEST_ALLOC_STATS_UNLOCK() ((void)0)
+#endif
+
+static void track_alloc_ptr_locked(void *ptr) {
   if (ptr == NULL) {
     return;
   }
@@ -40,7 +49,7 @@ static void track_alloc_ptr(void *ptr) {
   }
 }
 
-static void track_free_ptr(void *ptr) {
+static void track_free_ptr_locked(void *ptr) {
   size_t i;
 
   if (ptr == NULL) {
@@ -58,8 +67,10 @@ static void track_free_ptr(void *ptr) {
 static void *test_lonejson_malloc(size_t size) {
   void *ptr = malloc(size);
   if (ptr != NULL) {
+    TEST_ALLOC_STATS_LOCK();
     ++g_lonejson_alloc_calls;
-    track_alloc_ptr(ptr);
+    track_alloc_ptr_locked(ptr);
+    TEST_ALLOC_STATS_UNLOCK();
   }
   return ptr;
 }
@@ -70,34 +81,42 @@ static void *test_lonejson_realloc(void *ptr, size_t size) {
   if (ptr == NULL) {
     next = realloc(NULL, size);
     if (next != NULL) {
+      TEST_ALLOC_STATS_LOCK();
       ++g_lonejson_alloc_calls;
-      track_alloc_ptr(next);
+      track_alloc_ptr_locked(next);
+      TEST_ALLOC_STATS_UNLOCK();
     }
     return next;
   }
 
-  track_free_ptr(ptr);
+  TEST_ALLOC_STATS_LOCK();
+  track_free_ptr_locked(ptr);
   next = realloc(ptr, size);
   if (next != NULL) {
-    track_alloc_ptr(next);
+    track_alloc_ptr_locked(next);
   } else {
-    track_alloc_ptr(ptr);
+    track_alloc_ptr_locked(ptr);
   }
+  TEST_ALLOC_STATS_UNLOCK();
   return next;
 }
 
 static void test_lonejson_free(void *ptr) {
   if (ptr != NULL) {
+    TEST_ALLOC_STATS_LOCK();
     ++g_lonejson_free_calls;
-    track_free_ptr(ptr);
+    track_free_ptr_locked(ptr);
+    TEST_ALLOC_STATS_UNLOCK();
   }
   free(ptr);
 }
 
 static void reset_lonejson_alloc_stats(void) {
+  TEST_ALLOC_STATS_LOCK();
   g_alloc_record_count = 0u;
   g_lonejson_alloc_calls = 0u;
   g_lonejson_free_calls = 0u;
+  TEST_ALLOC_STATS_UNLOCK();
 }
 
 #if defined(LONEJSON_TEST_RUNTIME_HANDLE_CACHE_DRAIN)
@@ -120,6 +139,16 @@ typedef struct test_allocator_state {
   lonejson_allocator allocator;
   lonejson_allocator_stats stats;
 } test_allocator_state;
+
+#if LONEJSON_TEST_HAS_PTHREAD
+typedef struct test_serial_allocator_state {
+  lonejson_allocator allocator;
+  lonejson_allocator_stats stats;
+  pthread_mutex_t mutex;
+  int active_calls;
+  int overlap_detected;
+} test_serial_allocator_state;
+#endif
 
 static void *test_allocator_malloc(void *ctx, size_t size) {
   (void)ctx;
@@ -1099,6 +1128,69 @@ static void test_allocator_init(test_allocator_state *state) {
   state->allocator.free_fn = test_allocator_free;
   state->allocator.stats = &state->stats;
 }
+
+#if LONEJSON_TEST_HAS_PTHREAD
+static void *test_serial_allocator_malloc(void *ctx, size_t size) {
+  test_serial_allocator_state *state = (test_serial_allocator_state *)ctx;
+  void *ptr;
+
+  pthread_mutex_lock(&state->mutex);
+  state->active_calls += 1;
+  if (state->active_calls > 1) {
+    state->overlap_detected = 1;
+  }
+  usleep(1000);
+  ptr = malloc(size);
+  state->active_calls -= 1;
+  pthread_mutex_unlock(&state->mutex);
+  return ptr;
+}
+
+static void *test_serial_allocator_realloc(void *ctx, void *ptr, size_t size) {
+  test_serial_allocator_state *state = (test_serial_allocator_state *)ctx;
+  void *next;
+
+  pthread_mutex_lock(&state->mutex);
+  state->active_calls += 1;
+  if (state->active_calls > 1) {
+    state->overlap_detected = 1;
+  }
+  usleep(1000);
+  next = realloc(ptr, size);
+  state->active_calls -= 1;
+  pthread_mutex_unlock(&state->mutex);
+  return next;
+}
+
+static void test_serial_allocator_free(void *ctx, void *ptr) {
+  test_serial_allocator_state *state = (test_serial_allocator_state *)ctx;
+
+  pthread_mutex_lock(&state->mutex);
+  state->active_calls += 1;
+  if (state->active_calls > 1) {
+    state->overlap_detected = 1;
+  }
+  usleep(1000);
+  free(ptr);
+  state->active_calls -= 1;
+  pthread_mutex_unlock(&state->mutex);
+}
+
+static void test_serial_allocator_init(test_serial_allocator_state *state) {
+  memset(state, 0, sizeof(*state));
+  state->allocator = lonejson_default_allocator();
+  state->allocator.ctx = state;
+  state->allocator.malloc_fn = test_serial_allocator_malloc;
+  state->allocator.realloc_fn = test_serial_allocator_realloc;
+  state->allocator.free_fn = test_serial_allocator_free;
+  state->allocator.stats = &state->stats;
+  (void)pthread_mutex_init(&state->mutex, NULL);
+}
+
+static void test_serial_allocator_destroy(test_serial_allocator_state *state) {
+  (void)pthread_mutex_destroy(&state->mutex);
+}
+#endif
 
 typedef struct test_fail_after_allocator_state {
   lonejson_allocator allocator;

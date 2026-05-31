@@ -24,6 +24,8 @@ option(LONEJSON_BUILD_EXAMPLES "Build lonejson examples." OFF)
 option(LONEJSON_BUILD_BENCHMARKS "Build lonejson benchmarks." OFF)
 option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
+option(LONEJSON_ENABLE_TSAN "Enable ThreadSanitizer." OFF)
+option(LONEJSON_ENABLE_MSAN "Enable MemorySanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
 set(LONEJSON_ABI_VERSION "15" CACHE STRING "Shared-library ABI / SONAME version"
@@ -128,9 +130,50 @@ function(lonejson_target_include_curl target)
   endif()
 endfunction()
 
+set(LONEJSON_ENABLED_SANITIZER_COUNT 0)
+if(LONEJSON_ENABLE_ASAN)
+  math(EXPR LONEJSON_ENABLED_SANITIZER_COUNT
+    "${LONEJSON_ENABLED_SANITIZER_COUNT} + 1")
+endif()
+if(LONEJSON_ENABLE_TSAN)
+  math(EXPR LONEJSON_ENABLED_SANITIZER_COUNT
+    "${LONEJSON_ENABLED_SANITIZER_COUNT} + 1")
+endif()
+if(LONEJSON_ENABLE_MSAN)
+  math(EXPR LONEJSON_ENABLED_SANITIZER_COUNT
+    "${LONEJSON_ENABLED_SANITIZER_COUNT} + 1")
+endif()
+if(LONEJSON_ENABLED_SANITIZER_COUNT GREATER 1)
+  message(FATAL_ERROR
+    "Enable at most one of LONEJSON_ENABLE_ASAN, LONEJSON_ENABLE_TSAN, or "
+    "LONEJSON_ENABLE_MSAN at a time.")
+endif()
+
 if(LONEJSON_ENABLE_ASAN AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
+endif()
+
+if(LONEJSON_ENABLE_TSAN)
+  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    message(FATAL_ERROR "LONEJSON_ENABLE_TSAN requires Clang or GCC.")
+  endif()
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+endif()
+
+if(LONEJSON_ENABLE_MSAN)
+  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "LONEJSON_ENABLE_MSAN requires Clang.")
+  endif()
+  add_compile_options(
+    -fsanitize=memory
+    -fsanitize-memory-track-origins=2
+    -fno-omit-frame-pointer
+    -O1)
+  add_link_options(
+    -fsanitize=memory
+    -fsanitize-memory-track-origins=2)
 endif()
 
 if(LONEJSON_ENABLE_STACK_USAGE AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
@@ -170,6 +213,11 @@ foreach(target lonejson_shared lonejson_static)
 endforeach()
 
 if(LONEJSON_BUILD_FUZZERS)
+  if(LONEJSON_ENABLE_TSAN OR LONEJSON_ENABLE_MSAN)
+    message(FATAL_ERROR
+      "LONEJSON_BUILD_FUZZERS is incompatible with "
+      "LONEJSON_ENABLE_TSAN and LONEJSON_ENABLE_MSAN.")
+  endif()
   if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "LONEJSON_BUILD_FUZZERS requires Clang/libFuzzer.")
   endif()
@@ -266,6 +314,21 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_cmake_threads_optional_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_threads_optional.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_test_all_clang_optional_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_test_all_clang_optional.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_check_clang_sanitizer_support_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_check_clang_sanitizer_support.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_cmake_fuzz_sanitizer_conflict_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_sanitizer_conflicts.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_run_release_matrix_darwin_target_tests
@@ -583,6 +646,42 @@ if(LONEJSON_BUILD_FUZZERS)
   target_link_options(lonejson_fuzz_protocol_framing PRIVATE
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_protocol_framing)
+
+  add_executable(lonejson_fuzz_fixed_string_paths
+    fuzz/fuzz_fixed_string_paths.c)
+  target_include_directories(lonejson_fuzz_fixed_string_paths
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_fixed_string_paths PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_fixed_string_paths PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_fixed_string_paths PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_fixed_string_paths)
+
+  add_executable(lonejson_fuzz_alloc_ceiling
+    fuzz/fuzz_alloc_ceiling.c)
+  target_include_directories(lonejson_fuzz_alloc_ceiling
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_alloc_ceiling PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_alloc_ceiling PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_alloc_ceiling PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_alloc_ceiling)
+
+  add_executable(lonejson_fuzz_parser_boundaries
+    fuzz/fuzz_parser_boundaries.c)
+  target_include_directories(lonejson_fuzz_parser_boundaries
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_parser_boundaries PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_parser_boundaries PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_parser_boundaries PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_parser_boundaries)
 endif()
 
 if(CLANG_FORMAT_BIN)
@@ -631,6 +730,9 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_generator_backpressure.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_value_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_protocol_framing.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_fixed_string_paths.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_alloc_ceiling.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_parser_boundaries.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_visitor.inc"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_stream.inc"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_curl_misc.inc"

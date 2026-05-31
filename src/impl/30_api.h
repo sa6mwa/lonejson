@@ -87,20 +87,12 @@ static void lonejson__runtime_free_owned_config(lonejson_runtime *runtime);
 static void lonejson_parser_destroy(lonejson_parser *parser);
 
 #if defined(_WIN32)
-#include <windows.h>
-static volatile LONG g_lonejson_runtime_handle_lock = 0;
+static lonejson__lock_word g_lonejson_runtime_handle_lock = 0;
 #define LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE()                            \
-  do {                                                                     \
-    while (InterlockedCompareExchange(&g_lonejson_runtime_handle_lock, 1L, \
-                                      0L) != 0L) {                        \
-      Sleep(0);                                                            \
-    }                                                                      \
-  } while (0)
+  lonejson__lock_acquire(&g_lonejson_runtime_handle_lock)
 #define LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE()                            \
-  do {                                                                     \
-    (void)InterlockedExchange(&g_lonejson_runtime_handle_lock, 0L);        \
-  } while (0)
-#define LONEJSON__RUNTIME_HANDLE_WAIT_YIELD() Sleep(0)
+  lonejson__lock_release(&g_lonejson_runtime_handle_lock)
+#define LONEJSON__RUNTIME_HANDLE_WAIT_YIELD() lonejson__lock_wait_yield()
 #define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_INC(handle)                    \
   ((unsigned int)InterlockedIncrement((volatile LONG *)&(handle)->active_pins))
 #define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle)                    \
@@ -117,20 +109,12 @@ static volatile LONG g_lonejson_runtime_handle_lock = 0;
                               (LONG)(value));                             \
   } while (0)
 #elif defined(__GNUC__) || defined(__clang__)
-#include <sched.h>
-static volatile int g_lonejson_runtime_handle_lock = 0;
+static lonejson__lock_word g_lonejson_runtime_handle_lock = 0;
 #define LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE()                            \
-  do {                                                                     \
-    while (__sync_lock_test_and_set(&g_lonejson_runtime_handle_lock, 1)) { \
-      while (g_lonejson_runtime_handle_lock) {                             \
-      }                                                                    \
-    }                                                                      \
-  } while (0)
+  lonejson__lock_acquire(&g_lonejson_runtime_handle_lock)
 #define LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE()                            \
-  do {                                                                     \
-    __sync_lock_release(&g_lonejson_runtime_handle_lock);                  \
-  } while (0)
-#define LONEJSON__RUNTIME_HANDLE_WAIT_YIELD() (void)sched_yield()
+  lonejson__lock_release(&g_lonejson_runtime_handle_lock)
+#define LONEJSON__RUNTIME_HANDLE_WAIT_YIELD() lonejson__lock_wait_yield()
 #define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_INC(handle) \
   ((unsigned int)__atomic_add_fetch(&(handle)->active_pins, 1u, __ATOMIC_SEQ_CST))
 #define LONEJSON__RUNTIME_HANDLE_ACTIVE_PINS_DEC(handle) \
@@ -1084,20 +1068,6 @@ void lonejson_free(lonejson *runtime) {
   runtime->_runtime_owner_data = NULL;
   lonejson__runtime_free_owned_config(runtime_state);
   lonejson__buffer_free(allocator, runtime, sizeof(lonejson__runtime_bundle));
-}
-
-static int lonejson__string_array_stream_is_initialized(
-    const lonejson_string_array_stream *stream) {
-  return stream != NULL &&
-         stream->_lonejson_magic ==
-             lonejson__init_cookie(stream, LONEJSON__STRING_ARRAY_STREAM_MAGIC);
-}
-
-static int lonejson__mapped_array_stream_is_initialized(
-    const lonejson_mapped_array_stream *stream) {
-  return stream != NULL &&
-         stream->_lonejson_magic ==
-             lonejson__init_cookie(stream, LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
 }
 
 void lonejson_string_array_stream_init(lonejson_string_array_stream *stream) {

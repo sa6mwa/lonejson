@@ -12,6 +12,49 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+#include <sanitizer/msan_interface.h>
+#define LONEJSON__HAS_MSAN 1
+#endif
+#endif
+#ifndef LONEJSON__HAS_MSAN
+#define LONEJSON__HAS_MSAN 0
+#endif
+
+#if defined(_WIN32)
+#include <windows.h>
+typedef volatile LONG lonejson__lock_word;
+static void lonejson__lock_acquire(lonejson__lock_word *lock_word) {
+  while (InterlockedCompareExchange(lock_word, 1L, 0L) != 0L) {
+    Sleep(0);
+  }
+}
+static void lonejson__lock_release(lonejson__lock_word *lock_word) {
+  (void)InterlockedExchange(lock_word, 0L);
+}
+static void lonejson__lock_wait_yield(void) { Sleep(0); }
+#elif defined(__GNUC__) || defined(__clang__)
+#include <sched.h>
+typedef volatile int lonejson__lock_word;
+static void lonejson__lock_acquire(lonejson__lock_word *lock_word) {
+  while (__sync_lock_test_and_set(lock_word, 1)) {
+    while (*lock_word) {
+    }
+  }
+}
+static void lonejson__lock_release(lonejson__lock_word *lock_word) {
+  __sync_lock_release(lock_word);
+}
+static void lonejson__lock_wait_yield(void) {
+  (void)sched_yield();
+}
+#else
+#error "lonejson runtime synchronization requires compiler atomic primitives"
+#endif
+
+static lonejson__lock_word g_lonejson_allocator_stats_lock = 0;
+
 typedef enum lonejson_container_kind {
   LONEJSON_CONTAINER_OBJECT = 1,
   LONEJSON_CONTAINER_ARRAY = 2
@@ -767,11 +810,13 @@ static void lonejson__allocator_note_alloc(lonejson_allocator_stats *stats,
   if (stats == NULL) {
     return;
   }
+  lonejson__lock_acquire(&g_lonejson_allocator_stats_lock);
   stats->alloc_calls++;
   stats->bytes_live += size;
   if (stats->bytes_live > stats->peak_bytes_live) {
     stats->peak_bytes_live = stats->bytes_live;
   }
+  lonejson__lock_release(&g_lonejson_allocator_stats_lock);
 }
 
 static void lonejson__allocator_note_realloc(lonejson_allocator_stats *stats,
@@ -779,6 +824,7 @@ static void lonejson__allocator_note_realloc(lonejson_allocator_stats *stats,
   if (stats == NULL) {
     return;
   }
+  lonejson__lock_acquire(&g_lonejson_allocator_stats_lock);
   stats->realloc_calls++;
   if (stats->bytes_live >= old_size) {
     stats->bytes_live -= old_size;
@@ -789,6 +835,7 @@ static void lonejson__allocator_note_realloc(lonejson_allocator_stats *stats,
   if (stats->bytes_live > stats->peak_bytes_live) {
     stats->peak_bytes_live = stats->bytes_live;
   }
+  lonejson__lock_release(&g_lonejson_allocator_stats_lock);
 }
 
 static void lonejson__allocator_note_free(lonejson_allocator_stats *stats,
@@ -796,12 +843,14 @@ static void lonejson__allocator_note_free(lonejson_allocator_stats *stats,
   if (stats == NULL) {
     return;
   }
+  lonejson__lock_acquire(&g_lonejson_allocator_stats_lock);
   stats->free_calls++;
   if (stats->bytes_live >= size) {
     stats->bytes_live -= size;
   } else {
     stats->bytes_live = 0u;
   }
+  lonejson__lock_release(&g_lonejson_allocator_stats_lock);
 }
 
 static void *lonejson__buffer_alloc(const lonejson_allocator *allocator,
@@ -1174,8 +1223,21 @@ lonejson__spooled_apply_allocator(lonejson_spooled *value,
 }
 
 static LONEJSON__INLINE int
+lonejson__bytes_are_initialized(const void *ptr, size_t size) {
+#if LONEJSON__HAS_MSAN
+  return ptr == NULL || __msan_test_shadow(ptr, size) < 0;
+#else
+  (void)ptr;
+  (void)size;
+  return 1;
+#endif
+}
+
+static LONEJSON__INLINE int
 lonejson__spooled_is_initialized(const lonejson_spooled *value) {
   return value != NULL &&
+         lonejson__bytes_are_initialized(&value->_lonejson_magic,
+                                         sizeof(value->_lonejson_magic)) &&
          value->_lonejson_magic ==
              lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
 }
@@ -1194,6 +1256,10 @@ lonejson__json_value_apply_allocator(lonejson_json_value *value,
 static LONEJSON__INLINE int
 lonejson__json_value_is_initialized(const lonejson_json_value *value) {
   return value != NULL &&
+         lonejson__bytes_are_initialized(&value->methods,
+                                         sizeof(value->methods)) &&
+         lonejson__bytes_are_initialized(&value->_lonejson_magic,
+                                         sizeof(value->_lonejson_magic)) &&
          value->methods == &g_lonejson_json_value_methods &&
          value->_lonejson_magic ==
              lonejson__init_cookie(value, LONEJSON__JSON_VALUE_MAGIC);
@@ -1215,6 +1281,26 @@ static void lonejson__mapped_array_stream_assign_methods(
   stream->set_handler = lonejson_mapped_array_stream_set_handler;
 }
 
+static LONEJSON__INLINE int lonejson__string_array_stream_is_initialized(
+    const lonejson_string_array_stream *stream) {
+  return stream != NULL &&
+         lonejson__bytes_are_initialized(&stream->_lonejson_magic,
+                                         sizeof(stream->_lonejson_magic)) &&
+         stream->_lonejson_magic ==
+             lonejson__init_cookie(stream,
+                                   LONEJSON__STRING_ARRAY_STREAM_MAGIC);
+}
+
+static LONEJSON__INLINE int lonejson__mapped_array_stream_is_initialized(
+    const lonejson_mapped_array_stream *stream) {
+  return stream != NULL &&
+         lonejson__bytes_are_initialized(&stream->_lonejson_magic,
+                                         sizeof(stream->_lonejson_magic)) &&
+         stream->_lonejson_magic ==
+             lonejson__init_cookie(stream,
+                                   LONEJSON__MAPPED_ARRAY_STREAM_MAGIC);
+}
+
 static void lonejson__source_assign_methods(lonejson_source *value) {
   static const lonejson_source template_methods = {
       0, NULL, -1, NULL,
@@ -1230,6 +1316,22 @@ static void lonejson__source_assign_methods(lonejson_source *value) {
   }
   memcpy(&value->cleanup, &template_methods.cleanup,
          sizeof(*value) - offsetof(lonejson_source, cleanup));
+}
+
+static LONEJSON__INLINE int
+lonejson__source_is_initialized(const lonejson_source *value) {
+  return value != NULL &&
+         lonejson__bytes_are_initialized(&value->cleanup,
+                                         sizeof(*value) -
+                                             offsetof(lonejson_source,
+                                                      cleanup)) &&
+         value->cleanup == lonejson_source_cleanup &&
+         value->reset == lonejson_source_reset &&
+         value->set_file == lonejson_source_set_file &&
+         value->set_fd == lonejson_source_set_fd &&
+         value->set_path == lonejson_source_set_path &&
+         value->write_to_sink == lonejson_source_write_to_sink &&
+         value->is_rewindable == lonejson_source_is_rewindable;
 }
 
 void lonejson_source_init(lonejson_source *value) {

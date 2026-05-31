@@ -128,6 +128,22 @@
       }
     },
     {
+      "name": "tsan",
+      "inherits": "debug",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "LONEJSON_ENABLE_TSAN": "ON"
+      }
+    },
+    {
+      "name": "msan",
+      "inherits": "debug",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "LONEJSON_ENABLE_MSAN": "ON"
+      }
+    },
+    {
       "name": "fuzz",
       "inherits": "base",
       "cacheVariables": {
@@ -162,6 +178,14 @@
     {
       "name": "asan",
       "configurePreset": "asan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
+    },
+    {
+      "name": "msan",
+      "configurePreset": "msan"
     },
     {
       "name": "fuzz",
@@ -319,6 +343,20 @@
     {
       "name": "asan",
       "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "msan",
+      "configurePreset": "msan",
       "output": {
         "outputOnFailure": true
       }

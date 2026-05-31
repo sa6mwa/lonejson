@@ -5,7 +5,12 @@ MAKEFLAGS += --no-builtin-rules
 DEBUG_PRESET := debug
 HOST_PRESET := host
 ASAN_PRESET := asan
+TSAN_PRESET := tsan
+MSAN_PRESET := msan
 FUZZ_PRESET := fuzz
+LONEJSON_HAVE_CLANG ?= $(shell if command -v clang >/dev/null 2>&1; then printf '1'; else printf '0'; fi)
+LONEJSON_HAVE_TSAN ?= $(shell bash "$(CURDIR)/scripts/check_clang_sanitizer_support.sh" thread)
+LONEJSON_HAVE_MSAN ?= $(shell bash "$(CURDIR)/scripts/check_clang_sanitizer_support.sh" memory)
 RELEASE_BUILD_PRESETS := \
 	linux-gnu-release \
 	linux-musl-release \
@@ -57,6 +62,9 @@ FUZZ_READER_STREAM_GENERATOR_MAX_LEN ?= 262144
 FUZZ_WRITER_GENERATOR_MAX_LEN ?= 262144
 FUZZ_WRITER_VALUE_STREAM_MAX_LEN ?= 262144
 FUZZ_PROTOCOL_FRAMING_MAX_LEN ?= 262144
+FUZZ_FIXED_STRING_PATHS_MAX_LEN ?= 65536
+FUZZ_ALLOC_CEILING_MAX_LEN ?= 65536
+FUZZ_PARSER_BOUNDARIES_MAX_LEN ?= 131072
 FUZZ_LARGE_SEEDS := \
 	fuzz/corpus/mapped/person_large_payload.json \
 	fuzz/corpus/json_value/large_selector_payload.json \
@@ -72,6 +80,9 @@ FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/reader_st
 FUZZ_WRITER_GENERATOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/writer_generator
 FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/writer_value_stream
 FUZZ_PROTOCOL_FRAMING_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/protocol_framing
+FUZZ_FIXED_STRING_PATHS_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/fixed_string_paths
+FUZZ_ALLOC_CEILING_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/alloc_ceiling
+FUZZ_PARSER_BOUNDARIES_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/parser_boundaries
 FUZZ_VALIDATE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/validate
 FUZZ_MAPPED_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/mapped
 FUZZ_ARRAY_STREAM_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/array_stream
@@ -82,6 +93,9 @@ FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/reader_strea
 FUZZ_WRITER_GENERATOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/writer_generator
 FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/writer_value_stream
 FUZZ_PROTOCOL_FRAMING_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/protocol_framing
+FUZZ_FIXED_STRING_PATHS_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/fixed_string_paths
+FUZZ_ALLOC_CEILING_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/alloc_ceiling
+FUZZ_PARSER_BOUNDARIES_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/parser_boundaries
 LUA_ROCK_TREE := build/luarocks
 LUA_ROCKSPEC := $(LUA_ROCK_TREE)/lonejson-$(RELEASE_VERSION)-1.rockspec
 LUA_ROCK_STAMP := $(LUA_ROCK_TREE)/.installed.stamp
@@ -104,6 +118,8 @@ LUA_ROCK_SOURCES := \
 	$(sort $(wildcard src/impl/*.h)) \
 	src/lua/lonejson_lua.c \
 	lua/lonejson/init.lua
+
+SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_confirm_tests|lua_legacy_uservalue_tests|lua_schema_cache_tests|lua_encode_stats_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|run_release_matrix_darwin_target_tests)
 
 .PHONY: \
 	help \
@@ -134,6 +150,8 @@ LUA_ROCK_SOURCES := \
 	test-all \
 	test-all-bindings \
 	asan \
+	tsan \
+	msan \
 	fuzz-smoke \
 	fuzz \
 	fuzz-long \
@@ -182,9 +200,11 @@ help:
 		'make test-host              Build and run the host-native test preset.' \
 		'make test-host-curl         Build and run the host-native curl-enabled test preset.' \
 		'make test-cross             Configure, build, and run all cross release test presets serially.' \
-		'make test-all               Run debug, host, host-curl, cross, ASan, fuzz-smoke, and benchmark gates serially.' \
+		'make test-all               Run debug, host, host-curl, cross, ASan, benchmark gates, and fuzz-smoke serially; TSan/MSan are included when clang is available.' \
 		'make test-all-bindings      Run test-all plus the optional Lua binding suite.' \
 		'make asan                   Build and run the ASan/UBSan preset.' \
+		'make tsan                   Build the TSan preset and run the pure-C CTest subset that does not depend on external unsanitized runtimes.' \
+		'make msan                   Build the MSan preset and run the pure-C CTest subset that does not depend on external unsanitized runtimes.' \
 		'make fuzz-smoke             Build all libFuzzer targets and run a seeded 1s smoke pass for each.' \
 		'make fuzz                   Build all libFuzzer targets and run a seeded 30s pass for each with explicit large-input caps; missing large synthetic seeds are regenerated automatically.' \
 		'make fuzz-long              Run the same fuzz targets with a several-minute soak per target.' \
@@ -360,6 +380,16 @@ test-all:
 	$(MAKE) test-host-curl
 	$(MAKE) test-cross
 	$(MAKE) asan
+ifeq ($(LONEJSON_HAVE_TSAN),1)
+	$(MAKE) tsan
+else
+	@printf '%s\n' 'Skipping tsan: unsupported toolchain'
+endif
+ifeq ($(LONEJSON_HAVE_MSAN),1)
+	$(MAKE) msan
+else
+	@printf '%s\n' 'Skipping msan: unsupported toolchain'
+endif
 	$(MAKE) bench-check
 	$(MAKE) fuzz-smoke
 
@@ -406,6 +436,16 @@ asan:
 	cmake --build --preset $(ASAN_PRESET)
 	ctest --preset $(ASAN_PRESET)
 
+tsan:
+	cmake --preset $(TSAN_PRESET)
+	cmake --build --preset $(TSAN_PRESET)
+	ctest --preset $(TSAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
+
+msan:
+	cmake --preset $(MSAN_PRESET)
+	cmake --build --preset $(MSAN_PRESET)
+	MSAN_OPTIONS=halt_on_error=1:abort_on_error=1:exit_code=86 ctest --preset $(MSAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
+
 fuzz:
 	@missing=0; for seed in $(FUZZ_LARGE_SEEDS); do \
 		if [ ! -s "$$seed" ]; then \
@@ -417,10 +457,10 @@ fuzz:
 		./scripts/generate_fuzz_large_seeds.sh; \
 	fi
 	cmake --preset $(FUZZ_PRESET)
-	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing
+	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries
 	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -P cmake/check_fuzz_instrumentation.cmake
-	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)"
-	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)"
+	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)"
+	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)"
 	cmake -E make_directory "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
@@ -431,6 +471,9 @@ fuzz:
 	cmake -E make_directory "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"
 	cmake -E make_directory "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/value_visitor" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/spec"
 	cmake -E make_directory "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing"
+	cmake -E make_directory "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)/fixed_string_paths"
+	cmake -E make_directory "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)/alloc_ceiling"
+	cmake -E make_directory "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)/parser_boundaries"
 	cp -R tests/fixtures/vendor/json_test_suite/test_parsing/. "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor/"
 	cp -R tests/fixtures/spec/. "$(FUZZ_VALIDATE_CORPUS_DIR)/spec/"
 	cp -R tests/fixtures/languages/. "$(FUZZ_VALIDATE_CORPUS_DIR)/languages/"
@@ -460,6 +503,9 @@ fuzz:
 	cp -R fuzz/corpus/value_visitor/. "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/value_visitor/"
 	cp -R tests/fixtures/spec/. "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/spec/"
 	cp -R fuzz/corpus/protocol_framing/. "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing/"
+	cp -R fuzz/corpus/fixed_string_paths/. "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)/fixed_string_paths/"
+	cp -R fuzz/corpus/alloc_ceiling/. "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)/alloc_ceiling/"
+	cp -R fuzz/corpus/parser_boundaries/. "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)/parser_boundaries/"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/validate"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/mapped"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/array_stream"
@@ -470,6 +516,9 @@ fuzz:
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/writer_generator"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/writer_value_stream"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/protocol_framing"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/fixed_string_paths"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/alloc_ceiling"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/parser_boundaries"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_validate -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALIDATE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/validate/ "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_MAPPED_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/mapped/ "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_array_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ARRAY_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/array_stream/ "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
@@ -480,6 +529,9 @@ fuzz:
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_generator_backpressure -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_generator/ "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_value_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_VALUE_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_value_stream/ "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/value_visitor" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/spec"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_protocol_framing -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PROTOCOL_FRAMING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/protocol_framing/ "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_fixed_string_paths -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_FIXED_STRING_PATHS_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/fixed_string_paths/ "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)/fixed_string_paths"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_alloc_ceiling -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ALLOC_CEILING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/alloc_ceiling/ "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)/alloc_ceiling"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_parser_boundaries -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PARSER_BOUNDARIES_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/parser_boundaries/ "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)/parser_boundaries"
 
 fuzz-long:
 	$(MAKE) fuzz FUZZ_TIME=$(FUZZ_LONG_TIME)

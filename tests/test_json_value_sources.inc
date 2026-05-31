@@ -29,6 +29,7 @@ static void test_spooled_fields_roundtrip(void) {
     return;
   }
 
+  test_init_map(&test_spool_doc_map, &doc);
   status = test_parse_cstr(&test_spool_doc_map, &doc, json, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(doc.id, "spool-1") == 0);
@@ -54,6 +55,7 @@ static void test_spooled_fields_roundtrip(void) {
     EXPECT(test_validate_cstr(serialized, &error) == LONEJSON_STATUS_OK);
     test_expect_compact_buffer_matches_sink(&test_spool_doc_map, &doc,
                                             serialized);
+    test_init_map(&test_spool_doc_map, &roundtrip);
     status = test_parse_cstr(&test_spool_doc_map, &roundtrip, serialized,
                                  NULL, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
@@ -81,6 +83,7 @@ static void test_spooled_fields_small_and_null(void) {
   size_t read_len;
 
   reset_lonejson_alloc_stats();
+  test_init_map(&test_spool_doc_map, &doc);
   status = test_parse_cstr(&test_spool_doc_map, &doc, json, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(lonejson_spooled_spilled(&doc.text) == 0);
@@ -193,6 +196,7 @@ static void test_spooled_field_failures(void) {
   lonejson_error error;
   lonejson_status status;
 
+  test_init_map(&test_spool_doc_map, &doc);
   status =
       test_parse_cstr(&test_spool_doc_map, &doc, bad_base64, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
@@ -214,6 +218,7 @@ static void test_spooled_field_failures(void) {
     }
     snprintf(too_large_json, need + 1u, fmt, too_large_text);
   }
+  test_init_map(&test_spool_limits_doc_map, &limited);
   status = test_parse_cstr(&test_spool_limits_doc_map, &limited,
                                too_large_json, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
@@ -1601,6 +1606,89 @@ static void test_json_value_reuse_and_cleanup_ownership(void) {
 
   lonejson_cleanup(&test_json_value_doc_map, &doc);
   EXPECT(g_alloc_record_count == 0u);
+}
+
+static void test_init_releases_existing_json_value_storage(void) {
+  lonejson_error error;
+  test_json_value_doc doc;
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(test_default_runtime(), &test_json_value_doc_map, &doc);
+  reset_lonejson_alloc_stats();
+  EXPECT(lonejson_json_value_enable_parse_capture(&doc.selector, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_json_value_set_buffer(&doc.selector, "{\"ok\":true}", 11u,
+                                        &error) == LONEJSON_STATUS_OK);
+  EXPECT(g_alloc_record_count == 1u);
+  reset_lonejson_alloc_stats();
+  lonejson_init(test_default_runtime(), &test_json_value_doc_map, &doc);
+  EXPECT(g_lonejson_free_calls > 0u);
+  EXPECT(g_alloc_record_count == 0u);
+  EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_NULL);
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
+}
+
+static void test_init_releases_existing_spooled_storage(void) {
+  lonejson_error error;
+  test_spool_doc doc;
+
+  memset(&doc, 0, sizeof(doc));
+  lonejson_init(test_default_runtime(), &test_spool_doc_map, &doc);
+  reset_lonejson_alloc_stats();
+  EXPECT(lonejson_spooled_append(&doc.text, "abc", 3u, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(g_alloc_record_count > 0u);
+  reset_lonejson_alloc_stats();
+  lonejson_init(test_default_runtime(), &test_spool_doc_map, &doc);
+  EXPECT(g_lonejson_free_calls > 0u);
+  EXPECT(g_alloc_record_count == 0u);
+  EXPECT(lonejson_spooled_size(&doc.text) == 0u);
+  lonejson_cleanup(&test_spool_doc_map, &doc);
+}
+
+static void test_init_preserves_shallow_copied_source_owner(void) {
+  lonejson_error error;
+  test_source_doc owner;
+  test_source_doc alias;
+  char path[] = "/tmp/lonejson-source-owner-XXXXXX";
+  int fd;
+  test_buffer_sink sink;
+  unsigned char buffer[64];
+
+  fd = write_temp_text_file(path, "owned payload");
+  EXPECT(fd >= 0);
+  if (fd < 0) {
+    return;
+  }
+  close(fd);
+
+  memset(&owner, 0, sizeof(owner));
+  lonejson_init(test_default_runtime(), &test_source_doc_map, &owner);
+  reset_lonejson_alloc_stats();
+  EXPECT(lonejson_source_set_path(&owner.text, path, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(g_alloc_record_count == 1u);
+  alias = owner;
+  reset_lonejson_alloc_stats();
+  lonejson_init(test_default_runtime(), &test_source_doc_map, &alias);
+  EXPECT(g_lonejson_free_calls == 0u);
+  EXPECT(alias.text.kind == LONEJSON_SOURCE_NONE);
+  EXPECT(owner.text.kind == LONEJSON_SOURCE_PATH);
+
+  memset(&sink, 0, sizeof(sink));
+  memset(buffer, 0, sizeof(buffer));
+  sink.buffer = buffer;
+  sink.capacity = sizeof(buffer);
+  EXPECT(lonejson_source_write_to_sink(&owner.text, test_buffer_sink_write,
+                                       &sink, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp((const char *)buffer, "owned payload") == 0);
+
+  reset_lonejson_alloc_stats();
+  lonejson_cleanup(&test_source_doc_map, &owner);
+  EXPECT(g_lonejson_free_calls > 0u);
+  EXPECT(g_alloc_record_count == 0u);
+  lonejson_cleanup(&test_source_doc_map, &alias);
+  unlink(path);
 }
 
 static void test_json_value_source_validation_failures(void) {

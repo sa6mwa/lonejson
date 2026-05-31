@@ -21,21 +21,16 @@ file(COPY "${LONEJSON_STATIC_LIB}" DESTINATION "${package_root}/lib")
 set(packaged_shared_lib "${package_root}/lib/${LONEJSON_SHARED_LIB_NAME}")
 set(packaged_static_lib "${package_root}/lib/${LONEJSON_STATIC_LIB_NAME}")
 if(DEFINED LONEJSON_STRIP AND NOT LONEJSON_STRIP STREQUAL "")
-  if(LONEJSON_TARGET_ID MATCHES "darwin")
-    set(strip_shared_flag "-S")
-    set(strip_static_flag "-S")
-  else()
+  if(NOT LONEJSON_TARGET_ID MATCHES "darwin")
     set(strip_shared_flag "--strip-unneeded")
     set(strip_static_flag "--strip-debug")
-  endif()
-  execute_process(
-    COMMAND "${LONEJSON_STRIP}" "${strip_shared_flag}" "${packaged_shared_lib}"
-    RESULT_VARIABLE strip_shared_result
-  )
-  if(NOT strip_shared_result EQUAL 0)
-    message(FATAL_ERROR "failed to strip ${packaged_shared_lib}")
-  endif()
-  if(NOT LONEJSON_TARGET_ID MATCHES "darwin")
+    execute_process(
+      COMMAND "${LONEJSON_STRIP}" "${strip_shared_flag}" "${packaged_shared_lib}"
+      RESULT_VARIABLE strip_shared_result
+    )
+    if(NOT strip_shared_result EQUAL 0)
+      message(FATAL_ERROR "failed to strip ${packaged_shared_lib}")
+    endif()
     execute_process(
       COMMAND "${LONEJSON_STRIP}" "${strip_static_flag}" "${packaged_static_lib}"
       RESULT_VARIABLE strip_static_result

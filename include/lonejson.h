@@ -1804,7 +1804,15 @@ typedef struct lonejson_owned_buffer {
  * as an owner-only opaque object: do not copy it by value. Only the original
  * pointer returned by `lonejson_new()` may be freed. If `lonejson_free()` is
  * accidentally called on a copied wrapper while the owner is still live,
- * lonejson only clears that copy and leaves the real owner untouched.
+ * lonejson only clears that copy and leaves the real owner untouched. The
+ * runtime itself is thread-compatible: multiple threads may call APIs through
+ * the same `lonejson *` concurrently as long as those calls operate on
+ * distinct mutable handles or destination values, do not share one writable
+ * `fixed_string_scratch` staging buffer, and use an allocator configuration
+ * whose callbacks and optional stats storage are themselves safe to share
+ * across those threads. Mutable handle objects created from a runtime are not
+ * concurrently callable by multiple threads unless the caller provides
+ * external synchronization.
  */
 struct lonejson {
   /** Internal runtime identity cookie used to validate the owning wrapper. */
@@ -3626,7 +3634,21 @@ lonejson__value_limits lonejson__default_value_limits(void);
  * that can still allocate or free through that allocator has been closed or
  * cleaned up, even if the `lonejson` runtime itself has already been freed.
  * Non-NULL configs must be initialized with `lonejson_default_config()` before
- * overriding fields.
+ * overriding fields. Calls that only share this runtime may execute
+ * concurrently from different threads as long as they operate on distinct
+ * mutable handles or destination values and the runtime does not share one
+ * writable `fixed_string_scratch` buffer across those calls. When
+ * `fixed_string_scratch` is configured, callers must serialize concurrent
+ * parse operations that could stage through that shared scratch or use
+ * separate runtimes. The same allocator callbacks and allocator `ctx` are
+ * shared across calls through one runtime, so callers must provide a
+ * thread-safe allocator implementation when they want to share one runtime
+ * concurrently across threads. lonejson serializes updates to
+ * `allocator.stats` internally, so a shared stats block may also be used
+ * safely across those concurrent calls. The same mutable stateful handle
+ * (stream, array stream, writer, generator, spool, `lonejson_json_value`, and
+ * similar objects) may move between threads but must not be called
+ * concurrently without external synchronization.
  */
 lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error);
 /** Releases one lonejson runtime. */
@@ -4988,10 +5010,17 @@ lonejson_serialize_jsonl_path(lonejson *runtime, const lonejson_map *map,
  * method twin for API symmetry on runtime-owned entrypoints.
  */
 void lonejson_cleanup(const lonejson_map *map, void *value);
-/** Initializes a mapped value according to its field descriptors. Use this
- * instead of manual `memset` when you need a known reusable starting state,
- * when you plan to parse with `clear_destination = 0`, or when you are
- * configuring caller-owned fixed-capacity array backing storage before parse.
+/** Initializes previously uninitialized mapped storage according to its field
+ * descriptors.
+ *
+ * Call this before the first parse into storage that contains stateful handle
+ * fields such as `lonejson_spooled`, `lonejson_json_value`, mapped array-stream
+ * helpers, or other runtime-managed subobjects. Use `lonejson_reset()` to
+ * reuse an already initialized value.
+ *
+ * This is also the right entrypoint when you plan to parse with
+ * `clear_destination = 0`, or when you are configuring caller-owned
+ * fixed-capacity array backing storage before parse.
  */
 void lonejson_init(lonejson *runtime, const lonejson_map *map, void *value);
 /** Clears a mapped value while preserving caller-owned fixed-capacity array
