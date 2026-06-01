@@ -593,6 +593,30 @@ static lonejson_status test_array_rewrite_count_owned_item(
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status test_array_rewrite_assert_owned_item(
+    void *user, const lonejson_array_rewrite_context *context, void *item,
+    lonejson_array_rewrite_result *result, lonejson_error *error) {
+  test_array_rewrite_owned_item *owned =
+      (test_array_rewrite_owned_item *)item;
+  size_t *count = (size_t *)user;
+
+  (void)context;
+  (void)result;
+  (void)error;
+  EXPECT(owned != NULL);
+  EXPECT(owned->name != NULL);
+  EXPECT(test_msan_cstr_initialized(owned->name));
+  if (owned != NULL && owned->name != NULL) {
+    if (*count == 0u) {
+      EXPECT(strcmp(owned->name, "alpha") == 0);
+    } else if (*count == 1u) {
+      EXPECT(strcmp(owned->name, "beta") == 0);
+    }
+  }
+  (*count)++;
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status test_array_rewrite_fail_owned_item(
     void *user, const lonejson_array_rewrite_context *context, void *item,
     lonejson_array_rewrite_result *result, lonejson_error *error) {
@@ -1415,6 +1439,35 @@ static void test_array_rewrite_owned_item_cleanup_between_items(void) {
          LONEJSON_STATUS_OK);
   EXPECT(count == 200u);
   EXPECT(alloc_state.stats.bytes_live == 0u);
+}
+
+static void test_array_rewrite_initializes_owned_item_destination(void) {
+  static const char json[] = "[{\"name\":\"alpha\"},{\"name\":\"beta\"}]";
+  test_reader_state reader;
+  test_array_rewrite_owned_item item;
+  lonejson_array_rewrite_options options;
+  lonejson_error error;
+  test_array_rewrite_count_sink sink;
+  size_t count;
+
+  memset(&options, 0, sizeof(options));
+  memset(&sink, 0, sizeof(sink));
+  count = 0u;
+  item.name = NULL;
+  test_msan_poison_bytes(&item.name, sizeof(item.name));
+  options.item_map = &test_array_rewrite_owned_item_map;
+  options.item_dst = &item;
+  options.item = test_array_rewrite_assert_owned_item;
+  options.user = &count;
+  reader.json = json;
+  reader.offset = 0u;
+  reader.chunk_size = 5u;
+  EXPECT(test_array_rewrite_reader(
+             "", test_state_reader, &reader,
+             test_array_rewrite_count_sink_write, &sink, NULL, &options,
+             &error) == LONEJSON_STATUS_OK);
+  EXPECT(count == 2u);
+  EXPECT(sink.bytes == strlen(json));
 }
 
 static void test_array_rewrite_truncation_status_is_preserved(void) {

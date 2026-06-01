@@ -133,6 +133,7 @@ int main(void) {
   test_array_rewrite_spooled_replacement_item();
   test_array_rewrite_large_array_memory_bound();
   test_array_rewrite_owned_item_cleanup_between_items();
+  test_array_rewrite_initializes_owned_item_destination();
   test_array_rewrite_truncation_status_is_preserved();
   test_array_rewrite_owned_parent_cleanup_between_parents();
   test_array_rewrite_owned_item_cleanup_on_failures();
@@ -178,6 +179,7 @@ int main(void) {
   test_runtime_defaults_and_method_dispatch();
   test_runtime_method_json_value_init_null_does_not_leak_pin();
   test_receiver_methods_dispatch_on_public_handles();
+  test_remaining_public_api_entrypoints_are_directly_covered();
   test_runtime_copy_free_leaves_owner_live();
   test_runtime_bundle_uses_custom_allocator();
   test_runtime_copy_free_does_not_retire_owner();

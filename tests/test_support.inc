@@ -1311,6 +1311,10 @@ typedef struct test_alloc_parse_doc {
   lonejson_string_array tags;
 } test_alloc_parse_doc;
 
+typedef struct test_response_json_doc {
+  char *response_json;
+} test_response_json_doc;
+
 typedef struct test_alloc_json_value_doc {
   char id[16];
   lonejson_json_value selector;
@@ -1664,6 +1668,12 @@ static const lonejson_field test_alloc_parse_doc_fields[] = {
 LONEJSON_MAP_DEFINE(test_alloc_parse_doc_map, test_alloc_parse_doc,
                     test_alloc_parse_doc_fields);
 
+static const lonejson_field test_response_json_doc_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC_REQ(test_response_json_doc, response_json,
+                                    "response_json")};
+LONEJSON_MAP_DEFINE(test_response_json_doc_map, test_response_json_doc,
+                    test_response_json_doc_fields);
+
 static const lonejson_field test_alloc_json_value_doc_fields[] = {
     LONEJSON_FIELD_STRING_FIXED_REQ(test_alloc_json_value_doc, id, "id",
                                     LONEJSON_OVERFLOW_FAIL),
@@ -1967,6 +1977,19 @@ static int test_msan_bytes_initialized(const void *ptr, size_t len) {
   (void)ptr;
   (void)len;
   return 1;
+#endif
+}
+
+static int test_msan_cstr_initialized(const char *text) {
+  return text == NULL || test_msan_bytes_initialized(text, strlen(text) + 1u);
+}
+
+static void test_msan_poison_bytes(void *ptr, size_t len) {
+#if LONEJSON__HAS_MSAN
+  __msan_poison(ptr, len);
+#else
+  (void)ptr;
+  (void)len;
 #endif
 }
 
@@ -2404,6 +2427,16 @@ test_multipart_begin_cb(void *user, const lonejson_multipart_part *part,
   }
   index = state->begin_count;
   if (index < 4u) {
+    size_t i;
+
+    EXPECT(test_msan_cstr_initialized(part->name));
+    EXPECT(test_msan_cstr_initialized(part->content_type));
+    for (i = 0u; i < part->header_count; ++i) {
+      EXPECT(test_msan_bytes_initialized(&part->headers[i],
+                                         sizeof(part->headers[i])));
+      EXPECT(test_msan_cstr_initialized(part->headers[i].name));
+      EXPECT(test_msan_cstr_initialized(part->headers[i].value));
+    }
     test_copy_cstr(state->names[index], sizeof(state->names[index]),
                    part->name);
     test_copy_cstr(state->content_types[index],
@@ -2452,6 +2485,18 @@ test_multipart_end_cb(void *user, const lonejson_multipart_part *part,
   (void)part;
   (void)error;
   EXPECT(test_msan_bytes_initialized(part, sizeof(*part)));
+  if (part != NULL) {
+    size_t i;
+
+    EXPECT(test_msan_cstr_initialized(part->name));
+    EXPECT(test_msan_cstr_initialized(part->content_type));
+    for (i = 0u; i < part->header_count; ++i) {
+      EXPECT(test_msan_bytes_initialized(&part->headers[i],
+                                         sizeof(part->headers[i])));
+      EXPECT(test_msan_cstr_initialized(part->headers[i].name));
+      EXPECT(test_msan_cstr_initialized(part->headers[i].value));
+    }
+  }
   state = (test_multipart_state *)user;
   if (state->fail_end) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
