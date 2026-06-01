@@ -1,5 +1,7 @@
 lonejson__parse_options lonejson__default_parse_options(void) {
   lonejson__parse_options options;
+
+  memset(&options, 0, sizeof(options));
   options.clear_destination = 1;
   options.reject_duplicate_keys = 1;
   options.max_depth = 64u;
@@ -13,6 +15,8 @@ lonejson__parse_options lonejson__default_parse_options(void) {
 
 lonejson__value_limits lonejson__default_value_limits(void) {
   lonejson__value_limits limits;
+
+  memset(&limits, 0, sizeof(limits));
   limits.max_depth = 64u;
   limits.max_string_bytes = 1024u * 1024u;
   limits.max_number_bytes = 256u;
@@ -23,6 +27,8 @@ lonejson__value_limits lonejson__default_value_limits(void) {
 
 lonejson__write_options lonejson__default_write_options(void) {
   lonejson__write_options options;
+
+  memset(&options, 0, sizeof(options));
   options.overflow_policy = LONEJSON_OVERFLOW_FAIL;
   options.pretty = 0;
   options.allocator = NULL;
@@ -40,6 +46,8 @@ lonejson__write_max_output_bytes(const lonejson__write_options *options) {
 
 lonejson_owned_buffer lonejson_default_owned_buffer(void) {
   lonejson_owned_buffer buffer;
+
+  memset(&buffer, 0, sizeof(buffer));
   buffer.data = NULL;
   buffer.len = 0u;
   buffer.alloc_size = 0u;
@@ -56,6 +64,7 @@ lonejson_config lonejson_default_config(void) {
   lonejson__write_options write_options = lonejson__default_write_options();
   lonejson__spool_options spool_options = lonejson__default_spool_options();
 
+  memset(&config, 0, sizeof(config));
   config.max_alloc_bytes = parse_options.max_alloc_bytes;
   config.max_dynamic_string_bytes = parse_options.max_dynamic_string_bytes;
   config.max_depth = parse_options.max_depth;

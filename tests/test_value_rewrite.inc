@@ -636,6 +636,7 @@ test_value_rewrite_expect_old_value(lonejson_writer *writer,
       (test_value_rewrite_old_value_expect *)user;
 
   expect->calls++;
+  EXPECT(test_msan_bytes_initialized(old, sizeof(*old)));
   EXPECT(old->present == expect->present);
   EXPECT(old->type == expect->type);
   if (old->type == LONEJSON_VALUE_NUMBER) {

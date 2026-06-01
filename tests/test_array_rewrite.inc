@@ -588,6 +588,7 @@ static lonejson_status test_array_rewrite_count_owned_item(
   (void)result;
   (void)error;
   EXPECT(owned->name != NULL);
+  EXPECT(test_msan_bytes_initialized(owned->name, strlen(owned->name) + 1u));
   (*count)++;
   return LONEJSON_STATUS_OK;
 }
@@ -602,6 +603,7 @@ static lonejson_status test_array_rewrite_fail_owned_item(
   (void)result;
   (void)error;
   EXPECT(owned->name != NULL);
+  EXPECT(test_msan_bytes_initialized(owned->name, strlen(owned->name) + 1u));
   return LONEJSON_STATUS_CALLBACK_FAILED;
 }
 
@@ -614,6 +616,7 @@ static lonejson_status test_array_rewrite_bad_action_owned_item(
   (void)context;
   (void)error;
   EXPECT(owned->name != NULL);
+  EXPECT(test_msan_bytes_initialized(owned->name, strlen(owned->name) + 1u));
   result->action = (lonejson_array_rewrite_action)99;
   return LONEJSON_STATUS_OK;
 }
@@ -630,6 +633,8 @@ static lonejson_status test_array_rewrite_owned_parent_append(
     const test_array_rewrite_owned_parent *parent =
         (const test_array_rewrite_owned_parent *)context->parents[0].dst;
     EXPECT(parent->name != NULL);
+    EXPECT(test_msan_bytes_initialized(parent->name,
+                                       strlen(parent->name) + 1u));
     (*count)++;
   }
   return LONEJSON_STATUS_OK;

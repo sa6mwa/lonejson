@@ -202,6 +202,7 @@ test_sse_large_event_cb(void *user, const lonejson_sse_event *event, void *dst,
   size_t text_len = doc->text ? strlen(doc->text) : 0u;
 
   (void)error;
+  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   state->count++;
   if (doc->type == NULL || strcmp(doc->type, event->event) != 0) {
     state->invalid = 1;
@@ -250,7 +251,7 @@ static lonejson_status test_sse_json_value_capture_event_cb(
   test_buffer_sink sink;
   lonejson_status status;
 
-  (void)event;
+  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   memset(&sink, 0, sizeof(sink));
   sink.buffer = (unsigned char *)state->captured;
   sink.capacity = sizeof(state->captured);
@@ -269,7 +270,7 @@ static lonejson_status test_sse_json_value_count_event_cb(
     lonejson_error *error) {
   test_sse_json_value_state *state = (test_sse_json_value_state *)user;
 
-  (void)event;
+  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   (void)value;
   (void)error;
   state->count++;
@@ -281,7 +282,7 @@ static lonejson_status test_sse_json_value_fail_cb(
     lonejson_error *error) {
   test_sse_json_value_state *state = (test_sse_json_value_state *)user;
 
-  (void)event;
+  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   (void)value;
   state->saw_failure = 1;
   return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,

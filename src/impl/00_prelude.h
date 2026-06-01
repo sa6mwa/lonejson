@@ -755,6 +755,7 @@ static void lonejson__default_free(void *ctx, void *ptr) {
 lonejson_allocator lonejson_default_allocator(void) {
   lonejson_allocator allocator;
 
+  memset(&allocator, 0, sizeof(allocator));
   allocator.malloc_fn = lonejson__default_malloc;
   allocator.realloc_fn = lonejson__default_realloc;
   allocator.free_fn = lonejson__default_free;
@@ -1137,6 +1138,7 @@ static void lonejson__owned_free_parse(lonejson_parser *parser, void *ptr) {
 lonejson__spool_options lonejson__default_spool_options(void) {
   lonejson__spool_options options;
 
+  memset(&options, 0, sizeof(options));
   options.memory_limit = LONEJSON_SPOOL_MEMORY_LIMIT;
   options.max_bytes = LONEJSON_SPOOL_MAX_BYTES;
   options.temp_dir = NULL;

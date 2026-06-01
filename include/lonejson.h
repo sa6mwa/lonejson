@@ -26,6 +26,7 @@
 #ifndef LONEJSON_H
 #define LONEJSON_H
 
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 
@@ -491,7 +492,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 15
+#define LONEJSON_ABI_VERSION 16
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -937,6 +938,8 @@ typedef struct lonejson_read_result {
   int would_block;
   /** `errno`-style failure code. Zero indicates success. */
   int error_code;
+  /** Reserved for ABI-stable padding; must remain zero. */
+  int reserved;
 } lonejson_read_result;
 
 /** Callback type used by reader-backed parse and stream APIs. */

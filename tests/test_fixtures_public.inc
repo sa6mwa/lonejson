@@ -474,16 +474,31 @@ static void test_public_api_argument_and_serialization_guards(void) {
 }
 
 static void test_public_initializers_and_defaults(void) {
+  static const unsigned char buffer_reader_data[] = "{}";
   lonejson_error error;
   lonejson_read_result read_result;
   lonejson_value_visitor visitor;
   lonejson_config config;
+  lonejson_allocator allocator;
+  lonejson__spool_options spool_options;
+  lonejson__parse_options parse_options;
+  lonejson__value_limits value_limits;
+  lonejson__write_options write_options;
+  lonejson_owned_buffer owned_buffer;
+  lonejson_sse_options sse_options;
+  lonejson_multipart_options multipart_options;
+  lonejson_buffer_reader buffer_reader;
+  lonejson_source source;
+  lonejson_string_array_stream string_stream;
+  lonejson_mapped_array_stream mapped_stream;
+  lonejson_writer_value_stream writer_value_stream;
   test_json_value_doc doc;
   lonejson_json_value value;
   lonejson_spooled spool;
 
   poison_bytes(&error, sizeof(error), 0xA5u);
   lonejson_error_init(&error);
+  EXPECT(test_msan_bytes_initialized(&error, sizeof(error)));
   EXPECT(error.code == LONEJSON_STATUS_OK);
   EXPECT(error.line == 0u);
   EXPECT(error.column == 0u);
@@ -493,12 +508,20 @@ static void test_public_initializers_and_defaults(void) {
   EXPECT(error.message[0] == '\0');
 
   read_result = lonejson_default_read_result();
+  EXPECT(test_msan_bytes_initialized(&read_result, sizeof(read_result)));
+  if (sizeof(size_t) == 4u) {
+    EXPECT(sizeof(read_result) == sizeof(size_t) + 4u * sizeof(int));
+  } else if (sizeof(size_t) == 8u) {
+    EXPECT(sizeof(read_result) == sizeof(size_t) + 4u * sizeof(int));
+  }
   EXPECT(read_result.bytes_read == 0u);
   EXPECT(read_result.eof == 0);
   EXPECT(read_result.would_block == 0);
   EXPECT(read_result.error_code == 0);
+  EXPECT(read_result.reserved == 0);
 
   visitor = lonejson_default_value_visitor();
+  EXPECT(test_msan_bytes_initialized(&visitor, sizeof(visitor)));
   EXPECT(visitor.object_begin == NULL);
   EXPECT(visitor.object_end == NULL);
   EXPECT(visitor.object_key_begin == NULL);
@@ -515,7 +538,76 @@ static void test_public_initializers_and_defaults(void) {
   EXPECT(visitor.boolean_value == NULL);
   EXPECT(visitor.null_value == NULL);
 
+  allocator = lonejson_default_allocator();
+  EXPECT(test_msan_bytes_initialized(&allocator, sizeof(allocator)));
+  EXPECT(allocator.malloc_fn != NULL);
+  EXPECT(allocator.realloc_fn != NULL);
+  EXPECT(allocator.free_fn != NULL);
+  EXPECT(allocator.ctx == NULL);
+  EXPECT(allocator.stats == NULL);
+
+  spool_options = lonejson__default_spool_options();
+  EXPECT(test_msan_bytes_initialized(&spool_options, sizeof(spool_options)));
+  EXPECT(spool_options.memory_limit == LONEJSON_SPOOL_MEMORY_LIMIT);
+  EXPECT(spool_options.max_bytes == LONEJSON_SPOOL_MAX_BYTES);
+  EXPECT(spool_options.temp_dir == NULL);
+
+  parse_options = lonejson__default_parse_options();
+  EXPECT(test_msan_bytes_initialized(&parse_options, sizeof(parse_options)));
+  EXPECT(parse_options.clear_destination == 1);
+  EXPECT(parse_options.reject_duplicate_keys == 1);
+  EXPECT(parse_options.max_depth == 64u);
+  EXPECT(parse_options.max_dynamic_string_bytes ==
+         LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES);
+  EXPECT(parse_options.max_alloc_bytes == LONEJSON_PARSE_MAX_ALLOC_BYTES);
+  EXPECT(parse_options.fixed_string_scratch == NULL);
+  EXPECT(parse_options.fixed_string_scratch_size == 0u);
+  EXPECT(parse_options.allocator == NULL);
+
+  value_limits = lonejson__default_value_limits();
+  EXPECT(test_msan_bytes_initialized(&value_limits, sizeof(value_limits)));
+  EXPECT(value_limits.max_depth == 64u);
+  EXPECT(value_limits.max_string_bytes == 1024u * 1024u);
+  EXPECT(value_limits.max_number_bytes == 256u);
+  EXPECT(value_limits.max_key_bytes == 64u * 1024u);
+  EXPECT(value_limits.max_total_bytes == 0u);
+
+  write_options = lonejson__default_write_options();
+  EXPECT(test_msan_bytes_initialized(&write_options, sizeof(write_options)));
+  EXPECT(write_options.overflow_policy == LONEJSON_OVERFLOW_FAIL);
+  EXPECT(write_options.pretty == 0);
+  EXPECT(write_options.allocator == NULL);
+  EXPECT(write_options.max_output_bytes == LONEJSON_WRITE_MAX_OUTPUT_BYTES);
+
+  owned_buffer = lonejson_default_owned_buffer();
+  EXPECT(test_msan_bytes_initialized(&owned_buffer, sizeof(owned_buffer)));
+  EXPECT(owned_buffer.data == NULL);
+  EXPECT(owned_buffer.len == 0u);
+  EXPECT(owned_buffer.alloc_size == 0u);
+  EXPECT(owned_buffer.allocator.malloc_fn != NULL);
+  EXPECT(owned_buffer.allocator.realloc_fn != NULL);
+  EXPECT(owned_buffer.allocator.free_fn != NULL);
+  EXPECT(owned_buffer.allocator.ctx == NULL);
+  EXPECT(owned_buffer.allocator.stats == NULL);
+
+  sse_options = lonejson_default_sse_options();
+  EXPECT(test_msan_bytes_initialized(&sse_options, sizeof(sse_options)));
+  EXPECT(sse_options.max_line_bytes == 64u * 1024u);
+  EXPECT(sse_options.max_event_data_bytes == 1024u * 1024u);
+  EXPECT(sse_options.max_buffered_bytes == 1024u * 1024u);
+  EXPECT(sse_options.allocator == NULL);
+
+  multipart_options = lonejson_default_multipart_options();
+  EXPECT(test_msan_bytes_initialized(&multipart_options,
+                                     sizeof(multipart_options)));
+  EXPECT(multipart_options.max_boundary_bytes == 200u);
+  EXPECT(multipart_options.max_header_line_bytes == 64u * 1024u);
+  EXPECT(multipart_options.max_header_count == 64u);
+  EXPECT(multipart_options.max_part_buffered_bytes == 1024u * 1024u);
+  EXPECT(multipart_options.allocator == NULL);
+
   config = lonejson_default_config();
+  EXPECT(test_msan_bytes_initialized(&config, sizeof(config)));
   EXPECT(config.max_alloc_bytes == LONEJSON_PARSE_MAX_ALLOC_BYTES);
   EXPECT(config.max_dynamic_string_bytes ==
          LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES);
@@ -533,6 +625,57 @@ static void test_public_initializers_and_defaults(void) {
   EXPECT(config.spool_default.memory_limit == LONEJSON_SPOOL_MEMORY_LIMIT);
   EXPECT(config.spool_default.max_bytes == LONEJSON_SPOOL_MAX_BYTES);
   EXPECT(config.spool_default.temp_dir == NULL);
+
+  poison_bytes(&buffer_reader, sizeof(buffer_reader), 0x11u);
+  lonejson_buffer_reader_init(&buffer_reader, buffer_reader_data,
+                              sizeof(buffer_reader_data) - 1u);
+  EXPECT(test_msan_bytes_initialized(&buffer_reader, sizeof(buffer_reader)));
+  EXPECT(buffer_reader.data == buffer_reader_data);
+  EXPECT(buffer_reader.len == sizeof(buffer_reader_data) - 1u);
+  EXPECT(buffer_reader.offset == 0u);
+
+  poison_bytes(&source, sizeof(source), 0x22u);
+  lonejson_source_init(&source);
+  EXPECT(test_msan_bytes_initialized(&source, sizeof(source)));
+  EXPECT(source.kind == LONEJSON_SOURCE_NONE);
+  EXPECT(source.fp == NULL);
+  EXPECT(source.fd == -1);
+  EXPECT(source.path == NULL);
+  EXPECT(source.cleanup == lonejson_source_cleanup);
+  EXPECT(source.reset == lonejson_source_reset);
+  EXPECT(source.set_file == lonejson_source_set_file);
+  EXPECT(source.set_fd == lonejson_source_set_fd);
+  EXPECT(source.set_path == lonejson_source_set_path);
+  EXPECT(source.write_to_sink == lonejson_source_write_to_sink);
+  EXPECT(source.is_rewindable == lonejson_source_is_rewindable);
+
+  poison_bytes(&string_stream, sizeof(string_stream), 0x33u);
+  lonejson_string_array_stream_init(&string_stream);
+  EXPECT(test_msan_bytes_initialized(&string_stream, sizeof(string_stream)));
+  EXPECT(string_stream.set_handler == lonejson_string_array_stream_set_handler);
+
+  poison_bytes(&mapped_stream, sizeof(mapped_stream), 0x44u);
+  lonejson_mapped_array_stream_init(&mapped_stream);
+  EXPECT(test_msan_bytes_initialized(&mapped_stream, sizeof(mapped_stream)));
+  EXPECT(mapped_stream.set_handler == lonejson_mapped_array_stream_set_handler);
+
+  poison_bytes(&writer_value_stream, sizeof(writer_value_stream), 0x55u);
+  lonejson_writer_value_stream_init(&writer_value_stream);
+  EXPECT(test_msan_bytes_initialized(&writer_value_stream,
+                                     sizeof(writer_value_stream)));
+  EXPECT(writer_value_stream.open == lonejson_writer_value_stream_open);
+  EXPECT(writer_value_stream.push == lonejson_writer_value_stream_push);
+  EXPECT(writer_value_stream.close == lonejson_writer_value_stream_close);
+  EXPECT(writer_value_stream.cleanup == lonejson_writer_value_stream_cleanup);
+
+  poison_bytes(&owned_buffer, sizeof(owned_buffer), 0x66u);
+  lonejson_owned_buffer_init(&owned_buffer);
+  EXPECT(test_msan_bytes_initialized(&owned_buffer, sizeof(owned_buffer)));
+  EXPECT(owned_buffer.data == NULL);
+  EXPECT(owned_buffer.len == 0u);
+  EXPECT(owned_buffer.alloc_size == 0u);
+  EXPECT(owned_buffer.allocator.malloc_fn != NULL);
+  lonejson_owned_buffer_free(&owned_buffer);
 
   EXPECT((int)LONEJSON_FIELD_KIND_STRING == 0);
   EXPECT((int)LONEJSON_FIELD_KIND_STRING_STREAM == 1);
@@ -572,13 +715,73 @@ static void test_public_initializers_and_defaults(void) {
 
   poison_bytes(&value, sizeof(value), 0x33u);
   lonejson_json_value_init(NULL, &value);
+  EXPECT(test_msan_bytes_initialized(&value, sizeof(value)));
   EXPECT(lonejson__json_value_is_initialized(&value));
   lonejson_json_value_cleanup(&value);
 
   poison_bytes(&spool, sizeof(spool), 0x44u);
   lonejson_spooled_init_class(NULL, &spool, LONEJSON_SPOOL_CLASS_BLOB);
+  EXPECT(test_msan_bytes_initialized(&spool, sizeof(spool)));
   EXPECT(lonejson__spooled_is_initialized(&spool));
   lonejson_spooled_cleanup(&spool);
+}
+
+static void test_msan_public_boundary_results_are_initialized(void) {
+  static const unsigned char input[] = "abcdef";
+  static const char alloc_json[] =
+      "{\"name\":\"allocated-boundary\",\"body\":\"spooled\","
+      "\"tags\":[\"one\",\"two\"]}";
+  lonejson_buffer_reader reader;
+  lonejson_read_result read_result;
+  unsigned char buffer[16];
+  lonejson_spooled spool;
+  lonejson_error error;
+  test_alloc_parse_doc doc;
+
+  lonejson_buffer_reader_init(&reader, input, sizeof(input) - 1u);
+  poison_bytes(&read_result, sizeof(read_result), 0xA5u);
+  read_result = lonejson_buffer_reader_read(&reader, buffer, sizeof(buffer));
+  EXPECT(test_msan_bytes_initialized(&read_result, sizeof(read_result)));
+  EXPECT(read_result.bytes_read == sizeof(input) - 1u);
+  EXPECT(read_result.eof == 1);
+  EXPECT(read_result.would_block == 0);
+  EXPECT(read_result.error_code == 0);
+  EXPECT(read_result.reserved == 0);
+  EXPECT(test_msan_bytes_initialized(buffer, read_result.bytes_read));
+  EXPECT(memcmp(buffer, input, sizeof(input) - 1u) == 0);
+
+  poison_bytes(&spool, sizeof(spool), 0xA5u);
+  lonejson_spooled_init(test_default_runtime(), &spool);
+  EXPECT(lonejson_spooled_append(&spool, input, sizeof(input) - 1u, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_spooled_rewind(&spool, &error) == LONEJSON_STATUS_OK);
+  poison_bytes(&read_result, sizeof(read_result), 0x5Au);
+  read_result = lonejson_spooled_read(&spool, buffer, sizeof(buffer));
+  EXPECT(test_msan_bytes_initialized(&read_result, sizeof(read_result)));
+  EXPECT(read_result.bytes_read == sizeof(input) - 1u);
+  EXPECT(read_result.eof == 1);
+  EXPECT(read_result.would_block == 0);
+  EXPECT(read_result.error_code == 0);
+  EXPECT(read_result.reserved == 0);
+  EXPECT(test_msan_bytes_initialized(buffer, read_result.bytes_read));
+  EXPECT(memcmp(buffer, input, sizeof(input) - 1u) == 0);
+  lonejson_spooled_cleanup(&spool);
+
+  memset(&doc, 0, sizeof(doc));
+  EXPECT(test_parse_cstr(&test_alloc_parse_doc_map, &doc, alloc_json, NULL,
+                         &error) == LONEJSON_STATUS_OK);
+  EXPECT(doc.name != NULL);
+  EXPECT(test_msan_bytes_initialized(doc.name, strlen(doc.name) + 1u));
+  EXPECT(strcmp(doc.name, "allocated-boundary") == 0);
+  EXPECT(doc.tags.items != NULL);
+  EXPECT(doc.tags.count == 2u);
+  EXPECT(test_msan_bytes_initialized(doc.tags.items[0],
+                                     strlen(doc.tags.items[0]) + 1u));
+  EXPECT(test_msan_bytes_initialized(doc.tags.items[1],
+                                     strlen(doc.tags.items[1]) + 1u));
+  EXPECT(strcmp(doc.tags.items[0], "one") == 0);
+  EXPECT(strcmp(doc.tags.items[1], "two") == 0);
+  lonejson_cleanup(&test_alloc_parse_doc_map, &doc);
 }
 
 static lonejson_status test_runtime_array_rewrite_keep_item(

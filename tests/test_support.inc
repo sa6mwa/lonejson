@@ -1941,6 +1941,35 @@ LONEJSON_MAP_DEFINE(test_person_map, test_person, test_person_fields);
 
 static int g_failures = 0;
 
+static void expect_true(int cond, const char *expr, const char *file,
+                        int line) {
+  if (!cond) {
+    fprintf(stderr, "%s:%d: expectation failed: %s\n", file, line, expr);
+    g_failures++;
+  }
+}
+
+#define EXPECT(expr) expect_true((expr), #expr, __FILE__, __LINE__)
+
+static void poison_bytes(void *ptr, size_t len, unsigned char value) {
+  unsigned char *bytes = (unsigned char *)ptr;
+  size_t i;
+
+  for (i = 0; i < len; ++i) {
+    bytes[i] = value;
+  }
+}
+
+static int test_msan_bytes_initialized(const void *ptr, size_t len) {
+#if LONEJSON__HAS_MSAN
+  return ptr == NULL || __msan_test_shadow(ptr, len) < 0;
+#else
+  (void)ptr;
+  (void)len;
+  return 1;
+#endif
+}
+
 static lonejson_read_result test_state_reader(void *user, unsigned char *buffer,
                                               size_t capacity) {
   test_reader_state *st = (test_reader_state *)user;
@@ -2262,6 +2291,7 @@ static lonejson_status test_sse_begin_cb(void *user,
   test_sse_state *state;
 
   (void)error;
+  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   state = (test_sse_state *)user;
   ++state->begin_count;
   test_copy_cstr(state->event, sizeof(state->event), event->event);
@@ -2275,6 +2305,7 @@ static lonejson_status test_sse_data_cb(void *user, const void *bytes,
   size_t copy_len;
 
   state = (test_sse_state *)user;
+  EXPECT(test_msan_bytes_initialized(bytes, len));
   if (state->fail) {
     (void)error;
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -2298,6 +2329,7 @@ static lonejson_status test_sse_end_cb(void *user,
   test_sse_state *state;
 
   (void)error;
+  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   state = (test_sse_state *)user;
   ++state->count;
   test_copy_cstr(state->event, sizeof(state->event), event->event);
@@ -2325,6 +2357,7 @@ static lonejson_status test_sse_json_event_cb(void *user,
   test_event *record;
 
   (void)error;
+  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   state = (test_sse_json_state *)user;
   record = (test_event *)dst;
   if (strcmp(record->id, "evtjsn") != 0 || record->ok != true) {
@@ -2346,6 +2379,7 @@ test_sse_json_collect_event_cb(void *user, const lonejson_sse_event *event,
 
   (void)dst;
   (void)error;
+  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   state = (test_sse_json_state *)user;
   ++state->count;
   test_copy_cstr(state->event, sizeof(state->event), event->event);
@@ -2363,6 +2397,7 @@ test_multipart_begin_cb(void *user, const lonejson_multipart_part *part,
   size_t index;
 
   (void)error;
+  EXPECT(test_msan_bytes_initialized(part, sizeof(*part)));
   state = (test_multipart_state *)user;
   if (state->fail_begin) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -2385,6 +2420,7 @@ static lonejson_status test_multipart_data_cb(void *user, const void *bytes,
   test_multipart_state *state;
 
   state = (test_multipart_state *)user;
+  EXPECT(test_msan_bytes_initialized(bytes, len));
   if (state->check_no_body_alloc && state->stats != NULL) {
     if (state->stats->alloc_calls != state->alloc_calls_after_headers ||
         state->stats->realloc_calls != state->realloc_calls_after_headers) {
@@ -2415,6 +2451,7 @@ test_multipart_end_cb(void *user, const lonejson_multipart_part *part,
 
   (void)part;
   (void)error;
+  EXPECT(test_msan_bytes_initialized(part, sizeof(*part)));
   state = (test_multipart_state *)user;
   if (state->fail_end) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -2771,16 +2808,6 @@ static char *vendor_fixture_path(const char *name) {
   return path;
 }
 
-static void expect_true(int cond, const char *expr, const char *file,
-                        int line) {
-  if (!cond) {
-    fprintf(stderr, "%s:%d: expectation failed: %s\n", file, line, expr);
-    g_failures++;
-  }
-}
-
-#define EXPECT(expr) expect_true((expr), #expr, __FILE__, __LINE__)
-
 static void test_expect_compact_buffer_matches_sink(const lonejson_map *map,
                                                     const void *src,
                                                     const char *expected) {
@@ -2806,13 +2833,4 @@ static void test_expect_compact_buffer_matches_sink(const lonejson_map *map,
                                    NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(buffer_json, sink_json) == 0);
-}
-
-static void poison_bytes(void *ptr, size_t len, unsigned char value) {
-  unsigned char *bytes = (unsigned char *)ptr;
-  size_t i;
-
-  for (i = 0; i < len; ++i) {
-    bytes[i] = value;
-  }
 }

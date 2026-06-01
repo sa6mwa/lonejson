@@ -2,6 +2,8 @@
 
 lonejson_sse_options lonejson_default_sse_options(void) {
   lonejson_sse_options options;
+
+  memset(&options, 0, sizeof(options));
   options.max_line_bytes = 64u * 1024u;
   options.max_event_data_bytes = 1024u * 1024u;
   options.max_buffered_bytes = 1024u * 1024u;
@@ -1010,6 +1012,8 @@ void lonejson_sse_close(lonejson_sse *sse) {
 
 lonejson_multipart_options lonejson_default_multipart_options(void) {
   lonejson_multipart_options options;
+
+  memset(&options, 0, sizeof(options));
   options.max_boundary_bytes = 200u;
   options.max_header_line_bytes = 64u * 1024u;
   options.max_header_count = 64u;
