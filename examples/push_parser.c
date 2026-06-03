@@ -55,9 +55,8 @@ int main(void) {
 
   lonejson_init(lj, &build_info_map, &info);
 
-  stream =
-      lonejson_stream_open_reader(lj, &build_info_map, build_reader, &state,
-                                  &error);
+  stream = lonejson_stream_open_reader(lj, &build_info_map, build_reader,
+                                       &state, &error);
   if (stream == NULL) {
     fprintf(stderr, "stream open failed: %s\n", error.message);
     lonejson_free(lj);

@@ -182,8 +182,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     return 0;
   }
   memset(&person, 0, sizeof(person));
-  status =
-      lonejson_parse_buffer(runtime, &fuzz_person_map, &person, data, size, &error);
+  status = lonejson_parse_buffer(runtime, &fuzz_person_map, &person, data, size,
+                                 &error);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     fuzz_generator_path(runtime, &person, chunk_size);
   }

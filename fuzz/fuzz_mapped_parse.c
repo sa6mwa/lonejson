@@ -1,6 +1,6 @@
 #include <stddef.h>
-#include <stdlib.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "lonejson.h"
@@ -353,8 +353,8 @@ static void fuzz_parse_capped_alloc_doc(const uint8_t *data, size_t size) {
 
   memset(&doc, 0, sizeof(doc));
   lonejson_init(runtime, &fuzz_capped_alloc_doc_map, &doc);
-  status =
-      lonejson_parse_cstr(runtime, &fuzz_capped_alloc_doc_map, &doc, json, &error);
+  status = lonejson_parse_cstr(runtime, &fuzz_capped_alloc_doc_map, &doc, json,
+                               &error);
   (void)status;
   lonejson_cleanup(&fuzz_capped_alloc_doc_map, &doc);
   lonejson_free(runtime);
@@ -376,8 +376,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     return 0;
   }
   memset(&person, 0, sizeof(person));
-  status =
-      lonejson_parse_buffer(runtime, &fuzz_person_map, &person, data, size, &error);
+  status = lonejson_parse_buffer(runtime, &fuzz_person_map, &person, data, size,
+                                 &error);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     char buffer[1024];
     size_t needed;

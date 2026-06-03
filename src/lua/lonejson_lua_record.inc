@@ -235,7 +235,8 @@ static int ljlua_decode_context_prepare_table_mode(lua_State *L,
   if (ctx->json_values == NULL) {
     return luaL_error(L, "failed to allocate Lua JSON decode state");
   }
-  if (!ljlua_prepare_record_json_value_capture_recursive(L, schema, record, 0)) {
+  if (!ljlua_prepare_record_json_value_capture_recursive(L, schema, record,
+                                                         0)) {
     return 0;
   }
   for (i = 0u; i < schema->field_count; ++i) {
@@ -288,8 +289,8 @@ static int ljlua_prepare_record_json_value_capture(lua_State *L,
                                                    ljlua_schema *schema,
                                                    void *record,
                                                    int preserve_runtime) {
-  return ljlua_prepare_record_json_value_capture_recursive(
-      L, schema, record, preserve_runtime);
+  return ljlua_prepare_record_json_value_capture_recursive(L, schema, record,
+                                                           preserve_runtime);
 }
 
 static int ljlua_record_to_table(lua_State *L, ljlua_schema *schema,
@@ -714,8 +715,8 @@ static void ljlua_init_helper_parser(lonejson_parser *parser) {
   static const lonejson_map helper_map = {"lua-helper", 0u, NULL, 0u, NULL, 0u};
   static unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
 
-  lonejson__parser_init_state(parser, &helper_map, NULL, NULL, NULL, 0,
-                              0, 0, 0u, workspace, sizeof(workspace));
+  lonejson__parser_init_state(parser, &helper_map, NULL, NULL, NULL, 0, 0, 0,
+                              0u, workspace, sizeof(workspace));
 }
 
 static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
@@ -726,9 +727,8 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
 
   (void)schema;
   ptr = (unsigned char *)record + meta->field.struct_offset;
-  if (lua_isnil(L, value_index) ||
-      (ljlua_field_is_nullable_presence(meta) &&
-       ljlua_is_json_null(L, value_index))) {
+  if (lua_isnil(L, value_index) || (ljlua_field_is_nullable_presence(meta) &&
+                                    ljlua_is_json_null(L, value_index))) {
     lonejson_parser parser;
 
     ljlua_init_helper_parser(&parser);
@@ -749,8 +749,8 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
     unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
 
     lonejson__parser_init_state(&parser, &schema->map, record, NULL,
-                                lonejson__runtime_const(schema->runtime), 0,
-                                0, 0, 0u, workspace, sizeof(workspace));
+                                lonejson__runtime_const(schema->runtime), 0, 0,
+                                0, 0u, workspace, sizeof(workspace));
     if (lonejson__assign_string(&parser, &meta->field, ptr, text, len) !=
         LONEJSON_STATUS_OK) {
       return luaL_error(L, "%s", parser.error.message);

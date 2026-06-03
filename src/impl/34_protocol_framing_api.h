@@ -329,8 +329,10 @@ static void lonejson__sse_json_release_runtime(lonejson_sse *sse) {
   sse->json_runtime_source = NULL;
 }
 
-static lonejson_status lonejson__sse_json_snapshot_runtime(
-    lonejson_sse *sse, const lonejson__sse_json_ctx *ctx, lonejson_error *error) {
+static lonejson_status
+lonejson__sse_json_snapshot_runtime(lonejson_sse *sse,
+                                    const lonejson__sse_json_ctx *ctx,
+                                    lonejson_error *error) {
   if (sse == NULL || ctx == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "SSE JSON parser context is required");
@@ -339,15 +341,14 @@ static lonejson_status lonejson__sse_json_snapshot_runtime(
                                       1, error) != LONEJSON_STATUS_OK) {
     return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
   }
-  sse->json_runtime =
-      ctx->runtime != NULL ? &sse->json_runtime_storage
-                           : (const lonejson_runtime *)NULL;
+  sse->json_runtime = ctx->runtime != NULL ? &sse->json_runtime_storage
+                                           : (const lonejson_runtime *)NULL;
   sse->json_runtime_source = ctx->runtime;
-  sse->json_parse_options_storage =
-      ctx->parse_options != NULL ? *ctx->parse_options
-                                 : lonejson__default_parse_options();
-  if (ctx->runtime != NULL &&
-      sse->json_parse_options_storage.allocator == ctx->runtime->config.allocator) {
+  sse->json_parse_options_storage = ctx->parse_options != NULL
+                                        ? *ctx->parse_options
+                                        : lonejson__default_parse_options();
+  if (ctx->runtime != NULL && sse->json_parse_options_storage.allocator ==
+                                  ctx->runtime->config.allocator) {
     sse->json_parse_options_storage.allocator =
         sse->json_runtime->config.allocator;
   }
@@ -386,8 +387,8 @@ lonejson__sse_json_has_filter(const lonejson_sse_json_options *options) {
          options->event_name_count != 0u;
 }
 
-static void lonejson__sse_json_cleanup_retained_map_destination(
-    lonejson_sse *sse) {
+static void
+lonejson__sse_json_cleanup_retained_map_destination(lonejson_sse *sse) {
   if (sse == NULL) {
     return;
   }
@@ -401,8 +402,8 @@ static void lonejson__sse_json_cleanup_retained_map_destination(
   sse->json_retained_active = 0;
 }
 
-static void lonejson__sse_json_cleanup_retained_value_destination(
-    lonejson_sse *sse) {
+static void
+lonejson__sse_json_cleanup_retained_value_destination(lonejson_sse *sse) {
   if (sse == NULL) {
     return;
   }
@@ -467,8 +468,8 @@ lonejson__sse_json_begin_parser(lonejson_sse *sse,
                               ctx->value != NULL, 0, 0, 0u, sse->json_workspace,
                               sizeof(sse->json_workspace));
   if (ctx->value != NULL) {
-    lonejson_status status =
-        lonejson__json_value_prepare_parse(&sse->json_parser, ctx->value, error);
+    lonejson_status status = lonejson__json_value_prepare_parse(
+        &sse->json_parser, ctx->value, error);
     if (status != LONEJSON_STATUS_OK) {
       lonejson_parser_destroy(&sse->json_parser);
       lonejson__sse_json_release_runtime(sse);
@@ -749,8 +750,7 @@ static lonejson_status lonejson__sse_push_json_impl(
 static lonejson_status lonejson__sse_push_json_with_options(
     lonejson_sse *sse, const lonejson_map *map, void *dst, const void *bytes,
     size_t len, const lonejson__parse_options *parse_options,
-    const lonejson_runtime *runtime,
-    const lonejson_sse_json_options *options,
+    const lonejson_runtime *runtime, const lonejson_sse_json_options *options,
     lonejson_sse_json_event_fn event_cb, void *user, lonejson_error *error) {
   lonejson__sse_json_ctx ctx;
   if (map == NULL || dst == NULL) {
@@ -798,8 +798,7 @@ LONEJSON__COLD lonejson_status lonejson_sse_push_json(
 static lonejson_status lonejson__sse_finish_json_with_options(
     lonejson_sse *sse, const lonejson_map *map, void *dst,
     const lonejson__parse_options *parse_options,
-    const lonejson_runtime *runtime,
-    const lonejson_sse_json_options *options,
+    const lonejson_runtime *runtime, const lonejson_sse_json_options *options,
     lonejson_sse_json_event_fn event_cb, void *user, lonejson_error *error) {
   lonejson__sse_json_ctx ctx;
   if (map == NULL || dst == NULL) {
@@ -848,12 +847,10 @@ static lonejson_status lonejson__sse_finish_json_with_options(
   }
 }
 
-lonejson_status
-lonejson_sse_finish_json(lonejson *runtime, lonejson_sse *sse,
-                         const lonejson_map *map, void *dst,
-                         const lonejson_sse_json_options *options,
-                         lonejson_sse_json_event_fn event_cb, void *user,
-                         lonejson_error *error) {
+lonejson_status lonejson_sse_finish_json(
+    lonejson *runtime, lonejson_sse *sse, const lonejson_map *map, void *dst,
+    const lonejson_sse_json_options *options,
+    lonejson_sse_json_event_fn event_cb, void *user, lonejson_error *error) {
   lonejson__runtime_borrow borrow;
   const lonejson_runtime *runtime_state;
   lonejson_status status;
@@ -872,8 +869,7 @@ lonejson_sse_finish_json(lonejson *runtime, lonejson_sse *sse,
 static lonejson_status lonejson__sse_push_json_value_with_options(
     lonejson_sse *sse, lonejson_json_value *value, const void *bytes,
     size_t len, const lonejson__parse_options *parse_options,
-    const lonejson_runtime *runtime,
-    const lonejson_sse_json_options *options,
+    const lonejson_runtime *runtime, const lonejson_sse_json_options *options,
     lonejson_sse_json_value_event_fn event_cb, void *user,
     lonejson_error *error) {
   lonejson__sse_json_ctx ctx;
@@ -924,8 +920,7 @@ LONEJSON__COLD lonejson_status lonejson_sse_push_json_value(
 static lonejson_status lonejson__sse_finish_json_value_with_options(
     lonejson_sse *sse, lonejson_json_value *value,
     const lonejson__parse_options *parse_options,
-    const lonejson_runtime *runtime,
-    const lonejson_sse_json_options *options,
+    const lonejson_runtime *runtime, const lonejson_sse_json_options *options,
     lonejson_sse_json_value_event_fn event_cb, void *user,
     lonejson_error *error) {
   lonejson__sse_json_ctx ctx;
@@ -976,11 +971,12 @@ static lonejson_status lonejson__sse_finish_json_value_with_options(
   }
 }
 
-lonejson_status lonejson_sse_finish_json_value(
-    lonejson *runtime, lonejson_sse *sse, lonejson_json_value *value,
-    const lonejson_sse_json_options *options,
-    lonejson_sse_json_value_event_fn event_cb, void *user,
-    lonejson_error *error) {
+lonejson_status
+lonejson_sse_finish_json_value(lonejson *runtime, lonejson_sse *sse,
+                               lonejson_json_value *value,
+                               const lonejson_sse_json_options *options,
+                               lonejson_sse_json_value_event_fn event_cb,
+                               void *user, lonejson_error *error) {
   lonejson__runtime_borrow borrow;
   const lonejson_runtime *runtime_state;
   lonejson_status status;

@@ -86,8 +86,8 @@ static lonejson_status fuzz_value_event(void *user, lonejson_error *error) {
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status fuzz_value_chunk(void *user, const char *data, size_t len,
-                                        lonejson_error *error) {
+static lonejson_status fuzz_value_chunk(void *user, const char *data,
+                                        size_t len, lonejson_error *error) {
   fuzz_visit_state *state = (fuzz_visit_state *)user;
   (void)data;
   (void)error;
@@ -113,9 +113,10 @@ static lonejson_status fuzz_sink_write(void *user, const void *data, size_t len,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status fuzz_sse_json_value_sink_event(
-    void *user, const lonejson_sse_event *event, lonejson_json_value *value,
-    lonejson_error *error) {
+static lonejson_status
+fuzz_sse_json_value_sink_event(void *user, const lonejson_sse_event *event,
+                               lonejson_json_value *value,
+                               lonejson_error *error) {
   fuzz_framing_state *state = (fuzz_framing_state *)user;
   (void)event;
   (void)value;
@@ -124,9 +125,10 @@ static lonejson_status fuzz_sse_json_value_sink_event(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status fuzz_sse_json_value_capture_event(
-    void *user, const lonejson_sse_event *event, lonejson_json_value *value,
-    lonejson_error *error) {
+static lonejson_status
+fuzz_sse_json_value_capture_event(void *user, const lonejson_sse_event *event,
+                                  lonejson_json_value *value,
+                                  lonejson_error *error) {
   fuzz_framing_state *state = (fuzz_framing_state *)user;
   fuzz_sink_state sink_state;
   (void)event;
@@ -141,9 +143,10 @@ static lonejson_status fuzz_sse_json_value_capture_event(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status fuzz_sse_json_value_visitor_event(
-    void *user, const lonejson_sse_event *event, lonejson_json_value *value,
-    lonejson_error *error) {
+static lonejson_status
+fuzz_sse_json_value_visitor_event(void *user, const lonejson_sse_event *event,
+                                  lonejson_json_value *value,
+                                  lonejson_error *error) {
   fuzz_framing_state *state = (fuzz_framing_state *)user;
   (void)event;
   (void)value;
@@ -346,10 +349,9 @@ static void fuzz_sse_json_value(const uint8_t *data, size_t size) {
     }
     switch (value.parse_mode) {
     case LONEJSON_JSON_VALUE_PARSE_SINK:
-      (void)lonejson_sse_push_json_value(runtime, sse, &value, data + offset, chunk,
-                                         &json_options,
-                                         fuzz_sse_json_value_sink_event, &state,
-                                         &error);
+      (void)lonejson_sse_push_json_value(
+          runtime, sse, &value, data + offset, chunk, &json_options,
+          fuzz_sse_json_value_sink_event, &state, &error);
       break;
     case LONEJSON_JSON_VALUE_PARSE_VISITOR:
       (void)lonejson_sse_push_json_value(
@@ -373,18 +375,16 @@ static void fuzz_sse_json_value(const uint8_t *data, size_t size) {
                                          &error);
     break;
   case LONEJSON_JSON_VALUE_PARSE_VISITOR:
-    (void)lonejson_sse_finish_json_value(
-        runtime, sse, &value, &json_options,
-        fuzz_sse_json_value_visitor_event, &state,
-        &error);
+    (void)lonejson_sse_finish_json_value(runtime, sse, &value, &json_options,
+                                         fuzz_sse_json_value_visitor_event,
+                                         &state, &error);
     state.bytes += visit_state.bytes;
     state.events += visit_state.events;
     break;
   default:
-    (void)lonejson_sse_finish_json_value(
-        runtime, sse, &value, &json_options,
-        fuzz_sse_json_value_capture_event, &state,
-        &error);
+    (void)lonejson_sse_finish_json_value(runtime, sse, &value, &json_options,
+                                         fuzz_sse_json_value_capture_event,
+                                         &state, &error);
     break;
   }
   lonejson_sse_close(sse);

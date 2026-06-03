@@ -77,11 +77,11 @@ lonejson__complete_streamed_string_token(lonejson_parser *parser) {
                              "invalid streamed string context");
 }
 
-static LONEJSON__INLINE int
-lonejson__streamed_json_value_scalar_field_active(const lonejson_parser *parser) {
-  const lonejson_frame *frame =
-      (parser->frame_count != 0u) ? &parser->frames[parser->frame_count - 1u]
-                                  : NULL;
+static LONEJSON__INLINE int lonejson__streamed_json_value_scalar_field_active(
+    const lonejson_parser *parser) {
+  const lonejson_frame *frame = (parser->frame_count != 0u)
+                                    ? &parser->frames[parser->frame_count - 1u]
+                                    : NULL;
 
   return !parser->lex_is_key && frame != NULL &&
          frame->kind == LONEJSON_CONTAINER_OBJECT &&
@@ -940,8 +940,8 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
                 parser, parser->json_stream_value->parse_visitor->null_value);
           }
         } else if (mode == LONEJSON_LEX_NUMBER) {
-          status = lonejson__json_value_emit(parser, token_text,
-                                             parser->token.len);
+          status =
+              lonejson__json_value_emit(parser, token_text, parser->token.len);
         } else if (mode == LONEJSON_LEX_TRUE) {
           status = lonejson__json_value_emit(parser, "true", 4u);
         } else if (mode == LONEJSON_LEX_FALSE) {

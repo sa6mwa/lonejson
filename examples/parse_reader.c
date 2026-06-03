@@ -52,9 +52,8 @@ int main(void) {
 
   lj_init(runtime, &metric_sample_map, &sample);
 
-  stream =
-      lj_stream_open_reader(runtime, &metric_sample_map, chunk_reader, &state,
-                            &error);
+  stream = lj_stream_open_reader(runtime, &metric_sample_map, chunk_reader,
+                                 &state, &error);
   if (stream == NULL) {
     fprintf(stderr, "stream open failed: %s\n", error.message);
     lj_free(runtime);

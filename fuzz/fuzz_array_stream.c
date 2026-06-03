@@ -110,9 +110,8 @@ static void fuzz_drive_mapped(const char *path, const uint8_t *json,
   reader.would_blocks = 0u;
   reader.max_would_blocks = 2u;
   reader.read_calls = 0u;
-  stream = lonejson_array_stream_open_reader(runtime, path,
-                                             fuzz_array_stream_reader, &reader,
-                                             &error);
+  stream = lonejson_array_stream_open_reader(
+      runtime, path, fuzz_array_stream_reader, &reader, &error);
   if (stream == NULL) {
     lonejson_free(runtime);
     return;
@@ -161,9 +160,8 @@ static void fuzz_drive_raw(const char *path, const uint8_t *json,
   reader.would_blocks = 0u;
   reader.max_would_blocks = 2u;
   reader.read_calls = 0u;
-  stream = lonejson_array_stream_open_reader(runtime, path,
-                                             fuzz_array_stream_reader, &reader,
-                                             &error);
+  stream = lonejson_array_stream_open_reader(
+      runtime, path, fuzz_array_stream_reader, &reader, &error);
   if (stream == NULL) {
     lonejson_free(runtime);
     return;
@@ -266,9 +264,8 @@ static void fuzz_expect_raw_duplicate(const char *json, size_t json_len,
   reader.would_blocks = 0u;
   reader.max_would_blocks = 0u;
   reader.read_calls = 0u;
-  stream = lonejson_array_stream_open_reader(runtime, "",
-                                             fuzz_array_stream_reader, &reader,
-                                             &error);
+  stream = lonejson_array_stream_open_reader(
+      runtime, "", fuzz_array_stream_reader, &reader, &error);
   if (stream == NULL) {
     abort();
   }
@@ -309,9 +306,8 @@ static void fuzz_expect_root_duplicate(const char *json, size_t json_len,
   reader.would_blocks = 0u;
   reader.max_would_blocks = 0u;
   reader.read_calls = 0u;
-  stream = lonejson_array_stream_open_reader(runtime, "items",
-                                             fuzz_array_stream_reader, &reader,
-                                             &error);
+  stream = lonejson_array_stream_open_reader(
+      runtime, "items", fuzz_array_stream_reader, &reader, &error);
   if (stream == NULL) {
     abort();
   }

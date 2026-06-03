@@ -424,10 +424,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                memcmp(sink_out.data, generator_out.data, sink_out.len) != 0))) {
     abort();
   }
-  if (ok1 && (lonejson_validate_buffer(runtime, sink_out.data, sink_out.len, NULL) !=
-                  LONEJSON_STATUS_OK ||
-              lonejson_validate_buffer(runtime, generator_out.data, generator_out.len,
-                                       NULL) != LONEJSON_STATUS_OK)) {
+  if (ok1 &&
+      (lonejson_validate_buffer(runtime, sink_out.data, sink_out.len, NULL) !=
+           LONEJSON_STATUS_OK ||
+       lonejson_validate_buffer(runtime, generator_out.data, generator_out.len,
+                                NULL) != LONEJSON_STATUS_OK)) {
     abort();
   }
   free(sink_out.data);

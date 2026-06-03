@@ -85,8 +85,9 @@ static size_t lonejson__test_get_map_analysis_count(void) {
 }
 #endif
 
-static LONEJSON__INLINE int lonejson__map_analysis_stack_contains(
-    const lonejson__map_analysis_frame *frame, const lonejson_map *map) {
+static LONEJSON__INLINE int
+lonejson__map_analysis_stack_contains(const lonejson__map_analysis_frame *frame,
+                                      const lonejson_map *map) {
   while (frame != NULL) {
     if (frame->map == map) {
       return 1;
@@ -106,8 +107,9 @@ lonejson__recursive_submap_analysis(const lonejson_map *map) {
   return analysis;
 }
 
-static lonejson__map_analysis lonejson__analyze_map_with_stack(
-    const lonejson_map *map, const lonejson__map_analysis_frame *parent) {
+static lonejson__map_analysis
+lonejson__analyze_map_with_stack(const lonejson_map *map,
+                                 const lonejson__map_analysis_frame *parent) {
   lonejson__map_analysis analysis;
   lonejson__map_analysis_frame frame;
   size_t i;
@@ -134,11 +136,10 @@ static lonejson__map_analysis lonejson__analyze_map_with_stack(
 
     size = lonejson__field_storage_size(field);
     has_presence = (field->flags & LONEJSON_FIELD_HAS_PRESENCE) != 0u;
-    kind_accepts_presence =
-        field->kind == LONEJSON_FIELD_KIND_I64 ||
-        field->kind == LONEJSON_FIELD_KIND_U64 ||
-        field->kind == LONEJSON_FIELD_KIND_F64 ||
-        field->kind == LONEJSON_FIELD_KIND_BOOL;
+    kind_accepts_presence = field->kind == LONEJSON_FIELD_KIND_I64 ||
+                            field->kind == LONEJSON_FIELD_KIND_U64 ||
+                            field->kind == LONEJSON_FIELD_KIND_F64 ||
+                            field->kind == LONEJSON_FIELD_KIND_BOOL;
 
     if (size == 0u || field->struct_offset > map->struct_size ||
         size > (map->struct_size - field->struct_offset) ||
@@ -149,10 +150,9 @@ static lonejson__map_analysis lonejson__analyze_map_with_stack(
         (((field->flags & LONEJSON_FIELD_ACCEPT_NULL) != 0u) &&
          (!has_presence || !kind_accepts_presence)) ||
         (((field->flags & LONEJSON_FIELD_REQUIRED) != 0u) &&
-         (field->flags & (LONEJSON_FIELD_OMIT_NULL |
-                          LONEJSON_FIELD_OMIT_EMPTY |
-                          LONEJSON_FIELD_HAS_PRESENCE |
-                          LONEJSON_FIELD_ACCEPT_NULL)) != 0u)) {
+         (field->flags &
+          (LONEJSON_FIELD_OMIT_NULL | LONEJSON_FIELD_OMIT_EMPTY |
+           LONEJSON_FIELD_HAS_PRESENCE | LONEJSON_FIELD_ACCEPT_NULL)) != 0u)) {
       analysis.valid = 0;
       return analysis;
     }
@@ -236,16 +236,12 @@ static void lonejson__parser_adopt_existing_map_allocations_with_mask(
     lonejson_uint64 adopt_mask);
 static int lonejson__map_may_allocate(const lonejson_map *map);
 
-static void lonejson__parser_init_state(lonejson_parser *parser,
-                                        const lonejson_map *map, void *dst,
-                                        const lonejson__parse_options *options,
-                                        const lonejson_runtime *runtime,
-                                        int validate_only,
-                                        int root_map_analysis_known,
-                                        int root_map_may_allocate,
-                                        lonejson_uint64 root_map_adopt_mask,
-                                        unsigned char *workspace,
-                                        size_t workspace_size) {
+static void lonejson__parser_init_state(
+    lonejson_parser *parser, const lonejson_map *map, void *dst,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    int validate_only, int root_map_analysis_known, int root_map_may_allocate,
+    lonejson_uint64 root_map_adopt_mask, unsigned char *workspace,
+    size_t workspace_size) {
   unsigned char *aligned_workspace = workspace;
   size_t alignment_padding = 0u;
 
@@ -769,9 +765,8 @@ typedef enum lonejson__array_ensure_result {
 
 static lonejson__array_ensure_result
 lonejson__array_ensure_bytes(lonejson_parser *parser, void **items_ptr,
-                             size_t *cap_ptr, size_t elem_size,
-                             unsigned *flags, size_t want,
-                             lonejson_overflow_policy policy,
+                             size_t *cap_ptr, size_t elem_size, unsigned *flags,
+                             size_t want, lonejson_overflow_policy policy,
                              lonejson_error *error) {
   void *next;
   size_t cap;
@@ -1081,8 +1076,8 @@ static int lonejson__parser_adopt_existing_value_allocations(
         parser, ((lonejson_spooled *)ptr)->memory);
   case LONEJSON_FIELD_KIND_STRING_SOURCE:
   case LONEJSON_FIELD_KIND_BASE64_SOURCE:
-    return lonejson__parser_adopt_owned_pointer(
-        parser, ((lonejson_source *)ptr)->path);
+    return lonejson__parser_adopt_owned_pointer(parser,
+                                                ((lonejson_source *)ptr)->path);
   case LONEJSON_FIELD_KIND_JSON_VALUE: {
     lonejson_json_value *value = (lonejson_json_value *)ptr;
     if (!lonejson__parser_adopt_owned_pointer(parser, value->json)) {
@@ -1157,9 +1152,10 @@ static int lonejson__parser_adopt_existing_value_allocations(
   }
 }
 
-static void lonejson__init_map_with_allocator(const lonejson_map *map, void *value,
-                                              const lonejson_allocator *allocator,
-                                              const lonejson_runtime *runtime);
+static void
+lonejson__init_map_with_allocator(const lonejson_map *map, void *value,
+                                  const lonejson_allocator *allocator,
+                                  const lonejson_runtime *runtime);
 
 static void lonejson__parser_adopt_existing_map_allocations_with_mask(
     lonejson_parser *parser, const lonejson_map *map, void *value,
@@ -1209,7 +1205,8 @@ static void lonejson__cleanup_map_parse(lonejson_parser *parser,
   }
   for (i = 0; i < map->field_count; ++i) {
     const lonejson_field *field = &map->fields[i];
-    lonejson__cleanup_value_parse(parser, field, lonejson__field_ptr(value, field));
+    lonejson__cleanup_value_parse(parser, field,
+                                  lonejson__field_ptr(value, field));
     lonejson__field_set_presence(value, field, 0);
   }
 }
@@ -1239,7 +1236,8 @@ static void lonejson__cleanup_value_parse(lonejson_parser *parser,
     lonejson__source_reset_parse(parser, (lonejson_source *)ptr);
     break;
   case LONEJSON_FIELD_KIND_JSON_VALUE:
-    lonejson__json_value_clear_runtime_parse(parser, (lonejson_json_value *)ptr);
+    lonejson__json_value_clear_runtime_parse(parser,
+                                             (lonejson_json_value *)ptr);
     break;
   case LONEJSON_FIELD_KIND_OBJECT:
     lonejson__cleanup_map_parse(parser, field->submap, ptr);
@@ -1417,24 +1415,21 @@ static void lonejson__reset_present_array_field(const lonejson_field *field,
     break;
   }
   case LONEJSON_FIELD_KIND_I64_ARRAY:
-    if (lonejson__is_exact_fixed_capacity(
-            ((lonejson_i64_array *)ptr)->flags)) {
+    if (lonejson__is_exact_fixed_capacity(((lonejson_i64_array *)ptr)->flags)) {
       ((lonejson_i64_array *)ptr)->count = 0u;
       break;
     }
     lonejson__cleanup_value(field, ptr);
     break;
   case LONEJSON_FIELD_KIND_U64_ARRAY:
-    if (lonejson__is_exact_fixed_capacity(
-            ((lonejson_u64_array *)ptr)->flags)) {
+    if (lonejson__is_exact_fixed_capacity(((lonejson_u64_array *)ptr)->flags)) {
       ((lonejson_u64_array *)ptr)->count = 0u;
       break;
     }
     lonejson__cleanup_value(field, ptr);
     break;
   case LONEJSON_FIELD_KIND_F64_ARRAY:
-    if (lonejson__is_exact_fixed_capacity(
-            ((lonejson_f64_array *)ptr)->flags)) {
+    if (lonejson__is_exact_fixed_capacity(((lonejson_f64_array *)ptr)->flags)) {
       ((lonejson_f64_array *)ptr)->count = 0u;
       break;
     }
@@ -1462,9 +1457,8 @@ static void lonejson__reset_present_array_field(const lonejson_field *field,
   }
 }
 
-static void lonejson__reset_present_array_field_parse(lonejson_parser *parser,
-                                                      const lonejson_field *field,
-                                                      void *ptr) {
+static void lonejson__reset_present_array_field_parse(
+    lonejson_parser *parser, const lonejson_field *field, void *ptr) {
   if (field == NULL || ptr == NULL) {
     return;
   }
@@ -1473,24 +1467,21 @@ static void lonejson__reset_present_array_field_parse(lonejson_parser *parser,
     lonejson__cleanup_value_parse(parser, field, ptr);
     break;
   case LONEJSON_FIELD_KIND_I64_ARRAY:
-    if (lonejson__is_exact_fixed_capacity(
-            ((lonejson_i64_array *)ptr)->flags)) {
+    if (lonejson__is_exact_fixed_capacity(((lonejson_i64_array *)ptr)->flags)) {
       ((lonejson_i64_array *)ptr)->count = 0u;
       break;
     }
     lonejson__cleanup_value_parse(parser, field, ptr);
     break;
   case LONEJSON_FIELD_KIND_U64_ARRAY:
-    if (lonejson__is_exact_fixed_capacity(
-            ((lonejson_u64_array *)ptr)->flags)) {
+    if (lonejson__is_exact_fixed_capacity(((lonejson_u64_array *)ptr)->flags)) {
       ((lonejson_u64_array *)ptr)->count = 0u;
       break;
     }
     lonejson__cleanup_value_parse(parser, field, ptr);
     break;
   case LONEJSON_FIELD_KIND_F64_ARRAY:
-    if (lonejson__is_exact_fixed_capacity(
-            ((lonejson_f64_array *)ptr)->flags)) {
+    if (lonejson__is_exact_fixed_capacity(((lonejson_f64_array *)ptr)->flags)) {
       ((lonejson_f64_array *)ptr)->count = 0u;
       break;
     }
@@ -1518,9 +1509,10 @@ static void lonejson__reset_present_array_field_parse(lonejson_parser *parser,
   }
 }
 
-static void lonejson__init_json_value_field(
-    lonejson_json_value *value, const lonejson_allocator *allocator,
-    const lonejson_runtime *runtime, unsigned flags) {
+static void lonejson__init_json_value_field(lonejson_json_value *value,
+                                            const lonejson_allocator *allocator,
+                                            const lonejson_runtime *runtime,
+                                            unsigned flags) {
   if (lonejson__json_value_is_initialized(value)) {
     lonejson_json_value_cleanup(value);
   }
@@ -1712,9 +1704,8 @@ static void lonejson__reset_map_parse(lonejson_parser *parser,
     void *ptr = lonejson__field_ptr(value, field);
     switch (field->kind) {
     case LONEJSON_FIELD_KIND_JSON_VALUE:
-      lonejson__reseed_json_value_field_parse(parser,
-                                              (lonejson_json_value *)ptr,
-                                              field->flags);
+      lonejson__reseed_json_value_field_parse(
+          parser, (lonejson_json_value *)ptr, field->flags);
       break;
     case LONEJSON_FIELD_KIND_STRING_STREAM:
     case LONEJSON_FIELD_KIND_BASE64_STREAM:
@@ -1853,8 +1844,8 @@ static void lonejson__init_value(const lonejson_field *field, void *ptr,
   }
 }
 
-static int lonejson__init_map_parse(lonejson_parser *parser, const lonejson_map *map,
-                                    void *value);
+static int lonejson__init_map_parse(lonejson_parser *parser,
+                                    const lonejson_map *map, void *value);
 
 static void lonejson__init_value_parse(lonejson_parser *parser,
                                        const lonejson_field *field, void *ptr) {
@@ -1871,15 +1862,17 @@ static void lonejson__init_value_parse(lonejson_parser *parser,
     break;
   case LONEJSON_FIELD_KIND_STRING_STREAM:
   case LONEJSON_FIELD_KIND_BASE64_STREAM:
-    lonejson__reseed_spooled_field_parse(parser, field, (lonejson_spooled *)ptr);
+    lonejson__reseed_spooled_field_parse(parser, field,
+                                         (lonejson_spooled *)ptr);
     break;
   case LONEJSON_FIELD_KIND_STRING_SOURCE:
   case LONEJSON_FIELD_KIND_BASE64_SOURCE:
     lonejson_source_init((lonejson_source *)ptr);
     break;
   case LONEJSON_FIELD_KIND_JSON_VALUE:
-    lonejson__init_json_value_field((lonejson_json_value *)ptr, &parser->allocator,
-                                    parser->runtime, field->flags);
+    lonejson__init_json_value_field((lonejson_json_value *)ptr,
+                                    &parser->allocator, parser->runtime,
+                                    field->flags);
     break;
   case LONEJSON_FIELD_KIND_I64:
   case LONEJSON_FIELD_KIND_U64:
@@ -1952,8 +1945,8 @@ static void lonejson__init_value_parse(lonejson_parser *parser,
   }
 }
 
-static int lonejson__init_map_parse(lonejson_parser *parser, const lonejson_map *map,
-                                    void *value) {
+static int lonejson__init_map_parse(lonejson_parser *parser,
+                                    const lonejson_map *map, void *value) {
   size_t i;
 
   if (parser == NULL || map == NULL || value == NULL) {
@@ -1964,7 +1957,8 @@ static int lonejson__init_map_parse(lonejson_parser *parser, const lonejson_map 
     if (!lonejson__field_fits_map(map, field)) {
       continue;
     }
-    lonejson__init_value_parse(parser, field, lonejson__field_ptr(value, field));
+    lonejson__init_value_parse(parser, field,
+                               lonejson__field_ptr(value, field));
     lonejson__field_set_presence(value, field, 0);
     if (parser->failed) {
       return 0;

@@ -30,7 +30,8 @@ static int fuzz_append_text(char **out, size_t *remaining, const char *text) {
   return 1;
 }
 
-static int fuzz_append_fill(char **out, size_t *remaining, char ch, size_t len) {
+static int fuzz_append_fill(char **out, size_t *remaining, char ch,
+                            size_t len) {
   if (len >= *remaining) {
     return 0;
   }
@@ -118,13 +119,15 @@ static char *fuzz_build_followup_json(const uint8_t *data, size_t size,
     }
     break;
   case 4u:
-    if (!fuzz_append_text(&out, &remaining, "{\"payload\":false,\"note\":123}")) {
+    if (!fuzz_append_text(&out, &remaining,
+                          "{\"payload\":false,\"note\":123}")) {
       free(json);
       return NULL;
     }
     break;
   case 5u:
-    if (!fuzz_append_text(&out, &remaining, "{\"payload\":\"\",\"note\":\"\"}")) {
+    if (!fuzz_append_text(&out, &remaining,
+                          "{\"payload\":\"\",\"note\":\"\"}")) {
       free(json);
       return NULL;
     }
@@ -206,7 +209,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                               seed_json, &error);
   }
 
-  followup_json = fuzz_build_followup_json(data, size, size > 2u ? data[2] : 0u);
+  followup_json =
+      fuzz_build_followup_json(data, size, size > 2u ? data[2] : 0u);
   if (followup_json != NULL) {
     char buffer[512];
     size_t needed = 0u;

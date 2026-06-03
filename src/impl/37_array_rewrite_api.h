@@ -210,17 +210,15 @@ static lonejson_status lonejson__array_rewrite_begin_parent(
   }
   workspace = ((unsigned char *)state->parent_runtime[slot].parser) +
               sizeof(lonejson_parser);
-  lonejson__parser_init_state(state->parent_runtime[slot].parser,
-                              state->options.parents[parent_index].map,
-                              state->options.parents[parent_index].dst,
-                              &state->parse_options, state->runtime, 0, 0, 0,
-                              0u, workspace,
-                              LONEJSON_PUSH_PARSER_BUFFER_SIZE +
-                                  LONEJSON__PARSER_WORKSPACE_SLACK);
-  lonejson__init_map_with_allocator(
+  lonejson__parser_init_state(
+      state->parent_runtime[slot].parser,
       state->options.parents[parent_index].map,
-      state->options.parents[parent_index].dst, &state->allocator,
-      state->runtime);
+      state->options.parents[parent_index].dst, &state->parse_options,
+      state->runtime, 0, 0, 0, 0u, workspace,
+      LONEJSON_PUSH_PARSER_BUFFER_SIZE + LONEJSON__PARSER_WORKSPACE_SLACK);
+  lonejson__init_map_with_allocator(state->options.parents[parent_index].map,
+                                    state->options.parents[parent_index].dst,
+                                    &state->allocator, state->runtime);
   state->parent_runtime[slot].parser_alloc_size = parser_bytes;
   state->parent_runtime[slot].parent_index = parent_index;
   state->parent_runtime[slot].active = 1;
@@ -1180,8 +1178,9 @@ static lonejson_status lonejson__array_rewrite_reader_common(
   state.error = error;
   state.runtime = runtime;
   state.options = *options;
-  state.parse_options =
-      parse_options != NULL ? *parse_options : lonejson__default_parse_options();
+  state.parse_options = parse_options != NULL
+                            ? *parse_options
+                            : lonejson__default_parse_options();
   state.allocator = lonejson__allocator_resolve(state.parse_options.allocator);
   state.dup_state.allocator = &state.allocator;
   lonejson_json_value_init_with_allocator(&input, &state.allocator);
@@ -1292,8 +1291,7 @@ static lonejson_status lonejson__array_rewrite_fd_sink(void *user,
 lonejson_status lonejson_array_rewrite_reader_to_filep(
     lonejson *runtime, const char *selector, lonejson_reader_fn reader,
     void *reader_user, FILE *output,
-    const lonejson_array_rewrite_options *options,
-    lonejson_error *error) {
+    const lonejson_array_rewrite_options *options, lonejson_error *error) {
   if (output == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "output file is required");
@@ -1316,16 +1314,17 @@ lonejson_status lonejson_array_rewrite_reader_to_fd(
                                        options, error);
 }
 
-lonejson_status lonejson_array_rewrite_filep(
-    lonejson *runtime, const char *selector, FILE *fp, lonejson_sink_fn sink,
-    void *sink_user,
-    const lonejson_array_rewrite_options *options, lonejson_error *error) {
+lonejson_status
+lonejson_array_rewrite_filep(lonejson *runtime, const char *selector, FILE *fp,
+                             lonejson_sink_fn sink, void *sink_user,
+                             const lonejson_array_rewrite_options *options,
+                             lonejson_error *error) {
   if (fp == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "input file is required");
   }
-  return lonejson_array_rewrite_reader(runtime, selector, lonejson__file_reader, fp,
-                                       sink, sink_user, options, error);
+  return lonejson_array_rewrite_reader(runtime, selector, lonejson__file_reader,
+                                       fp, sink, sink_user, options, error);
 }
 
 lonejson_status lonejson_array_rewrite_filep_to_filep(
@@ -1335,20 +1334,21 @@ lonejson_status lonejson_array_rewrite_filep_to_filep(
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "output file is required");
   }
-  return lonejson_array_rewrite_filep(runtime, selector, input, lonejson__sink_file,
-                                      output, options, error);
+  return lonejson_array_rewrite_filep(
+      runtime, selector, input, lonejson__sink_file, output, options, error);
 }
 
-lonejson_status lonejson_array_rewrite_fd(
-    lonejson *runtime, const char *selector, int fd, lonejson_sink_fn sink,
-    void *sink_user,
-    const lonejson_array_rewrite_options *options, lonejson_error *error) {
+lonejson_status
+lonejson_array_rewrite_fd(lonejson *runtime, const char *selector, int fd,
+                          lonejson_sink_fn sink, void *sink_user,
+                          const lonejson_array_rewrite_options *options,
+                          lonejson_error *error) {
   if (fd < 0) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "input fd must be non-negative");
   }
-  return lonejson_array_rewrite_reader(runtime, selector, lonejson__fd_reader, &fd,
-                                       sink, sink_user, options, error);
+  return lonejson_array_rewrite_reader(runtime, selector, lonejson__fd_reader,
+                                       &fd, sink, sink_user, options, error);
 }
 
 lonejson_status lonejson_array_rewrite_fd_to_fd(
@@ -1363,10 +1363,11 @@ lonejson_status lonejson_array_rewrite_fd_to_fd(
                                    options, error);
 }
 
-lonejson_status lonejson_array_rewrite_path(
-    lonejson *runtime, const char *selector, const char *input_path,
-    const char *output_path,
-    const lonejson_array_rewrite_options *options, lonejson_error *error) {
+lonejson_status
+lonejson_array_rewrite_path(lonejson *runtime, const char *selector,
+                            const char *input_path, const char *output_path,
+                            const lonejson_array_rewrite_options *options,
+                            lonejson_error *error) {
   struct stat input_stat;
   struct stat output_stat;
   FILE *in;
@@ -1410,8 +1411,8 @@ lonejson_status lonejson_array_rewrite_path(
     return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
                                "failed to open rewrite output path");
   }
-  status = lonejson_array_rewrite_filep(runtime, selector, in, lonejson__sink_file,
-                                        out, options, error);
+  status = lonejson_array_rewrite_filep(
+      runtime, selector, in, lonejson__sink_file, out, options, error);
   if (fclose(out) != 0 && status == LONEJSON_STATUS_OK) {
     if (error != NULL) {
       error->system_errno = errno;

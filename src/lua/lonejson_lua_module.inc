@@ -20,7 +20,8 @@ static int ljlua_runtime_new(lua_State *L) {
   int fixed_string_scratch_ref;
 
   ljlua_parse_runtime_config(L, 1, &config);
-  fixed_string_scratch_ref = ljlua_runtime_config_fixed_string_scratch_ref(L, 1);
+  fixed_string_scratch_ref =
+      ljlua_runtime_config_fixed_string_scratch_ref(L, 1);
   ud = (ljlua_runtime_ud *)ljlua_newuserdata_slots(L, sizeof(*ud), 0);
   memset(ud, 0, sizeof(*ud));
   ud->fixed_string_scratch_ref = LUA_NOREF;
@@ -64,8 +65,8 @@ static int ljlua_test_schema_map_cacheable(lua_State *L) {
 static int ljlua_test_schema_map_cookie(lua_State *L) {
   ljlua_schema_ud *ud = ljlua_check_schema(L, 1);
 
-  lua_pushinteger(
-      L, (lua_Integer)(ud->schema->map._map_cookie & (lonejson_uint64)0xffffffffu));
+  lua_pushinteger(L, (lua_Integer)(ud->schema->map._map_cookie &
+                                   (lonejson_uint64)0xffffffffu));
   return 1;
 }
 #endif
@@ -82,8 +83,8 @@ static int ljlua_test_get_encode_stats_lua(lua_State *L) {
   lua_pushinteger(
       L, (lua_Integer)g_ljlua_test_encode_stats.json_buf_peak_capacity);
   lua_setfield(L, -2, "json_buf_peak_capacity");
-  lua_pushinteger(
-      L, (lua_Integer)g_ljlua_test_encode_stats.pretty_key_bytes_live);
+  lua_pushinteger(L,
+                  (lua_Integer)g_ljlua_test_encode_stats.pretty_key_bytes_live);
   lua_setfield(L, -2, "pretty_key_bytes_live");
   lua_pushinteger(
       L, (lua_Integer)g_ljlua_test_encode_stats.pretty_key_peak_bytes_live);
@@ -174,7 +175,8 @@ static int ljlua_fixed_string_scratch_new(lua_State *L) {
   ljlua_fixed_string_scratch_ud *ud;
 
   luaL_argcheck(L, size > 0, 1, "scratch size must be positive");
-  ud = (ljlua_fixed_string_scratch_ud *)ljlua_newuserdata_slots(L, sizeof(*ud), 0);
+  ud = (ljlua_fixed_string_scratch_ud *)ljlua_newuserdata_slots(L, sizeof(*ud),
+                                                                0);
   memset(ud, 0, sizeof(*ud));
   ud->data = (unsigned char *)malloc((size_t)size);
   if (ud->data == NULL) {
@@ -292,8 +294,7 @@ typedef struct ljlua_pretty_encode_call {
 
 static int ljlua_encode_json_value_pretty(lua_State *L, int index,
                                           ljlua_json_out *out,
-                                          const void **visited,
-                                          size_t depth);
+                                          const void **visited, size_t depth);
 static int ljlua_json_out_write_indent(lua_State *L, ljlua_json_out *out,
                                        size_t depth);
 
@@ -397,8 +398,7 @@ static int ljlua_json_out_write_indent(lua_State *L, ljlua_json_out *out,
 
 static int ljlua_encode_json_table_pretty(lua_State *L, int index,
                                           ljlua_json_out *out,
-                                          const void **visited,
-                                          size_t depth) {
+                                          const void **visited, size_t depth) {
   const char *shape;
   size_t i;
 
@@ -505,8 +505,7 @@ static int ljlua_encode_json_table_pretty(lua_State *L, int index,
 
 static int ljlua_encode_json_value_pretty(lua_State *L, int index,
                                           ljlua_json_out *out,
-                                          const void **visited,
-                                          size_t depth) {
+                                          const void **visited, size_t depth) {
   int type;
   size_t i;
 
@@ -761,8 +760,7 @@ static int ljlua_encode_json_to_sink(lua_State *L) {
     runtime_ud = ljlua_check_runtime(L, 1);
     luaL_checkany(L, 2);
     luaL_checktype(L, 3, LUA_TFUNCTION);
-    return ljlua_runtime_encode_json_to_sink_impl(L, runtime_ud->runtime, 2,
-                                                  3);
+    return ljlua_runtime_encode_json_to_sink_impl(L, runtime_ud->runtime, 2, 3);
   }
   luaL_checkany(L, 1);
   luaL_checktype(L, 2, LUA_TFUNCTION);

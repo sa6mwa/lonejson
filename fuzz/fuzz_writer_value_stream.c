@@ -117,8 +117,7 @@ static int fuzz_spooled_prepare(lonejson *runtime, fuzz_spooled_state *state,
   }
   pre = size == 0u
             ? 0u
-            : 1u + (size_t)(control %
-                            (uint8_t)(size < 17u ? size : 17u));
+            : 1u + (size_t)(control % (uint8_t)(size < 17u ? size : 17u));
   while (consumed < pre) {
     size_t want = pre - consumed;
     lonejson_read_result chunk;
@@ -161,8 +160,7 @@ static void fuzz_spooled_check_and_cleanup(fuzz_spooled_state *state,
     }
     consumed += chunk.bytes_read;
   }
-  if (consumed != 0u &&
-      memcmp(scratch, data + state->offset, consumed) != 0) {
+  if (consumed != 0u && memcmp(scratch, data + state->offset, consumed) != 0) {
     abort();
   }
   if (state->offset + consumed < size && consumed == 0u) {
@@ -213,9 +211,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   chunk_size = 1u + (size_t)(control % 17u);
   array_items_mode = (control & 0x30u) == 0x30u;
 
-  status = lonejson_writer_init_sink(runtime, &writer,
-                                     fuzz_writer_value_sink_write, &sink,
-                                     &error);
+  status = lonejson_writer_init_sink(
+      runtime, &writer, fuzz_writer_value_sink_write, &sink, &error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson_free(runtime);
     return 0;
@@ -236,8 +233,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       const char *selector = (control & 8u) != 0u ? "items" : NULL;
       if ((control & 0x80u) != 0u &&
           fuzz_spooled_prepare(runtime, &spool, data, size, control)) {
-        status = lonejson_writer_array_items_spooled(
-            &writer, selector, &spool.value, &error);
+        status = lonejson_writer_array_items_spooled(&writer, selector,
+                                                     &spool.value, &error);
       } else if ((control & 4u) != 0u) {
         memset(&reader, 0, sizeof(reader));
         reader.data = data;
@@ -255,8 +252,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     } else if ((control & 0x30u) == 0x20u) {
       if ((control & 0x80u) != 0u &&
           fuzz_spooled_prepare(runtime, &spool, data, size, control)) {
-        status = lonejson_writer_json_value_spooled(&writer, &spool.value,
-                                                    &error);
+        status =
+            lonejson_writer_json_value_spooled(&writer, &spool.value, &error);
       } else {
         memset(&reader, 0, sizeof(reader));
         reader.data = data;

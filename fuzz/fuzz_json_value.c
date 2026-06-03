@@ -51,9 +51,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   if (runtime == NULL) {
     return 0;
   }
-  status =
-      lonejson_parse_buffer(runtime, &fuzz_json_value_doc_map, &doc, data, size,
-                            &error);
+  status = lonejson_parse_buffer(runtime, &fuzz_json_value_doc_map, &doc, data,
+                                 size, &error);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     char compact[2048];
     char pretty[4096];

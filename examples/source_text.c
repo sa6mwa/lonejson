@@ -58,8 +58,8 @@ int main(void) {
     return 1;
   }
 
-  json = lj_serialize_alloc(runtime, &outbound_text_doc_map, &doc, NULL,
-                            &error);
+  json =
+      lj_serialize_alloc(runtime, &outbound_text_doc_map, &doc, NULL, &error);
   if (json == NULL) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
     lj_cleanup(&outbound_text_doc_map, &doc);

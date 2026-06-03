@@ -20,9 +20,9 @@ static int ljlua_schema_stream_string(lua_State *L) {
   ud->input = (const unsigned char *)json;
   ud->input_len = len;
   ljlua_set_uservalue_ref(L, -1, 2, 2);
-  ud->stream = ljlua_stream_open_memory_with_options(
-      &schema_ud->schema->map, ud->input, ud->input_len, &options, runtime,
-      &error);
+  ud->stream = ljlua_stream_open_memory_with_options(&schema_ud->schema->map,
+                                                     ud->input, ud->input_len,
+                                                     &options, runtime, &error);
   if (ud->stream == NULL) {
     ud->input = NULL;
     return ljlua_push_error(L, &error);
@@ -69,9 +69,8 @@ static int ljlua_schema_array_stream_path(lua_State *L) {
     options.clear_destination = 0;
   }
   ud->magic = LJLUA_ARRAY_STREAM_MAGIC;
-  ud->stream = ljlua_array_stream_open_path_with_options(array_path, path,
-                                                         &options, runtime,
-                                                         &error);
+  ud->stream = ljlua_array_stream_open_path_with_options(
+      array_path, path, &options, runtime, &error);
   if (ud->stream == NULL) {
     return ljlua_push_error(L, &error);
   }
@@ -130,9 +129,8 @@ static int ljlua_schema_array_stream_file(lua_State *L) {
     options.clear_destination = 0;
   }
   ud->magic = LJLUA_ARRAY_STREAM_MAGIC;
-  ud->stream = ljlua_array_stream_open_filep_with_options(array_path, fp,
-                                                          &options, runtime,
-                                                          &error);
+  ud->stream = ljlua_array_stream_open_filep_with_options(
+      array_path, fp, &options, runtime, &error);
   if (ud->stream == NULL) {
     return ljlua_push_error(L, &error);
   }
@@ -943,10 +941,10 @@ static void ljlua_array_rewrite_ctx_cleanup(ljlua_array_rewrite_ctx *ctx) {
   free(ctx->parents);
 }
 
-static int ljlua_array_rewrite_parse_options(lua_State *L, lonejson *runtime,
-                                             int index, const char *selector,
-                                             ljlua_array_rewrite_ctx *ctx,
-                                             lonejson_array_rewrite_options *rewrite_opts) {
+static int ljlua_array_rewrite_parse_options(
+    lua_State *L, lonejson *runtime, int index, const char *selector,
+    ljlua_array_rewrite_ctx *ctx,
+    lonejson_array_rewrite_options *rewrite_opts) {
   int options_index = lua_absindex(L, index);
 
   memset(ctx, 0, sizeof(*ctx));
@@ -1054,10 +1052,9 @@ static int ljlua_array_rewrite_string(lua_State *L) {
   reader.data = (const unsigned char *)json;
   reader.len = len;
   memset(&output, 0, sizeof(output));
-  status = lonejson_array_rewrite_reader(runtime_ud->runtime, selector,
-                                         ljlua_array_rewrite_mem_read, &reader,
-                                         ljlua_json_buf_sink, &output,
-                                         &options, &error);
+  status = lonejson_array_rewrite_reader(
+      runtime_ud->runtime, selector, ljlua_array_rewrite_mem_read, &reader,
+      ljlua_json_buf_sink, &output, &options, &error);
   ljlua_array_rewrite_ctx_cleanup(&ctx);
   if (status != LONEJSON_STATUS_OK) {
     free(output.data);
@@ -1108,14 +1105,12 @@ static int ljlua_array_rewrite_path(lua_State *L) {
       ljlua_push_error(L, &error);
       return 2;
     }
-    status = lonejson_array_rewrite_reader(runtime_ud->runtime, selector,
-                                           lonejson__file_reader, input,
-                                           lonejson__sink_file, output,
-                                           &options, &error);
+    status = lonejson_array_rewrite_reader(
+        runtime_ud->runtime, selector, lonejson__file_reader, input,
+        lonejson__sink_file, output, &options, &error);
     if (fclose(output) != 0 && status == LONEJSON_STATUS_OK) {
       error.system_errno = errno;
-      status = lonejson__set_error(&error, LONEJSON_STATUS_IO_ERROR, 0u, 0u,
-                                   0u,
+      status = lonejson__set_error(&error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
                                    "failed to close rewrite output path");
     }
     fclose(input);

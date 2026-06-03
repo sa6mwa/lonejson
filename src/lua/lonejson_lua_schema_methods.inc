@@ -353,11 +353,9 @@ static int ljlua_schema_decode_into(lua_State *L) {
       lonejson_reset(schema_ud->schema->runtime, &schema_ud->schema->map,
                      record_ud->data);
     }
-    ljlua_prepare_record_json_value_capture(L, schema_ud->schema,
-                                            record_ud->data,
-                                            effective_options.clear_destination
-                                                ? 0
-                                                : 1);
+    ljlua_prepare_record_json_value_capture(
+        L, schema_ud->schema, record_ud->data,
+        effective_options.clear_destination ? 0 : 1);
     effective_options.clear_destination = 0;
   } else {
     if (effective_options.clear_destination) {
@@ -542,9 +540,9 @@ static int ljlua_schema_decode(lua_State *L) {
     ljlua_decode_context_prepare_table_mode(L, schema_ud->schema, record, &ctx);
     {
       lonejson_error error;
-      lonejson_status status = ljlua_parse_buffer_with_options(
-          &schema_ud->schema->map, record, json, len, &options, runtime,
-          &error);
+      lonejson_status status =
+          ljlua_parse_buffer_with_options(&schema_ud->schema->map, record, json,
+                                          len, &options, runtime, &error);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         ljlua_decode_context_cleanup(&ctx);
         ljlua_cleanup_record_storage(schema_ud->schema, record);
@@ -680,8 +678,8 @@ static int ljlua_schema_encode(lua_State *L) {
     if (record_ud->schema != schema_ud->schema) {
       return luaL_error(L, "record belongs to a different schema");
     }
-    json = ljlua_serialize_value(L, schema_ud->schema, record_ud->data,
-                                 &out_len);
+    json =
+        ljlua_serialize_value(L, schema_ud->schema, record_ud->data, &out_len);
   } else {
     int owned_record;
     unsigned char *record =
@@ -713,9 +711,8 @@ static int ljlua_schema_write_path(lua_State *L) {
   options = &runtime->write_options;
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
-    status = ljlua_serialize_path_with_options(&schema_ud->schema->map,
-                                               record_ud->data, path, options,
-                                               &error);
+    status = ljlua_serialize_path_with_options(
+        &schema_ud->schema->map, record_ud->data, path, options, &error);
   } else {
     int owned_record;
     unsigned char *record =
@@ -761,8 +758,8 @@ static int ljlua_schema_write_file(lua_State *L) {
     }
     ljlua_prepare_record_storage(schema_ud->schema, record);
     ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
-    status = ljlua_serialize_filep_with_options(&schema_ud->schema->map,
-                                                record, fp, options, &error);
+    status = ljlua_serialize_filep_with_options(&schema_ud->schema->map, record,
+                                                fp, options, &error);
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
   }
@@ -799,8 +796,8 @@ static int ljlua_schema_write_fd(lua_State *L) {
     }
     ljlua_prepare_record_storage(schema_ud->schema, record);
     ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
-    status = ljlua_serialize_filep_with_options(&schema_ud->schema->map,
-                                                record, fp, options, &error);
+    status = ljlua_serialize_filep_with_options(&schema_ud->schema->map, record,
+                                                fp, options, &error);
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
   }
@@ -842,9 +839,8 @@ static int ljlua_schema_stream_path(lua_State *L) {
     options.clear_destination = 0;
   }
   ud->magic = LJLUA_STREAM_MAGIC;
-  ud->stream = ljlua_stream_open_path_with_options(&schema_ud->schema->map,
-                                                   path, &options, runtime,
-                                                   &error);
+  ud->stream = ljlua_stream_open_path_with_options(
+      &schema_ud->schema->map, path, &options, runtime, &error);
   if (ud->stream == NULL) {
     return ljlua_push_error(L, &error);
   }
@@ -901,9 +897,8 @@ static int ljlua_schema_stream_file(lua_State *L) {
     options.clear_destination = 0;
   }
   ud->magic = LJLUA_STREAM_MAGIC;
-  ud->stream = ljlua_stream_open_filep_with_options(&schema_ud->schema->map,
-                                                    fp, &options, runtime,
-                                                    &error);
+  ud->stream = ljlua_stream_open_filep_with_options(&schema_ud->schema->map, fp,
+                                                    &options, runtime, &error);
   if (ud->stream == NULL) {
     return ljlua_push_error(L, &error);
   }

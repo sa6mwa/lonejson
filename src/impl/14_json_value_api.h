@@ -11,14 +11,13 @@ static int lonejson__value_limits_equal(const lonejson__value_limits *a,
          a->max_total_bytes == b->max_total_bytes;
 }
 
-static void lonejson__json_value_note_limits_mode_change(
-    lonejson_json_value *value) {
+static void
+lonejson__json_value_note_limits_mode_change(lonejson_json_value *value) {
   if (value == NULL) {
     return;
   }
-  value->parse_limits_follow_runtime =
-      lonejson__value_limits_equal(&value->parse_visitor_limits,
-                                   &value->runtime_parse_visitor_limits);
+  value->parse_limits_follow_runtime = lonejson__value_limits_equal(
+      &value->parse_visitor_limits, &value->runtime_parse_visitor_limits);
 }
 
 static lonejson_status lonejson__visit_value_buffer_with_limits(
@@ -132,9 +131,10 @@ lonejson_status lonejson_json_value_set_parse_sink(lonejson_json_value *value,
   return LONEJSON_STATUS_OK;
 }
 
-lonejson_status lonejson_json_value_set_parse_visitor(
-    lonejson_json_value *value, const lonejson_value_visitor *visitor,
-    void *user, lonejson_error *error) {
+lonejson_status
+lonejson_json_value_set_parse_visitor(lonejson_json_value *value,
+                                      const lonejson_value_visitor *visitor,
+                                      void *user, lonejson_error *error) {
   if (value == NULL || visitor == NULL) {
     return lonejson__set_error(
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,

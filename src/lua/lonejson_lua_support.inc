@@ -177,7 +177,8 @@ typedef struct ljlua_path_ud {
   int schema_ref;
 } ljlua_path_ud;
 
-static void *ljlua_newuserdata_slots(lua_State *L, size_t size, int slot_count) {
+static void *ljlua_newuserdata_slots(lua_State *L, size_t size,
+                                     int slot_count) {
 #if LJLUA_HAS_INDEXED_USERVALUE
   return lua_newuserdatauv(L, size, slot_count);
 #else
@@ -217,9 +218,9 @@ ljlua_check_fixed_string_scratch(lua_State *L, int index);
 static ljlua_runtime_ud *ljlua_check_runtime(lua_State *L, int index) {
   ljlua_runtime_ud *ud =
       (ljlua_runtime_ud *)luaL_checkudata(L, index, LJLUA_RUNTIME_MT);
-  luaL_argcheck(L, ud != NULL && ud->magic == LJLUA_RUNTIME_MAGIC &&
-                         ud->runtime != NULL,
-                index, "invalid lonejson runtime");
+  luaL_argcheck(
+      L, ud != NULL && ud->magic == LJLUA_RUNTIME_MAGIC && ud->runtime != NULL,
+      index, "invalid lonejson runtime");
   return ud;
 }
 
@@ -272,8 +273,7 @@ static void ljlua_parse_runtime_spool_policy(lua_State *L, int index,
   lua_getfield(L, policy_index, "max_bytes");
   if (!lua_isnil(L, -1)) {
     value = luaL_checkinteger(L, -1);
-    luaL_argcheck(L, value >= 0, index,
-                  "spool max_bytes must be non-negative");
+    luaL_argcheck(L, value >= 0, index, "spool max_bytes must be non-negative");
     policy->max_bytes = (size_t)value;
   }
   lua_pop(L, 1);
@@ -299,8 +299,7 @@ static void ljlua_parse_runtime_config(lua_State *L, int index,
   lua_getfield(L, index, "max_alloc_bytes");
   if (!lua_isnil(L, -1)) {
     value = luaL_checkinteger(L, -1);
-    luaL_argcheck(L, value >= 0, index,
-                  "max_alloc_bytes must be non-negative");
+    luaL_argcheck(L, value >= 0, index, "max_alloc_bytes must be non-negative");
     config->max_alloc_bytes = (size_t)value;
   }
   lua_pop(L, 1);
@@ -361,8 +360,7 @@ static void ljlua_parse_runtime_config(lua_State *L, int index,
   lua_getfield(L, index, "json_value_max_depth");
   if (!lua_isnil(L, -1)) {
     value = luaL_checkinteger(L, -1);
-    luaL_argcheck(L, value > 0, index,
-                  "json_value_max_depth must be positive");
+    luaL_argcheck(L, value > 0, index, "json_value_max_depth must be positive");
     config->json_value_max_depth = (size_t)value;
   }
   lua_pop(L, 1);
@@ -399,8 +397,7 @@ static void ljlua_parse_runtime_config(lua_State *L, int index,
 
   ljlua_parse_runtime_spool_policy(L, index, "spool_default",
                                    &config->spool_default);
-  ljlua_parse_runtime_spool_policy(L, index, "spool_blob",
-                                   &config->spool_blob);
+  ljlua_parse_runtime_spool_policy(L, index, "spool_blob", &config->spool_blob);
   ljlua_parse_runtime_spool_policy(L, index, "spool_large_text",
                                    &config->spool_large_text);
 
@@ -434,9 +431,9 @@ ljlua_check_fixed_string_scratch(lua_State *L, int index) {
   ljlua_fixed_string_scratch_ud *ud =
       (ljlua_fixed_string_scratch_ud *)luaL_checkudata(
           L, index, LJLUA_FIXED_STRING_SCRATCH_MT);
-  luaL_argcheck(L, ud != NULL &&
-                       ud->magic == LJLUA_FIXED_STRING_SCRATCH_MAGIC &&
-                       ud->data != NULL && ud->size != 0u,
+  luaL_argcheck(L,
+                ud != NULL && ud->magic == LJLUA_FIXED_STRING_SCRATCH_MAGIC &&
+                    ud->data != NULL && ud->size != 0u,
                 index, "invalid fixed string scratch");
   return ud;
 }
@@ -496,22 +493,18 @@ typedef struct ljlua_json_parser {
   size_t off;
 } ljlua_json_parser;
 
-static lonejson_status
-ljlua_parse_buffer_with_options(const lonejson_map *map, void *dst,
-                                const void *data, size_t len,
-                                const lonejson__parse_options *options,
-                                const lonejson_runtime *runtime,
-                                lonejson_error *error) {
+static lonejson_status ljlua_parse_buffer_with_options(
+    const lonejson_map *map, void *dst, const void *data, size_t len,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error) {
   return lonejson__parse_buffer_with_options(map, dst, data, len, options,
                                              runtime, error);
 }
 
-static lonejson_status
-ljlua_parse_reader_with_options(const lonejson_map *map, void *dst,
-                                lonejson_reader_fn reader, void *user,
-                                const lonejson__parse_options *options,
-                                const lonejson_runtime *runtime,
-                                lonejson_error *error) {
+static lonejson_status ljlua_parse_reader_with_options(
+    const lonejson_map *map, void *dst, lonejson_reader_fn reader, void *user,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error) {
   return lonejson__parse_reader_with_options(map, dst, reader, user, options,
                                              runtime, error);
 }
@@ -525,12 +518,10 @@ ljlua_parse_filep_with_options(const lonejson_map *map, void *dst, FILE *fp,
                                          options, runtime, error);
 }
 
-static lonejson_status
-ljlua_parse_path_with_options(const lonejson_map *map, void *dst,
-                              const char *path,
-                              const lonejson__parse_options *options,
-                              const lonejson_runtime *runtime,
-                              lonejson_error *error) {
+static lonejson_status ljlua_parse_path_with_options(
+    const lonejson_map *map, void *dst, const char *path,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error) {
   FILE *fp;
   lonejson_status status;
 
@@ -546,55 +537,44 @@ ljlua_parse_path_with_options(const lonejson_map *map, void *dst,
     return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
                                "failed to open '%s'", path);
   }
-  status = ljlua_parse_filep_with_options(map, dst, fp, options, runtime,
-                                          error);
+  status =
+      ljlua_parse_filep_with_options(map, dst, fp, options, runtime, error);
   fclose(fp);
   return status;
 }
 
-static lonejson_status
-ljlua_serialize_buffer_with_options(const lonejson_map *map, const void *src,
-                                    char *buffer, size_t capacity,
-                                    size_t *needed,
-                                    const lonejson__write_options *options,
-                                    lonejson_error *error) {
+static lonejson_status ljlua_serialize_buffer_with_options(
+    const lonejson_map *map, const void *src, char *buffer, size_t capacity,
+    size_t *needed, const lonejson__write_options *options,
+    lonejson_error *error) {
   return lonejson__serialize_buffer_with_options(map, src, buffer, capacity,
                                                  needed, options, error);
 }
 
-static lonejson_status
-ljlua_serialize_filep_with_options(const lonejson_map *map, const void *src,
-                                   FILE *fp,
-                                   const lonejson__write_options *options,
-                                   lonejson_error *error) {
+static lonejson_status ljlua_serialize_filep_with_options(
+    const lonejson_map *map, const void *src, FILE *fp,
+    const lonejson__write_options *options, lonejson_error *error) {
   return lonejson__serialize_filep_with_options(map, src, fp, options, error);
 }
 
-static lonejson_status
-ljlua_serialize_path_with_options(const lonejson_map *map, const void *src,
-                                  const char *path,
-                                  const lonejson__write_options *options,
-                                  lonejson_error *error) {
+static lonejson_status ljlua_serialize_path_with_options(
+    const lonejson_map *map, const void *src, const char *path,
+    const lonejson__write_options *options, lonejson_error *error) {
   return lonejson__serialize_path_with_options(map, src, path, options, error);
 }
 
-static lonejson_stream *
-ljlua_stream_open_reader_with_options(const lonejson_map *map,
-                                      lonejson_reader_fn reader, void *user,
-                                      const lonejson__parse_options *options,
-                                      const lonejson_runtime *runtime,
-                                      lonejson_error *error) {
+static lonejson_stream *ljlua_stream_open_reader_with_options(
+    const lonejson_map *map, lonejson_reader_fn reader, void *user,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error) {
   return lonejson__stream_open_reader_with_options(map, reader, user, options,
                                                    runtime, error);
 }
 
-static lonejson_stream *
-ljlua_stream_open_memory_with_options(const lonejson_map *map,
-                                      const unsigned char *input,
-                                      size_t input_len,
-                                      const lonejson__parse_options *options,
-                                      const lonejson_runtime *runtime,
-                                      lonejson_error *error) {
+static lonejson_stream *ljlua_stream_open_memory_with_options(
+    const lonejson_map *map, const unsigned char *input, size_t input_len,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error) {
   lonejson__stream_state *stream;
 
   if (input == NULL && input_len != 0u) {
@@ -613,11 +593,9 @@ ljlua_stream_open_memory_with_options(const lonejson_map *map,
   return &stream->public;
 }
 
-static lonejson_stream *
-ljlua_stream_open_filep_with_options(const lonejson_map *map, FILE *fp,
-                                     const lonejson__parse_options *options,
-                                     const lonejson_runtime *runtime,
-                                     lonejson_error *error) {
+static lonejson_stream *ljlua_stream_open_filep_with_options(
+    const lonejson_map *map, FILE *fp, const lonejson__parse_options *options,
+    const lonejson_runtime *runtime, lonejson_error *error) {
   return lonejson__stream_open_filep_with_options(map, fp, options, runtime,
                                                   error);
 }
@@ -631,54 +609,41 @@ ljlua_stream_open_path_with_options(const lonejson_map *map, const char *path,
                                                  error);
 }
 
-static lonejson_stream *
-ljlua_stream_open_fd_with_options(const lonejson_map *map, int fd,
-                                  const lonejson__parse_options *options,
-                                  const lonejson_runtime *runtime,
-                                  lonejson_error *error) {
+static lonejson_stream *ljlua_stream_open_fd_with_options(
+    const lonejson_map *map, int fd, const lonejson__parse_options *options,
+    const lonejson_runtime *runtime, lonejson_error *error) {
   return lonejson__stream_open_fd_with_options(map, fd, options, runtime,
                                                error);
 }
 
-static lonejson_array_stream *
-ljlua_array_stream_open_reader_with_options(const char *path,
-                                            lonejson_reader_fn reader,
-                                            void *user,
-                                            const lonejson__parse_options *options,
-                                            const lonejson_runtime *runtime,
-                                            lonejson_error *error) {
-  return lonejson__array_stream_open_reader_with_options(path, reader, user,
-                                                         options, runtime,
-                                                         error);
+static lonejson_array_stream *ljlua_array_stream_open_reader_with_options(
+    const char *path, lonejson_reader_fn reader, void *user,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error) {
+  return lonejson__array_stream_open_reader_with_options(
+      path, reader, user, options, runtime, error);
 }
 
-static lonejson_array_stream *
-ljlua_array_stream_open_filep_with_options(const char *path, FILE *fp,
-                                           const lonejson__parse_options *options,
-                                           const lonejson_runtime *runtime,
-                                           lonejson_error *error) {
+static lonejson_array_stream *ljlua_array_stream_open_filep_with_options(
+    const char *path, FILE *fp, const lonejson__parse_options *options,
+    const lonejson_runtime *runtime, lonejson_error *error) {
   return lonejson__array_stream_open_filep_with_options(path, fp, options,
                                                         runtime, error);
 }
 
-static lonejson_array_stream *
-ljlua_array_stream_open_path_with_options(const char *array_path,
-                                          const char *path,
-                                          const lonejson__parse_options *options,
-                                          const lonejson_runtime *runtime,
-                                          lonejson_error *error) {
+static lonejson_array_stream *ljlua_array_stream_open_path_with_options(
+    const char *array_path, const char *path,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    lonejson_error *error) {
   return lonejson__array_stream_open_path_with_options(array_path, path,
-                                                       options, runtime,
-                                                       error);
+                                                       options, runtime, error);
 }
 
-static lonejson_array_stream *
-ljlua_array_stream_open_fd_with_options(const char *path, int fd,
-                                        const lonejson__parse_options *options,
-                                        const lonejson_runtime *runtime,
-                                        lonejson_error *error) {
-  return lonejson__array_stream_open_fd_with_options(path, fd, options,
-                                                     runtime, error);
+static lonejson_array_stream *ljlua_array_stream_open_fd_with_options(
+    const char *path, int fd, const lonejson__parse_options *options,
+    const lonejson_runtime *runtime, lonejson_error *error) {
+  return lonejson__array_stream_open_fd_with_options(path, fd, options, runtime,
+                                                     error);
 }
 
 static char ljlua_json_null_sentinel;
@@ -899,8 +864,9 @@ static lonejson_status ljlua_json_buf_sink_limited(void *user, const void *data,
   ljlua_json_buf *buf = (ljlua_json_buf *)user;
 
   if (buf->max_cap != 0u && len > (buf->max_cap - 1u) - buf->len) {
-    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                               "serializer-owned output exceeds max_output_bytes");
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+        "serializer-owned output exceeds max_output_bytes");
   }
   return ljlua_json_buf_sink(user, data, len, error);
 }

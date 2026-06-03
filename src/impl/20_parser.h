@@ -62,16 +62,12 @@ static LONEJSON__INLINE void *lonejson__field_ptr(void *base,
 static lonejson_status lonejson__stream_value_begin(lonejson_parser *parser,
                                                     const lonejson_field *field,
                                                     void *ptr);
-static void lonejson__parser_init_state(lonejson_parser *parser,
-                                        const lonejson_map *map, void *dst,
-                                        const lonejson__parse_options *options,
-                                        const lonejson_runtime *runtime,
-                                        int validate_only,
-                                        int root_map_analysis_known,
-                                        int root_map_may_allocate,
-                                        lonejson_uint64 root_map_adopt_mask,
-                                        unsigned char *workspace,
-                                        size_t workspace_size);
+static void lonejson__parser_init_state(
+    lonejson_parser *parser, const lonejson_map *map, void *dst,
+    const lonejson__parse_options *options, const lonejson_runtime *runtime,
+    int validate_only, int root_map_analysis_known, int root_map_may_allocate,
+    lonejson_uint64 root_map_adopt_mask, unsigned char *workspace,
+    size_t workspace_size);
 #define lonejson__parser_peak_workspace_used(parser_ptr)                       \
   ((parser_ptr) != NULL ? (parser_ptr)->workspace_peak : 0u)
 static LONEJSON__HOT lonejson_status
@@ -289,9 +285,9 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
   }
   if (field != NULL && field->kind == LONEJSON_FIELD_KIND_STRING &&
       field->storage == LONEJSON_STORAGE_FIXED && field->fixed_capacity != 0u) {
-    lonejson_frame *frame =
-        (parser->frame_count != 0u) ? &parser->frames[parser->frame_count - 1u]
-                                    : NULL;
+    lonejson_frame *frame = (parser->frame_count != 0u)
+                                ? &parser->frames[parser->frame_count - 1u]
+                                : NULL;
     char *stage = NULL;
     int owned = 0;
 
@@ -308,7 +304,8 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
     if (!parser->options.clear_destination) {
       if (ptr != NULL && ((const char *)ptr)[0] != '\0') {
         if (parser->options.fixed_string_scratch != NULL &&
-            parser->options.fixed_string_scratch_size >= field->fixed_capacity) {
+            parser->options.fixed_string_scratch_size >=
+                field->fixed_capacity) {
           stage = (char *)parser->options.fixed_string_scratch;
         } else if (field->fixed_capacity <= lonejson__token_limit(parser)) {
           stage = (char *)lonejson__token_base(parser);
@@ -320,8 +317,8 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
                 parser->error.line, parser->error.column,
                 "parse allocations exceed configured max bytes");
           }
-          stage =
-              (char *)lonejson__owned_malloc_parse(parser, field->fixed_capacity);
+          stage = (char *)lonejson__owned_malloc_parse(parser,
+                                                       field->fixed_capacity);
           if (stage == NULL) {
             return lonejson__set_error(
                 &parser->error, LONEJSON_STATUS_ALLOCATION_FAILED,
@@ -362,9 +359,9 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
   }
   if (field != NULL && field->kind == LONEJSON_FIELD_KIND_STRING &&
       field->storage == LONEJSON_STORAGE_DYNAMIC) {
-    lonejson_frame *frame =
-        (parser->frame_count != 0u) ? &parser->frames[parser->frame_count - 1u]
-                                    : NULL;
+    lonejson_frame *frame = (parser->frame_count != 0u)
+                                ? &parser->frames[parser->frame_count - 1u]
+                                : NULL;
     char *buffer;
     size_t initial_capacity = 64u;
     size_t available = lonejson__parser_alloc_available(parser, 0u);
@@ -496,9 +493,9 @@ lonejson__stream_value_append_decoded(lonejson_parser *parser,
                                parser->error.column,
                                "streamed field is not active");
   }
-  return lonejson__spooled_append_parse(
-      parser, (lonejson_spooled *)parser->stream_ptr, data, len,
-      &parser->error);
+  return lonejson__spooled_append_parse(parser,
+                                        (lonejson_spooled *)parser->stream_ptr,
+                                        data, len, &parser->error);
 }
 
 static lonejson_status
@@ -706,8 +703,7 @@ static LONEJSON__INLINE lonejson_status lonejson__direct_string_append_bytes(
                                  parser->error.column,
                                  "direct string field is not active");
     }
-    if (string_limit != 0u &&
-        parser->direct_string_len + len > string_limit) {
+    if (string_limit != 0u && parser->direct_string_len + len > string_limit) {
       return lonejson__set_error(
           &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
           parser->error.line, parser->error.column,
@@ -733,16 +729,15 @@ static LONEJSON__INLINE lonejson_status lonejson__direct_string_append_bytes(
       if (!lonejson__parser_alloc_can_grow(
               parser,
               lonejson__parser_alloc_counted_bytes(parser,
-                                                  parser->direct_string_ptr),
+                                                   parser->direct_string_ptr),
               next_capacity)) {
         return lonejson__set_error(
             &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
             parser->error.line, parser->error.column,
             "parse allocations exceed configured max bytes");
       }
-      next = (char *)lonejson__owned_realloc_parse(parser,
-                                                   parser->direct_string_ptr,
-                                                   next_capacity);
+      next = (char *)lonejson__owned_realloc_parse(
+          parser, parser->direct_string_ptr, next_capacity);
       if (next == NULL) {
         return lonejson__set_error(
             &parser->error, LONEJSON_STATUS_ALLOCATION_FAILED,
@@ -790,8 +785,9 @@ static LONEJSON__INLINE lonejson_status lonejson__direct_string_append_bytes(
   return LONEJSON_STATUS_OK;
 }
 
-static LONEJSON__INLINE void lonejson__direct_string_clear(
-    lonejson_parser *parser, int restore_destination) {
+static LONEJSON__INLINE void
+lonejson__direct_string_clear(lonejson_parser *parser,
+                              int restore_destination) {
   if (parser == NULL || !parser->direct_string_active) {
     return;
   }
@@ -812,8 +808,8 @@ static LONEJSON__INLINE void lonejson__direct_string_clear(
   parser->direct_string_field = NULL;
 }
 
-static LONEJSON__INLINE void lonejson__direct_string_abort(
-    lonejson_parser *parser) {
+static LONEJSON__INLINE void
+lonejson__direct_string_abort(lonejson_parser *parser) {
   lonejson__direct_string_clear(parser, 1);
 }
 

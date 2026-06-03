@@ -21,7 +21,8 @@ static const lonejson_field fuzz_budget_doc_fields[] = {
     LONEJSON_FIELD_JSON_VALUE(fuzz_budget_doc, metadata, "metadata"),
     LONEJSON_FIELD_STRING_FIXED_REQ(fuzz_budget_doc, payload, "payload",
                                     LONEJSON_OVERFLOW_FAIL)};
-LONEJSON_MAP_DEFINE(fuzz_budget_doc_map, fuzz_budget_doc, fuzz_budget_doc_fields);
+LONEJSON_MAP_DEFINE(fuzz_budget_doc_map, fuzz_budget_doc,
+                    fuzz_budget_doc_fields);
 
 static int fuzz_append_text(char **out, size_t *remaining, const char *text) {
   size_t len = strlen(text);
@@ -35,7 +36,8 @@ static int fuzz_append_text(char **out, size_t *remaining, const char *text) {
   return 1;
 }
 
-static int fuzz_append_fill(char **out, size_t *remaining, char ch, size_t len) {
+static int fuzz_append_fill(char **out, size_t *remaining, char ch,
+                            size_t len) {
   if (len >= *remaining) {
     return 0;
   }
@@ -93,8 +95,8 @@ static char *fuzz_build_budget_json(size_t name_len, size_t title_len,
   char *json;
   char *out;
   size_t cap = 256u + name_len + title_len + payload_len +
-               (tag_count * (tag_len + 4u)) +
-               (meta_depth * 16u) + (meta_width * (meta_string_len + 4u));
+               (tag_count * (tag_len + 4u)) + (meta_depth * 16u) +
+               (meta_width * (meta_string_len + 4u));
   size_t remaining;
 
   json = (char *)malloc(cap + 1u);
@@ -207,17 +209,18 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_init(seed_runtime, &fuzz_budget_doc_map, &doc);
   (void)lonejson_json_value_enable_parse_capture(&doc.metadata, &error);
 
-  seed_json =
-      fuzz_build_budget_json(name_len, title_len, tag_count, tag_len, payload_len,
-                             meta_depth, meta_width, meta_string_len, 0u);
+  seed_json = fuzz_build_budget_json(name_len, title_len, tag_count, tag_len,
+                                     payload_len, meta_depth, meta_width,
+                                     meta_string_len, 0u);
   if (seed_json != NULL) {
     (void)lonejson_parse_cstr(seed_runtime, &fuzz_budget_doc_map, &doc,
                               seed_json, &error);
   }
 
   followup_json = fuzz_build_budget_json(
-      1u + (name_len / 2u), title_len, tag_count + 1u, tag_len / 2u, payload_len,
-      meta_depth, meta_width + 1u, meta_string_len, size > 11u ? data[11] : 0u);
+      1u + (name_len / 2u), title_len, tag_count + 1u, tag_len / 2u,
+      payload_len, meta_depth, meta_width + 1u, meta_string_len,
+      size > 11u ? data[11] : 0u);
   if (followup_json != NULL) {
     char buffer[512];
     size_t needed = 0u;

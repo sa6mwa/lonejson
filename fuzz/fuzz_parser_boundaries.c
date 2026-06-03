@@ -26,8 +26,8 @@ static lonejson_status fuzz_visit_event(void *user, lonejson_error *error) {
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status fuzz_visit_chunk(void *user, const char *data, size_t len,
-                                        lonejson_error *error) {
+static lonejson_status fuzz_visit_chunk(void *user, const char *data,
+                                        size_t len, lonejson_error *error) {
   fuzz_visit_state *state = (fuzz_visit_state *)user;
   (void)data;
   (void)error;
@@ -148,8 +148,10 @@ static char *fuzz_build_boundary_json(const uint8_t *data, size_t size) {
       return NULL;
     }
     for (i = 0u; i < width; ++i) {
-      if (!fuzz_append_text(&out, &remaining, i == 0u ? "\"k\":\"" : ",\"k\":\"") ||
-          !fuzz_append_repeat(&out, &remaining, "\\u0000", (i & 1u) != 0u ? 1u : 0u) ||
+      if (!fuzz_append_text(&out, &remaining,
+                            i == 0u ? "\"k\":\"" : ",\"k\":\"") ||
+          !fuzz_append_repeat(&out, &remaining, "\\u0000",
+                              (i & 1u) != 0u ? 1u : 0u) ||
           !fuzz_append_repeat(&out, &remaining, "x", depth) ||
           !fuzz_append_text(&out, &remaining, "\"")) {
         free(json);
@@ -250,7 +252,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
   config = lonejson_default_config();
   if (size > 4u) {
-    config.max_depth = (data[4] & 1u) != 0u ? 0u : (size_t)(1u + (data[4] & 31u));
+    config.max_depth =
+        (data[4] & 1u) != 0u ? 0u : (size_t)(1u + (data[4] & 31u));
   }
   if (size > 5u) {
     config.reject_duplicate_keys_by_default = (data[5] & 1u) != 0u ? 1 : 0;

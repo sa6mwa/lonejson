@@ -152,8 +152,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   if (runtime == NULL) {
     return 0;
   }
-  status =
-      lonejson_visit_value_buffer(runtime, data, size, &visitor, &state, &error);
+  status = lonejson_visit_value_buffer(runtime, data, size, &visitor, &state,
+                                       &error);
   if (status == LONEJSON_STATUS_OK) {
     (void)state.callback_count;
   }

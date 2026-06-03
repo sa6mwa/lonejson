@@ -103,10 +103,8 @@ fuzz_replace_with(lonejson_writer *writer,
     return lonejson_writer_i64(writer, (lonejson_int64)old_value->number_len,
                                error);
   case LONEJSON_VALUE_BOOL:
-    return lonejson_writer_bool(writer,
-                                state->mode ? !old_value->boolean
-                                            : old_value->boolean,
-                                error);
+    return lonejson_writer_bool(
+        writer, state->mode ? !old_value->boolean : old_value->boolean, error);
   case LONEJSON_VALUE_NULL:
     return lonejson_writer_null(writer, error);
   case LONEJSON_VALUE_STRING:
@@ -207,9 +205,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     selector_options.old_value_user = options.old_value_user;
     selector_options.replace = options.replace;
     selector_options.replace_user = options.replace_user;
-    status = lonejson_value_rewrite_selector_buffer(runtime, data, size,
-                                                    fuzz_sink, &sink_state,
-                                                    &selector_options, &error);
+    status = lonejson_value_rewrite_selector_buffer(
+        runtime, data, size, fuzz_sink, &sink_state, &selector_options, &error);
   } else {
     status = lonejson_value_rewrite_buffer(runtime, data, size, fuzz_sink,
                                            &sink_state, &options, &error);
@@ -217,7 +214,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
   if (status == LONEJSON_STATUS_OK) {
     if (sink_state.out.data == NULL ||
-        lonejson_validate_buffer(runtime, sink_state.out.data, sink_state.out.len,
+        lonejson_validate_buffer(runtime, sink_state.out.data,
+                                 sink_state.out.len,
                                  &validate_error) != LONEJSON_STATUS_OK) {
       abort();
     }

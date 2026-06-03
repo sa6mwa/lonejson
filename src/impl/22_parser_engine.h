@@ -17,8 +17,9 @@ lonejson__direct_string_reject_nul(lonejson_parser *parser) {
       &parser->error, LONEJSON_STATUS_TYPE_MISMATCH, parser->error.offset,
       parser->error.line, parser->error.column,
       "field '%s' contains embedded NUL unsupported by C strings",
-      parser->direct_string_field != NULL ? parser->direct_string_field->json_key
-                                          : "<unknown>");
+      parser->direct_string_field != NULL
+          ? parser->direct_string_field->json_key
+          : "<unknown>");
 }
 
 static LONEJSON__INLINE int
@@ -499,11 +500,11 @@ lonejson__consume_string_fast(lonejson_parser *parser,
                  LONEJSON_STRING_CAPTURE_JSON_VISITOR) {
         status = lonejson__json_value_string_end(parser);
         if (status == LONEJSON_STATUS_OK) {
-          status = !lonejson__json_value_parse_visitor_active(parser) ||
-                           lonejson__streamed_json_value_scalar_field_active(
-                               parser)
-                       ? lonejson__complete_streamed_string_token(parser)
-                       : lonejson__deliver_token(parser, LONEJSON_LEX_STRING);
+          status =
+              !lonejson__json_value_parse_visitor_active(parser) ||
+                      lonejson__streamed_json_value_scalar_field_active(parser)
+                  ? lonejson__complete_streamed_string_token(parser)
+                  : lonejson__deliver_token(parser, LONEJSON_LEX_STRING);
         }
       } else if (parser->string_capture_mode ==
                  LONEJSON_STRING_CAPTURE_STREAM) {

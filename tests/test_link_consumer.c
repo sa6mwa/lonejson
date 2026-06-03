@@ -153,8 +153,10 @@ int main(void) {
   consumer_response_json response;
   consumer_rewrite_item rewrite_item;
   consumer_rewrite_counter rewrite_counter;
-  lonejson_string_array_stream string_stream = LONEJSON_STRING_ARRAY_STREAM_INIT;
-  lonejson_mapped_array_stream mapped_stream = LONEJSON_MAPPED_ARRAY_STREAM_INIT;
+  lonejson_string_array_stream string_stream =
+      LONEJSON_STRING_ARRAY_STREAM_INIT;
+  lonejson_mapped_array_stream mapped_stream =
+      LONEJSON_MAPPED_ARRAY_STREAM_INIT;
   lonejson_array_rewrite_options rewrite_options;
   lonejson_json_value value;
   lonejson_spooled spool;
@@ -171,9 +173,8 @@ int main(void) {
   lonejson_init(consumer_runtime(), &consumer_log_map, &log_record);
   lonejson_error_init(&error);
 
-  status =
-      lonejson_parse_cstr(consumer_runtime(), &consumer_log_map, &log_record,
-                          json, &error);
+  status = lonejson_parse_cstr(consumer_runtime(), &consumer_log_map,
+                               &log_record, json, &error);
   if (status != LONEJSON_STATUS_OK) {
     return 1;
   }
@@ -263,9 +264,9 @@ int main(void) {
   value_buffer[0] = '\0';
   consumer_msan_poison_bytes(value_buffer + 1u, sizeof(value_buffer) - 1u);
   {
-    char *allocated = lonejson_serialize_alloc(
-        consumer_runtime(), &consumer_response_json_map, &response, NULL,
-        &error);
+    char *allocated = lonejson_serialize_alloc(consumer_runtime(),
+                                               &consumer_response_json_map,
+                                               &response, NULL, &error);
     if (allocated == NULL || !consumer_msan_cstr_initialized(allocated) ||
         strstr(allocated, "\"response_json\"") == NULL ||
         strstr(allocated, "\"\"") == NULL) {

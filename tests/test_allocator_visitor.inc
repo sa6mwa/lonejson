@@ -1,12 +1,11 @@
 static void test_value_visitor_success_and_limits(void) {
   const char *json = "{\"name\":\"a\\n\\u20ac\",\"items\":[1,-2.5e3,true,false,"
                      "null,{\"x\":[]}]}";
-  const char *pretty_object =
-      "{\n"
-      "  \"kind\": \"term\",\n"
-      "  \"field\": \"name\",\n"
-      "  \"value\": \"alice\"\n"
-      "}";
+  const char *pretty_object = "{\n"
+                              "  \"kind\": \"term\",\n"
+                              "  \"field\": \"name\",\n"
+                              "  \"value\": \"alice\"\n"
+                              "}";
   lonejson_value_visitor visitor = test_value_visitor();
   lonejson__value_limits limits = lonejson__default_value_limits();
   lonejson_error error;
@@ -26,15 +25,15 @@ static void test_value_visitor_success_and_limits(void) {
   memset(&state, 0, sizeof(state));
   status = test_visit_value_cstr(pretty_object, &visitor, &state, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  EXPECT(strcmp(state.log,
-                "{K(kind)S(term)K(field)S(name)K(value)S(alice)}") == 0);
+  EXPECT(strcmp(state.log, "{K(kind)S(term)K(field)S(name)K(value)S(alice)}") ==
+         0);
 
   memset(&state, 0, sizeof(state));
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 2u;
-  status = test_visit_value_reader(test_state_reader, &reader, &visitor,
-                                       &state, &limits, &error);
+  status = test_visit_value_reader(test_state_reader, &reader, &visitor, &state,
+                                   &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(
       strcmp(state.log,
@@ -63,14 +62,13 @@ static void test_value_visitor_success_and_limits(void) {
 
   limits = lonejson__default_value_limits();
   limits.max_string_bytes = 2u;
-  status = test_visit_value_cstr("{\"k\":\"abcd\"}", &visitor, &state,
-                                     &limits, &error);
+  status = test_visit_value_cstr("{\"k\":\"abcd\"}", &visitor, &state, &limits,
+                                 &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
 
   limits = lonejson__default_value_limits();
   limits.max_number_bytes = 3u;
-  status =
-      test_visit_value_cstr("12345", &visitor, &state, &limits, &error);
+  status = test_visit_value_cstr("12345", &visitor, &state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
 
   limits = lonejson__default_value_limits();
@@ -79,12 +77,11 @@ static void test_value_visitor_success_and_limits(void) {
       test_visit_value_cstr("{\"k\":1}", &visitor, &state, &limits, &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
 
-  status = test_visit_value_cstr("{\"k\":1} trailing", &visitor, &state,
-                                     NULL, &error);
+  status = test_visit_value_cstr("{\"k\":1} trailing", &visitor, &state, NULL,
+                                 &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
 
-  status =
-      test_visit_value_cstr("{\"k\":tru}", &visitor, &state, NULL, &error);
+  status = test_visit_value_cstr("{\"k\":tru}", &visitor, &state, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
 
   strcpy(path, "/tmp/lonejson-value-visitor-XXXXXX");
@@ -139,8 +136,8 @@ static void test_value_visitor_chunking_unicode_and_failures(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 1u;
-  status = test_visit_value_reader(test_state_reader, &reader, &visitor,
-                                       &state, NULL, &error);
+  status = test_visit_value_reader(test_state_reader, &reader, &visitor, &state,
+                                   NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(state.object_count == 1u);
   EXPECT(state.array_count == 1u);
@@ -176,15 +173,14 @@ static void test_value_visitor_chunking_unicode_and_failures(void) {
 
   for (i = 0u; i < sizeof(invalid_cases) / sizeof(invalid_cases[0]); ++i) {
     memset(&state, 0, sizeof(state));
-    status = test_visit_value_cstr(invalid_cases[i], &visitor, &state, NULL,
-                                       &error);
+    status =
+        test_visit_value_cstr(invalid_cases[i], &visitor, &state, NULL, &error);
     EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
   }
 }
 
 static void test_visit_value_reader_rejects_would_block(void) {
-  static const char json[] =
-      "{\"name\":\"visit\",\"items\":[1,2],\"ok\":true}";
+  static const char json[] = "{\"name\":\"visit\",\"items\":[1,2],\"ok\":true}";
   lonejson_value_visitor visitor = test_value_visitor();
   test_visit_state state;
   test_would_block_tripwire_read_state reader;
@@ -197,8 +193,9 @@ static void test_visit_value_reader_rejects_would_block(void) {
   reader.json = json;
   reader.chunk_size = 12u;
   reader.block_after = 12u;
-  status = lonejson_visit_value_reader(runtime, test_would_block_tripwire_reader,
-                                       &reader, &visitor, &state, &error);
+  status =
+      lonejson_visit_value_reader(runtime, test_would_block_tripwire_reader,
+                                  &reader, &visitor, &state, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(reader.blocked);
   EXPECT(!reader.reentered_after_block);
@@ -211,8 +208,9 @@ static void test_visit_value_reader_rejects_would_block(void) {
   reader.json = json;
   reader.chunk_size = 12u;
   reader.block_after = 12u;
-  status = runtime->visit_value_reader(runtime, test_would_block_tripwire_reader,
-                                       &reader, &visitor, &state, &error);
+  status =
+      runtime->visit_value_reader(runtime, test_would_block_tripwire_reader,
+                                  &reader, &visitor, &state, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(reader.blocked);
   EXPECT(!reader.reentered_after_block);
@@ -332,8 +330,8 @@ static void test_custom_allocator_parse_cleanup_and_stream(void) {
   test_allocator_init(&alloc);
   memset(&doc, 0, sizeof(doc));
   options.allocator = &alloc.allocator;
-  status = test_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options,
-                               &error);
+  status =
+      test_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(alloc.stats.alloc_calls > 0u);
   EXPECT(alloc.stats.bytes_live > 0u);
@@ -347,8 +345,8 @@ static void test_custom_allocator_parse_cleanup_and_stream(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 7u;
-  stream = test_stream_open_reader(
-      &test_alloc_parse_doc_map, test_state_reader, &reader, &options, &error);
+  stream = test_stream_open_reader(&test_alloc_parse_doc_map, test_state_reader,
+                                   &reader, &options, &error);
   EXPECT(stream != NULL);
   EXPECT(alloc.stats.alloc_calls > 0u);
   if (stream != NULL) {
@@ -375,8 +373,8 @@ static void test_custom_allocator_misaligned_owned_alloc_is_rejected(void) {
   allocator.realloc_fn = test_misaligned_allocator_realloc;
   allocator.free_fn = test_misaligned_allocator_free;
   options.allocator = &allocator;
-  status = test_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options,
-                               &error);
+  status =
+      test_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options, &error);
   EXPECT(status == LONEJSON_STATUS_ALLOCATION_FAILED);
   EXPECT(error.code == LONEJSON_STATUS_ALLOCATION_FAILED);
   EXPECT(strstr(error.message, "failed to allocate string") != NULL);
@@ -407,7 +405,7 @@ static void test_custom_allocator_json_value_capture_and_serialize_alloc(void) {
   parse_options.clear_destination = 0;
   parse_options.allocator = &parse_alloc.allocator;
   status = test_parse_cstr(&test_alloc_json_value_doc_map, &doc, json,
-                               &parse_options, &error);
+                           &parse_options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(parse_alloc.stats.alloc_calls > 0u);
   EXPECT(parse_alloc.stats.bytes_live > 0u);
@@ -421,7 +419,7 @@ static void test_custom_allocator_json_value_capture_and_serialize_alloc(void) {
   event.ok = true;
   lonejson_owned_buffer_init(&serialized);
   status = test_serialize_owned(&test_event_map, &event, &serialized,
-                                    &write_options, &error);
+                                &write_options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(serialized.data != NULL);
   EXPECT(write_alloc.stats.alloc_calls > 0u);
@@ -446,7 +444,7 @@ static void test_custom_allocator_raw_serialize_alloc_is_rejected(void) {
   memcpy(event.id, "evt-raw", 8u);
   event.ok = true;
   serialized = test_serialize_alloc(&test_event_map, &event, NULL,
-                                        &write_options, &error);
+                                    &write_options, &error);
   EXPECT(serialized == NULL);
   EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(strstr(error.message,
@@ -492,8 +490,8 @@ test_explicit_default_allocator_raw_serialize_jsonl_alloc_is_allowed(void) {
   events[0].ok = true;
   memcpy(events[1].id, "evt-2", 6u);
   events[1].ok = false;
-  serialized = test_serialize_jsonl_alloc(&test_event_map, events, 2u, 0u,
-                                              NULL, &options, &error);
+  serialized = test_serialize_jsonl_alloc(&test_event_map, events, 2u, 0u, NULL,
+                                          &options, &error);
   EXPECT(serialized != NULL);
   if (serialized != NULL) {
     EXPECT(strcmp(serialized, "{\"id\":\"evt-1\",\"ok\":true}\n"
@@ -520,7 +518,7 @@ test_custom_allocator_json_value_capture_preserves_handle_allocator(void) {
   parse_options.clear_destination = 0;
   parse_options.allocator = NULL;
   status = test_parse_cstr(&test_alloc_json_value_doc_map, &doc, json,
-                               &parse_options, &error);
+                           &parse_options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(parse_alloc.stats.alloc_calls > 0u);
   EXPECT(parse_alloc.stats.bytes_live > 0u);
@@ -645,8 +643,8 @@ static void test_partial_allocator_parse_is_rejected(void) {
   alloc.allocator.realloc_fn = NULL;
   alloc.allocator.free_fn = NULL;
   options.allocator = &alloc.allocator;
-  status = test_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options,
-                               &error);
+  status =
+      test_parse_cstr(&test_alloc_parse_doc_map, &doc, json, &options, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(strstr(error.message,
@@ -674,8 +672,8 @@ static void test_partial_allocator_parse_reader_is_rejected(void) {
   reader.json = json;
   reader.offset = 0u;
   reader.chunk_size = 5u;
-  status = test_parse_reader(&test_alloc_parse_doc_map, &doc,
-                                 test_state_reader, &reader, &options, &error);
+  status = test_parse_reader(&test_alloc_parse_doc_map, &doc, test_state_reader,
+                             &reader, &options, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(strstr(error.message,
@@ -726,8 +724,7 @@ static void test_partial_allocator_generator_init_is_rejected(void) {
   alloc.allocator.realloc_fn = NULL;
   alloc.allocator.free_fn = NULL;
   options.allocator = &alloc.allocator;
-  status =
-      test_generator_init(&generator, &test_event_map, &event, &options);
+  status = test_generator_init(&generator, &test_event_map, &event, &options);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(generator.state == NULL);
   EXPECT(generator.error.code == LONEJSON_STATUS_INVALID_ARGUMENT);

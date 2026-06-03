@@ -620,8 +620,7 @@ static lonejson_status lonejson__json_visit_cursor(
   io.error = error;
   io.allocator = allocator;
   if (limits != NULL && limits->max_depth != 0u &&
-      limits->max_string_bytes != 0u &&
-      limits->max_number_bytes != 0u &&
+      limits->max_string_bytes != 0u && limits->max_number_bytes != 0u &&
       limits->max_key_bytes != 0u) {
     io.limits = *limits;
   } else {

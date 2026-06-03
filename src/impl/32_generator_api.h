@@ -8,8 +8,8 @@ typedef enum lonejson__generator_pending_kind {
 #define LONEJSON__WRITER_GENERATOR_MAGIC 0x4c4a5747u
 
 static lonejson_status lonejson__serialize_sink_with_options(
-    const lonejson_map *map, const void *src, lonejson_sink_fn sink,
-    void *user, const lonejson__write_options *options, lonejson_error *error);
+    const lonejson_map *map, const void *src, lonejson_sink_fn sink, void *user,
+    const lonejson__write_options *options, lonejson_error *error);
 static lonejson_status lonejson__writer_init_sink_with_options(
     lonejson_writer *writer, lonejson_sink_fn sink, void *sink_user,
     const lonejson__write_options *options, const lonejson_runtime *runtime,
@@ -1143,9 +1143,10 @@ lonejson__generator_step_frame(lonejson__generator_state *state,
   }
 }
 
-static lonejson_status lonejson__generator_init_with_options(
-    lonejson_generator *generator, const lonejson_map *map, const void *src,
-    const lonejson__write_options *options) {
+static lonejson_status
+lonejson__generator_init_with_options(lonejson_generator *generator,
+                                      const lonejson_map *map, const void *src,
+                                      const lonejson__write_options *options) {
   lonejson__generator_state *state;
   lonejson_allocator allocator;
   lonejson__generator_frame root;
@@ -1409,8 +1410,8 @@ static lonejson_status lonejson__writer_generator_init_with_options(
   state->producer = producer;
   state->producer_user = producer_user;
   status = lonejson__writer_init_sink_with_options(
-      &state->writer, lonejson__writer_generator_sink, state, options,
-      runtime, &generator->error);
+      &state->writer, lonejson__writer_generator_sink, state, options, runtime,
+      &generator->error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson__buffer_free(&allocator, state, sizeof(*state));
     return status;
@@ -1421,9 +1422,10 @@ static lonejson_status lonejson__writer_generator_init_with_options(
   return LONEJSON_STATUS_OK;
 }
 
-lonejson_status lonejson_writer_generator_init(
-    lonejson *runtime, lonejson_generator *generator,
-    lonejson_writer_producer_fn producer, void *producer_user) {
+lonejson_status
+lonejson_writer_generator_init(lonejson *runtime, lonejson_generator *generator,
+                               lonejson_writer_producer_fn producer,
+                               void *producer_user) {
   lonejson__runtime_borrow borrow;
   const lonejson_runtime *runtime_state;
   const lonejson__write_options *options;
@@ -1508,8 +1510,8 @@ static lonejson_status lonejson__generator_measure_with_options(
                                "cannot measure non-rewindable JSON document");
   }
   state.total = 0u;
-  status = lonejson__serialize_sink_with_options(map, src, lonejson__measure_sink,
-                                                 &state, options, error);
+  status = lonejson__serialize_sink_with_options(
+      map, src, lonejson__measure_sink, &state, options, error);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     *out_len = state.total;
   }

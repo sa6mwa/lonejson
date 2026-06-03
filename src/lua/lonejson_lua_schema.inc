@@ -117,8 +117,8 @@ static int ljlua_check_fd_like(lua_State *L, int index) {
   return fileno(ljlua_check_file(L, index));
 }
 
-static int ljlua_compile_nested_schema(lua_State *L, lonejson *runtime, int index,
-                                       ljlua_schema **out_schema) {
+static int ljlua_compile_nested_schema(lua_State *L, lonejson *runtime,
+                                       int index, ljlua_schema **out_schema) {
   ljlua_schema *schema;
   size_t count;
   size_t i;
@@ -205,8 +205,8 @@ static int ljlua_compile_field(lua_State *L, lonejson *runtime, int index,
       return luaL_error(L, "field '%s' cannot be both required and nullable",
                         meta->name);
     }
-    meta->field.flags |= LONEJSON_FIELD_HAS_PRESENCE |
-                         LONEJSON_FIELD_ACCEPT_NULL;
+    meta->field.flags |=
+        LONEJSON_FIELD_HAS_PRESENCE | LONEJSON_FIELD_ACCEPT_NULL;
   }
 
   switch (meta->lua_kind) {

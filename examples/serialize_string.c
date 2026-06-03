@@ -32,8 +32,8 @@ int main(void) {
   response.code = 201;
   response.retry = false;
 
-  json = lonejson_serialize_alloc(lj, &api_response_map, &response, NULL,
-                                  &error);
+  json =
+      lonejson_serialize_alloc(lj, &api_response_map, &response, NULL, &error);
   if (json == NULL) {
     fprintf(stderr, "serialize failed: %s\n", error.message);
     lonejson_free(lj);

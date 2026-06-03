@@ -9,8 +9,8 @@ static int test_child_curl_upload_cleanup_default_allocator(void) {
   event.ok = true;
 
   if (lonejson_curl_upload_init(&upload, test_default_runtime(),
-                                &test_event_map, &event) !=
-      LONEJSON_STATUS_OK) {
+                                &test_event_map,
+                                &event) != LONEJSON_STATUS_OK) {
     return 2;
   }
   lonejson_curl_upload_cleanup(&upload);
@@ -172,18 +172,18 @@ static void test_curl_parse_survives_runtime_free(void) {
   }
 
   lonejson_init(runtime, &test_nested_json_value_doc_map, &doc);
-  EXPECT(lonejson_json_value_enable_parse_capture(&doc.response.payload,
-                                                  &error) ==
-         LONEJSON_STATUS_OK);
-  EXPECT(lonejson_curl_parse_init(&parse, runtime, &test_nested_json_value_doc_map,
+  EXPECT(lonejson_json_value_enable_parse_capture(
+             &doc.response.payload, &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_parse_init(&parse, runtime,
+                                  &test_nested_json_value_doc_map,
                                   &doc) == LONEJSON_STATUS_OK);
   lonejson_free(runtime);
 
-  wrote = lonejson_curl_write_callback((char *)chunk0, 1u, strlen(chunk0),
-                                       &parse);
+  wrote =
+      lonejson_curl_write_callback((char *)chunk0, 1u, strlen(chunk0), &parse);
   EXPECT(wrote == strlen(chunk0));
-  wrote = lonejson_curl_write_callback((char *)chunk1, 1u, strlen(chunk1),
-                                       &parse);
+  wrote =
+      lonejson_curl_write_callback((char *)chunk1, 1u, strlen(chunk1), &parse);
   EXPECT(wrote == strlen(chunk1));
   status = lonejson_curl_parse_finish(&parse);
   EXPECT(status == LONEJSON_STATUS_OK);
@@ -228,19 +228,19 @@ static void test_curl_parse_reinit_releases_previous_parser(void) {
   }
 
   lonejson_init(runtime, &test_nested_json_value_doc_map, &doc0);
-  EXPECT(lonejson_json_value_enable_parse_capture(&doc0.response.payload,
-                                                  &error) ==
-         LONEJSON_STATUS_OK);
-  EXPECT(lonejson_curl_parse_init(&parse, runtime, &test_nested_json_value_doc_map,
+  EXPECT(lonejson_json_value_enable_parse_capture(
+             &doc0.response.payload, &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_parse_init(&parse, runtime,
+                                  &test_nested_json_value_doc_map,
                                   &doc0) == LONEJSON_STATUS_OK);
   alloc_after_first = g_lonejson_alloc_calls;
   EXPECT(alloc_after_first > 0u);
 
   lonejson_init(runtime, &test_nested_json_value_doc_map, &doc1);
-  EXPECT(lonejson_json_value_enable_parse_capture(&doc1.response.payload,
-                                                  &error) ==
-         LONEJSON_STATUS_OK);
-  EXPECT(lonejson_curl_parse_init(&parse, runtime, &test_nested_json_value_doc_map,
+  EXPECT(lonejson_json_value_enable_parse_capture(
+             &doc1.response.payload, &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_parse_init(&parse, runtime,
+                                  &test_nested_json_value_doc_map,
                                   &doc1) == LONEJSON_STATUS_OK);
   EXPECT(g_lonejson_free_calls > 0u);
   EXPECT(g_alloc_record_count > 0u);
@@ -262,9 +262,8 @@ static void test_curl_parse_init_accepts_poisoned_stack_state(void) {
   memset(&doc, 0, sizeof(doc));
   lonejson_init(test_default_runtime(), &test_event_map, &doc);
 
-  EXPECT(lonejson_curl_parse_init(&parse, test_default_runtime(), &test_event_map,
-                                  &doc) ==
-         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_parse_init(&parse, test_default_runtime(),
+                                  &test_event_map, &doc) == LONEJSON_STATUS_OK);
   wrote = lonejson_curl_write_callback((char *)json, 1u, strlen(json), &parse);
   EXPECT(wrote == strlen(json));
   EXPECT(lonejson_curl_parse_finish(&parse) == LONEJSON_STATUS_OK);
@@ -419,8 +418,7 @@ static void test_curl_array_parse_failure_cleanup_and_truncation(void) {
   memset(&parse, 0xA5, sizeof(parse));
   EXPECT(lonejson_curl_array_parse_init(
              &parse, test_default_runtime(), "", NULL, &item,
-             test_curl_array_item, &seen) ==
-         LONEJSON_STATUS_INVALID_ARGUMENT);
+             test_curl_array_item, &seen) == LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(parse.stream == NULL);
   EXPECT(parse.error.code == LONEJSON_STATUS_INVALID_ARGUMENT);
   lonejson_curl_array_parse_cleanup(&parse);
@@ -493,9 +491,9 @@ static void test_curl_array_parse_reinit_releases_previous_stream(void) {
              &parse, runtime, "items", &test_item_map, &item,
              test_curl_array_item, &seen) == LONEJSON_STATUS_OK);
   EXPECT(g_lonejson_alloc_calls > 0u);
-  EXPECT(lonejson_curl_array_parse_init(
-             &parse, runtime, "", &test_item_map, &item, test_curl_array_item,
-             &seen) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_array_parse_init(&parse, runtime, "", &test_item_map,
+                                        &item, test_curl_array_item,
+                                        &seen) == LONEJSON_STATUS_OK);
   EXPECT(g_lonejson_free_calls > 0u);
 
   lonejson_curl_array_parse_cleanup(&parse);
@@ -513,9 +511,9 @@ static void test_curl_string_array_parse_streams_keys(void) {
   size_t got;
 
   memset(&seen, 0, sizeof(seen));
-  EXPECT(lonejson_curl_string_array_parse_init(
-             &parse, test_default_runtime(), "keys", &handler, &seen) ==
-         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_string_array_parse_init(&parse, test_default_runtime(),
+                                               "keys", &handler,
+                                               &seen) == LONEJSON_STATUS_OK);
   for (i = 0u; i < strlen(json); ++i) {
     got = lonejson_curl_string_array_write_callback((char *)json + i, 1u, 1u,
                                                     &parse);
@@ -529,9 +527,9 @@ static void test_curl_string_array_parse_streams_keys(void) {
   lonejson_curl_string_array_parse_cleanup(&parse);
 
   memset(&seen, 0, sizeof(seen));
-  EXPECT(lonejson_curl_string_array_parse_init(
-             &parse, test_default_runtime(), "keys", &handler, &seen) ==
-         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_string_array_parse_init(&parse, test_default_runtime(),
+                                               "keys", &handler,
+                                               &seen) == LONEJSON_STATUS_OK);
   got = lonejson_curl_string_array_write_callback(
       "{\"keys\":[1]}", 1u, strlen("{\"keys\":[1]}"), &parse);
   EXPECT(got == 0u);
@@ -562,11 +560,10 @@ static void test_curl_string_array_parse_reinit_releases_previous_stream(void) {
   }
 
   EXPECT(lonejson_curl_string_array_parse_init(
-             &parse, runtime, "keys", &handler, &seen) ==
-         LONEJSON_STATUS_OK);
+             &parse, runtime, "keys", &handler, &seen) == LONEJSON_STATUS_OK);
   EXPECT(g_lonejson_alloc_calls > 0u);
-  EXPECT(lonejson_curl_string_array_parse_init(
-             &parse, runtime, "", &handler, &seen) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_string_array_parse_init(&parse, runtime, "", &handler,
+                                               &seen) == LONEJSON_STATUS_OK);
   EXPECT(g_lonejson_free_calls > 0u);
 
   lonejson_curl_string_array_parse_cleanup(&parse);
@@ -584,9 +581,9 @@ static void test_curl_string_items_parse_streams_keys(void) {
   size_t got;
 
   memset(&seen, 0, sizeof(seen));
-  EXPECT(lonejson_curl_string_items_parse_init(
-             &parse, test_default_runtime(), "keys", test_curl_string_item,
-             &seen) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_string_items_parse_init(&parse, test_default_runtime(),
+                                               "keys", test_curl_string_item,
+                                               &seen) == LONEJSON_STATUS_OK);
   for (i = 0u; i < strlen(json); ++i) {
     got = lonejson_curl_string_items_write_callback((char *)json + i, 1u, 1u,
                                                     &parse);
@@ -603,9 +600,9 @@ static void test_curl_string_items_parse_streams_keys(void) {
   lonejson_curl_string_items_parse_cleanup(&parse);
 
   memset(&seen, 0, sizeof(seen));
-  EXPECT(lonejson_curl_string_items_parse_init(
-             &parse, test_default_runtime(), "keys", test_curl_string_item,
-             &seen) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_string_items_parse_init(&parse, test_default_runtime(),
+                                               "keys", test_curl_string_item,
+                                               &seen) == LONEJSON_STATUS_OK);
   got = lonejson_curl_string_items_write_callback(
       "{\"keys\":[1]}", 1u, strlen("{\"keys\":[1]}"), &parse);
   EXPECT(got == 0u);
@@ -634,13 +631,13 @@ static void test_curl_string_items_parse_reinit_releases_previous_stream(void) {
     return;
   }
 
-  EXPECT(lonejson_curl_string_items_parse_init(
-             &parse, runtime, "keys", test_curl_string_item, &seen) ==
-         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_string_items_parse_init(&parse, runtime, "keys",
+                                               test_curl_string_item,
+                                               &seen) == LONEJSON_STATUS_OK);
   EXPECT(g_lonejson_alloc_calls > 0u);
-  EXPECT(lonejson_curl_string_items_parse_init(
-             &parse, runtime, "", test_curl_string_item, &seen) ==
-         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_string_items_parse_init(&parse, runtime, "",
+                                               test_curl_string_item,
+                                               &seen) == LONEJSON_STATUS_OK);
   EXPECT(g_lonejson_free_calls > 0u);
 
   lonejson_curl_string_items_parse_cleanup(&parse);
@@ -741,8 +738,8 @@ static void test_prepared_fixed_object_array_parse_preserves_storage(void) {
 
   options = lonejson__default_parse_options();
   options.clear_destination = 0;
-  status = test_parse_cstr(&test_fixed_result_run_map, &run, json, &options,
-                               &error);
+  status =
+      test_parse_cstr(&test_fixed_result_run_map, &run, json, &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(run.results.items == run.result_storage);
   EXPECT(run.results.count == 2u);

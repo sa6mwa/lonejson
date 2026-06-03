@@ -77,9 +77,9 @@ int main(void) {
   options.replace = increment_selected_value;
   options.replace_user = &ctx;
 
-  status = lj_value_rewrite_selector_buffer(
-      runtime, input, strlen(input), lj_owned_buffer_sink, &output, &options,
-      &error);
+  status = lj_value_rewrite_selector_buffer(runtime, input, strlen(input),
+                                            lj_owned_buffer_sink, &output,
+                                            &options, &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "rewrite failed: %s\n", error.message);
     lj_owned_buffer_free(&output);

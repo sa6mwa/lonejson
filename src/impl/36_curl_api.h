@@ -33,9 +33,9 @@ lonejson__curl_array_finish_method(lonejson_curl_array_parse *ctx) {
   return lonejson_curl_array_parse_finish(ctx);
 }
 
-static size_t lonejson__curl_string_array_write_method(
-    lonejson_curl_string_array_parse *ctx, char *ptr, size_t size,
-    size_t nmemb) {
+static size_t
+lonejson__curl_string_array_write_method(lonejson_curl_string_array_parse *ctx,
+                                         char *ptr, size_t size, size_t nmemb) {
   return lonejson_curl_string_array_write_callback(ptr, size, nmemb, ctx);
 }
 
@@ -44,9 +44,9 @@ static lonejson_status lonejson__curl_string_array_finish_method(
   return lonejson_curl_string_array_parse_finish(ctx);
 }
 
-static size_t lonejson__curl_string_items_write_method(
-    lonejson_curl_string_items_parse *ctx, char *ptr, size_t size,
-    size_t nmemb) {
+static size_t
+lonejson__curl_string_items_write_method(lonejson_curl_string_items_parse *ctx,
+                                         char *ptr, size_t size, size_t nmemb) {
   return lonejson_curl_string_items_write_callback(ptr, size, nmemb, ctx);
 }
 
@@ -114,9 +114,9 @@ static void lonejson__curl_upload_assign_methods(lonejson_curl_upload *ctx) {
   ctx->cleanup = lonejson_curl_upload_cleanup;
 }
 
-lonejson_status
-lonejson_curl_parse_init(lonejson_curl_parse *ctx, lonejson *runtime,
-                         const lonejson_map *map, void *dst) {
+lonejson_status lonejson_curl_parse_init(lonejson_curl_parse *ctx,
+                                         lonejson *runtime,
+                                         const lonejson_map *map, void *dst) {
   lonejson__runtime_borrow borrow;
   lonejson_runtime *runtime_snapshot;
   const lonejson_runtime *runtime_state;
@@ -131,7 +131,8 @@ lonejson_curl_parse_init(lonejson_curl_parse *ctx, lonejson *runtime,
   memset(ctx, 0, sizeof(*ctx));
   lonejson__curl_parse_assign_methods(ctx);
   lonejson__curl_state_mark_live(ctx->_reserved_state);
-  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
+  runtime_state =
+      lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
   if (runtime_state == NULL) {
     return ctx->error.code;
   }
@@ -151,9 +152,9 @@ lonejson_curl_parse_init(lonejson_curl_parse *ctx, lonejson *runtime,
     lonejson__runtime_borrow_release(&borrow);
     return ctx->error.code;
   }
-  ctx->parser = lonejson__parser_create_ex(map, dst,
-                                           &runtime_snapshot->parse_options,
-                                           runtime_snapshot, &ctx->error, 0);
+  ctx->parser =
+      lonejson__parser_create_ex(map, dst, &runtime_snapshot->parse_options,
+                                 runtime_snapshot, &ctx->error, 0);
   if (ctx->parser == NULL) {
     lonejson__runtime_free_owned_config(runtime_snapshot);
     allocator.free_fn(allocator.ctx, runtime_snapshot);
@@ -204,8 +205,8 @@ void lonejson_curl_parse_cleanup(lonejson_curl_parse *ctx) {
   runtime_snapshot = (lonejson_runtime *)ctx->runtime_snapshot;
   if (runtime_snapshot != NULL) {
     lonejson__runtime_free_owned_config(runtime_snapshot);
-    runtime_snapshot->allocator_storage.free_fn(runtime_snapshot->allocator_storage.ctx,
-                                                runtime_snapshot);
+    runtime_snapshot->allocator_storage.free_fn(
+        runtime_snapshot->allocator_storage.ctx, runtime_snapshot);
   }
   memset(ctx, 0, sizeof(*ctx));
   lonejson__curl_parse_assign_methods(ctx);
@@ -213,8 +214,8 @@ void lonejson_curl_parse_cleanup(lonejson_curl_parse *ctx) {
 
 lonejson_status lonejson_curl_array_parse_init(
     lonejson_curl_array_parse *ctx, lonejson *runtime, const char *path,
-    const lonejson_map *map, void *dst,
-    lonejson_array_stream_item_fn callback, void *user) {
+    const lonejson_map *map, void *dst, lonejson_array_stream_item_fn callback,
+    void *user) {
   lonejson__runtime_borrow borrow;
   const lonejson_runtime *runtime_state;
 
@@ -227,7 +228,8 @@ lonejson_status lonejson_curl_array_parse_init(
   memset(ctx, 0, sizeof(*ctx));
   lonejson__curl_array_parse_assign_methods(ctx);
   lonejson__curl_state_mark_live(ctx->_reserved_state);
-  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
+  runtime_state =
+      lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
   if (runtime_state == NULL) {
     return ctx->error.code;
   }
@@ -303,7 +305,8 @@ lonejson_status lonejson_curl_string_array_parse_init(
   memset(ctx, 0, sizeof(*ctx));
   lonejson__curl_string_array_parse_assign_methods(ctx);
   lonejson__curl_state_mark_live(ctx->_reserved_state);
-  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
+  runtime_state =
+      lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
   if (runtime_state == NULL) {
     return ctx->error.code;
   }
@@ -375,7 +378,8 @@ lonejson_status lonejson_curl_string_items_parse_init(
   memset(ctx, 0, sizeof(*ctx));
   lonejson__curl_string_items_parse_assign_methods(ctx);
   lonejson__curl_state_mark_live(ctx->_reserved_state);
-  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
+  runtime_state =
+      lonejson__require_runtime_borrow(runtime, &borrow, &ctx->error);
   if (runtime_state == NULL) {
     return ctx->error.code;
   }
@@ -432,9 +436,10 @@ void lonejson_curl_string_items_parse_cleanup(
   lonejson__curl_string_items_parse_assign_methods(ctx);
 }
 
-lonejson_status
-lonejson_curl_upload_init(lonejson_curl_upload *ctx, lonejson *runtime,
-                          const lonejson_map *map, const void *src) {
+lonejson_status lonejson_curl_upload_init(lonejson_curl_upload *ctx,
+                                          lonejson *runtime,
+                                          const lonejson_map *map,
+                                          const void *src) {
   lonejson__runtime_borrow borrow;
   const lonejson_runtime *runtime_state;
   const lonejson__write_options *options;
