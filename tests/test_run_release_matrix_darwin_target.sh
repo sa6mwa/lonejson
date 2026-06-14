@@ -17,3 +17,17 @@ printf '%s\n' "$script" | grep -F -- 'target_raw_compile_flags()' >/dev/null
 printf '%s\n' "$script" | grep -F -- 'printf '\''%s\n'\'' "-mmacosx-version-min=$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$script" | grep -F -- 'raw_compile_flags="$(target_raw_compile_flags "$target_id")"' >/dev/null
 printf '%s\n' "$script" | grep -F -- '"$compiler" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"' >/dev/null
+printf '%s\n' "$script" | grep -F -- 'missing c.pkt.systems CURL CMake package' >/dev/null
+printf '%s\n' "$script" | grep -F -- '-D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"' >/dev/null
+if printf '%s\n' "$script" | grep -F -- '-D CURL_LIBRARY_RELEASE=' >/dev/null; then
+  printf 'run_release_matrix.sh must not inject raw CURL_LIBRARY_RELEASE paths\n' >&2
+  exit 1
+fi
+if printf '%s\n' "$script" | grep -F -- '-D CURL_INCLUDE_DIR=' >/dev/null; then
+  printf 'run_release_matrix.sh must not inject raw CURL_INCLUDE_DIR paths\n' >&2
+  exit 1
+fi
+if printf '%s\n' "$script" | grep -F -- '-U CURL_' >/dev/null; then
+  printf 'run_release_matrix.sh must not clean legacy CURL cache variables\n' >&2
+  exit 1
+fi

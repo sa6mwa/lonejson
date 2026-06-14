@@ -338,21 +338,14 @@ configure_release_target() {
     target_id="$2"
 
     bundle_root="$repo_root/.deps/c.pkt.systems/$target_id/root"
-    curl_library="$(find "$bundle_root/lib" -maxdepth 1 -type f \( -name 'libcurl.so*' -o -name 'libcurl.*.dylib' -o -name 'libcurl.dylib' \) | sort | head -n 1)"
-    if [ -z "$curl_library" ]; then
-        printf 'missing c.pkt.systems libcurl for %s under %s\n' "$target_id" "$bundle_root/lib" >&2
+    if [ ! -f "$bundle_root/lib/cmake/CURL/CURLConfig.cmake" ]; then
+        printf 'missing c.pkt.systems CURL CMake package for %s under %s\n' "$target_id" "$bundle_root/lib/cmake/CURL" >&2
         exit 1
     fi
 
     cmake --preset "$preset" \
-        -U CURL_DIR \
-        -U CURL_INCLUDE_DIR \
-        -U CURL_LIBRARY_DEBUG \
-        -U CURL_LIBRARY_RELEASE \
         -D LONEJSON_BUILD_WITH_CURL=ON \
-        -D CMAKE_PREFIX_PATH="$bundle_root" \
-        -D CURL_INCLUDE_DIR="$bundle_root/include" \
-        -D CURL_LIBRARY_RELEASE="$curl_library"
+        -D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"
 }
 
 run_target() {

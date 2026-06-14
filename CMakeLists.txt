@@ -38,6 +38,7 @@ set(LONEJSON_GENERATED_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/include")
 set(LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/single-header/include")
 set(LONEJSON_GENERATED_FIXTURE_DIR "${LONEJSON_SHARED_BUILD_DIR}/generated/fixtures")
 set(LONEJSON_TEST_BUNDLE_ROOT "" CACHE PATH "Root directory for extracted c.pkt.systems dependency bundle content used by tests.")
+set(LONEJSON_C_PKT_SYSTEMS_ROOT "" CACHE PATH "Root directory for extracted c.pkt.systems dependency bundle content.")
 set(LONEJSON_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "Artifact architecture name")
 set(LONEJSON_TARGET_OS "${CMAKE_SYSTEM_NAME}" CACHE STRING "Artifact operating system name")
 set(LONEJSON_TARGET_LIBC "" CACHE STRING "Artifact libc suffix for Linux targets (gnu, musl, or empty)")
@@ -115,8 +116,43 @@ elseif(LONEJSON_TARGET_OS_LOWER STREQUAL "darwin" AND
 else()
   set(LONEJSON_TARGET_ID "${LONEJSON_TARGET_ARCH_LOWER}-${LONEJSON_TARGET_OS_LOWER}")
 endif()
+function(lonejson_find_curl)
+  if(LONEJSON_C_PKT_SYSTEMS_ROOT)
+    get_filename_component(_cpkt_root "${LONEJSON_C_PKT_SYSTEMS_ROOT}" ABSOLUTE)
+    set(_cpkt_curl_config
+        "${_cpkt_root}/lib/cmake/CURL/CURLConfig.cmake")
+    if(NOT IS_DIRECTORY "${_cpkt_root}")
+      message(FATAL_ERROR
+        "LONEJSON_C_PKT_SYSTEMS_ROOT does not exist: ${_cpkt_root}. "
+        "Run the matching make deps-* target or unset "
+        "LONEJSON_C_PKT_SYSTEMS_ROOT to use system curl.")
+    endif()
+    if(NOT EXISTS "${_cpkt_curl_config}")
+      message(FATAL_ERROR
+        "LONEJSON_C_PKT_SYSTEMS_ROOT is missing CURLConfig.cmake: "
+        "${_cpkt_curl_config}. Use a c.pkt.systems v0.2.0 or newer "
+        "bundle, or unset LONEJSON_C_PKT_SYSTEMS_ROOT to use system curl.")
+    endif()
+    set(LONEJSON_C_PKT_SYSTEMS_ROOT "${_cpkt_root}" CACHE PATH
+        "Root directory for extracted c.pkt.systems dependency bundle content."
+        FORCE)
+    set(CURL_DIR "${_cpkt_root}/lib/cmake/CURL" CACHE PATH
+        "Directory containing CURLConfig.cmake." FORCE)
+    find_package(CURL CONFIG REQUIRED
+      PATHS "${_cpkt_root}"
+      NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH)
+  else()
+    find_package(CURL REQUIRED)
+  endif()
+  if(NOT TARGET CURL::libcurl)
+    message(FATAL_ERROR
+      "CURL was found but did not provide the CURL::libcurl target.")
+  endif()
+endfunction()
+
 if(LONEJSON_BUILD_WITH_CURL)
-  find_package(CURL REQUIRED)
+  lonejson_find_curl()
 endif()
 
 function(lonejson_target_include_curl target)
@@ -316,6 +352,11 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_threads_optional.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_cmake_c_pkt_systems_root_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_c_pkt_systems_root.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_test_all_clang_optional_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_test_all_clang_optional.sh"
@@ -329,6 +370,11 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_cmake_fuzz_sanitizer_conflict_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_sanitizer_conflicts.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_lua_src_rock_privacy_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_src_rock_privacy.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_run_release_matrix_darwin_target_tests

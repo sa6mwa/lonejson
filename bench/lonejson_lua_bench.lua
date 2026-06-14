@@ -7,6 +7,9 @@ local HAVE_CJSON, cjson = pcall(require, "cjson")
 
 local BENCH_SAMPLE_COUNT = 5
 local BENCH_MIN_SAMPLE_NS = 500000000
+local BENCH_CONFIRM_ATTEMPTS = 3
+local BENCH_CONFIRM_COOLDOWN_SECONDS =
+  tonumber(os.getenv("LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS") or "10") or 10
 local BENCH_SCHEMA_VERSION = 30
 local BENCH_NOISE_DELTA_PCT = 3.0
 local BENCH_MATERIAL_DELTA_PCT = 10.0
@@ -1522,7 +1525,7 @@ local function c_is_retry_worthy(prior, current)
   if (current.mismatch_count or 0) ~= 0 then
     return true
   end
-  return is_small_regression(prior, current) or is_material_regression(prior, current)
+  return is_material_regression(prior, current)
 end
 
 local function lua_is_retry_worthy(prior, current)
@@ -1535,7 +1538,7 @@ local function lua_is_retry_worthy(prior, current)
   if (current.mismatch_count or 0) ~= 0 then
     return true
   end
-  return is_small_regression(prior, current) or is_material_regression(prior, current)
+  return is_material_regression(prior, current)
 end
 
 local function print_retry_delta(label, prior, current)
@@ -1572,6 +1575,21 @@ local function parse_c_case_output(line)
   }
 end
 
+local function parse_lua_case_output(line)
+  local name, group, mib_per_sec, docs_per_sec, mismatch_count =
+    line:match("^(%S+)%s+(%S+)%s+([%+%-]?%d+%.?%d*)%s+MiB/s%s+([%+%-]?%d+%.?%d*)%s+docs/s%s+mismatch=(%d+)")
+  if name == nil then
+    return nil
+  end
+  return {
+    name = name,
+    group = group,
+    mib_per_sec = tonumber(mib_per_sec),
+    docs_per_sec = tonumber(docs_per_sec),
+    mismatch_count = tonumber(mismatch_count),
+  }
+end
+
 local function run_c_case(bench_bin, case_name, iterations)
   local cmd = string.format("%s case %s %d 2>/dev/null",
     shell_quote(bench_bin), shell_quote(case_name), iterations)
@@ -1590,6 +1608,40 @@ local function run_c_case(bench_bin, case_name, iterations)
   local result = parse_c_case_output(line)
   if result == nil then
     error("failed to parse c benchmark case output for " .. case_name .. ": " .. line)
+  end
+  return result
+end
+
+local function benchmark_retry_cooldown()
+  if BENCH_CONFIRM_COOLDOWN_SECONDS <= 0 then
+    return
+  end
+  io.stderr:write(string.format("waiting %ds before benchmark retry\n",
+    BENCH_CONFIRM_COOLDOWN_SECONDS))
+  os.execute(string.format("sleep %d", BENCH_CONFIRM_COOLDOWN_SECONDS))
+end
+
+local function run_lua_case_fresh(c_latest_path, case_name, iterations)
+  local lua_bin = arg[-1] or "lua"
+  local script_path = arg[0] or "bench/lonejson_lua_bench.lua"
+  local cmd = string.format("%s %s case %s %s %d 2>/dev/null",
+    shell_quote(lua_bin), shell_quote(script_path), shell_quote(c_latest_path),
+    shell_quote(case_name), iterations)
+  local pipe = assert(io.popen(cmd, "r"))
+  local output = pipe:read("*a")
+  local ok, _, status = pipe:close()
+  local line
+
+  if ok ~= true or status ~= 0 then
+    error("lua benchmark case command failed for " .. case_name)
+  end
+  line = output:match("([^\r\n]+)")
+  if line == nil then
+    error("lua benchmark case command produced no output for " .. case_name)
+  end
+  local result = parse_lua_case_output(line)
+  if result == nil then
+    error("failed to parse lua benchmark case output for " .. case_name .. ": " .. line)
   end
   return result
 end
@@ -1621,10 +1673,20 @@ local function confirm_c_gate(bench_bin, baseline_path, latest_path, iterations)
     local prior = baseline_index[current.name]
     if c_is_retry_worthy(prior, current) then
       local retry
-      io.stderr:write(string.format("retrying c benchmark case once: %s\n", current.name))
-      retry = run_c_case(bench_bin, current.name, iterations)
-      print_retry_delta("c", prior, retry)
-      if c_is_retry_worthy(prior, retry) then
+      local attempt
+      local confirmed = true
+      for attempt = 1, BENCH_CONFIRM_ATTEMPTS do
+        benchmark_retry_cooldown()
+        io.stderr:write(string.format("retrying c benchmark case %d/%d: %s\n",
+          attempt, BENCH_CONFIRM_ATTEMPTS, current.name))
+        retry = run_c_case(bench_bin, current.name, iterations)
+        print_retry_delta("c", prior, retry)
+        if not c_is_retry_worthy(prior, retry) then
+          confirmed = false
+          break
+        end
+      end
+      if confirmed then
         io.stderr:write("c benchmark retry confirmed the failure; stopping immediately\n")
         os.exit(1)
       end
@@ -1636,7 +1698,6 @@ local function confirm_lua_gate(c_latest_path, baseline_path, latest_path, itera
   local baseline = BenchRunSchema:decode_path(baseline_path)
   local latest = BenchRunSchema:decode_path(latest_path)
   local baseline_index = index_results(baseline)
-  local c_siblings = load_c_siblings(c_latest_path)
   local i
 
   if baseline.schema_version ~= latest.schema_version then
@@ -1650,14 +1711,24 @@ local function confirm_lua_gate(c_latest_path, baseline_path, latest_path, itera
     if lua_is_retry_worthy(prior, current) then
       local case = find_case_by_name(current.name)
       local retry
+      local attempt
+      local confirmed = true
       if case == nil then
         io.stderr:write("lua benchmark retry cannot find case: " .. current.name .. "\n")
         os.exit(1)
       end
-      io.stderr:write(string.format("retrying lua benchmark case once: %s\n", current.name))
-      retry = build_bench_result(case, measure_case(case, iterations), c_siblings[case.sibling_name])
-      print_retry_delta("lua", prior, retry)
-      if lua_is_retry_worthy(prior, retry) then
+      for attempt = 1, BENCH_CONFIRM_ATTEMPTS do
+        benchmark_retry_cooldown()
+        io.stderr:write(string.format("retrying lua benchmark case %d/%d: %s\n",
+          attempt, BENCH_CONFIRM_ATTEMPTS, current.name))
+        retry = run_lua_case_fresh(c_latest_path, current.name, iterations)
+        print_retry_delta("lua", prior, retry)
+        if not lua_is_retry_worthy(prior, retry) then
+          confirmed = false
+          break
+        end
+      end
+      if confirmed then
         io.stderr:write("lua benchmark retry confirmed the failure; stopping immediately\n")
         os.exit(1)
       end

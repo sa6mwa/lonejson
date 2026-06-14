@@ -31,6 +31,17 @@ write_run() {
   printf ']}\n' >>"$path"
 }
 
+write_lua_run() {
+  local path=$1
+  local name=$2
+  local mib=$3
+  local mismatch=$4
+  printf '{"schema_version":30,"timestamp_epoch_ns":1,"timestamp_utc":"1970-01-01T00:00:00Z","host":"test","lua_version":"Lua 5.5","c_latest_path":"","iterations":1,"results":[' >"$path"
+  printf '{"name":"%s","group":"decode","elapsed_ns":1,"total_bytes":1,"total_documents":1,"mismatch_count":%s,"mib_per_sec":%s,"docs_per_sec":1,"ns_per_byte":1}' \
+    "$name" "$mismatch" "$mib" >>"$path"
+  printf ']}\n' >>"$path"
+}
+
 fake_bench="$tmp_dir/fake_bench.sh"
 fake_log="$tmp_dir/fake_bench.log"
 cat >"$fake_bench" <<'EOF'
@@ -66,6 +77,7 @@ write_run "$baseline" "case/a" 100 0 "case/b" 100 0
 write_run "$latest" "case/a" 90 0 "case/b" 100 0
 rm -f "$fake_log"
 FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="pass-one" \
+  LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
   bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >/dev/null
 grep -qx 'case case/a 1' "$fake_log"
 if grep -q 'case case/b 1' "$fake_log"; then
@@ -73,17 +85,33 @@ if grep -q 'case case/b 1' "$fake_log"; then
   exit 1
 fi
 
+write_run "$baseline" "case/a" 100 0
+write_run "$latest" "case/a" 97 0
+rm -f "$fake_log"
+FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="pass-one" \
+  LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
+  bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >/dev/null
+if [ -f "$fake_log" ] && [ -s "$fake_log" ]; then
+  printf 'confirm-c retried a small-only regression\n' >&2
+  exit 1
+fi
+
 write_run "$baseline" "case/a" 100 0 "case/b" 100 0 "case/c" 100 0
 write_run "$latest" "case/a" 90 0 "case/b" 80 0 "case/c" 100 0
 rm -f "$fake_log"
 if FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="fail-first" \
+  LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
   bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >/dev/null 2>&1; then
   printf 'confirm-c succeeded despite a confirmed failure\n' >&2
   exit 1
 fi
 grep -qx 'case case/a 1' "$fake_log"
 if grep -q 'case case/b 1' "$fake_log"; then
-  printf 'confirm-c did not stop on the first confirmed failure\n' >&2
+  printf 'confirm-c retried a later case after a stable confirmed failure\n' >&2
+  exit 1
+fi
+if [ "$(grep -cx 'case case/a 1' "$fake_log")" -ne 3 ]; then
+  printf 'confirm-c did not exhaust confirmation attempts for a stable failure\n' >&2
   exit 1
 fi
 
@@ -91,11 +119,27 @@ write_run "$baseline" "case/a" 100 0
 printf '{"schema_version":2,"iterations":1,"parser_buffer_size":4096,"push_parser_buffer_size":4096,"reader_buffer_size":4096,"stream_buffer_size":4096,"results":[{"name":"case/a","mib_per_sec":100,"mismatch_count":0}]}\n' >"$latest"
 rm -f "$fake_log"
 if FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="pass-one" \
+  LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
   bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >/dev/null 2>&1; then
   printf 'confirm-c succeeded despite a schema mismatch\n' >&2
   exit 1
 fi
 if [ -f "$fake_log" ] && [ -s "$fake_log" ]; then
   printf 'confirm-c retried cases despite a schema mismatch\n' >&2
+  exit 1
+fi
+
+c_latest="$tmp_dir/c-latest.json"
+write_run "$c_latest" "parse/buffer_fixed/lonejson" 100 0
+write_lua_run "$baseline" "decode/record_fixed/lua" 100 0
+write_lua_run "$latest" "decode/record_fixed/lua" 97 0
+if ! LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
+  bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-lua $(printf '%q' "$c_latest") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >"$tmp_dir/confirm-lua-small.out" 2>"$tmp_dir/confirm-lua-small.err"; then
+  printf 'confirm-lua failed a small-only regression\n' >&2
+  cat "$tmp_dir/confirm-lua-small.err" >&2
+  exit 1
+fi
+if grep -q 'retrying lua benchmark case' "$tmp_dir/confirm-lua-small.err"; then
+  printf 'confirm-lua retried a small-only regression\n' >&2
   exit 1
 fi

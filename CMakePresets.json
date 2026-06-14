@@ -42,9 +42,7 @@
       "name": "linux-gnu-release",
       "inherits": "host",
       "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root",
-        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root/include",
-        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_TARGET_ARCH": "x86_64",
         "LONEJSON_TARGET_OS": "linux",
@@ -56,9 +54,7 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-musl.cmake",
       "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-musl/root",
-        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-musl/root/include",
-        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-musl/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-musl/root",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_TARGET_ARCH": "x86_64",
         "LONEJSON_TARGET_OS": "linux",
@@ -70,9 +66,7 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-gnu.cmake",
       "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-gnu/root",
-        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-gnu/root/include",
-        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-gnu/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-gnu/root",
         "LONEJSON_BUILD_WITH_CURL": "ON"
       }
     },
@@ -81,9 +75,7 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-musl.cmake",
       "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-musl/root",
-        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-musl/root/include",
-        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-musl/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-musl/root",
         "LONEJSON_BUILD_WITH_CURL": "ON"
       }
     },
@@ -92,9 +84,7 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-gnu.cmake",
       "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-gnu/root",
-        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-gnu/root/include",
-        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-gnu/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-gnu/root",
         "LONEJSON_BUILD_WITH_CURL": "ON"
       }
     },
@@ -103,9 +93,7 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-musl.cmake",
       "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-musl/root",
-        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-musl/root/include",
-        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-musl/root/lib/libcurl.so.4.8.0",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-musl/root",
         "LONEJSON_BUILD_WITH_CURL": "ON"
       }
     },
@@ -114,9 +102,7 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-apple-darwin.cmake",
       "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/c.pkt.systems/arm64-apple-darwin/root",
-        "CURL_INCLUDE_DIR": "${sourceDir}/.deps/c.pkt.systems/arm64-apple-darwin/root/include",
-        "CURL_LIBRARY_RELEASE": "${sourceDir}/.deps/c.pkt.systems/arm64-apple-darwin/root/lib/libcurl.4.8.0.dylib",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/arm64-apple-darwin/root",
         "LONEJSON_BUILD_WITH_CURL": "ON"
       }
     },

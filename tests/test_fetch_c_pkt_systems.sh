@@ -5,7 +5,7 @@ repo_root=$1
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
-bundle_dir_name="c.pkt.systems-0.1.0-x86_64-linux-gnu"
+bundle_dir_name="c.pkt.systems-0.2.0-x86_64-linux-gnu"
 assets_dir="$tmp_dir/assets"
 bundle_root="$assets_dir/$bundle_dir_name"
 success_root="$tmp_dir/success-root"
@@ -16,7 +16,12 @@ mkdir -p \
   "$bundle_root/include/curl" \
   "$bundle_root/include/openssl" \
   "$bundle_root/include/nghttp2" \
-  "$bundle_root/lib"
+  "$bundle_root/lib/cmake/CURL" \
+  "$bundle_root/lib/cmake/OpenSSL" \
+  "$bundle_root/lib/cmake/nghttp2" \
+  "$bundle_root/lib/cmake/zlib" \
+  "$bundle_root/lib/cmake/libssh2" \
+  "$bundle_root/lib/pkgconfig"
 
 cat >"$bundle_root/include/curl/curlver.h" <<'EOF'
 #define LIBCURL_VERSION "8.20.0"
@@ -29,7 +34,14 @@ touch \
   "$bundle_root/include/zlib.h" \
   "$bundle_root/lib/libcurl.so" \
   "$bundle_root/lib/libssl.so" \
-  "$bundle_root/lib/libcrypto.so"
+  "$bundle_root/lib/libcrypto.so" \
+  "$bundle_root/lib/cmake/CURL/CURLConfig.cmake" \
+  "$bundle_root/lib/cmake/OpenSSL/OpenSSLConfig.cmake" \
+  "$bundle_root/lib/cmake/nghttp2/nghttp2Config.cmake" \
+  "$bundle_root/lib/cmake/zlib/ZLIBConfig.cmake" \
+  "$bundle_root/lib/cmake/libssh2/libssh2-config.cmake" \
+  "$bundle_root/lib/pkgconfig/libcurl.pc" \
+  "$bundle_root/lib/pkgconfig/libcrypto.pc"
 
 mkdir -p "$assets_dir"
 tar -czf "$archive_path" -C "$assets_dir" "$bundle_dir_name"
@@ -50,6 +62,8 @@ cmake \
 grep -q 'Download attempt 1/3 failed' "$success_log"
 grep -q 'Download attempt 2/3 failed' "$success_log"
 test -f "$success_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/include/curl/curlver.h"
+test -f "$success_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/lib/cmake/CURL/CURLConfig.cmake"
+test -f "$success_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/lib/pkgconfig/libcurl.pc"
 test -f "$success_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-version"
 
 failure_log="$tmp_dir/failure.log"

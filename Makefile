@@ -108,6 +108,7 @@ LUA_ROCK_BUILD_BYPRODUCTS := \
 LUA_ROCK_SOURCES := \
 	lonejson.rockspec.in \
 	scripts/build_lua_rock.sh \
+	scripts/package_lua_src_rock.sh \
 	scripts/render_release_rockspec.sh \
 	scripts/release_version.sh \
 	scripts/stage_lua_rock_sources.sh \
@@ -263,17 +264,10 @@ $(RELEASE_ROCKSPEC): lonejson.rockspec.in scripts/render_release_rockspec.sh | $
 	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(RELEASE_ROCKSPEC)" "" "" "$$lib_ext"
 
 $(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_PACK_SOURCE_TARBALL)
-	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(RELEASE_PACK_SOURCE_TARBALL)" "" "$$lib_ext"
+	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(notdir $(RELEASE_PACK_SOURCE_TARBALL))" "" "$$lib_ext"
 
-$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/smoke_lua_src_rock.sh
-	rm -f "$(RELEASE_ROCK)"
-	cd "$(RELEASE_PACK_DIR)" && $(LUAROCKS) pack "$(notdir $(RELEASE_PACK_ROCKSPEC))"
-	mv "$(RELEASE_PACK_DIR)/$(notdir $(RELEASE_ROCK))" "$(RELEASE_ROCK)"
-	@tmp_dir="$$(mktemp -d)"; \
-	trap 'rm -rf "$$tmp_dir"' EXIT; \
-	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; \
-	./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$$tmp_dir/$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(notdir $(RELEASE_PACK_SOURCE_TARBALL))" "" "$$lib_ext"; \
-	cd "$$tmp_dir" && zip -q -u "$(RELEASE_ROCK)" "$(notdir $(RELEASE_PACK_ROCKSPEC))"
+$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lua_src_rock.sh scripts/smoke_lua_src_rock.sh
+	./scripts/package_lua_src_rock.sh "$(RELEASE_ROCK)" "$(RELEASE_PACK_ROCKSPEC)" "$(RELEASE_PACK_SOURCE_TARBALL)"
 	./scripts/smoke_lua_src_rock.sh "$(RELEASE_ROCK)"
 	rm -rf "$(RELEASE_PACK_DIR)"
 
@@ -362,8 +356,8 @@ test-host: build-host
 	ctest --preset $(HOST_PRESET)
 	$(MAKE) lua-test
 
-test-host-curl:
-	cmake --preset host-curl
+test-host-curl: deps-host
+	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset host-curl
 	ctest --preset host-curl
 

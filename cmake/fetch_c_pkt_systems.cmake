@@ -4,7 +4,7 @@ if(NOT DEFINED LONEJSON_SOURCE_DIR)
   get_filename_component(LONEJSON_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 endif()
 
-set(LONEJSON_C_PKT_SYSTEMS_VERSION "0.1.0" CACHE STRING
+set(LONEJSON_C_PKT_SYSTEMS_VERSION "0.2.0" CACHE STRING
     "c.pkt.systems release version to fetch for curl dependency tests.")
 set(LONEJSON_C_PKT_SYSTEMS_BASE_URL
     "https://github.com/sa6mwa/c.pkt.systems/releases/download/v${LONEJSON_C_PKT_SYSTEMS_VERSION}"
@@ -115,19 +115,19 @@ endif()
 
 function(lonejson_c_pkt_systems_sha256 target_id out_var)
   if(target_id STREQUAL "x86_64-linux-gnu")
-    set(_sha256 "4e6c4ca07c0647a05923b4a56ef12d440a1d1b53465224e30d990fc18777aa4e")
+    set(_sha256 "69e699d18374987ba16dfd82640ba1c263b71f0e1daeef8af2a2018a6f1e39ef")
   elseif(target_id STREQUAL "x86_64-linux-musl")
-    set(_sha256 "d44f70558b961125c96d356d27ce83fc7d50c9cc650a335c2016c8d3778d98aa")
+    set(_sha256 "dcb1923af1d7529531f31637476f083070ccf1051ec217012d77a155ff4132d4")
   elseif(target_id STREQUAL "aarch64-linux-gnu")
-    set(_sha256 "c20969872de3087f984e8bca3e01fa98e495a3581940e426d07ebed014cf8190")
+    set(_sha256 "54e9ef336a0b092d0e68a84d2026a499c051df3c3e61b7a7dab1f0103d1e082b")
   elseif(target_id STREQUAL "aarch64-linux-musl")
-    set(_sha256 "8ff3cc3c457dc66918470beaea01744bc38c342a87c20c6b072761c56c858e19")
+    set(_sha256 "61f7cb43ca78f33a21b5719f84f864ac5ce5cf7d8268eef52a7a01da08582a38")
   elseif(target_id STREQUAL "armhf-linux-gnu")
-    set(_sha256 "26787953d690b0f01a11538e8692f68f9c746b8e97a9baf47ac15241d9a947fc")
+    set(_sha256 "33bfe771f2f2b36562c9e18094f79168d8d687dc7a55393584930ca434547d7d")
   elseif(target_id STREQUAL "armhf-linux-musl")
-    set(_sha256 "f0172a6ff928111cfaeb503b01b48b3cdd2c05a04d54047630180ee79f65af31")
+    set(_sha256 "7edc2f61e01370da6af96c496ae5bfbec72e43761247dd2c310ac7627923c591")
   elseif(target_id STREQUAL "arm64-apple-darwin")
-    set(_sha256 "dba4424de9566c2418162f62e5e90c45b40266c6e750b5096d4a251bf96d8e9a")
+    set(_sha256 "204fcaa8d6d53b6affcdcb49668d60b0e41d2aa7ff5f4dc2c8fce0d24caa0022")
   else()
     message(FATAL_ERROR "No pinned c.pkt.systems checksum for ${target_id}")
   endif()
@@ -226,7 +226,14 @@ function(lonejson_validate_c_pkt_systems_bundle extract_root filename target_id 
       "${extract_root}/include/zlib.h"
       "${extract_root}/lib/libcurl.${_shared_ext}"
       "${extract_root}/lib/libssl.${_shared_ext}"
-      "${extract_root}/lib/libcrypto.${_shared_ext}")
+      "${extract_root}/lib/libcrypto.${_shared_ext}"
+      "${extract_root}/lib/cmake/CURL/CURLConfig.cmake"
+      "${extract_root}/lib/cmake/OpenSSL/OpenSSLConfig.cmake"
+      "${extract_root}/lib/cmake/nghttp2/nghttp2Config.cmake"
+      "${extract_root}/lib/cmake/zlib/ZLIBConfig.cmake"
+      "${extract_root}/lib/cmake/libssh2/libssh2-config.cmake"
+      "${extract_root}/lib/pkgconfig/libcurl.pc"
+      "${extract_root}/lib/pkgconfig/libcrypto.pc")
     if(NOT EXISTS "${_required_path}")
       message(FATAL_ERROR
         "Downloaded c.pkt.systems bundle ${filename} is missing required "
