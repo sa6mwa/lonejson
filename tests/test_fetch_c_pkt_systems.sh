@@ -5,11 +5,12 @@ repo_root=$1
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
-bundle_dir_name="c.pkt.systems-0.2.0-x86_64-linux-gnu"
+bundle_dir_name="c.pkt.systems-0.4.0-x86_64-linux-gnu"
 assets_dir="$tmp_dir/assets"
 bundle_root="$assets_dir/$bundle_dir_name"
 success_root="$tmp_dir/success-root"
 failure_root="$tmp_dir/failure-root"
+pinned_version_root="$tmp_dir/pinned-version-root"
 archive_path="$assets_dir/$bundle_dir_name.tar.gz"
 
 mkdir -p \
@@ -83,3 +84,18 @@ fi
 
 grep -q 'after 3 attempts' "$failure_log"
 test ! -e "$failure_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-version"
+
+pinned_version_log="$tmp_dir/pinned-version.log"
+if cmake \
+  -D LONEJSON_SOURCE_DIR="$pinned_version_root" \
+  -D LONEJSON_C_PKT_SYSTEMS_VERSION=0.2.0 \
+  -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu \
+  -D LONEJSON_C_PKT_SYSTEMS_BASE_URL="file://$assets_dir" \
+  -P "$repo_root/cmake/fetch_c_pkt_systems.cmake" \
+  >"$pinned_version_log" 2>&1; then
+  printf 'expected c.pkt.systems version override to fail before download\n' >&2
+  exit 1
+fi
+
+grep -q 'LONEJSON_C_PKT_SYSTEMS_VERSION is not configurable' "$pinned_version_log"
+test ! -e "$pinned_version_root/.deps/c.pkt.systems"

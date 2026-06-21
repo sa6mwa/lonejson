@@ -4,8 +4,16 @@ if(NOT DEFINED LONEJSON_SOURCE_DIR)
   get_filename_component(LONEJSON_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 endif()
 
-set(LONEJSON_C_PKT_SYSTEMS_VERSION "0.2.0" CACHE STRING
-    "c.pkt.systems release version to fetch for curl dependency tests.")
+set(LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION "0.4.0")
+if(DEFINED LONEJSON_C_PKT_SYSTEMS_VERSION AND
+   NOT LONEJSON_C_PKT_SYSTEMS_VERSION STREQUAL LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION)
+  message(FATAL_ERROR
+    "LONEJSON_C_PKT_SYSTEMS_VERSION is not configurable. This repository "
+    "pins c.pkt.systems ${LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION} and its "
+    "checksums; update cmake/fetch_c_pkt_systems.cmake to change the bundle "
+    "version.")
+endif()
+set(LONEJSON_C_PKT_SYSTEMS_VERSION "${LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION}")
 set(LONEJSON_C_PKT_SYSTEMS_BASE_URL
     "https://github.com/sa6mwa/c.pkt.systems/releases/download/v${LONEJSON_C_PKT_SYSTEMS_VERSION}"
     CACHE STRING "Base URL for c.pkt.systems release downloads.")
@@ -115,19 +123,19 @@ endif()
 
 function(lonejson_c_pkt_systems_sha256 target_id out_var)
   if(target_id STREQUAL "x86_64-linux-gnu")
-    set(_sha256 "69e699d18374987ba16dfd82640ba1c263b71f0e1daeef8af2a2018a6f1e39ef")
+    set(_sha256 "745fde56d564dcdcb22ed9f16a7b73c8c2e18f947d5fe37ab774e5154ef554b1")
   elseif(target_id STREQUAL "x86_64-linux-musl")
-    set(_sha256 "dcb1923af1d7529531f31637476f083070ccf1051ec217012d77a155ff4132d4")
+    set(_sha256 "e3a563a71d6bb9e1e3bdf14343d65bcc0ad8897713e6a8ddfd97cc7bc6b9c6f3")
   elseif(target_id STREQUAL "aarch64-linux-gnu")
-    set(_sha256 "54e9ef336a0b092d0e68a84d2026a499c051df3c3e61b7a7dab1f0103d1e082b")
+    set(_sha256 "574e02e193330fd8e8fa5c56442ae8d11e9c901b3e89a53f299d66557941b67c")
   elseif(target_id STREQUAL "aarch64-linux-musl")
-    set(_sha256 "61f7cb43ca78f33a21b5719f84f864ac5ce5cf7d8268eef52a7a01da08582a38")
+    set(_sha256 "c1b1e6b482172760f5967d484d2ef271e1d44defaf7f8f6e35bc66811f4f48fc")
   elseif(target_id STREQUAL "armhf-linux-gnu")
-    set(_sha256 "33bfe771f2f2b36562c9e18094f79168d8d687dc7a55393584930ca434547d7d")
+    set(_sha256 "1e4de9dd3de7345629c86cd140177d4dc591c740f7432041bcd423be9bf82496")
   elseif(target_id STREQUAL "armhf-linux-musl")
-    set(_sha256 "7edc2f61e01370da6af96c496ae5bfbec72e43761247dd2c310ac7627923c591")
+    set(_sha256 "222236dacf9df80f01fbc14768ed5163e08cbcdb32ae6460a0f494df14330f0b")
   elseif(target_id STREQUAL "arm64-apple-darwin")
-    set(_sha256 "204fcaa8d6d53b6affcdcb49668d60b0e41d2aa7ff5f4dc2c8fce0d24caa0022")
+    set(_sha256 "c5c0160ee65c94084350ee54eb21fc64c410b76c1d104071b29fb5e170ae0081")
   else()
     message(FATAL_ERROR "No pinned c.pkt.systems checksum for ${target_id}")
   endif()
