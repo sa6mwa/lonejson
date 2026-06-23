@@ -284,6 +284,10 @@ int main(void) {
   test_json_value_nested_failure_matrix();
   test_value_visitor_success_and_limits();
   test_value_visitor_chunking_unicode_and_failures();
+  test_path_value_visitor_paths_and_chunks();
+  test_path_value_visitor_reader_chunk_paths();
+  test_path_value_visitor_failure_cleans_state();
+  test_path_value_visitor_short_keys_do_not_allocate_per_event();
   test_visit_value_reader_rejects_would_block();
   test_visit_value_success_clears_error();
   test_custom_allocator_parse_cleanup_and_stream();

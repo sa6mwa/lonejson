@@ -1524,6 +1524,46 @@ typedef lonejson_status (*lonejson_value_chunk_fn)(void *user, const char *data,
 typedef lonejson_status (*lonejson_value_bool_fn)(void *user, int value,
                                                   lonejson_error *error);
 
+/** One decoded path segment in a parser-owned arbitrary JSON value path.
+ *
+ * Object member segments are decoded UTF-8 key bytes. Array item segments are
+ * decimal index bytes. Segment storage is valid only for the duration of the
+ * callback receiving the enclosing `lonejson_value_path`.
+ */
+typedef struct lonejson_path_segment {
+  const char *data;
+  size_t len;
+} lonejson_path_segment;
+
+/** Current normalized location while visiting one arbitrary JSON value.
+ *
+ * The root value is represented by `segment_count == 0`. The path is supplied
+ * as decoded segments rather than JSON Pointer text so callers can match
+ * without reparsing or escaping a string form.
+ */
+typedef struct lonejson_value_path {
+  const lonejson_path_segment *segments;
+  size_t segment_count;
+} lonejson_value_path;
+
+/** Path-aware callback signature for structure and boundary events during
+ * arbitrary JSON value visiting.
+ */
+typedef lonejson_status (*lonejson_path_value_event_fn)(
+    void *user, const lonejson_value_path *path, lonejson_error *error);
+/** Path-aware callback signature for chunked decoded text delivery during
+ * arbitrary JSON value visiting.
+ */
+typedef lonejson_status (*lonejson_path_value_chunk_fn)(
+    void *user, const lonejson_value_path *path, const char *data, size_t len,
+    lonejson_error *error);
+/** Path-aware callback signature for JSON boolean delivery during arbitrary
+ * JSON value visiting.
+ */
+typedef lonejson_status (*lonejson_path_value_bool_fn)(
+    void *user, const lonejson_value_path *path, int value,
+    lonejson_error *error);
+
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
  * per item. `end` is called only after the string item is complete; the JSON
@@ -1670,6 +1710,55 @@ typedef struct lonejson_value_visitor {
   /** Called for a JSON `null` value. */
   lonejson_value_event_fn null_value;
 } lonejson_value_visitor;
+
+/** Path-aware visitor callbacks for one arbitrary JSON value. String values
+ * and object keys are delivered as decoded UTF-8 in chunks. Number values are
+ * delivered as raw token bytes in chunks. Any callback may be `NULL` when the
+ * caller does not need that event. Use
+ * `lonejson_default_path_value_visitor()` instead of manual zeroing when you
+ * want the empty visitor state.
+ *
+ * The callback sequence is balanced like `lonejson_value_visitor`. Object-key
+ * begin/chunk/end callbacks receive the parent object path because the member
+ * value path is entered only after the key and colon have been parsed.
+ * Structure begin/end callbacks receive the container value path. Scalar
+ * begin/chunk/end callbacks receive the scalar value path, and every chunk for
+ * one scalar receives the same path.
+ */
+typedef struct lonejson_path_value_visitor {
+  /** Called when an object begins at `path`. */
+  lonejson_path_value_event_fn object_begin;
+  /** Called when an object ends at `path`. */
+  lonejson_path_value_event_fn object_end;
+  /** Called before chunks for an object key are delivered at the parent path. */
+  lonejson_path_value_event_fn object_key_begin;
+  /** Delivers one decoded UTF-8 object-key chunk at the parent path. */
+  lonejson_path_value_chunk_fn object_key_chunk;
+  /** Called after all chunks for an object key at the parent path. */
+  lonejson_path_value_event_fn object_key_end;
+  /** Called when an array begins at `path`. */
+  lonejson_path_value_event_fn array_begin;
+  /** Called when an array ends at `path`. */
+  lonejson_path_value_event_fn array_end;
+  /** Called before chunks for a string value are delivered at `path`. */
+  lonejson_path_value_event_fn string_begin;
+  /** Delivers one decoded UTF-8 string chunk at `path`. */
+  lonejson_path_value_chunk_fn string_chunk;
+  /** Called after all chunks for a string value at `path`. */
+  lonejson_path_value_event_fn string_end;
+  /** Called before chunks for a number token are delivered at `path`. */
+  lonejson_path_value_event_fn number_begin;
+  /** Delivers one raw JSON number-token chunk at `path`. */
+  lonejson_path_value_chunk_fn number_chunk;
+  /** Called after all chunks for a number token at `path`. */
+  lonejson_path_value_event_fn number_end;
+  /** Delivers one JSON boolean value at `path` as non-zero for `true` and zero
+   * for `false`.
+   */
+  lonejson_path_value_bool_fn boolean_value;
+  /** Called for a JSON `null` value at `path`. */
+  lonejson_path_value_event_fn null_value;
+} lonejson_path_value_visitor;
 
 struct lonejson_json_value;
 typedef struct lonejson_json_value_methods {
@@ -3700,6 +3789,8 @@ lonejson_read_result
 lonejson_buffer_reader_read(void *user, unsigned char *buffer, size_t capacity);
 /** Returns the empty visitor with all callbacks set to `NULL`. */
 lonejson_value_visitor lonejson_default_value_visitor(void);
+/** Returns a zeroed path-aware arbitrary JSON value visitor. */
+lonejson_path_value_visitor lonejson_default_path_value_visitor(void);
 /** Initializes a mapped string-array stream field with no handler. */
 void lonejson_string_array_stream_init(lonejson_string_array_stream *stream);
 /** Configures callbacks for a mapped string-array stream field.
@@ -4604,6 +4695,48 @@ lonejson_status lonejson_visit_value_path(lonejson *runtime, const char *path,
 lonejson_status lonejson_visit_value_fd(lonejson *runtime, int fd,
                                         const lonejson_value_visitor *visitor,
                                         void *user, lonejson_error *error);
+/** Visits exactly one JSON value from a caller-provided buffer and supplies the
+ * normalized current path with every path-aware visitor callback. The call
+ * fails on malformed JSON or on trailing non-whitespace bytes after the first
+ * complete value.
+ */
+lonejson_status lonejson_visit_path_value_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error);
+/** Visits exactly one JSON value from a NUL-terminated string and supplies the
+ * normalized current path with every path-aware visitor callback.
+ */
+lonejson_status lonejson_visit_path_value_cstr(
+    lonejson *runtime, const char *json,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error);
+/** Visits exactly one JSON value from a caller-provided reader callback and
+ * supplies the normalized current path with every path-aware visitor callback.
+ */
+lonejson_status lonejson_visit_path_value_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error);
+/** Visits exactly one JSON value from an open `FILE *` and supplies the
+ * normalized current path with every path-aware visitor callback.
+ */
+lonejson_status lonejson_visit_path_value_filep(
+    lonejson *runtime, FILE *fp, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error);
+/** Visits exactly one JSON value from a filesystem path and supplies the
+ * normalized current path with every path-aware visitor callback.
+ */
+lonejson_status lonejson_visit_path_value_path(
+    lonejson *runtime, const char *path,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error);
+/** Visits exactly one JSON value from a file descriptor and supplies the
+ * normalized current path with every path-aware visitor callback.
+ */
+lonejson_status lonejson_visit_path_value_fd(
+    lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error);
 
 /** Serializes a mapped struct to a generic output sink callback using runtime
  * write policy.
@@ -5741,6 +5874,12 @@ typedef lonejson_json_value_parse_mode lj_json_value_parse_mode;
  * begin/chunk/end triplets for keys, strings, and numbers.
  */
 typedef lonejson_value_visitor lj_value_visitor;
+/** One decoded path segment in a parser-owned arbitrary JSON value path. */
+typedef lonejson_path_segment lj_path_segment;
+/** Current normalized location while visiting one arbitrary JSON value. */
+typedef lonejson_value_path lj_value_path;
+/** Path-aware visitor callbacks for one arbitrary JSON value. */
+typedef lonejson_path_value_visitor lj_path_value_visitor;
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
  * per item. `end` is called only after the string item is complete; the JSON
@@ -6123,6 +6262,11 @@ lj_buffer_reader_read(void *user, unsigned char *buffer, size_t capacity) {
 /** Returns the empty visitor with all callbacks set to `NULL`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_value_visitor lj_default_value_visitor(void) {
   return lonejson_default_value_visitor();
+}
+/** Returns the empty path-aware visitor with all callbacks set to `NULL`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_path_value_visitor
+lj_default_path_value_visitor(void) {
+  return lonejson_default_path_value_visitor();
 }
 /** Initializes a mapped string-array stream field with no handler. */
 LONEJSON_SHORT_ALIAS_INLINE void
@@ -6925,6 +7069,57 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_visit_value_fd(lonejson *runtime, int fd, const lj_value_visitor *visitor,
                   void *user, lj_error *error) {
   return lonejson_visit_value_fd(runtime, fd, visitor, user, error);
+}
+/** Visits exactly one JSON value from a caller-provided buffer and supplies the
+ * normalized current path with every path-aware visitor callback.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_path_value_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lj_path_value_visitor *visitor, void *user, lj_error *error) {
+  return lonejson_visit_path_value_buffer(runtime, data, len, visitor, user,
+                                          error);
+}
+/** Visits exactly one JSON value from a NUL-terminated string and supplies the
+ * normalized current path with every path-aware visitor callback.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_path_value_cstr(
+    lonejson *runtime, const char *json, const lj_path_value_visitor *visitor,
+    void *user, lj_error *error) {
+  return lonejson_visit_path_value_cstr(runtime, json, visitor, user, error);
+}
+/** Visits exactly one JSON value from a caller-provided reader callback and
+ * supplies the normalized current path with every path-aware visitor callback.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_path_value_reader(
+    lonejson *runtime, lj_reader_fn reader, void *reader_user,
+    const lj_path_value_visitor *visitor, void *user, lj_error *error) {
+  return lonejson_visit_path_value_reader(runtime, reader, reader_user, visitor,
+                                          user, error);
+}
+/** Visits exactly one JSON value from an open `FILE *` and supplies the
+ * normalized current path with every path-aware visitor callback.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_path_value_filep(
+    lonejson *runtime, FILE *fp, const lj_path_value_visitor *visitor,
+    void *user, lj_error *error) {
+  return lonejson_visit_path_value_filep(runtime, fp, visitor, user, error);
+}
+/** Visits exactly one JSON value from a filesystem path and supplies the
+ * normalized current path with every path-aware visitor callback.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_path_value_path(
+    lonejson *runtime, const char *path, const lj_path_value_visitor *visitor,
+    void *user, lj_error *error) {
+  return lonejson_visit_path_value_path(runtime, path, visitor, user, error);
+}
+/** Visits exactly one JSON value from a file descriptor and supplies the
+ * normalized current path with every path-aware visitor callback.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_visit_path_value_fd(lonejson *runtime, int fd,
+                       const lj_path_value_visitor *visitor, void *user,
+                       lj_error *error) {
+  return lonejson_visit_path_value_fd(runtime, fd, visitor, user, error);
 }
 /** Pull-style JSON generator state. */
 typedef lonejson_generator lj_generator;

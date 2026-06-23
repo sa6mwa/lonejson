@@ -1,10 +1,44 @@
 
 static lonejson_status lonejson__json_visit_event(lonejson__json_io *io,
                                                   lonejson_value_event_fn fn) {
+  lonejson_status status;
+
   if (fn == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  return fn(io->visitor_user, io->error);
+  status = fn(io->visitor_user, io->error);
+  return status;
+}
+
+static const lonejson_value_path *
+lonejson__json_current_path(lonejson__json_io *io, lonejson_value_path *path) {
+  path->segments = io->path_segments;
+  path->segment_count = io->path_depth;
+  return path;
+}
+
+static lonejson_status
+lonejson__json_visit_path_event(lonejson__json_io *io,
+                                lonejson_path_value_event_fn fn) {
+  lonejson_value_path path;
+
+  if (fn == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return fn(io->visitor_user, lonejson__json_current_path(io, &path),
+            io->error);
+}
+
+static lonejson_status lonejson__json_visit_any_event(
+    lonejson__json_io *io, lonejson_value_event_fn fn,
+    lonejson_path_value_event_fn path_fn) {
+  lonejson_status status;
+
+  status = lonejson__json_visit_event(io, fn);
+  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    return status;
+  }
+  return lonejson__json_visit_path_event(io, path_fn);
 }
 
 static lonejson_status lonejson__json_visit_chunk(lonejson__json_io *io,
@@ -17,12 +51,110 @@ static lonejson_status lonejson__json_visit_chunk(lonejson__json_io *io,
   return fn(io->visitor_user, data, len, io->error);
 }
 
-static lonejson_status lonejson__json_visit_bool(lonejson__json_io *io,
-                                                 int value) {
-  if (io->visitor == NULL || io->visitor->boolean_value == NULL) {
+static lonejson_status
+lonejson__json_visit_path_chunk(lonejson__json_io *io,
+                                lonejson_path_value_chunk_fn fn,
+                                const char *data, size_t len) {
+  lonejson_value_path path;
+
+  if (len == 0u || fn == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  return io->visitor->boolean_value(io->visitor_user, value, io->error);
+  return fn(io->visitor_user, lonejson__json_current_path(io, &path), data, len,
+            io->error);
+}
+
+static lonejson_status lonejson__json_path_key_append(lonejson__json_io *io,
+                                                      const char *data,
+                                                      size_t len) {
+  lonejson__json_path_frame *frame;
+  size_t new_len;
+  size_t new_cap;
+  char *next;
+
+  if (len == 0u || io->path_frames == NULL ||
+      io->path_depth >= io->path_capacity) {
+    return LONEJSON_STATUS_OK;
+  }
+  frame = &io->path_frames[io->path_depth];
+  if (frame->key == NULL) {
+    frame->key = frame->inline_key;
+    frame->key_cap = sizeof(frame->inline_key);
+  }
+  if (len > ((size_t)-1) - frame->key_len - 1u) {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "JSON object key exceeds maximum decoded byte "
+                               "limit");
+  }
+  new_len = frame->key_len + len;
+  if (new_len + 1u > frame->key_cap) {
+    new_cap = frame->key_cap == 0u ? sizeof(frame->inline_key) : frame->key_cap;
+    while (new_cap < new_len + 1u) {
+      if (new_cap > ((size_t)-1) / 2u) {
+        new_cap = new_len + 1u;
+        break;
+      }
+      new_cap *= 2u;
+    }
+    next = (char *)lonejson__owned_malloc(io->allocator, new_cap);
+    if (next == NULL) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                 0u, 0u, 0u,
+                                 "failed to allocate JSON path key buffer");
+    }
+    if (frame->key_len != 0u) {
+      memcpy(next, frame->key, frame->key_len);
+    }
+    if (frame->key_heap) {
+      lonejson__owned_free(frame->key);
+    }
+    frame->key = next;
+    frame->key_cap = new_cap;
+    frame->key_heap = 1;
+  }
+  memcpy(frame->key + frame->key_len, data, len);
+  frame->key_len = new_len;
+  frame->key[frame->key_len] = '\0';
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__json_visit_any_chunk(
+    lonejson__json_io *io, int is_key, lonejson_value_chunk_fn fn,
+    lonejson_path_value_chunk_fn path_fn, const char *data, size_t len) {
+  lonejson_status status;
+
+  if (is_key && io->path_visitor != NULL) {
+    status = lonejson__json_path_key_append(io, data, len);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return status;
+    }
+  }
+  status = lonejson__json_visit_chunk(io, fn, data, len);
+  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    return status;
+  }
+  return lonejson__json_visit_path_chunk(io, path_fn, data, len);
+}
+
+static lonejson_status lonejson__json_visit_bool(lonejson__json_io *io,
+                                                 int value) {
+  lonejson_value_path path;
+  lonejson_status status;
+
+  if (io->visitor == NULL || io->visitor->boolean_value == NULL) {
+    status = LONEJSON_STATUS_OK;
+  } else {
+    status = io->visitor->boolean_value(io->visitor_user, value, io->error);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return status;
+    }
+  }
+  if (io->path_visitor == NULL || io->path_visitor->boolean_value == NULL) {
+    return status;
+  }
+  return io->path_visitor->boolean_value(
+      io->visitor_user, lonejson__json_current_path(io, &path), value,
+      io->error);
 }
 
 static const unsigned char *
@@ -65,7 +197,13 @@ lonejson__json_visit_plain_chunk(lonejson__json_io *io, int is_key,
   size_t take;
   size_t offset = 0u;
   lonejson_value_chunk_fn fn =
-      is_key ? io->visitor->object_key_chunk : io->visitor->string_chunk;
+      io->visitor == NULL
+          ? NULL
+          : (is_key ? io->visitor->object_key_chunk : io->visitor->string_chunk);
+  lonejson_path_value_chunk_fn path_fn =
+      io->path_visitor == NULL ? NULL
+                               : (is_key ? io->path_visitor->object_key_chunk
+                                         : io->path_visitor->string_chunk);
 
   if (len == 0u) {
     return LONEJSON_STATUS_OK;
@@ -85,7 +223,8 @@ lonejson__json_visit_plain_chunk(lonejson__json_io *io, int is_key,
                                         "byte limit");
   }
   if (*plain_len == 0u) {
-    return lonejson__json_visit_chunk(io, fn, (const char *)data, len);
+    return lonejson__json_visit_any_chunk(io, is_key, fn, path_fn,
+                                          (const char *)data, len);
   }
   while (offset < len) {
     take = len - offset;
@@ -99,8 +238,8 @@ lonejson__json_visit_plain_chunk(lonejson__json_io *io, int is_key,
     *plain_len += take;
     offset += take;
     if (*plain_len == sizeof(unsigned char[256])) {
-      status =
-          lonejson__json_visit_chunk(io, fn, (const char *)plain, *plain_len);
+      status = lonejson__json_visit_any_chunk(io, is_key, fn, path_fn,
+                                              (const char *)plain, *plain_len);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
       }
@@ -119,9 +258,46 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
   lonejson_status status;
   size_t limit =
       is_key ? io->limits.max_key_bytes : io->limits.max_string_bytes;
+  lonejson_value_event_fn begin_fn =
+      io->visitor == NULL
+          ? NULL
+          : (is_key ? io->visitor->object_key_begin : io->visitor->string_begin);
+  lonejson_value_event_fn end_fn =
+      io->visitor == NULL
+          ? NULL
+          : (is_key ? io->visitor->object_key_end : io->visitor->string_end);
+  lonejson_value_chunk_fn chunk_fn =
+      io->visitor == NULL
+          ? NULL
+          : (is_key ? io->visitor->object_key_chunk : io->visitor->string_chunk);
+  lonejson_path_value_event_fn path_begin_fn =
+      io->path_visitor == NULL
+          ? NULL
+          : (is_key ? io->path_visitor->object_key_begin
+                    : io->path_visitor->string_begin);
+  lonejson_path_value_event_fn path_end_fn =
+      io->path_visitor == NULL
+          ? NULL
+          : (is_key ? io->path_visitor->object_key_end
+                    : io->path_visitor->string_end);
+  lonejson_path_value_chunk_fn path_chunk_fn =
+      io->path_visitor == NULL
+          ? NULL
+          : (is_key ? io->path_visitor->object_key_chunk
+                    : io->path_visitor->string_chunk);
 
-  status = lonejson__json_visit_event(io, is_key ? io->visitor->object_key_begin
-                                                 : io->visitor->string_begin);
+  if (is_key && io->path_visitor != NULL && io->path_frames != NULL &&
+      io->path_depth < io->path_capacity) {
+    lonejson__json_path_frame *frame = &io->path_frames[io->path_depth];
+    frame->key_len = 0u;
+    if (frame->key == NULL) {
+      frame->key = frame->inline_key;
+      frame->key_cap = sizeof(frame->inline_key);
+      frame->key_heap = 0;
+    }
+    frame->key[0] = '\0';
+  }
+  status = lonejson__json_visit_any_event(io, begin_fn, path_begin_fn);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return status;
   }
@@ -172,17 +348,15 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
     }
     if (ch == '"') {
       if (plain_len != 0u) {
-        status = lonejson__json_visit_chunk(
-            io,
-            is_key ? io->visitor->object_key_chunk : io->visitor->string_chunk,
-            (const char *)plain, plain_len);
+        status = lonejson__json_visit_any_chunk(
+            io, is_key, chunk_fn, path_chunk_fn, (const char *)plain,
+            plain_len);
         if (status != LONEJSON_STATUS_OK &&
             status != LONEJSON_STATUS_TRUNCATED) {
           return status;
         }
       }
-      return lonejson__json_visit_event(io, is_key ? io->visitor->object_key_end
-                                                   : io->visitor->string_end);
+      return lonejson__json_visit_any_event(io, end_fn, path_end_fn);
     }
     if (ch < 0x20) {
       return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
@@ -200,10 +374,9 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
                                             "decoded byte limit");
       }
       if (plain_len == sizeof(plain)) {
-        status = lonejson__json_visit_chunk(
-            io,
-            is_key ? io->visitor->object_key_chunk : io->visitor->string_chunk,
-            (const char *)plain, plain_len);
+        status = lonejson__json_visit_any_chunk(
+            io, is_key, chunk_fn, path_chunk_fn, (const char *)plain,
+            plain_len);
         if (status != LONEJSON_STATUS_OK &&
             status != LONEJSON_STATUS_TRUNCATED) {
           return status;
@@ -214,10 +387,8 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
     }
 
     if (plain_len != 0u) {
-      status = lonejson__json_visit_chunk(io,
-                                          is_key ? io->visitor->object_key_chunk
-                                                 : io->visitor->string_chunk,
-                                          (const char *)plain, plain_len);
+      status = lonejson__json_visit_any_chunk(
+          io, is_key, chunk_fn, path_chunk_fn, (const char *)plain, plain_len);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
       }
@@ -241,10 +412,9 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
         return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
                                    0u, "decoded JSON text exceeds limit");
       }
-      status = lonejson__json_visit_chunk(io,
-                                          is_key ? io->visitor->object_key_chunk
-                                                 : io->visitor->string_chunk,
-                                          &out, 1u);
+      status =
+          lonejson__json_visit_any_chunk(io, is_key, chunk_fn, path_chunk_fn,
+                                         &out, 1u);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
       }
@@ -265,10 +435,9 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
         return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
                                    0u, "decoded JSON text exceeds limit");
       }
-      status = lonejson__json_visit_chunk(io,
-                                          is_key ? io->visitor->object_key_chunk
-                                                 : io->visitor->string_chunk,
-                                          &out, 1u);
+      status =
+          lonejson__json_visit_any_chunk(io, is_key, chunk_fn, path_chunk_fn,
+                                         &out, 1u);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
       }
@@ -352,10 +521,8 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
         return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
                                    0u, "decoded JSON text exceeds limit");
       }
-      status = lonejson__json_visit_chunk(io,
-                                          is_key ? io->visitor->object_key_chunk
-                                                 : io->visitor->string_chunk,
-                                          (const char *)utf8, scratch.len);
+      status = lonejson__json_visit_any_chunk(
+          io, is_key, chunk_fn, path_chunk_fn, (const char *)utf8, scratch.len);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
       }
@@ -376,6 +543,18 @@ static lonejson_status lonejson__json_visit_number(lonejson__json_io *io,
   size_t len = 0u;
   int ch = first;
   lonejson_status status;
+  lonejson_value_event_fn begin_fn =
+      io->visitor == NULL ? NULL : io->visitor->number_begin;
+  lonejson_value_chunk_fn chunk_fn =
+      io->visitor == NULL ? NULL : io->visitor->number_chunk;
+  lonejson_value_event_fn end_fn =
+      io->visitor == NULL ? NULL : io->visitor->number_end;
+  lonejson_path_value_event_fn path_begin_fn =
+      io->path_visitor == NULL ? NULL : io->path_visitor->number_begin;
+  lonejson_path_value_chunk_fn path_chunk_fn =
+      io->path_visitor == NULL ? NULL : io->path_visitor->number_chunk;
+  lonejson_path_value_event_fn path_end_fn =
+      io->path_visitor == NULL ? NULL : io->path_visitor->number_end;
 
   if (capacity > sizeof(stack_buf)) {
     buffer = (char *)lonejson__owned_malloc(io->allocator, capacity);
@@ -385,7 +564,7 @@ static lonejson_status lonejson__json_visit_number(lonejson__json_io *io,
                                  "failed to allocate JSON number buffer");
     }
   }
-  status = lonejson__json_visit_event(io, io->visitor->number_begin);
+  status = lonejson__json_visit_any_event(io, begin_fn, path_begin_fn);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     if (buffer != stack_buf) {
       lonejson__owned_free(buffer);
@@ -429,10 +608,10 @@ static lonejson_status lonejson__json_visit_number(lonejson__json_io *io,
     return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
                                0u, "invalid JSON number");
   }
-  status =
-      lonejson__json_visit_chunk(io, io->visitor->number_chunk, buffer, len);
+  status = lonejson__json_visit_any_chunk(io, 0, chunk_fn, path_chunk_fn,
+                                          buffer, len);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
-    status = lonejson__json_visit_event(io, io->visitor->number_end);
+    status = lonejson__json_visit_any_event(io, end_fn, path_end_fn);
   }
   if (buffer != stack_buf) {
     lonejson__owned_free(buffer);
@@ -457,11 +636,62 @@ static lonejson_status lonejson__json_visit_literal(lonejson__json_io *io,
   if (kind == 1) {
     return lonejson__json_visit_bool(io, first == 't');
   }
-  return lonejson__json_visit_event(io, io->visitor->null_value);
+  return lonejson__json_visit_any_event(
+      io, io->visitor == NULL ? NULL : io->visitor->null_value,
+      io->path_visitor == NULL ? NULL : io->path_visitor->null_value);
 }
 
 static LONEJSON__HOT lonejson_status
 lonejson__json_visit_value(lonejson__json_io *io);
+
+static lonejson_status
+lonejson__json_path_push_object_key(lonejson__json_io *io) {
+  lonejson__json_path_frame *frame;
+
+  if (io->path_visitor == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (io->path_depth >= io->path_capacity) {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_INTERNAL_ERROR, 0u,
+                               0u, 0u, "invalid JSON path stack state");
+  }
+  frame = &io->path_frames[io->path_depth];
+  io->path_segments[io->path_depth].data = frame->key;
+  io->path_segments[io->path_depth].len = frame->key_len;
+  ++io->path_depth;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+lonejson__json_path_push_array_index(lonejson__json_io *io) {
+  lonejson__json_path_frame *frame;
+  size_t n;
+
+  if (io->path_visitor == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (io->path_depth >= io->path_capacity) {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_INTERNAL_ERROR, 0u,
+                               0u, 0u, "invalid JSON path stack state");
+  }
+  frame = &io->path_frames[io->path_depth];
+  n = (size_t)snprintf(frame->index_text, sizeof(frame->index_text), "%lu",
+                       (unsigned long)frame->next_index);
+  if (n >= sizeof(frame->index_text)) {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "JSON array index path segment is too large");
+  }
+  io->path_segments[io->path_depth].data = frame->index_text;
+  io->path_segments[io->path_depth].len = n;
+  ++io->path_depth;
+  return LONEJSON_STATUS_OK;
+}
+
+static void lonejson__json_path_pop(lonejson__json_io *io) {
+  if (io->path_visitor != NULL && io->path_depth != 0u) {
+    --io->path_depth;
+  }
+}
 
 static lonejson_status lonejson__json_visit_array(lonejson__json_io *io) {
   int ch;
@@ -472,7 +702,12 @@ static lonejson_status lonejson__json_visit_array(lonejson__json_io *io) {
     return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                                "JSON value nesting exceeds maximum depth");
   }
-  status = lonejson__json_visit_event(io, io->visitor->array_begin);
+  if (io->path_visitor != NULL && io->path_depth < io->path_capacity) {
+    io->path_frames[io->path_depth].next_index = 0u;
+  }
+  status = lonejson__json_visit_any_event(
+      io, io->visitor == NULL ? NULL : io->visitor->array_begin,
+      io->path_visitor == NULL ? NULL : io->path_visitor->array_begin);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return status;
   }
@@ -487,7 +722,9 @@ static lonejson_status lonejson__json_visit_array(lonejson__json_io *io) {
     }
     if (ch == ']') {
       (void)lonejson__json_cursor_getc(io);
-      return lonejson__json_visit_event(io, io->visitor->array_end);
+      return lonejson__json_visit_any_event(
+          io, io->visitor == NULL ? NULL : io->visitor->array_end,
+          io->path_visitor == NULL ? NULL : io->path_visitor->array_end);
     }
     if (!first) {
       ch = lonejson__json_cursor_getc(io);
@@ -496,11 +733,19 @@ static lonejson_status lonejson__json_visit_array(lonejson__json_io *io) {
                                    0u, 0u, "expected ',' in array");
       }
     }
+    status = lonejson__json_path_push_array_index(io);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return status;
+    }
     ++io->depth;
     status = lonejson__json_visit_value(io);
     --io->depth;
+    lonejson__json_path_pop(io);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
+    }
+    if (io->path_visitor != NULL && io->path_depth < io->path_capacity) {
+      ++io->path_frames[io->path_depth].next_index;
     }
     first = 0;
   }
@@ -515,7 +760,9 @@ static lonejson_status lonejson__json_visit_object(lonejson__json_io *io) {
     return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                                "JSON value nesting exceeds maximum depth");
   }
-  status = lonejson__json_visit_event(io, io->visitor->object_begin);
+  status = lonejson__json_visit_any_event(
+      io, io->visitor == NULL ? NULL : io->visitor->object_begin,
+      io->path_visitor == NULL ? NULL : io->path_visitor->object_begin);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return status;
   }
@@ -530,7 +777,9 @@ static lonejson_status lonejson__json_visit_object(lonejson__json_io *io) {
     }
     if (ch == '}') {
       (void)lonejson__json_cursor_getc(io);
-      return lonejson__json_visit_event(io, io->visitor->object_end);
+      return lonejson__json_visit_any_event(
+          io, io->visitor == NULL ? NULL : io->visitor->object_end,
+          io->path_visitor == NULL ? NULL : io->path_visitor->object_end);
     }
     if (!first) {
       ch = lonejson__json_cursor_getc(io);
@@ -555,9 +804,14 @@ static lonejson_status lonejson__json_visit_object(lonejson__json_io *io) {
                                  0u, 0u, "expected ':' after object key");
     }
     (void)lonejson__json_cursor_getc(io);
+    status = lonejson__json_path_push_object_key(io);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return status;
+    }
     ++io->depth;
     status = lonejson__json_visit_value(io);
     --io->depth;
+    lonejson__json_path_pop(io);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
@@ -602,13 +856,15 @@ lonejson__json_visit_value(lonejson__json_io *io) {
 static lonejson_status lonejson__json_visit_cursor(
     lonejson__json_cursor *cursor, const lonejson_allocator *allocator,
     const lonejson_value_visitor *visitor, void *user,
+    const lonejson_path_value_visitor *path_visitor,
     const lonejson__value_limits *limits, lonejson_error *error) {
   lonejson__json_io io;
   lonejson__value_limits defaults;
   lonejson_status status;
   int ch;
+  size_t i;
 
-  if (cursor == NULL || visitor == NULL) {
+  if (cursor == NULL || (visitor == NULL && path_visitor == NULL)) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u,
                                "JSON value source and visitor are required");
@@ -616,6 +872,7 @@ static lonejson_status lonejson__json_visit_cursor(
   memset(&io, 0, sizeof(io));
   io.cursor = cursor;
   io.visitor = visitor;
+  io.path_visitor = path_visitor;
   io.visitor_user = user;
   io.error = error;
   io.allocator = allocator;
@@ -639,6 +896,23 @@ static lonejson_status lonejson__json_visit_cursor(
       io.limits.max_key_bytes = defaults.max_key_bytes;
     }
   }
+  if (path_visitor != NULL) {
+    io.path_capacity = io.limits.max_depth + 1u;
+    io.path_segments = (lonejson_path_segment *)lonejson__owned_malloc(
+        allocator, io.path_capacity * sizeof(*io.path_segments));
+    io.path_frames = (lonejson__json_path_frame *)lonejson__owned_malloc(
+        allocator, io.path_capacity * sizeof(*io.path_frames));
+    if (io.path_segments == NULL || io.path_frames == NULL) {
+      lonejson__owned_free(io.path_segments);
+      lonejson__owned_free(io.path_frames);
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate JSON path visitor state");
+    }
+    memset(io.path_segments, 0,
+           io.path_capacity * sizeof(*io.path_segments));
+    memset(io.path_frames, 0, io.path_capacity * sizeof(*io.path_frames));
+  }
   status = lonejson__json_visit_value(&io);
   if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
     ch = lonejson__json_peek_nonspace(&io);
@@ -648,6 +922,15 @@ static lonejson_status lonejson__json_visit_cursor(
                               "visited JSON must contain exactly one value");
     }
   }
+  if (io.path_frames != NULL) {
+    for (i = 0u; i < io.path_capacity; ++i) {
+      if (io.path_frames[i].key_heap) {
+        lonejson__owned_free(io.path_frames[i].key);
+      }
+    }
+  }
+  lonejson__owned_free(io.path_segments);
+  lonejson__owned_free(io.path_frames);
   return status;
 }
 
@@ -667,7 +950,7 @@ static lonejson_status lonejson__json_visit(
     return status;
   }
   status = lonejson__json_visit_cursor(&cursor, &value->allocator, visitor,
-                                       user, limits, error);
+                                       user, NULL, limits, error);
   lonejson__json_cursor_close(&cursor);
   return status;
 }

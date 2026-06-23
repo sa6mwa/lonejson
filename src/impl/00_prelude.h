@@ -1204,6 +1204,13 @@ lonejson_value_visitor lonejson_default_value_visitor(void) {
   return visitor;
 }
 
+lonejson_path_value_visitor lonejson_default_path_value_visitor(void) {
+  lonejson_path_value_visitor visitor;
+
+  memset(&visitor, 0, sizeof(visitor));
+  return visitor;
+}
+
 static void
 lonejson__spooled_apply_options(lonejson_spooled *value,
                                 const lonejson__spool_options *options) {

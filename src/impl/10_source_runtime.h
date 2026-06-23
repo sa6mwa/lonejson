@@ -20,11 +20,22 @@ typedef struct lonejson__json_cursor {
   int use_fd;
 } lonejson__json_cursor;
 
+typedef struct lonejson__json_path_frame {
+  char inline_key[64];
+  char index_text[32];
+  char *key;
+  size_t key_len;
+  size_t key_cap;
+  size_t next_index;
+  int key_heap;
+} lonejson__json_path_frame;
+
 typedef struct lonejson__json_io {
   lonejson__json_cursor *cursor;
   lonejson_sink_fn sink;
   void *sink_user;
   const lonejson_value_visitor *visitor;
+  const lonejson_path_value_visitor *path_visitor;
   void *visitor_user;
   lonejson_error *error;
   int pretty;
@@ -35,6 +46,10 @@ typedef struct lonejson__json_io {
   const lonejson_allocator *allocator;
   int has_pushback;
   int pushback;
+  lonejson_path_segment *path_segments;
+  lonejson__json_path_frame *path_frames;
+  size_t path_depth;
+  size_t path_capacity;
 } lonejson__json_io;
 
 static lonejson_status

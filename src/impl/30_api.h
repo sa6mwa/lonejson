@@ -2740,7 +2740,7 @@ static lonejson_status lonejson__visit_value_buffer_with_limits(
   cursor.buffer = (const unsigned char *)data;
   cursor.buffer_len = len;
   status = lonejson__json_visit_cursor(&cursor, allocator, visitor, user,
-                                       limits, error);
+                                       NULL, limits, error);
   if (status == LONEJSON_STATUS_OK) {
     lonejson__clear_error(error);
   }
@@ -2775,6 +2775,63 @@ static lonejson_status lonejson__visit_value_reader_with_limits(
   cursor.reader = reader;
   cursor.reader_user = reader_user;
   status = lonejson__json_visit_cursor(&cursor, allocator, visitor, user,
+                                       NULL, limits, error);
+  if (status == LONEJSON_STATUS_OK) {
+    lonejson__clear_error(error);
+  }
+  return status;
+}
+
+static lonejson_status lonejson__visit_path_value_buffer_with_limits(
+    const void *data, size_t len, const lonejson_path_value_visitor *visitor,
+    void *user, const lonejson__value_limits *limits,
+    const lonejson_allocator *allocator, lonejson_error *error) {
+  lonejson__json_cursor cursor;
+  lonejson_status status;
+
+  if (data == NULL || visitor == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "buffer and visitor are required");
+  }
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.buffer = (const unsigned char *)data;
+  cursor.buffer_len = len;
+  status = lonejson__json_visit_cursor(&cursor, allocator, NULL, user, visitor,
+                                       limits, error);
+  if (status == LONEJSON_STATUS_OK) {
+    lonejson__clear_error(error);
+  }
+  return status;
+}
+
+static lonejson_status lonejson__visit_path_value_cstr_with_limits(
+    const char *json, const lonejson_path_value_visitor *visitor, void *user,
+    const lonejson__value_limits *limits, const lonejson_allocator *allocator,
+    lonejson_error *error) {
+  if (json == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "json string and visitor are required");
+  }
+  return lonejson__visit_path_value_buffer_with_limits(
+      json, strlen(json), visitor, user, limits, allocator, error);
+}
+
+static lonejson_status lonejson__visit_path_value_reader_with_limits(
+    lonejson_reader_fn reader, void *reader_user,
+    const lonejson_path_value_visitor *visitor, void *user,
+    const lonejson__value_limits *limits, const lonejson_allocator *allocator,
+    lonejson_error *error) {
+  lonejson__json_cursor cursor;
+  lonejson_status status;
+
+  if (reader == NULL || visitor == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "reader and visitor are required");
+  }
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.reader = reader;
+  cursor.reader_user = reader_user;
+  status = lonejson__json_visit_cursor(&cursor, allocator, NULL, user, visitor,
                                        limits, error);
   if (status == LONEJSON_STATUS_OK) {
     lonejson__clear_error(error);
@@ -2939,6 +2996,104 @@ lonejson_status lonejson_visit_value_fd(lonejson *runtime, int fd,
   }
   return lonejson_visit_value_reader(runtime, lonejson__fd_reader, &fd, visitor,
                                      user, error);
+}
+
+lonejson_status lonejson_visit_path_value_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  lonejson__value_limits limits;
+  lonejson_allocator allocator_storage;
+  const lonejson_allocator *allocator = NULL;
+
+  if (lonejson__runtime_snapshot_visit_policy(runtime, &limits,
+                                              &allocator_storage, &allocator,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  return lonejson__visit_path_value_buffer_with_limits(
+      data, len, visitor, user, &limits, allocator, error);
+}
+
+lonejson_status lonejson_visit_path_value_cstr(
+    lonejson *runtime, const char *json,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  lonejson__value_limits limits;
+  lonejson_allocator allocator_storage;
+  const lonejson_allocator *allocator = NULL;
+
+  if (lonejson__runtime_snapshot_visit_policy(runtime, &limits,
+                                              &allocator_storage, &allocator,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  return lonejson__visit_path_value_cstr_with_limits(json, visitor, user,
+                                                     &limits, allocator,
+                                                     error);
+}
+
+lonejson_status lonejson_visit_path_value_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  lonejson__value_limits limits;
+  lonejson_allocator allocator_storage;
+  const lonejson_allocator *allocator = NULL;
+
+  if (lonejson__runtime_snapshot_visit_policy(runtime, &limits,
+                                              &allocator_storage, &allocator,
+                                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  return lonejson__visit_path_value_reader_with_limits(
+      reader, reader_user, visitor, user, &limits, allocator, error);
+}
+
+lonejson_status lonejson_visit_path_value_filep(
+    lonejson *runtime, FILE *fp, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error) {
+  if (fp == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "file pointer and visitor are required");
+  }
+  return lonejson_visit_path_value_reader(runtime, lonejson__file_reader, fp,
+                                          visitor, user, error);
+}
+
+lonejson_status lonejson_visit_path_value_path(
+    lonejson *runtime, const char *path,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  FILE *fp;
+  lonejson_status status;
+
+  if (path == NULL || visitor == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "path and visitor are required");
+  }
+  fp = fopen(path, "rb");
+  if (fp == NULL) {
+    if (error != NULL) {
+      error->system_errno = errno;
+    }
+    return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 1u, 0u,
+                               "failed to open '%s'", path);
+  }
+  status = lonejson_visit_path_value_filep(runtime, fp, visitor, user, error);
+  fclose(fp);
+  return status;
+}
+
+lonejson_status lonejson_visit_path_value_fd(
+    lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error) {
+  if (fd < 0 || visitor == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "fd and visitor are required");
+  }
+  return lonejson_visit_path_value_reader(runtime, lonejson__fd_reader, &fd,
+                                          visitor, user, error);
 }
 
 static lonejson_status lonejson__serialize_sink_with_options(
