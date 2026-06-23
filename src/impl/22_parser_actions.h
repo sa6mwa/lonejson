@@ -31,7 +31,8 @@ lonejson__complete_streamed_string_token(lonejson_parser *parser) {
                                  "object key outside object context");
     }
     frame->pending_field = NULL;
-    if (parser->json_stream_active) {
+    if (parser->json_stream_active &&
+        !lonejson__json_value_parse_visitor_active(parser)) {
       lonejson_status status = lonejson__json_value_emit(parser, ":", 1u);
       if (status != LONEJSON_STATUS_OK) {
         return status;
@@ -460,7 +461,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
         parser->json_stream_total_bytes = 0u;
         parser->json_stream_text_bytes = 0u;
         parser->json_stream_text_is_key = 0;
-        if (value->parse_mode == LONEJSON_JSON_VALUE_PARSE_VISITOR) {
+        if (lonejson__json_value_parse_visitor_active(parser)) {
           if (value->parse_visitor_limits.max_depth != 0u &&
               parser->json_stream_depth >
                   value->parse_visitor_limits.max_depth) {
@@ -471,8 +472,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
                 parser->error.line, parser->error.column,
                 "JSON value nesting exceeds maximum depth");
           }
-          if (lonejson__json_value_visit_event(
-                  parser, value->parse_visitor->object_begin) !=
+          if (lonejson__json_value_object_begin(parser) !=
               LONEJSON_STATUS_OK) {
             lonejson__parser_clear_json_stream_value(parser);
             parser->json_stream_depth = 0u;
@@ -556,8 +556,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
   frame->required_remaining = lonejson__required_count_for_map(parser, map);
   if (started_root_visitor) {
     parser->json_stream_depth = 1u;
-    return lonejson__json_value_visit_event(
-        parser, parser->json_stream_value->parse_visitor->object_begin);
+    return lonejson__json_value_object_begin(parser);
   }
   if (started_root_value) {
     parser->json_stream_depth = 1u;
@@ -575,8 +574,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
                                    parser->error.column,
                                    "JSON value nesting exceeds maximum depth");
       }
-      return lonejson__json_value_visit_event(
-          parser, parser->json_stream_value->parse_visitor->object_begin);
+      return lonejson__json_value_object_begin(parser);
     }
     return lonejson__json_value_emit(parser, "{", 1u);
   }
@@ -626,7 +624,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
         parser->json_stream_total_bytes = 0u;
         parser->json_stream_text_bytes = 0u;
         parser->json_stream_text_is_key = 0;
-        if (value->parse_mode == LONEJSON_JSON_VALUE_PARSE_VISITOR) {
+        if (lonejson__json_value_parse_visitor_active(parser)) {
           if (value->parse_visitor_limits.max_depth != 0u &&
               parser->json_stream_depth >
                   value->parse_visitor_limits.max_depth) {
@@ -637,9 +635,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
                 parser->error.line, parser->error.column,
                 "JSON value nesting exceeds maximum depth");
           }
-          if (lonejson__json_value_visit_event(
-                  parser, value->parse_visitor->array_begin) !=
-              LONEJSON_STATUS_OK) {
+          if (lonejson__json_value_array_begin(parser) != LONEJSON_STATUS_OK) {
             lonejson__parser_clear_json_stream_value(parser);
             parser->json_stream_depth = 0u;
             return parser->error.code;
@@ -725,8 +721,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
   frame->field = field;
   if (started_root_visitor) {
     parser->json_stream_depth = 1u;
-    return lonejson__json_value_visit_event(
-        parser, parser->json_stream_value->parse_visitor->array_begin);
+    return lonejson__json_value_array_begin(parser);
   }
   if (started_root_value) {
     parser->json_stream_depth = 1u;
@@ -744,8 +739,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
                                    parser->error.column,
                                    "JSON value nesting exceeds maximum depth");
       }
-      return lonejson__json_value_visit_event(
-          parser, parser->json_stream_value->parse_visitor->array_begin);
+      return lonejson__json_value_array_begin(parser);
     }
     return lonejson__json_value_emit(parser, "[", 1u);
   }
@@ -804,8 +798,7 @@ lonejson__finalize_object(lonejson_parser *parser) {
   if (parser->json_stream_active) {
     status =
         lonejson__json_value_parse_visitor_active(parser)
-            ? lonejson__json_value_visit_event(
-                  parser, parser->json_stream_value->parse_visitor->object_end)
+            ? lonejson__json_value_object_end(parser)
             : lonejson__json_value_emit(parser, "}", 1u);
     if (status != LONEJSON_STATUS_OK) {
       return status;
@@ -831,8 +824,7 @@ lonejson__finalize_array(lonejson_parser *parser) {
   if (parser->json_stream_active) {
     lonejson_status status =
         lonejson__json_value_parse_visitor_active(parser)
-            ? lonejson__json_value_visit_event(
-                  parser, parser->json_stream_value->parse_visitor->array_end)
+            ? lonejson__json_value_array_end(parser)
             : lonejson__json_value_emit(parser, "]", 1u);
     if (status != LONEJSON_STATUS_OK) {
       return status;
@@ -936,8 +928,7 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
           } else if (mode == LONEJSON_LEX_FALSE) {
             status = lonejson__json_value_visit_bool(parser, 0);
           } else if (mode == LONEJSON_LEX_NULL) {
-            status = lonejson__json_value_visit_event(
-                parser, parser->json_stream_value->parse_visitor->null_value);
+            status = lonejson__json_value_null(parser);
           }
         } else if (mode == LONEJSON_LEX_NUMBER) {
           status =
@@ -986,8 +977,7 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
       } else if (mode == LONEJSON_LEX_FALSE) {
         status = lonejson__json_value_visit_bool(parser, 0);
       } else if (mode == LONEJSON_LEX_NULL) {
-        status = lonejson__json_value_visit_event(
-            parser, parser->json_stream_value->parse_visitor->null_value);
+        status = lonejson__json_value_null(parser);
       } else {
         status = LONEJSON_STATUS_OK;
       }
@@ -1045,8 +1035,7 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
         } else if (mode == LONEJSON_LEX_FALSE) {
           status = lonejson__json_value_visit_bool(parser, 0);
         } else if (mode == LONEJSON_LEX_NULL) {
-          status = lonejson__json_value_visit_event(
-              parser, parser->json_stream_value->parse_visitor->null_value);
+          status = lonejson__json_value_null(parser);
         } else {
           status = LONEJSON_STATUS_OK;
         }

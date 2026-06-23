@@ -20,16 +20,6 @@ typedef struct lonejson__json_cursor {
   int use_fd;
 } lonejson__json_cursor;
 
-typedef struct lonejson__json_path_frame {
-  char inline_key[64];
-  char index_text[32];
-  char *key;
-  size_t key_len;
-  size_t key_cap;
-  size_t next_index;
-  int key_heap;
-} lonejson__json_path_frame;
-
 typedef struct lonejson__json_io {
   lonejson__json_cursor *cursor;
   lonejson_sink_fn sink;

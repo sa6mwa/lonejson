@@ -1254,6 +1254,7 @@ static void test_receiver_methods_dispatch_on_public_handles(void) {
   EXPECT(value.methods->set_buffer != NULL);
   EXPECT(value.methods->set_parse_sink != NULL);
   EXPECT(value.methods->set_parse_visitor != NULL);
+  EXPECT(value.methods->set_parse_path_visitor != NULL);
   EXPECT(value.methods->enable_parse_capture != NULL);
   EXPECT(value.methods->set_reader != NULL);
   EXPECT(value.methods->set_file != NULL);

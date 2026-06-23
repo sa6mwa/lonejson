@@ -263,6 +263,9 @@ int main(void) {
   test_json_value_nested_object_parse_sink_failure_matrix();
   test_json_value_parse_visitor();
   test_json_value_nested_object_parse_visitor();
+  test_json_value_parse_path_visitor_paths();
+  test_json_value_parse_path_visitor_failure_cleanup();
+  test_json_value_parse_path_visitor_api_guards();
   test_json_value_parse_visitor_fast_path_regressions();
   test_json_value_parse_visitor_total_byte_reset_for_string_regressions();
   test_json_value_parse_visitor_scalar_string_regressions();

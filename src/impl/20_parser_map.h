@@ -320,6 +320,7 @@ static void lonejson__parser_restart_stream(lonejson_parser *parser,
                                             void *dst) {
   parser->root_dst = dst;
   lonejson__direct_string_abort(parser);
+  lonejson__parser_cleanup_json_stream_path(parser);
   memset(&parser->error, 0, sizeof(parser->error));
   parser->error.line = 1u;
   parser->error.column = 0u;
@@ -346,6 +347,7 @@ static void lonejson__parser_restart_stream(lonejson_parser *parser,
   parser->json_stream_value = NULL;
   parser->json_stream_active = 0;
   parser->json_stream_visit_active = 0;
+  parser->json_stream_path_visit_active = 0;
   parser->json_stream_sink_active = 0;
   parser->json_stream_depth = 0u;
   parser->token.len = 0u;

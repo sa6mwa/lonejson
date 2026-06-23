@@ -1324,6 +1324,7 @@ static void lonejson_parser_destroy(lonejson_parser *parser) {
     return;
   }
   lonejson__direct_string_clear(parser, 0);
+  lonejson__parser_cleanup_json_stream_path(parser);
   lonejson__parser_unwind_active_mapped_array_streams(parser);
   while (parser->frame_count != 0u) {
     lonejson__pop_frame(parser);
@@ -1385,6 +1386,7 @@ static lonejson_status lonejson__parse_buffer_with_options(
     lonejson__parser_unwind_active_mapped_array_streams(parser);
   }
   lonejson__direct_string_abort(parser);
+  lonejson__parser_cleanup_json_stream_path(parser);
   if (error != NULL) {
     *error = parser->error;
   }
@@ -1532,6 +1534,7 @@ static lonejson_status lonejson__parse_reader_with_options(
     lonejson__parser_unwind_active_mapped_array_streams(parser);
   }
   lonejson__direct_string_abort(parser);
+  lonejson__parser_cleanup_json_stream_path(parser);
   if (error != NULL) {
     *error = parser->error;
   }

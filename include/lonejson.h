@@ -1483,7 +1483,11 @@ typedef enum lonejson_json_value_parse_mode {
   /** Parsing streams structured JSON visitor events incrementally. */
   LONEJSON_JSON_VALUE_PARSE_VISITOR = 2,
   /** Parsing captures compact JSON bytes into owned storage. */
-  LONEJSON_JSON_VALUE_PARSE_CAPTURE = 3
+  LONEJSON_JSON_VALUE_PARSE_CAPTURE = 3,
+  /** Parsing streams structured JSON visitor events with decoded path context
+   * incrementally.
+   */
+  LONEJSON_JSON_VALUE_PARSE_PATH_VISITOR = 4
 } lonejson_json_value_parse_mode;
 
 /** Internal JSON-value visitor limit layout retained for lonejson's
@@ -1773,6 +1777,10 @@ typedef struct lonejson_json_value_methods {
   lonejson_status (*set_parse_visitor)(struct lonejson_json_value *value,
                                        const lonejson_value_visitor *visitor,
                                        void *user, lonejson_error *error);
+  lonejson_status (*set_parse_path_visitor)(
+      struct lonejson_json_value *value,
+      const lonejson_path_value_visitor *visitor, void *user,
+      lonejson_error *error);
   lonejson_status (*enable_parse_capture)(struct lonejson_json_value *value,
                                           lonejson_error *error);
   lonejson_status (*set_reader)(struct lonejson_json_value *value,
@@ -1828,9 +1836,15 @@ typedef struct lonejson_json_value {
   const lonejson_value_visitor *parse_visitor;
   /** Caller-provided visitor user data. */
   void *parse_visitor_user;
-  /** Internal runtime-selected limits applied while parsing through
-   * `parse_visitor`. Public callers configure these through `lonejson_config`
-   * and should treat this storage as opaque.
+  /** Caller-provided path-aware visitor when `parse_mode ==
+   * LONEJSON_JSON_VALUE_PARSE_PATH_VISITOR`.
+   */
+  const lonejson_path_value_visitor *parse_path_visitor;
+  /** Caller-provided path-aware visitor user data. */
+  void *parse_path_visitor_user;
+  /** Internal runtime-selected limits applied while parsing through a parse
+   * visitor. Public callers configure these through `lonejson_config` and
+   * should treat this storage as opaque.
    */
 #if defined(LONEJSON_INTERNAL_BUILD) || defined(LONEJSON_IMPLEMENTATION)
   lonejson__value_limits parse_visitor_limits;
@@ -3941,6 +3955,13 @@ lonejson_status
 lonejson_json_value_set_parse_visitor(lonejson_json_value *value,
                                       const lonejson_value_visitor *visitor,
                                       void *user, lonejson_error *error);
+/** Configures an embedded JSON value handle to deliver inbound parsed JSON as
+ * structured visitor callbacks with decoded path context relative to the
+ * embedded value root. The root embedded value has zero path segments.
+ */
+lonejson_status lonejson_json_value_set_parse_path_visitor(
+    lonejson_json_value *value, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error);
 /** Enables explicit parse-time capture of one inbound JSON value into owned
  * compact bytes. This is the opt-in storage path for callers that need to
  * retain a parsed arbitrary JSON value after decoding, including nested
@@ -6471,6 +6492,16 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_parse_visitor(
     lj_json_value *value, const lj_value_visitor *visitor, void *user,
     lj_error *error) {
   return lonejson_json_value_set_parse_visitor(value, visitor, user, error);
+}
+
+/** Configures an embedded JSON value handle to deliver inbound parsed JSON as
+ * path-aware structured visitor callbacks.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_parse_path_visitor(
+    lj_json_value *value, const lj_path_value_visitor *visitor, void *user,
+    lj_error *error) {
+  return lonejson_json_value_set_parse_path_visitor(value, visitor, user,
+                                                   error);
 }
 
 /** Enables explicit parse-time capture of one inbound JSON value into owned

@@ -1096,7 +1096,8 @@ static lonejson_status lonejson__parser_consume_char(lonejson_parser *parser,
                                  parser->error.column, "expected JSON value");
     case LONEJSON_FRAME_OBJECT_COMMA_OR_END:
       if (ch == ',') {
-        if (parser->json_stream_active && !parser->json_stream_visit_active) {
+        if (parser->json_stream_active &&
+            !lonejson__json_value_parse_visitor_active(parser)) {
           lonejson_status status = lonejson__json_value_emit(parser, ",", 1u);
           if (status != LONEJSON_STATUS_OK) {
             return status;
@@ -1214,7 +1215,8 @@ static lonejson_status lonejson__parser_consume_char(lonejson_parser *parser,
                                parser->error.column, "expected array value");
   case LONEJSON_FRAME_ARRAY_COMMA_OR_END:
     if (ch == ',') {
-      if (parser->json_stream_active && !parser->json_stream_visit_active) {
+      if (parser->json_stream_active &&
+          !lonejson__json_value_parse_visitor_active(parser)) {
         lonejson_status status = lonejson__json_value_emit(parser, ",", 1u);
         if (status != LONEJSON_STATUS_OK) {
           return status;
@@ -1423,7 +1425,7 @@ lonejson__parser_feed_bytes(lonejson_parser *parser, const unsigned char *bytes,
         if (active->state == LONEJSON_FRAME_OBJECT_COMMA_OR_END) {
           if (bytes[i] == ',') {
             if (parser->json_stream_active &&
-                !parser->json_stream_visit_active) {
+                !lonejson__json_value_parse_visitor_active(parser)) {
               status = lonejson__json_value_emit(parser, ",", 1u);
               if (status != LONEJSON_STATUS_OK) {
                 parser->failed = 1;
@@ -1506,7 +1508,8 @@ lonejson__parser_feed_bytes(lonejson_parser *parser, const unsigned char *bytes,
       } else if (active->kind == LONEJSON_CONTAINER_ARRAY &&
                  active->state == LONEJSON_FRAME_ARRAY_COMMA_OR_END) {
         if (bytes[i] == ',') {
-          if (parser->json_stream_active && !parser->json_stream_visit_active) {
+          if (parser->json_stream_active &&
+              !lonejson__json_value_parse_visitor_active(parser)) {
             status = lonejson__json_value_emit(parser, ",", 1u);
             if (status != LONEJSON_STATUS_OK) {
               parser->failed = 1;
