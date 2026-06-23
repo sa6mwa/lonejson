@@ -3935,3 +3935,176 @@ void lonejson_reset(lonejson *runtime, const lonejson_map *map, void *value) {
   lonejson__reset_map(map, value, runtime_state);
   lonejson__runtime_borrow_release(&borrow);
 }
+
+int lonejson_field_has_presence(const lonejson_field *field) {
+  return lonejson__field_has_presence(field);
+}
+
+void lonejson_field_set_presence(void *record, const lonejson_field *field,
+                                 int present) {
+  lonejson__field_set_presence(record, field, present ? 1 : 0);
+}
+
+static void lonejson__record_assign_parser_init(
+    const lonejson_runtime *runtime_state, const lonejson_map *map,
+    void *record, lonejson_parser *parser, unsigned char *workspace,
+    size_t workspace_size) {
+  lonejson__parse_options options =
+      runtime_state != NULL ? runtime_state->parse_options
+                            : lonejson__default_parse_options();
+  options.clear_destination = 0;
+  lonejson__parser_init_state(parser, map, record, &options, runtime_state, 0,
+                              1, 1, 0u, workspace, workspace_size);
+}
+
+static lonejson_status
+lonejson__record_assign_finish(lonejson_parser *parser, lonejson_status status,
+                               lonejson_error *error) {
+  if (error != NULL) {
+    *error = parser->error;
+  }
+  return status;
+}
+
+lonejson_status lonejson_record_assign_null(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_error *error) {
+  lonejson_parser parser;
+  unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  void *ptr;
+  lonejson_status status;
+
+  if (record == NULL || field == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "record and field are required");
+  }
+  runtime_state =
+      lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+  ptr = (unsigned char *)record + field->struct_offset;
+  lonejson__record_assign_parser_init(runtime_state, map, record, &parser,
+                                      workspace, sizeof(workspace));
+  status = lonejson__assign_null(&parser, field, ptr);
+  lonejson__runtime_borrow_release(&borrow);
+  return lonejson__record_assign_finish(&parser, status, error);
+}
+
+lonejson_status lonejson_record_assign_string(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, const char *data, size_t len,
+    lonejson_error *error) {
+  lonejson_parser parser;
+  unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  void *ptr;
+  lonejson_status status;
+
+  if (record == NULL || field == NULL || (data == NULL && len != 0u)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "record, field, and string data are "
+                                   "required");
+  }
+  runtime_state =
+      lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+  ptr = (unsigned char *)record + field->struct_offset;
+  lonejson__record_assign_parser_init(runtime_state, map, record, &parser,
+                                      workspace, sizeof(workspace));
+  status = lonejson__assign_string(&parser, field, ptr, data, len);
+  lonejson__runtime_borrow_release(&borrow);
+  return lonejson__record_assign_finish(&parser, status, error);
+}
+
+lonejson_status lonejson_record_array_append_string(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_string_array *array,
+    const char *data, size_t len, lonejson_error *error) {
+  lonejson_parser parser;
+  unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  lonejson_status status;
+
+  if (record == NULL || field == NULL || array == NULL ||
+      (data == NULL && len != 0u)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "record, field, array, and string data are "
+                                   "required");
+  }
+  runtime_state =
+      lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+  lonejson__record_assign_parser_init(runtime_state, map, record, &parser,
+                                      workspace, sizeof(workspace));
+  status = lonejson__array_append_string(&parser, field, array, data, len);
+  lonejson__runtime_borrow_release(&borrow);
+  return lonejson__record_assign_finish(&parser, status, error);
+}
+
+#define LONEJSON__RECORD_ARRAY_APPEND_IMPL(api_name, internal_name, array_type, \
+                                           value_type)                         \
+  lonejson_status api_name(lonejson *runtime, const lonejson_map *map,         \
+                           void *record, const lonejson_field *field,          \
+                           array_type *array, value_type value,                \
+                           lonejson_error *error) {                            \
+    lonejson_parser parser;                                                    \
+    unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];                      \
+    const lonejson_runtime *runtime_state;                                     \
+    lonejson__runtime_borrow borrow;                                           \
+    lonejson_status status;                                                    \
+                                                                               \
+    if (record == NULL || field == NULL || array == NULL) {                    \
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,  \
+                                 0u, 0u,                                       \
+                                 "record, field, and array are required");     \
+    }                                                                          \
+    runtime_state =                                                            \
+        lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);    \
+    lonejson__record_assign_parser_init(runtime_state, map, record, &parser,  \
+                                        workspace, sizeof(workspace));         \
+    status = internal_name(&parser, field, array, value);                      \
+    lonejson__runtime_borrow_release(&borrow);                                 \
+    return lonejson__record_assign_finish(&parser, status, error);             \
+  }
+
+LONEJSON__RECORD_ARRAY_APPEND_IMPL(lonejson_record_array_append_i64,
+                                   lonejson__array_append_i64,
+                                   lonejson_i64_array, lonejson_int64)
+LONEJSON__RECORD_ARRAY_APPEND_IMPL(lonejson_record_array_append_u64,
+                                   lonejson__array_append_u64,
+                                   lonejson_u64_array, lonejson_uint64)
+LONEJSON__RECORD_ARRAY_APPEND_IMPL(lonejson_record_array_append_f64,
+                                   lonejson__array_append_f64,
+                                   lonejson_f64_array, double)
+LONEJSON__RECORD_ARRAY_APPEND_IMPL(lonejson_record_array_append_bool,
+                                   lonejson__array_append_bool,
+                                   lonejson_bool_array, int)
+
+#undef LONEJSON__RECORD_ARRAY_APPEND_IMPL
+
+void *lonejson_record_object_array_append_slot(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_object_array *array,
+    lonejson_error *error) {
+  lonejson_parser parser;
+  unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
+  const lonejson_runtime *runtime_state;
+  lonejson__runtime_borrow borrow;
+  void *slot;
+
+  if (record == NULL || field == NULL || array == NULL) {
+    lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+                        "record, field, and array are required");
+    return NULL;
+  }
+  runtime_state =
+      lonejson__runtime_borrow_const((const lonejson *)runtime, &borrow);
+  lonejson__record_assign_parser_init(runtime_state, map, record, &parser,
+                                      workspace, sizeof(workspace));
+  slot = lonejson__object_array_append_slot(&parser, field, array);
+  lonejson__runtime_borrow_release(&borrow);
+  if (error != NULL) {
+    *error = parser.error;
+  }
+  return slot;
+}

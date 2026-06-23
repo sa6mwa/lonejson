@@ -724,6 +724,73 @@ static void test_public_initializers_and_defaults(void) {
   lonejson_spooled_cleanup(&spool);
 }
 
+static void test_public_dynamic_record_helpers(void) {
+  lonejson *runtime;
+  lonejson_error error;
+  test_person person;
+  test_item *item;
+  char buffer[512];
+  size_t needed = 0u;
+  lonejson_status status;
+
+  runtime = lonejson_new(NULL, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+
+  lonejson_init(runtime, &test_person_map, &person);
+  EXPECT(!lonejson_field_has_presence(&test_person_map.fields[0]));
+
+  status = lonejson_record_assign_string(
+      runtime, &test_person_map, &person, &test_person_map.fields[0],
+      "Dynamic", 7u, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_record_assign_string(
+      runtime, &test_person_map, &person, &test_person_map.fields[1], "dyn",
+      3u, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  person.age = 12;
+  person.score = 1.5;
+  person.active = true;
+  status = lonejson_record_assign_string(
+      runtime, &test_address_map, &person.address, &test_address_map.fields[0],
+      "Visby", 5u, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  person.address.zip = 62157;
+
+  status = lonejson_record_array_append_i64(
+      runtime, &test_person_map, &person, &test_person_map.fields[6],
+      &person.lucky_numbers, 7, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_record_array_append_string(
+      runtime, &test_person_map, &person, &test_person_map.fields[7],
+      &person.tags, "blue", 4u, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  item = (test_item *)lonejson_record_object_array_append_slot(
+      runtime, &test_person_map, &person, &test_person_map.fields[8],
+      &person.items, &error);
+  EXPECT(item != NULL);
+  if (item != NULL) {
+    item->id = 9;
+    status = lonejson_record_assign_string(
+        runtime, &test_item_map, item, &test_item_map.fields[1], "nine", 4u,
+        &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+  }
+
+  status = lonejson_serialize_buffer(runtime, &test_person_map, &person, buffer,
+                                     sizeof(buffer), &needed, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strstr(buffer, "\"name\":\"Dynamic\"") != NULL);
+  EXPECT(strstr(buffer, "\"lucky_numbers\":[7]") != NULL);
+  EXPECT(strstr(buffer, "\"tags\":[\"blue\"]") != NULL);
+  EXPECT(strstr(buffer, "\"items\":[{\"id\":9,\"label\":\"nine\"}]") != NULL);
+
+  lonejson_cleanup(&test_person_map, &person);
+  lonejson_free(runtime);
+}
+
 static void test_msan_public_boundary_results_are_initialized(void) {
   static const unsigned char input[] = "abcdef";
   static const char alloc_json[] =

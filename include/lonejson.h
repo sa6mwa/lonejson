@@ -5252,6 +5252,60 @@ void lonejson_init(lonejson *runtime, const lonejson_map *map, void *value);
 /** Clears a mapped value while preserving caller-owned fixed-capacity array
  * backing storage. */
 void lonejson_reset(lonejson *runtime, const lonejson_map *map, void *value);
+/** Returns non-zero when a field uses a presence flag. Dynamic language
+ * bindings can use this to mirror lonejson's nullable scalar semantics without
+ * including private implementation headers.
+ */
+int lonejson_field_has_presence(const lonejson_field *field);
+/** Sets or clears a field presence flag when the field has one. No-op for
+ * fields without presence storage.
+ */
+void lonejson_field_set_presence(void *record, const lonejson_field *field,
+                                 int present);
+/** Assigns JSON null semantics to one field in an initialized mapped record. */
+lonejson_status lonejson_record_assign_null(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_error *error);
+/** Assigns one decoded string value to a string field in an initialized mapped
+ * record, applying fixed-capacity overflow and allocation limits.
+ */
+lonejson_status lonejson_record_assign_string(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, const char *data, size_t len,
+    lonejson_error *error);
+/** Appends one decoded string item to a mapped string array field. */
+lonejson_status lonejson_record_array_append_string(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_string_array *array,
+    const char *data, size_t len, lonejson_error *error);
+/** Appends one signed integer item to a mapped i64 array field. */
+lonejson_status lonejson_record_array_append_i64(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_i64_array *array,
+    lonejson_int64 value, lonejson_error *error);
+/** Appends one unsigned integer item to a mapped u64 array field. */
+lonejson_status lonejson_record_array_append_u64(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_u64_array *array,
+    lonejson_uint64 value, lonejson_error *error);
+/** Appends one number item to a mapped f64 array field. */
+lonejson_status lonejson_record_array_append_f64(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_f64_array *array, double value,
+    lonejson_error *error);
+/** Appends one boolean item to a mapped bool array field. */
+lonejson_status lonejson_record_array_append_bool(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_bool_array *array, int value,
+    lonejson_error *error);
+/** Appends one uninitialized slot to a mapped object array field and returns
+ * the slot pointer. The caller should initialize/populate it with the field's
+ * submap before serialization.
+ */
+void *lonejson_record_object_array_append_slot(
+    lonejson *runtime, const lonejson_map *map, void *record,
+    const lonejson_field *field, lonejson_object_array *array,
+    lonejson_error *error);
 
 #ifdef LONEJSON_WITH_CURL
 #include <curl/curl.h>
