@@ -346,6 +346,11 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${LONEJSON_LUA_EXECUTABLE}"
         "${LONEJSON_LUAROCKS_EXECUTABLE}")
+    add_test(
+      NAME lonejson_lua_rock_makefile_deps_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_rock_makefile_deps.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
   if(LONEJSON_BASH_EXECUTABLE)
     add_test(
