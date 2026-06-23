@@ -3,10 +3,16 @@ cmake_minimum_required(VERSION 3.21)
 execute_process(
   COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release_version.sh"
   OUTPUT_VARIABLE LONEJSON_RESOLVED_VERSION
+  ERROR_VARIABLE LONEJSON_VERSION_ERROR
+  RESULT_VARIABLE LONEJSON_VERSION_RESULT
   OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_STRIP_TRAILING_WHITESPACE
 )
-if(NOT LONEJSON_RESOLVED_VERSION)
-  set(LONEJSON_RESOLVED_VERSION "0.0.0")
+if(NOT LONEJSON_VERSION_RESULT EQUAL 0 OR NOT LONEJSON_RESOLVED_VERSION)
+  if(NOT LONEJSON_VERSION_ERROR)
+    set(LONEJSON_VERSION_ERROR "version resolver produced no version")
+  endif()
+  message(FATAL_ERROR "${LONEJSON_VERSION_ERROR}")
 endif()
 
 project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
@@ -390,6 +396,12 @@ if(LONEJSON_BUILD_TESTS)
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_sanitizer_conflicts.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_source_release_tarball_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_source_release_tarball.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_COMMAND}")
     add_test(
       NAME lonejson_lua_src_rock_privacy_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
