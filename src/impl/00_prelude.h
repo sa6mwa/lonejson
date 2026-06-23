@@ -304,6 +304,7 @@ struct lonejson_parser {
   lonejson_uint64 required_masks[LONEJSON__MAP_MASK_CACHE_SIZE];
   lonejson_json_value *json_stream_value;
   int json_stream_active;
+  int json_stream_parse_visitor_active;
   int json_stream_visit_active;
   int json_stream_path_visit_active;
   int json_stream_sink_active;

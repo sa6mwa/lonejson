@@ -288,6 +288,7 @@ static void lonejson__parser_init_state(
   parser->direct_string_field = NULL;
   parser->json_stream_value = NULL;
   parser->json_stream_active = 0;
+  parser->json_stream_parse_visitor_active = 0;
   parser->json_stream_visit_active = 0;
   parser->json_stream_sink_active = 0;
   parser->json_stream_depth = 0u;
@@ -346,6 +347,7 @@ static void lonejson__parser_restart_stream(lonejson_parser *parser,
   parser->stream_base64_saw_padding = 0;
   parser->json_stream_value = NULL;
   parser->json_stream_active = 0;
+  parser->json_stream_parse_visitor_active = 0;
   parser->json_stream_visit_active = 0;
   parser->json_stream_path_visit_active = 0;
   parser->json_stream_sink_active = 0;
