@@ -28,7 +28,7 @@ option(LONEJSON_ENABLE_TSAN "Enable ThreadSanitizer." OFF)
 option(LONEJSON_ENABLE_MSAN "Enable MemorySanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "16" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "17" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")

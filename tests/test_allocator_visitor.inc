@@ -999,15 +999,39 @@ static void test_path_value_visitor_source_entry_points_and_args(void) {
   const char *json = "{\"a\":[true]}";
   lonejson_path_value_visitor visitor = test_path_value_visitor();
   test_path_visit_state state;
+  test_reader_state reader_state;
+  lonejson *runtime;
   lonejson_error error;
   lonejson_status status;
   char path[] = "/tmp/lonejson-path-value-visitor-XXXXXX";
   int fd;
   FILE *fp;
 
+  runtime = test_default_runtime();
   memset(&state, 0, sizeof(state));
-  status = lonejson_visit_path_value_buffer(test_default_runtime(), json,
-                                            strlen(json), &visitor, &state,
+  status = lonejson_visit_path_value_buffer(runtime, json, strlen(json),
+                                            &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+
+  memset(&state, 0, sizeof(state));
+  status = runtime->visit_path_value_buffer(runtime, json, strlen(json),
+                                            &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+
+  memset(&state, 0, sizeof(state));
+  status =
+      runtime->visit_path_value_cstr(runtime, json, &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+
+  reader_state.json = json;
+  reader_state.offset = 0u;
+  reader_state.chunk_size = 2u;
+  memset(&state, 0, sizeof(state));
+  status = runtime->visit_path_value_reader(runtime, test_state_reader,
+                                            &reader_state, &visitor, &state,
                                             &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
@@ -1023,6 +1047,12 @@ static void test_path_value_visitor_source_entry_points_and_args(void) {
       memset(&state, 0, sizeof(state));
       status = lonejson_visit_path_value_filep(test_default_runtime(), fp,
                                                &visitor, &state, &error);
+      EXPECT(status == LONEJSON_STATUS_OK);
+      EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+      EXPECT(fseek(fp, 0L, SEEK_SET) == 0);
+      memset(&state, 0, sizeof(state));
+      status = runtime->visit_path_value_filep(runtime, fp, &visitor, &state,
+                                               &error);
       EXPECT(status == LONEJSON_STATUS_OK);
       EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
       fclose(fp);
@@ -1042,6 +1072,11 @@ static void test_path_value_visitor_source_entry_points_and_args(void) {
                                             &visitor, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
     EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+    memset(&state, 0, sizeof(state));
+    status =
+        runtime->visit_path_value_path(runtime, path, &visitor, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
     unlink(path);
   }
 
@@ -1053,6 +1088,12 @@ static void test_path_value_visitor_source_entry_points_and_args(void) {
     memset(&state, 0, sizeof(state));
     status = lonejson_visit_path_value_fd(test_default_runtime(), fd, &visitor,
                                           &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+    EXPECT(lseek(fd, 0, SEEK_SET) == 0);
+    memset(&state, 0, sizeof(state));
+    status =
+        runtime->visit_path_value_fd(runtime, fd, &visitor, &state, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
     EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
     close(fd);

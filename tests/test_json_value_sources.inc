@@ -1322,6 +1322,47 @@ static void test_json_value_parse_path_visitor_paths(void) {
   lonejson_cleanup(&test_json_value_doc_map, &doc);
 }
 
+static void test_json_value_parse_path_visitor_zero_depth(void) {
+  const char *json =
+      "{\"id\":\"path-depth\","
+      "\"selector\":{\"outer\":{\"items\":[{\"sku\":\"ABC\"},null]}}}";
+  lonejson_config config;
+  lonejson *runtime;
+  test_json_value_doc doc;
+  lonejson_error error;
+  lonejson_status status;
+  test_json_value_path_visit_state state;
+  lonejson_path_value_visitor visitor;
+
+  config = lonejson_default_config();
+  config.clear_destination_by_default = 0;
+  config.json_value_max_depth = 0u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+
+  memset(&state, 0, sizeof(state));
+  visitor = test_json_value_path_visitor();
+  poison_bytes(&doc, sizeof(doc), 0xD2u);
+  lonejson_init(runtime, &test_json_value_doc_map, &doc);
+  status = lonejson_json_value_set_parse_path_visitor(&doc.selector, &visitor,
+                                                      &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_parse_cstr(runtime, &test_json_value_doc_map, &doc, json,
+                               &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strstr(state.log,
+                "S<($/5:outer/5:items/1:0/3:sku)S($/5:outer/5:items/1:0/"
+                "3:sku)=ABCS>($/5:outer/5:items/1:0/3:sku)") != NULL);
+  EXPECT(strstr(state.log, "Z($/5:outer/5:items/1:1)") != NULL);
+  EXPECT(state.mismatched_chunk_paths == 0u);
+
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
+  lonejson_free(runtime);
+}
+
 static void test_json_value_parse_path_visitor_failure_cleanup(void) {
   const char *long_key_json =
       "{\"id\":\"path-fail\",\"selector\":{\"abcdefghijklmnopqrstuvwxyzabcdef"

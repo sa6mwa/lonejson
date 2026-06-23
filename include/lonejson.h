@@ -492,7 +492,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 16
+#define LONEJSON_ABI_VERSION 17
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -1993,6 +1993,47 @@ struct lonejson {
   lonejson_status (*visit_value_fd)(lonejson *runtime, int fd,
                                     const lonejson_value_visitor *visitor,
                                     void *user, lonejson_error *error);
+  /** Visits exactly one JSON value from a caller-owned buffer with path-aware
+   * callbacks.
+   */
+  lonejson_status (*visit_path_value_buffer)(
+      lonejson *runtime, const void *data, size_t len,
+      const lonejson_path_value_visitor *visitor, void *user,
+      lonejson_error *error);
+  /** Visits exactly one JSON value from a NUL-terminated string with
+   * path-aware callbacks.
+   */
+  lonejson_status (*visit_path_value_cstr)(
+      lonejson *runtime, const char *json,
+      const lonejson_path_value_visitor *visitor, void *user,
+      lonejson_error *error);
+  /** Visits exactly one JSON value from a reader callback with path-aware
+   * callbacks.
+   */
+  lonejson_status (*visit_path_value_reader)(
+      lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+      const lonejson_path_value_visitor *visitor, void *user,
+      lonejson_error *error);
+  /** Visits exactly one JSON value from an open `FILE *` with path-aware
+   * callbacks.
+   */
+  lonejson_status (*visit_path_value_filep)(
+      lonejson *runtime, FILE *fp,
+      const lonejson_path_value_visitor *visitor, void *user,
+      lonejson_error *error);
+  /** Visits exactly one JSON value from a filesystem path with path-aware
+   * callbacks.
+   */
+  lonejson_status (*visit_path_value_path)(
+      lonejson *runtime, const char *path,
+      const lonejson_path_value_visitor *visitor, void *user,
+      lonejson_error *error);
+  /** Visits exactly one JSON value from a file descriptor with path-aware
+   * callbacks.
+   */
+  lonejson_status (*visit_path_value_fd)(
+      lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
+      void *user, lonejson_error *error);
   /** Initializes a mapped value according to one schema. */
   void (*init)(lonejson *runtime, const lonejson_map *map, void *value);
   /** Resets a mapped value while preserving caller-owned fixed backing. */

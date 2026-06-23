@@ -697,7 +697,20 @@ lonejson__json_value_path_ensure(lonejson_parser *parser) {
     return LONEJSON_STATUS_OK;
   }
   value = parser->json_stream_value;
-  capacity = value->parse_visitor_limits.max_depth + 1u;
+  capacity = value->parse_visitor_limits.max_depth;
+  if (capacity == 0u) {
+    capacity = parser->options.max_depth;
+  }
+  if (capacity == 0u) {
+    capacity = parser->workspace_size / sizeof(lonejson_frame);
+  }
+  if (capacity > ((size_t)-1) - 1u) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "JSON path visitor depth exceeds size limit");
+  }
+  ++capacity;
   parser->json_stream_path_segments =
       (lonejson_path_segment *)lonejson__owned_malloc_parse(
           parser, capacity * sizeof(*parser->json_stream_path_segments));

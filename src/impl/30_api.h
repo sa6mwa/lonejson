@@ -720,6 +720,28 @@ static lonejson_status
 lonejson__runtime_visit_value_fd(lonejson *runtime, int fd,
                                  const lonejson_value_visitor *visitor,
                                  void *user, lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_path_value_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_path_value_cstr(
+    lonejson *runtime, const char *json,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_path_value_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_path_value_filep(
+    lonejson *runtime, FILE *fp, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_path_value_path(
+    lonejson *runtime, const char *path,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error);
+static lonejson_status lonejson__runtime_visit_path_value_fd(
+    lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error);
 static void lonejson__runtime_init_value(lonejson *runtime,
                                          const lonejson_map *map, void *value);
 static void lonejson__runtime_reset_value(lonejson *runtime,
@@ -984,6 +1006,14 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
   runtime->visit_value_filep = lonejson__runtime_visit_value_filep;
   runtime->visit_value_path = lonejson__runtime_visit_value_path;
   runtime->visit_value_fd = lonejson__runtime_visit_value_fd;
+  runtime->visit_path_value_buffer =
+      lonejson__runtime_visit_path_value_buffer;
+  runtime->visit_path_value_cstr = lonejson__runtime_visit_path_value_cstr;
+  runtime->visit_path_value_reader =
+      lonejson__runtime_visit_path_value_reader;
+  runtime->visit_path_value_filep = lonejson__runtime_visit_path_value_filep;
+  runtime->visit_path_value_path = lonejson__runtime_visit_path_value_path;
+  runtime->visit_path_value_fd = lonejson__runtime_visit_path_value_fd;
   runtime->init = lonejson__runtime_init_value;
   runtime->reset = lonejson__runtime_reset_value;
   runtime->cleanup = lonejson__runtime_cleanup_value;
@@ -1695,6 +1725,48 @@ lonejson__runtime_visit_value_fd(lonejson *runtime, int fd,
                                  const lonejson_value_visitor *visitor,
                                  void *user, lonejson_error *error) {
   return lonejson_visit_value_fd(runtime, fd, visitor, user, error);
+}
+
+static lonejson_status lonejson__runtime_visit_path_value_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  return lonejson_visit_path_value_buffer(runtime, data, len, visitor, user,
+                                         error);
+}
+
+static lonejson_status lonejson__runtime_visit_path_value_cstr(
+    lonejson *runtime, const char *json,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  return lonejson_visit_path_value_cstr(runtime, json, visitor, user, error);
+}
+
+static lonejson_status lonejson__runtime_visit_path_value_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  return lonejson_visit_path_value_reader(runtime, reader, reader_user, visitor,
+                                         user, error);
+}
+
+static lonejson_status lonejson__runtime_visit_path_value_filep(
+    lonejson *runtime, FILE *fp, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error) {
+  return lonejson_visit_path_value_filep(runtime, fp, visitor, user, error);
+}
+
+static lonejson_status lonejson__runtime_visit_path_value_path(
+    lonejson *runtime, const char *path,
+    const lonejson_path_value_visitor *visitor, void *user,
+    lonejson_error *error) {
+  return lonejson_visit_path_value_path(runtime, path, visitor, user, error);
+}
+
+static lonejson_status lonejson__runtime_visit_path_value_fd(
+    lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error) {
+  return lonejson_visit_path_value_fd(runtime, fd, visitor, user, error);
 }
 
 static void lonejson__runtime_init_value(lonejson *runtime,

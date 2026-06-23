@@ -1027,6 +1027,12 @@ static void test_runtime_defaults_and_method_dispatch(void) {
   EXPECT(lj->visit_value_filep != NULL);
   EXPECT(lj->visit_value_path != NULL);
   EXPECT(lj->visit_value_fd != NULL);
+  EXPECT(lj->visit_path_value_buffer != NULL);
+  EXPECT(lj->visit_path_value_cstr != NULL);
+  EXPECT(lj->visit_path_value_reader != NULL);
+  EXPECT(lj->visit_path_value_filep != NULL);
+  EXPECT(lj->visit_path_value_path != NULL);
+  EXPECT(lj->visit_path_value_fd != NULL);
   EXPECT(lj->init != NULL);
   EXPECT(lj->reset != NULL);
   EXPECT(lj->stream_open_reader != NULL);
