@@ -330,21 +330,24 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_legacy_uservalue.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
+        "${LONEJSON_LUAROCKS_EXECUTABLE}"
+        "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(
       NAME lonejson_lua_schema_cache_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
+        "${LONEJSON_LUAROCKS_EXECUTABLE}"
+        "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(
       NAME lonejson_lua_encode_stats_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
+        "${LONEJSON_LUAROCKS_EXECUTABLE}"
+        "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(
       NAME lonejson_lua_external_liblonejson_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"

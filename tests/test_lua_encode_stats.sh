@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root=$1
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}
+libdir=${4:-"$repo_root/build/debug"}
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -113,11 +114,11 @@ EOF
   ./scripts/render_release_rockspec.sh \
     "0.0.0" "$rockspec" "git+file://$repo_root" "" "$lib_ext"
   CFLAGS="${CFLAGS:+$CFLAGS }-DLONEJSON_TEST_LUA_ENCODE_STATS=1" \
-  LONEJSON_LIBDIR="$repo_root/build/debug" \
+  LONEJSON_LIBDIR="$libdir" \
     "$luarocks_exec" make --tree "$rock_tree" "$rockspec" >/dev/null
 )
 
 eval "$("$luarocks_exec" path --tree "$rock_tree")"
-export LD_LIBRARY_PATH="$repo_root/build/debug:${LD_LIBRARY_PATH:-}"
-export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$libdir:${LD_LIBRARY_PATH:-}"
+export DYLD_LIBRARY_PATH="$libdir:${DYLD_LIBRARY_PATH:-}"
 "$lua_exec" "$test_lua"
