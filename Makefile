@@ -340,6 +340,8 @@ bench-compare:
 bench-baseline-history:
 	@$(MAKE) --no-print-directory lua-rock >/dev/null
 	@eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && \
+		LD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${LD_LIBRARY_PATH:-}" \
+		DYLD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${DYLD_LIBRARY_PATH:-}" \
 		$(LUA) scripts/bench_baseline_history.lua --repo "$(CURDIR)"
 
 bench-gate:
