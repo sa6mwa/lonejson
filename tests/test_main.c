@@ -288,6 +288,9 @@ int main(void) {
   test_path_value_visitor_reader_chunk_paths();
   test_path_value_visitor_failure_cleans_state();
   test_path_value_visitor_short_keys_do_not_allocate_per_event();
+  test_path_value_visitor_empty_and_numeric_segments();
+  test_path_value_visitor_source_entry_points_and_args();
+  test_path_value_visitor_limit_failures_cleanup();
   test_visit_value_reader_rejects_would_block();
   test_visit_value_success_clears_error();
   test_custom_allocator_parse_cleanup_and_stream();

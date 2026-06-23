@@ -975,6 +975,157 @@ static void test_runtime_allocator_visit_value_buffer_and_cstr(void) {
   lonejson_free(runtime);
 }
 
+static void test_path_value_visitor_empty_and_numeric_segments(void) {
+  const char *json = "{\"\":{\"0\":[\"x\"]}}";
+  lonejson_path_value_visitor visitor = test_path_value_visitor();
+  test_path_visit_state state;
+  lonejson_error error;
+  lonejson_status status;
+
+  memset(&state, 0, sizeof(state));
+  status = lonejson_visit_path_value_cstr(test_default_runtime(), json,
+                                          &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strstr(state.log, "K<($)") != NULL);
+  EXPECT(strstr(state.log, "K>($)") != NULL);
+  EXPECT(strstr(state.log, "{($/0:)") != NULL);
+  EXPECT(strstr(state.log, "K($/0:)=0") != NULL);
+  EXPECT(strstr(state.log, "[($/0:/1:0)") != NULL);
+  EXPECT(strstr(state.log, "S($/0:/1:0/1:0)=x") != NULL);
+  EXPECT(state.mismatched_chunk_paths == 0u);
+}
+
+static void test_path_value_visitor_source_entry_points_and_args(void) {
+  const char *json = "{\"a\":[true]}";
+  lonejson_path_value_visitor visitor = test_path_value_visitor();
+  test_path_visit_state state;
+  lonejson_error error;
+  lonejson_status status;
+  char path[] = "/tmp/lonejson-path-value-visitor-XXXXXX";
+  int fd;
+  FILE *fp;
+
+  memset(&state, 0, sizeof(state));
+  status = lonejson_visit_path_value_buffer(test_default_runtime(), json,
+                                            strlen(json), &visitor, &state,
+                                            &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+
+  strcpy(path, "/tmp/lonejson-path-value-visitor-XXXXXX");
+  fd = write_temp_text_file(path, json);
+  EXPECT(fd >= 0);
+  if (fd >= 0) {
+    fp = fdopen(fd, "rb");
+    EXPECT(fp != NULL);
+    if (fp != NULL) {
+      EXPECT(fseek(fp, 0L, SEEK_SET) == 0);
+      memset(&state, 0, sizeof(state));
+      status = lonejson_visit_path_value_filep(test_default_runtime(), fp,
+                                               &visitor, &state, &error);
+      EXPECT(status == LONEJSON_STATUS_OK);
+      EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+      fclose(fp);
+    } else {
+      close(fd);
+    }
+    unlink(path);
+  }
+
+  strcpy(path, "/tmp/lonejson-path-value-visitor-XXXXXX");
+  fd = write_temp_text_file(path, json);
+  EXPECT(fd >= 0);
+  if (fd >= 0) {
+    close(fd);
+    memset(&state, 0, sizeof(state));
+    status = lonejson_visit_path_value_path(test_default_runtime(), path,
+                                            &visitor, &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+    unlink(path);
+  }
+
+  strcpy(path, "/tmp/lonejson-path-value-visitor-XXXXXX");
+  fd = write_temp_text_file(path, json);
+  EXPECT(fd >= 0);
+  if (fd >= 0) {
+    EXPECT(lseek(fd, 0, SEEK_SET) == 0);
+    memset(&state, 0, sizeof(state));
+    status = lonejson_visit_path_value_fd(test_default_runtime(), fd, &visitor,
+                                          &state, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
+    close(fd);
+    unlink(path);
+  }
+
+  status = lonejson_visit_path_value_cstr(test_default_runtime(), json, NULL,
+                                          &state, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  status = lonejson_visit_path_value_buffer(test_default_runtime(), NULL, 0u,
+                                            &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  status = lonejson_visit_path_value_reader(test_default_runtime(), NULL, NULL,
+                                            &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  status = lonejson_visit_path_value_filep(test_default_runtime(), NULL,
+                                           &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  status = lonejson_visit_path_value_path(test_default_runtime(), NULL,
+                                          &visitor, &state, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+  status = lonejson_visit_path_value_fd(test_default_runtime(), -1, &visitor,
+                                        &state, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+}
+
+static void test_path_value_visitor_limit_failures_cleanup(void) {
+  const char *deep = "{\"a\":[{\"b\":true}]}";
+  const char *long_key = "{\"long-key\":true}";
+  lonejson_path_value_visitor visitor = test_path_value_visitor();
+  test_allocator_state alloc;
+  lonejson_config config;
+  lonejson *runtime;
+  test_path_visit_state state;
+  lonejson_error error;
+  lonejson_status status;
+  size_t base_live;
+
+  test_allocator_init(&alloc);
+  config = lonejson_default_config();
+  config.allocator = &alloc.allocator;
+  config.json_value_max_depth = 2u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+  base_live = alloc.stats.bytes_live;
+  memset(&state, 0, sizeof(state));
+  status = lonejson_visit_path_value_cstr(runtime, deep, &visitor, &state,
+                                          &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(alloc.stats.bytes_live == base_live);
+  lonejson_free(runtime);
+
+  test_allocator_init(&alloc);
+  config = lonejson_default_config();
+  config.allocator = &alloc.allocator;
+  config.json_value_max_key_bytes = 4u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+  base_live = alloc.stats.bytes_live;
+  memset(&state, 0, sizeof(state));
+  status = lonejson_visit_path_value_cstr(runtime, long_key, &visitor, &state,
+                                          &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(alloc.stats.bytes_live == base_live);
+  lonejson_free(runtime);
+}
+
 static void test_runtime_allocator_value_rewrite_reader(void) {
   char json[512];
   char number[400];
