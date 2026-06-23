@@ -140,6 +140,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	release \
 	lua-rock \
 	lua-test \
+	lua-fuzz \
 	lua-bench \
 	lua-bench-freeze-baseline \
 	lua-bench-compare \
@@ -193,6 +194,7 @@ help:
 		'make release-darwin-smoke-bundle Build the Darwin smoke ZIP with example and link-smoke binaries.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
 		'make lua-test               Build the Lua module and run the Lua integration test.' \
+		'make lua-fuzz               Build the Lua module and run the Lua randomized binding fuzz smoke.' \
 		'make lua-bench              Run the standalone Lua benchmark harness, compare it, and enforce the Lua benchmark gate.' \
 		'make lua-bench-freeze-baseline Freeze the last Lua benchmark history entry as the Lua baseline.' \
 		'make lua-bench-compare      Run a fresh Lua benchmark, then compare against the committed Lua baseline.' \
@@ -212,8 +214,8 @@ help:
 		'make asan                   Build and run the ASan/UBSan preset.' \
 		'make tsan                   Build the TSan preset and run the pure-C CTest subset that does not depend on external unsanitized runtimes.' \
 		'make msan                   Build the MSan preset and run the pure-C CTest subset that does not depend on external unsanitized runtimes.' \
-		'make fuzz-smoke             Build all libFuzzer targets and run a seeded 1s smoke pass for each.' \
-		'make fuzz                   Build all libFuzzer targets and run a seeded 30s pass for each with explicit large-input caps; missing large synthetic seeds are regenerated automatically.' \
+		'make fuzz-smoke             Build all libFuzzer targets, run a seeded 1s smoke pass for each, and run Lua binding fuzz smoke.' \
+		'make fuzz                   Build all libFuzzer targets, run a seeded 30s pass for each with explicit large-input caps, and run Lua binding fuzz smoke; missing large synthetic seeds are regenerated automatically.' \
 		'make fuzz-long              Run the same fuzz targets with a several-minute soak per target.' \
 		'make stack-usage            Build with compiler stack-usage reporting and print the report.' \
 		'make format                 Run clang-format over the C sources.' \
@@ -418,6 +420,9 @@ $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES) $(LUA_ROCK_LIBLONEJSON_SO
 
 lua-test: lua-rock
 	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && LD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) tests/test_lua.lua
+	$(MAKE) lua-fuzz
+
+lua-fuzz: lua-rock
 	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && LD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) tests/test_lua_fuzz.lua
 
 lua-bench:
@@ -557,6 +562,7 @@ fuzz:
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_fixed_string_paths -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_FIXED_STRING_PATHS_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/fixed_string_paths/ "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)/fixed_string_paths"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_alloc_ceiling -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ALLOC_CEILING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/alloc_ceiling/ "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)/alloc_ceiling"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_parser_boundaries -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PARSER_BOUNDARIES_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/parser_boundaries/ "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)/parser_boundaries"
+	$(MAKE) lua-fuzz
 
 fuzz-long:
 	$(MAKE) fuzz FUZZ_TIME=$(FUZZ_LONG_TIME)

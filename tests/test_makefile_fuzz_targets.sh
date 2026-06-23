@@ -4,13 +4,15 @@ set -euo pipefail
 repo_root=$1
 
 dry_run=$(make --no-print-directory -C "$repo_root" -n fuzz FUZZ_TIME=0)
+lua_dry_run=$(make --no-print-directory -C "$repo_root" -n lua-fuzz)
 
 require_line() {
   local pattern=$1
   local message=$2
+  local output=${3:-$dry_run}
 
-  if ! printf '%s\n' "$dry_run" | grep -F -- "$pattern" >/dev/null; then
-    printf '%s\n' "$dry_run" >&2
+  if ! printf '%s\n' "$output" | grep -F -- "$pattern" >/dev/null; then
+    printf '%s\n' "$output" >&2
     printf '%s\n' "$message" >&2
     exit 1
   fi
@@ -24,3 +26,8 @@ require_line 'fuzz/corpus/path_value_visitor/.' \
   'make fuzz does not copy the path value visitor seed corpus'
 require_line 'artifacts/path_value_visitor' \
   'make fuzz does not prepare path value visitor artifacts'
+require_line 'make lua-fuzz' \
+  'make fuzz does not run the Lua binding fuzz smoke'
+require_line 'tests/test_lua_fuzz.lua' \
+  'make lua-fuzz does not run the Lua randomized binding fuzz script' \
+  "$lua_dry_run"
