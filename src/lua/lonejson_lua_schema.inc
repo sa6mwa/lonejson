@@ -4,14 +4,12 @@ static lonejson_uint64 ljlua_next_map_cookie(void) {
   static unsigned int counter = 1u;
   unsigned int value;
 
-  LONEJSON__RUNTIME_HANDLE_LOCK_ACQUIRE();
   value = ++counter;
   if (value == 0u ||
-      value == (unsigned int)(LONEJSON__MAP_COOKIE_VALUE & 0xffffffffu)) {
+      value == (unsigned int)(LONEJSON_MAP_COOKIE_VALUE & 0xffffffffu)) {
     value = ++counter;
   }
-  LONEJSON__RUNTIME_HANDLE_LOCK_RELEASE();
-  return (LONEJSON__MAP_COOKIE_VALUE & ~((lonejson_uint64)0xffffffffu)) |
+  return (LONEJSON_MAP_COOKIE_VALUE & ~((lonejson_uint64)0xffffffffu)) |
          ((lonejson_uint64)value & 0xffffffffu);
 }
 
@@ -77,8 +75,8 @@ static int ljlua_field_kind_is_nullable_primitive(ljlua_field_kind kind) {
          kind == LJLUA_FIELD_F64 || kind == LJLUA_FIELD_BOOL;
 }
 
-static int ljlua_compile_field(lua_State *L, lonejson *runtime, int index,
-                               ljlua_field_meta *meta);
+static int ljlua_compile_field(lua_State *L, ljlua_runtime_ud *runtime_ud,
+                               int index, ljlua_field_meta *meta);
 static int ljlua_finalize_schema(ljlua_schema *schema);
 static FILE *ljlua_check_file(lua_State *L, int index);
 static ljlua_path_ud *ljlua_check_path(lua_State *L, int index);
@@ -117,7 +115,7 @@ static int ljlua_check_fd_like(lua_State *L, int index) {
   return fileno(ljlua_check_file(L, index));
 }
 
-static int ljlua_compile_nested_schema(lua_State *L, lonejson *runtime,
+static int ljlua_compile_nested_schema(lua_State *L, ljlua_runtime_ud *runtime_ud,
                                        int index, ljlua_schema **out_schema) {
   ljlua_schema *schema;
   size_t count;
@@ -129,7 +127,8 @@ static int ljlua_compile_nested_schema(lua_State *L, lonejson *runtime,
   if (schema == NULL) {
     return luaL_error(L, "failed to allocate schema");
   }
-  schema->runtime = runtime;
+  schema->runtime = runtime_ud->runtime;
+  schema->runtime_ud = runtime_ud;
   schema->name = ljlua_strdup("nested");
   schema->map.name = schema->name;
   schema->field_count = count;
@@ -145,7 +144,7 @@ static int ljlua_compile_nested_schema(lua_State *L, lonejson *runtime,
   }
   for (i = 0u; i < count; ++i) {
     lua_rawgeti(L, index, (lua_Integer)i + 1);
-    if (ljlua_compile_field(L, runtime, lua_gettop(L), &schema->metas[i]) !=
+    if (ljlua_compile_field(L, runtime_ud, lua_gettop(L), &schema->metas[i]) !=
         0) {
       lua_pop(L, 1);
       ljlua_schema_destroy(schema);
@@ -158,7 +157,8 @@ static int ljlua_compile_nested_schema(lua_State *L, lonejson *runtime,
   return 0;
 }
 
-static int ljlua_compile_field(lua_State *L, lonejson *runtime, int index,
+static int ljlua_compile_field(lua_State *L, ljlua_runtime_ud *runtime_ud,
+                               int index,
                                ljlua_field_meta *meta) {
   const char *kind_name;
   int nullable;
@@ -253,7 +253,7 @@ static int ljlua_compile_field(lua_State *L, lonejson *runtime, int index,
   case LJLUA_FIELD_JSON_VALUE:
     meta->field.kind = LONEJSON_FIELD_KIND_JSON_VALUE;
     meta->field.storage = LONEJSON_STORAGE_FIXED;
-    meta->field.flags |= LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE;
+    meta->field.flags |= LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE;
     break;
   case LJLUA_FIELD_I64:
     meta->field.kind = LONEJSON_FIELD_KIND_I64;
@@ -274,7 +274,7 @@ static int ljlua_compile_field(lua_State *L, lonejson *runtime, int index,
   case LJLUA_FIELD_OBJECT:
   case LJLUA_FIELD_OBJECT_ARRAY:
     lua_getfield(L, index, "fields");
-    if (ljlua_compile_nested_schema(L, runtime, lua_gettop(L),
+    if (ljlua_compile_nested_schema(L, runtime_ud, lua_gettop(L),
                                     &meta->subschema) != 0) {
       lua_pop(L, 1);
       return 1;
@@ -421,7 +421,7 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
       meta->fixed_array_offset = offset;
       offset += bytes;
     }
-    if (lonejson__field_has_presence(&meta->field)) {
+    if (lonejson_field_has_presence(&meta->field)) {
       offset = ljlua_align(offset, sizeof(int));
       meta->field.presence_offset = offset;
       schema->fields[i].presence_offset = offset;
@@ -558,8 +558,7 @@ static void ljlua_prepare_record_storage(ljlua_schema *schema, void *record) {
       break;
     }
   }
-  lonejson__init_map_with_allocator(&schema->map, record, NULL,
-                                    lonejson__runtime_const(schema->runtime));
+  lonejson_init(schema->runtime, &schema->map, record);
 }
 
 static ljlua_schema_ud *ljlua_check_schema(lua_State *L, int index) {

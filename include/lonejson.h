@@ -509,6 +509,8 @@ extern "C" {
 #define LONEJSON_FIELD_ACCEPT_NULL (1u << 4)
 /* Internal-only flag used by implementation-generated maps. */
 #define LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE (1u << 31)
+#define LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE                             \
+  LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE
 
 /** Internal/runtime flag indicating that an array container owns its backing
  * allocation. */
@@ -1251,6 +1253,7 @@ struct lonejson_field {
                        : '\0'))
 #define LONEJSON__MAP_COOKIE_VALUE                                             \
   ((((lonejson_uint64)0x4c4a4d41u) << 32) | (lonejson_uint64)0x50434143u)
+#define LONEJSON_MAP_COOKIE_VALUE LONEJSON__MAP_COOKIE_VALUE
 #define LONEJSON__MAP_STATIC_COOKIE(line, struct_size, field_count)            \
   (LONEJSON__MAP_COOKIE_VALUE ^                                                \
    (((lonejson_uint64)(line) & (lonejson_uint64)0xffffu) << 48u) ^             \

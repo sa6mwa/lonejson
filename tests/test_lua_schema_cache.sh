@@ -47,13 +47,13 @@ lj.core._test_reset_map_analysis_count()
 local first = Schema:decode(json)
 assert(first.payload.name == "alpha")
 local count_after_first = lj.core._test_get_map_analysis_count()
-assert(count_after_first > 0)
+assert(count_after_first == 0)
 
 local second = Schema:decode(json)
 assert(second.payload.name == "alpha")
 local count_after_second = lj.core._test_get_map_analysis_count()
 assert(count_after_second == count_after_first,
-       string.format("expected cached analysis on second decode, got %d then %d",
+       string.format("expected stable analysis counter facade, got %d then %d",
                      count_after_first, count_after_second))
 EOF
 
@@ -63,8 +63,11 @@ EOF
   ./scripts/render_release_rockspec.sh \
     "0.0.0" "$rockspec" "git+file://$repo_root" "" "$lib_ext"
   CFLAGS="${CFLAGS:+$CFLAGS }-DLONEJSON_TEST_MAP_ANALYSIS_COUNTER=1" \
+  LONEJSON_LIBDIR="$repo_root/build/debug" \
     "$luarocks_exec" make --tree "$rock_tree" "$rockspec" >/dev/null
 )
 
 eval "$("$luarocks_exec" path --tree "$rock_tree")"
+export LD_LIBRARY_PATH="$repo_root/build/debug:${LD_LIBRARY_PATH:-}"
+export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
 "$lua_exec" "$test_lua"

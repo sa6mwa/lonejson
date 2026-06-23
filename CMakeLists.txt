@@ -339,6 +339,13 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${LONEJSON_LUA_EXECUTABLE}"
         "${LONEJSON_LUAROCKS_EXECUTABLE}")
+    add_test(
+      NAME lonejson_lua_external_liblonejson_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_external_liblonejson.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${LONEJSON_LUA_EXECUTABLE}"
+        "${LONEJSON_LUAROCKS_EXECUTABLE}")
   endif()
   if(LONEJSON_BASH_EXECUTABLE)
     add_test(

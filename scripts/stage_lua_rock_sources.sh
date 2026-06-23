@@ -10,11 +10,6 @@ repo_root=$1
 stage_dir=$2
 release_version=$3
 
-mapfile -t impl_files < <(
-  cd "$repo_root"
-  find src/impl -maxdepth 1 -type f -name '*.h' | LC_ALL=C sort
-)
-
 files=(
   LICENSE
   README.md
@@ -22,10 +17,6 @@ files=(
   scripts/build_lua_rock.sh
   scripts/render_release_rockspec.sh
   include/lonejson.h
-  src/lonejson.c
-  src/lonejson_impl.h
-  src/lonejson_internal.h
-  "${impl_files[@]}"
   src/lua/lonejson_lua.c
   src/lua/lonejson_lua_module.inc
   src/lua/lonejson_lua_record.inc

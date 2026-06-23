@@ -98,15 +98,10 @@ static int ljlua_push_spool(lua_State *L, lonejson_spooled *spool, int kind,
     }
     return 1;
   }
-  lonejson_spooled_init_with_allocator(&ud->owned, NULL, NULL);
-  if (spool->memory_limit != 0u || spool->max_bytes != 0u ||
-      spool->temp_dir != NULL) {
-    lonejson__spool_options opts;
-    opts.memory_limit = spool->memory_limit;
-    opts.max_bytes = spool->max_bytes;
-    opts.temp_dir = spool->temp_dir;
-    lonejson_spooled_init_with_allocator(&ud->owned, &opts, NULL);
-  }
+  lonejson_spooled_init(NULL, &ud->owned);
+  ud->owned.memory_limit = spool->memory_limit;
+  ud->owned.max_bytes = spool->max_bytes;
+  ud->owned.temp_dir = spool->temp_dir;
   if (lonejson_spooled_rewind(spool, &error) != LONEJSON_STATUS_OK) {
     return luaL_error(L, "failed to rewind spool: %s", error.message);
   }
@@ -117,7 +112,7 @@ static int ljlua_push_spool(lua_State *L, lonejson_spooled *spool, int kind,
       return luaL_error(L, "failed to clone spool");
     }
     if (rr.bytes_read != 0u &&
-        lonejson__spooled_append(&ud->owned, buffer, rr.bytes_read, &error) !=
+        lonejson_spooled_append(&ud->owned, buffer, rr.bytes_read, &error) !=
             LONEJSON_STATUS_OK) {
       return luaL_error(L, "failed to clone spool: %s", error.message);
     }
@@ -135,7 +130,7 @@ static int ljlua_push_value(lua_State *L, ljlua_schema *schema, void *record,
                             ljlua_field_meta *meta, int owner_index);
 
 static int ljlua_field_is_nullable_presence(const ljlua_field_meta *meta) {
-  return meta != NULL && lonejson__field_has_presence(&meta->field) &&
+  return meta != NULL && lonejson_field_has_presence(&meta->field) &&
          (meta->field.flags & LONEJSON_FIELD_ACCEPT_NULL) != 0u;
 }
 
@@ -438,7 +433,7 @@ static void ljlua_cleanup_record_storage(ljlua_schema *schema, void *record) {
   if (schema == NULL || record == NULL) {
     return;
   }
-  lonejson__cleanup_map(&schema->map, record);
+  lonejson_cleanup(&schema->map, record);
 }
 
 static ljlua_field_meta *ljlua_find_meta(ljlua_schema *schema,
@@ -683,7 +678,7 @@ static int ljlua_assign_spool_from_lua(lua_State *L, lonejson_spooled *spool,
         return luaL_error(L, "failed to read spool source");
       }
       if (rr.bytes_read != 0u &&
-          lonejson__spooled_append(spool, buffer, rr.bytes_read, &error) !=
+          lonejson_spooled_append(spool, buffer, rr.bytes_read, &error) !=
               LONEJSON_STATUS_OK) {
         return luaL_error(L, "%s", error.message);
       }
@@ -695,12 +690,12 @@ static int ljlua_assign_spool_from_lua(lua_State *L, lonejson_spooled *spool,
   }
   data = luaL_checklstring(L, index, &len);
   if (kind == LJLUA_FIELD_SPOOLED_TEXT) {
-    if (lonejson__spooled_append(spool, (const unsigned char *)data, len,
+    if (lonejson_spooled_append(spool, (const unsigned char *)data, len,
                                  &error) != LONEJSON_STATUS_OK) {
       return luaL_error(L, "%s", error.message);
     }
   } else {
-    if (lonejson__spooled_append(spool, (const unsigned char *)data, len,
+    if (lonejson_spooled_append(spool, (const unsigned char *)data, len,
                                  &error) != LONEJSON_STATUS_OK) {
       return luaL_error(L, "%s", error.message);
     }
@@ -711,31 +706,22 @@ static int ljlua_assign_spool_from_lua(lua_State *L, lonejson_spooled *spool,
 static int ljlua_assign_table_to_record(lua_State *L, ljlua_schema *schema,
                                         void *record, int table_index);
 
-static void ljlua_init_helper_parser(lonejson_parser *parser) {
-  static const lonejson_map helper_map = {"lua-helper", 0u, NULL, 0u, NULL, 0u};
-  static unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
-
-  lonejson__parser_init_state(parser, &helper_map, NULL, NULL, NULL, 0, 0, 0,
-                              0u, workspace, sizeof(workspace));
-}
-
 static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
                                        void *record, ljlua_field_meta *meta,
                                        int value_index) {
   void *ptr;
+  lonejson_error error;
+  lonejson_status status;
   size_t i;
 
-  (void)schema;
   ptr = (unsigned char *)record + meta->field.struct_offset;
   if (lua_isnil(L, value_index) || (ljlua_field_is_nullable_presence(meta) &&
                                     ljlua_is_json_null(L, value_index))) {
-    lonejson_parser parser;
-
-    ljlua_init_helper_parser(&parser);
-    if (lonejson__assign_null(&parser, &meta->field, ptr) ==
-        LONEJSON_STATUS_OK) {
+    status = lonejson_record_assign_null(schema->runtime, &schema->map, record,
+                                         &meta->field, &error);
+    if (status == LONEJSON_STATUS_OK) {
       if (ljlua_field_is_nullable_presence(meta)) {
-        lonejson__field_set_presence(record, &meta->field, 0);
+        lonejson_field_set_presence(record, &meta->field, 0);
       }
       return 1;
     }
@@ -744,18 +730,13 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
   case LJLUA_FIELD_STRING: {
     size_t len;
     const char *text = luaL_checklstring(L, value_index, &len);
-    lonejson_error error;
-    lonejson_parser parser;
-    unsigned char workspace[LONEJSON_PARSER_BUFFER_SIZE];
 
-    lonejson__parser_init_state(&parser, &schema->map, record, NULL,
-                                lonejson__runtime_const(schema->runtime), 0, 0,
-                                0, 0u, workspace, sizeof(workspace));
-    if (lonejson__assign_string(&parser, &meta->field, ptr, text, len) !=
-        LONEJSON_STATUS_OK) {
-      return luaL_error(L, "%s", parser.error.message);
+    status = lonejson_record_assign_string(schema->runtime, &schema->map,
+                                           record, &meta->field, text, len,
+                                           &error);
+    if (status != LONEJSON_STATUS_OK) {
+      return luaL_error(L, "%s", error.message);
     }
-    (void)error;
     return 1;
   }
   case LJLUA_FIELD_SPOOLED_TEXT:
@@ -767,38 +748,38 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
                                             value_index);
   case LJLUA_FIELD_I64:
     *(lonejson_int64 *)ptr = (lonejson_int64)luaL_checkinteger(L, value_index);
-    lonejson__field_set_presence(record, &meta->field, 1);
+    lonejson_field_set_presence(record, &meta->field, 1);
     return 1;
   case LJLUA_FIELD_U64:
     *(lonejson_uint64 *)ptr = ljlua_check_u64(L, value_index);
-    lonejson__field_set_presence(record, &meta->field, 1);
+    lonejson_field_set_presence(record, &meta->field, 1);
     return 1;
   case LJLUA_FIELD_F64:
     *(double *)ptr = (double)luaL_checknumber(L, value_index);
-    lonejson__field_set_presence(record, &meta->field, 1);
+    lonejson_field_set_presence(record, &meta->field, 1);
     return 1;
   case LJLUA_FIELD_BOOL:
     *(bool *)ptr = lua_toboolean(L, value_index) ? true : false;
-    lonejson__field_set_presence(record, &meta->field, 1);
+    lonejson_field_set_presence(record, &meta->field, 1);
     return 1;
   case LJLUA_FIELD_OBJECT:
     luaL_checktype(L, value_index, LUA_TTABLE);
     return ljlua_assign_table_to_record(L, meta->subschema, ptr, value_index);
   case LJLUA_FIELD_STRING_ARRAY: {
     lonejson_string_array *arr = (lonejson_string_array *)ptr;
-    lonejson_parser parser;
     luaL_checktype(L, value_index, LUA_TTABLE);
-    ljlua_init_helper_parser(&parser);
     for (i = 1u; i <= (size_t)lua_rawlen(L, value_index); ++i) {
       size_t len;
       const char *text;
 
       lua_rawgeti(L, value_index, (lua_Integer)i);
       text = luaL_checklstring(L, -1, &len);
-      if (lonejson__array_append_string(&parser, &meta->field, arr, text,
-                                        len) != LONEJSON_STATUS_OK) {
+      status = lonejson_record_array_append_string(
+          schema->runtime, &schema->map, record, &meta->field, arr, text, len,
+          &error);
+      if (status != LONEJSON_STATUS_OK) {
         lua_pop(L, 1);
-        return luaL_error(L, "%s", parser.error.message);
+        return luaL_error(L, "%s", error.message);
       }
       lua_pop(L, 1);
     }
@@ -806,16 +787,15 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
   }
   case LJLUA_FIELD_I64_ARRAY: {
     lonejson_i64_array *arr = (lonejson_i64_array *)ptr;
-    lonejson_parser parser;
     luaL_checktype(L, value_index, LUA_TTABLE);
-    ljlua_init_helper_parser(&parser);
     for (i = 1u; i <= (size_t)lua_rawlen(L, value_index); ++i) {
       lua_rawgeti(L, value_index, (lua_Integer)i);
-      if (lonejson__array_append_i64(
-              &parser, &meta->field, arr,
-              (lonejson_int64)luaL_checkinteger(L, -1)) != LONEJSON_STATUS_OK) {
+      status = lonejson_record_array_append_i64(
+          schema->runtime, &schema->map, record, &meta->field, arr,
+          (lonejson_int64)luaL_checkinteger(L, -1), &error);
+      if (status != LONEJSON_STATUS_OK) {
         lua_pop(L, 1);
-        return luaL_error(L, "%s", parser.error.message);
+        return luaL_error(L, "%s", error.message);
       }
       lua_pop(L, 1);
     }
@@ -823,16 +803,15 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
   }
   case LJLUA_FIELD_U64_ARRAY: {
     lonejson_u64_array *arr = (lonejson_u64_array *)ptr;
-    lonejson_parser parser;
     luaL_checktype(L, value_index, LUA_TTABLE);
-    ljlua_init_helper_parser(&parser);
     for (i = 1u; i <= (size_t)lua_rawlen(L, value_index); ++i) {
       lua_rawgeti(L, value_index, (lua_Integer)i);
-      if (lonejson__array_append_u64(&parser, &meta->field, arr,
-                                     ljlua_check_u64(L, -1)) !=
-          LONEJSON_STATUS_OK) {
+      status = lonejson_record_array_append_u64(
+          schema->runtime, &schema->map, record, &meta->field, arr,
+          ljlua_check_u64(L, -1), &error);
+      if (status != LONEJSON_STATUS_OK) {
         lua_pop(L, 1);
-        return luaL_error(L, "%s", parser.error.message);
+        return luaL_error(L, "%s", error.message);
       }
       lua_pop(L, 1);
     }
@@ -840,16 +819,15 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
   }
   case LJLUA_FIELD_F64_ARRAY: {
     lonejson_f64_array *arr = (lonejson_f64_array *)ptr;
-    lonejson_parser parser;
     luaL_checktype(L, value_index, LUA_TTABLE);
-    ljlua_init_helper_parser(&parser);
     for (i = 1u; i <= (size_t)lua_rawlen(L, value_index); ++i) {
       lua_rawgeti(L, value_index, (lua_Integer)i);
-      if (lonejson__array_append_f64(&parser, &meta->field, arr,
-                                     (double)luaL_checknumber(L, -1)) !=
-          LONEJSON_STATUS_OK) {
+      status = lonejson_record_array_append_f64(
+          schema->runtime, &schema->map, record, &meta->field, arr,
+          (double)luaL_checknumber(L, -1), &error);
+      if (status != LONEJSON_STATUS_OK) {
         lua_pop(L, 1);
-        return luaL_error(L, "%s", parser.error.message);
+        return luaL_error(L, "%s", error.message);
       }
       lua_pop(L, 1);
     }
@@ -857,16 +835,15 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
   }
   case LJLUA_FIELD_BOOL_ARRAY: {
     lonejson_bool_array *arr = (lonejson_bool_array *)ptr;
-    lonejson_parser parser;
     luaL_checktype(L, value_index, LUA_TTABLE);
-    ljlua_init_helper_parser(&parser);
     for (i = 1u; i <= (size_t)lua_rawlen(L, value_index); ++i) {
       lua_rawgeti(L, value_index, (lua_Integer)i);
-      if (lonejson__array_append_bool(&parser, &meta->field, arr,
-                                      lua_toboolean(L, -1) ? true : false) !=
-          LONEJSON_STATUS_OK) {
+      status = lonejson_record_array_append_bool(
+          schema->runtime, &schema->map, record, &meta->field, arr,
+          lua_toboolean(L, -1) ? 1 : 0, &error);
+      if (status != LONEJSON_STATUS_OK) {
         lua_pop(L, 1);
-        return luaL_error(L, "%s", parser.error.message);
+        return luaL_error(L, "%s", error.message);
       }
       lua_pop(L, 1);
     }
@@ -875,16 +852,15 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
   case LJLUA_FIELD_OBJECT_ARRAY: {
     lonejson_object_array *arr = (lonejson_object_array *)ptr;
     size_t n = (size_t)lua_rawlen(L, value_index);
-    lonejson_parser parser;
     luaL_checktype(L, value_index, LUA_TTABLE);
-    ljlua_init_helper_parser(&parser);
     for (i = 1u; i <= n; ++i) {
       void *slot;
       lua_rawgeti(L, value_index, (lua_Integer)i);
-      slot = lonejson__object_array_append_slot(&parser, &meta->field, arr);
+      slot = lonejson_record_object_array_append_slot(
+          schema->runtime, &schema->map, record, &meta->field, arr, &error);
       if (slot == NULL) {
         lua_pop(L, 1);
-        return luaL_error(L, "%s", parser.error.message);
+        return luaL_error(L, "%s", error.message);
       }
       ljlua_prepare_record_storage(meta->subschema, slot);
       ljlua_assign_table_to_record(L, meta->subschema, slot, lua_gettop(L));

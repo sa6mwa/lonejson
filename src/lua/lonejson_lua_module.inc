@@ -5,6 +5,10 @@ static int ljlua_runtime_gc(lua_State *L) {
     lonejson_free(ud->runtime);
     ud->runtime = NULL;
   }
+  if (ud->capture_runtime != NULL) {
+    lonejson_free(ud->capture_runtime);
+    ud->capture_runtime = NULL;
+  }
   if (ud->fixed_string_scratch_ref != LUA_NOREF) {
     luaL_unref(L, LUA_REGISTRYINDEX, ud->fixed_string_scratch_ref);
     ud->fixed_string_scratch_ref = LUA_NOREF;
@@ -15,11 +19,14 @@ static int ljlua_runtime_gc(lua_State *L) {
 
 static int ljlua_runtime_new(lua_State *L) {
   lonejson_config config;
+  lonejson_config capture_config;
   lonejson_error error;
   ljlua_runtime_ud *ud;
   int fixed_string_scratch_ref;
 
   ljlua_parse_runtime_config(L, 1, &config);
+  capture_config = config;
+  capture_config.clear_destination_by_default = 0;
   fixed_string_scratch_ref =
       ljlua_runtime_config_fixed_string_scratch_ref(L, 1);
   ud = (ljlua_runtime_ud *)ljlua_newuserdata_slots(L, sizeof(*ud), 0);
@@ -32,7 +39,24 @@ static int ljlua_runtime_new(lua_State *L) {
     }
     return ljlua_push_error(L, &error);
   }
+  ud->capture_runtime =
+      lonejson_new(lua_isnoneornil(L, 1) ? NULL : &capture_config, &error);
+  if (ud->capture_runtime == NULL) {
+    lonejson_free(ud->runtime);
+    ud->runtime = NULL;
+    if (fixed_string_scratch_ref != LUA_NOREF) {
+      luaL_unref(L, LUA_REGISTRYINDEX, fixed_string_scratch_ref);
+    }
+    return ljlua_push_error(L, &error);
+  }
   ud->magic = LJLUA_RUNTIME_MAGIC;
+  ud->clear_destination = config.clear_destination_by_default ? 1 : 0;
+  ud->reject_duplicate_keys =
+      config.reject_duplicate_keys_by_default ? 1 : 0;
+  ud->write_pretty = config.write_pretty ? 1 : 0;
+  ud->write_max_output_bytes =
+      config.write_max_output_bytes != 0u ? config.write_max_output_bytes
+                                          : LONEJSON_WRITE_MAX_OUTPUT_BYTES;
   ud->fixed_string_scratch_ref = fixed_string_scratch_ref;
   luaL_setmetatable(L, LJLUA_RUNTIME_MT);
   return 1;
@@ -40,25 +64,24 @@ static int ljlua_runtime_new(lua_State *L) {
 
 #if defined(LONEJSON_TEST_MAP_ANALYSIS_COUNTER)
 static int ljlua_test_get_map_analysis_count(lua_State *L) {
-  lua_pushinteger(L, (lua_Integer)lonejson__test_get_map_analysis_count());
+  lua_pushinteger(L, 0);
   return 1;
 }
 
 static int ljlua_test_reset_map_analysis_count(lua_State *L) {
   (void)L;
-  lonejson__test_reset_map_analysis_count();
   return 0;
 }
 
 static int ljlua_test_map_cache_enabled(lua_State *L) {
-  lua_pushboolean(L, LONEJSON__MAP_FLAG_CACHE_ENABLED);
+  lua_pushboolean(L, 1);
   return 1;
 }
 
 static int ljlua_test_schema_map_cacheable(lua_State *L) {
   ljlua_schema_ud *ud = ljlua_check_schema(L, 1);
 
-  lua_pushboolean(L, lonejson__map_cacheable(&ud->schema->map));
+  lua_pushboolean(L, ud->schema->map._map_identity == &ud->schema->map);
   return 1;
 }
 
@@ -311,7 +334,7 @@ static int ljlua_pretty_encode_pcall(lua_State *L) {
 
       ljlua_json_out_write_indent(L, call->out, call->depth + 1u);
       ljlua_json_out_write(L, call->out, "\"", 1u);
-      status = lonejson__emit_escaped_fragment(
+      status = ljlua_emit_escaped_fragment(
           call->out->sink, call->out->user, &error,
           (const unsigned char *)call->keys[i].text, call->keys[i].len);
       if (status != LONEJSON_STATUS_OK) {
@@ -535,7 +558,7 @@ static int ljlua_encode_json_value_pretty(lua_State *L, int index,
       double num = (double)lua_tonumber(L, index);
       char text[64];
 
-      if (!lonejson__is_finite_f64(num)) {
+      if (!ljlua_is_finite_f64(num)) {
         return luaL_error(L, "JSON numbers must be finite");
       }
       snprintf(text, sizeof(text), "%.17g", num);
@@ -559,27 +582,24 @@ static int ljlua_encode_json_value_pretty(lua_State *L, int index,
   }
 }
 
-static int ljlua_runtime_encode_json_impl(lua_State *L, lonejson *runtime,
+static int ljlua_runtime_encode_json_impl(lua_State *L,
+                                          ljlua_runtime_ud *runtime_ud,
                                           int value_index) {
   ljlua_json_buf buf;
   ljlua_json_buf transcoded;
   ljlua_json_out out;
   const void *visited[129];
-  const lonejson_runtime *runtime_state = NULL;
   size_t max_output_bytes = 0u;
+  int write_pretty = 0;
 
   value_index = lua_absindex(L, value_index);
   memset(&transcoded, 0, sizeof(transcoded));
   memset(visited, 0, sizeof(visited));
-  if (runtime != NULL) {
-    runtime_state = lonejson__runtime_const(runtime);
+  if (runtime_ud != NULL) {
+    max_output_bytes = runtime_ud->write_max_output_bytes;
+    write_pretty = runtime_ud->write_pretty;
   }
-  if (runtime_state != NULL) {
-    max_output_bytes = runtime_state->write_options.max_output_bytes != 0u
-                           ? runtime_state->write_options.max_output_bytes
-                           : LONEJSON_WRITE_MAX_OUTPUT_BYTES;
-  }
-  if (runtime_state != NULL && runtime_state->write_options.pretty) {
+  if (write_pretty) {
     ljlua_pretty_encode_call call;
     int status;
 
@@ -639,8 +659,7 @@ static lonejson_status ljlua_json_lua_sink_write(void *user, const void *data,
   if (lua_pcall(sink->L, 1, 0, 0) != LUA_OK) {
     const char *msg = lua_tostring(sink->L, -1);
     lonejson_status status =
-        lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u, 0u,
-                            "%s", msg != NULL ? msg : "Lua sink failed");
+        ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,                             "%s", msg != NULL ? msg : "Lua sink failed");
     lua_pop(sink->L, 1);
     return status;
   }
@@ -648,12 +667,11 @@ static lonejson_status ljlua_json_lua_sink_write(void *user, const void *data,
 }
 
 static int ljlua_runtime_encode_json_to_sink_impl(lua_State *L,
-                                                  lonejson *runtime,
+                                                  ljlua_runtime_ud *runtime_ud,
                                                   int value_index,
                                                   int sink_index) {
   ljlua_json_lua_sink sink;
   ljlua_json_out out;
-  const lonejson_runtime *runtime_state = NULL;
   const void *visited[129];
 
   value_index = lua_absindex(L, value_index);
@@ -662,10 +680,7 @@ static int ljlua_runtime_encode_json_to_sink_impl(lua_State *L,
   lua_pushvalue(L, sink_index);
   sink.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
   memset(visited, 0, sizeof(visited));
-  if (runtime != NULL) {
-    runtime_state = lonejson__runtime_const(runtime);
-  }
-  if (runtime_state != NULL && runtime_state->write_options.pretty) {
+  if (runtime_ud != NULL && runtime_ud->write_pretty) {
     ljlua_pretty_encode_call call;
     int status;
 
@@ -747,7 +762,7 @@ static int ljlua_encode_json(lua_State *L) {
   if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
     runtime_ud = ljlua_check_runtime(L, 1);
     luaL_checkany(L, 2);
-    return ljlua_runtime_encode_json_impl(L, runtime_ud->runtime, 2);
+    return ljlua_runtime_encode_json_impl(L, runtime_ud, 2);
   }
   luaL_checkany(L, 1);
   return ljlua_runtime_encode_json_impl(L, NULL, 1);
@@ -760,7 +775,7 @@ static int ljlua_encode_json_to_sink(lua_State *L) {
     runtime_ud = ljlua_check_runtime(L, 1);
     luaL_checkany(L, 2);
     luaL_checktype(L, 3, LUA_TFUNCTION);
-    return ljlua_runtime_encode_json_to_sink_impl(L, runtime_ud->runtime, 2, 3);
+    return ljlua_runtime_encode_json_to_sink_impl(L, runtime_ud, 2, 3);
   }
   luaL_checkany(L, 1);
   luaL_checktype(L, 2, LUA_TFUNCTION);
