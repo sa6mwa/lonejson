@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  printf 'usage: %s <src-rock>\n' "$0" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  printf 'usage: %s <src-rock> [lonejson-libdir]\n' "$0" >&2
   exit 1
 fi
 
 rock_path=$1
+lonejson_libdir=${2:-${LONEJSON_LIBDIR:-}}
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir=
 
@@ -74,6 +75,17 @@ fi
 tar -xzf "${source_archives[0]}" -C "$nested_unpack_dir"
 scan_for_private_paths "$nested_unpack_dir" "nested source archive"
 
-luarocks install --tree "$tmp_dir/tree" "$rock_path"
+if [[ -z "$lonejson_libdir" ]]; then
+  printf 'smoke_lua_src_rock.sh: LONEJSON_LIBDIR or lonejson-libdir is required for the external liblonejson dependency\n' >&2
+  exit 1
+fi
+if [[ ! -d "$lonejson_libdir" ]]; then
+  printf 'smoke_lua_src_rock.sh: liblonejson directory not found: %s\n' "$lonejson_libdir" >&2
+  exit 1
+fi
+
+LONEJSON_LIBDIR="$lonejson_libdir" luarocks install --tree "$tmp_dir/tree" "$rock_path"
 eval "$(luarocks path --tree "$tmp_dir/tree")"
+export LD_LIBRARY_PATH="$lonejson_libdir:${LD_LIBRARY_PATH:-}"
+export DYLD_LIBRARY_PATH="$lonejson_libdir:${DYLD_LIBRARY_PATH:-}"
 lua -e 'assert(require("lonejson.init"))'

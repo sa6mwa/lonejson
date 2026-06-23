@@ -906,12 +906,18 @@ default and can be disabled with:
 The repository also ships a Lua binding with schema-guided decoding, reusable
 records, object-framed streams, selected-array streams, spool-backed fields,
 and native-Lua arbitrary `json_value` fields backed by the C visitor path.
+The native Lua module uses the public `lonejson.h` boundary and links against
+`liblonejson`; it does not embed or redefine the core C API.
 
 Build and install it into the local LuaRocks tree:
 
 ```sh
 make lua-rock
 ```
+
+For out-of-tree LuaRocks builds, provide the directory containing
+`liblonejson` with `LONEJSON_LIBDIR`, and make that same directory available to
+the platform dynamic loader when requiring the module.
 
 Run the integration test:
 
