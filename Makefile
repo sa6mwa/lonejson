@@ -57,6 +57,7 @@ FUZZ_MAPPED_MAX_LEN ?= 262144
 FUZZ_ARRAY_STREAM_MAX_LEN ?= 262144
 FUZZ_JSON_VALUE_MAX_LEN ?= 524288
 FUZZ_VALUE_VISITOR_MAX_LEN ?= 524288
+FUZZ_PATH_VALUE_VISITOR_MAX_LEN ?= 524288
 FUZZ_VALUE_REWRITE_MAX_LEN ?= 524288
 FUZZ_READER_STREAM_GENERATOR_MAX_LEN ?= 262144
 FUZZ_WRITER_GENERATOR_MAX_LEN ?= 262144
@@ -75,6 +76,7 @@ FUZZ_MAPPED_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/mapped
 FUZZ_ARRAY_STREAM_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/array_stream
 FUZZ_JSON_VALUE_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/json_value
 FUZZ_VALUE_VISITOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/value_visitor
+FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/path_value_visitor
 FUZZ_VALUE_REWRITE_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/value_rewrite
 FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/reader_stream_generator
 FUZZ_WRITER_GENERATOR_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/writer_generator
@@ -88,6 +90,7 @@ FUZZ_MAPPED_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/mapped
 FUZZ_ARRAY_STREAM_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/array_stream
 FUZZ_JSON_VALUE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/json_value
 FUZZ_VALUE_VISITOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/value_visitor
+FUZZ_PATH_VALUE_VISITOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/path_value_visitor
 FUZZ_VALUE_REWRITE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/value_rewrite
 FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/reader_stream_generator
 FUZZ_WRITER_GENERATOR_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/writer_generator
@@ -472,15 +475,16 @@ fuzz:
 		./scripts/generate_fuzz_large_seeds.sh; \
 	fi
 	cmake --preset $(FUZZ_PRESET)
-	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries
+	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_path_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries
 	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -P cmake/check_fuzz_instrumentation.cmake
-	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)"
-	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)"
+	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)"
+	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)"
 	cmake -E make_directory "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
 	cmake -E make_directory "$(FUZZ_JSON_VALUE_CORPUS_DIR)/json_value" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/mapped" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/value_visitor"
 	cmake -E make_directory "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages"
+	cmake -E make_directory "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/path_value_visitor" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/spec"
 	cmake -E make_directory "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/spec" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"
@@ -504,6 +508,10 @@ fuzz:
 	cp -R fuzz/corpus/value_visitor/. "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor/"
 	cp -R fuzz/corpus/json_value/. "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value/"
 	cp -R tests/fixtures/languages/. "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages/"
+	cp -R fuzz/corpus/path_value_visitor/. "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/path_value_visitor/"
+	cp -R fuzz/corpus/value_visitor/. "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/value_visitor/"
+	cp -R fuzz/corpus/json_value/. "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/json_value/"
+	cp -R tests/fixtures/languages/. "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/languages/"
 	cp -R fuzz/corpus/value_rewrite/. "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite/"
 	cp -R fuzz/corpus/json_value/. "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value/"
 	cp -R fuzz/corpus/mapped/. "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped/"
@@ -526,6 +534,7 @@ fuzz:
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/array_stream"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/json_value"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/value_visitor"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/path_value_visitor"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/value_rewrite"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/reader_stream_generator"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/writer_generator"
@@ -539,6 +548,7 @@ fuzz:
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_array_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ARRAY_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/array_stream/ "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_json_value -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_JSON_VALUE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/json_value/ "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/json_value" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/mapped" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/value_visitor"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_value_visitor -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALUE_VISITOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_visitor/ "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_path_value_visitor -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PATH_VALUE_VISITOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/path_value_visitor/ "$(FUZZ_PATH_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/path_value_visitor" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/languages"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_value_rewrite -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALUE_REWRITE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_rewrite/ "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/spec"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_reader_stream_generator -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_READER_STREAM_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/reader_stream_generator/ "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/spec" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/languages"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_generator_backpressure -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_generator/ "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"

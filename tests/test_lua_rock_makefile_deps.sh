@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root=$1
+luarocks_exec=${2:-luarocks}
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -16,7 +17,7 @@ make_lua_rock() {
     LUA_ROCKSPEC="$lua_rockspec" \
     LUA_ROCK_STAMP="$lua_stamp" \
     LUA_ROCK_BUILD_LOCK="$lua_lock" \
-    LUAROCKS=luarocks
+    LUAROCKS="$luarocks_exec"
 }
 
 dry_run=$(make_lua_rock -B -n lua-rock)

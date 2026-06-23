@@ -345,14 +345,21 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_external_liblonejson.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
+        "${LONEJSON_LUAROCKS_EXECUTABLE}"
+        "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(
       NAME lonejson_lua_rock_makefile_deps_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_rock_makefile_deps.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}")
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${LONEJSON_LUAROCKS_EXECUTABLE}")
   endif()
   if(LONEJSON_BASH_EXECUTABLE)
+    add_test(
+      NAME lonejson_makefile_fuzz_targets_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_makefile_fuzz_targets.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_c_pkt_systems_fetch_retry_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"

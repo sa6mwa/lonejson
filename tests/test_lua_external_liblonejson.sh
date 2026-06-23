@@ -4,12 +4,12 @@ set -euo pipefail
 repo_root=$1
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}
+libdir=${4:-"$repo_root/build/debug"}
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
 rock_tree="$tmp_dir/luarocks"
 rockspec="$tmp_dir/lonejson-0.0.0-1.rockspec"
-libdir="$repo_root/build/debug"
 
 mkdir -p "$rock_tree"
 
