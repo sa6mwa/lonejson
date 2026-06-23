@@ -1225,8 +1225,9 @@ lonejson__json_path_push_array_index(lonejson__json_io *io) {
                                0u, 0u, "invalid JSON path stack state");
   }
   frame = &io->path_frames[io->path_depth];
-  n = (size_t)snprintf(frame->index_text, sizeof(frame->index_text), "%lu",
-                       (unsigned long)frame->next_index);
+  n = lonejson__format_size_decimal(frame->index_text,
+                                    sizeof(frame->index_text),
+                                    frame->next_index);
   if (n >= sizeof(frame->index_text)) {
     return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                                "JSON array index path segment is too large");

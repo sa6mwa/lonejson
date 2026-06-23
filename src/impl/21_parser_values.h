@@ -931,8 +931,9 @@ lonejson__json_value_path_begin_value(lonejson_parser *parser) {
                                parser->error.column,
                                "invalid JSON path stack state");
   }
-  n = (size_t)snprintf(frame->index_text, sizeof(frame->index_text), "%lu",
-                       (unsigned long)frame->next_index);
+  n = lonejson__format_size_decimal(frame->index_text,
+                                    sizeof(frame->index_text),
+                                    frame->next_index);
   if (n >= sizeof(frame->index_text)) {
     return lonejson__set_error(&parser->error, LONEJSON_STATUS_OVERFLOW,
                                parser->error.offset, parser->error.line,

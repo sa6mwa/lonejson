@@ -465,6 +465,29 @@ static lonejson_path_value_visitor test_path_value_visitor(void) {
   return visitor;
 }
 
+static void test_path_index_formatter_uses_full_size_t(void) {
+  char text[32];
+  size_t n;
+
+  memset(text, 0xA5, sizeof(text));
+  n = lonejson__format_size_decimal(text, sizeof(text), 0u);
+  EXPECT(n == 1u);
+  EXPECT(strcmp(text, "0") == 0);
+
+  n = lonejson__format_size_decimal(text, sizeof(text), 1234567890u);
+  EXPECT(n == 10u);
+  EXPECT(strcmp(text, "1234567890") == 0);
+
+  n = lonejson__format_size_decimal(text, 4u, 12345u);
+  EXPECT(n == 5u);
+
+  n = lonejson__format_size_decimal(text, sizeof(text), (size_t)-1);
+  EXPECT(n > 0u);
+  EXPECT(n < sizeof(text));
+  EXPECT(text[n] == '\0');
+  EXPECT(text[0] >= '1' && text[0] <= '9');
+}
+
 static void test_path_value_visitor_paths_and_chunks(void) {
   const char *json =
       "{\"a/b\":{\"~key\":\"v\"},\"items\":[10,{\"sku\":\"ABC\"},false,null]}";

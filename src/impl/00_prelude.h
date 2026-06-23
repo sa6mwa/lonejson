@@ -125,6 +125,28 @@ typedef struct lonejson__json_path_frame {
   int container_kind;
 } lonejson__json_path_frame;
 
+static size_t lonejson__format_size_decimal(char *out, size_t out_size,
+                                            size_t value) {
+  char reversed[sizeof(size_t) * 3u + 1u];
+  size_t len = 0u;
+  size_t i;
+
+  do {
+    reversed[len] = (char)('0' + (value % 10u));
+    value /= 10u;
+    ++len;
+  } while (value != 0u && len < sizeof(reversed));
+
+  if (out_size <= len) {
+    return len;
+  }
+  for (i = 0u; i < len; ++i) {
+    out[i] = reversed[len - 1u - i];
+  }
+  out[len] = '\0';
+  return len;
+}
+
 typedef union lonejson__parser_workspace_align_union {
   lonejson_frame frame;
   void *ptr;
