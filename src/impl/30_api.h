@@ -3881,6 +3881,7 @@ static lonejson_status lonejson__candidate_callback_status(
   if (callback == NULL) {
     return LONEJSON_STATUS_OK;
   }
+  lonejson__clear_error(scan->error);
   result = callback(scan->options->candidate_user, info, scan->error);
   if (result == LONEJSON_CANDIDATE_CONTINUE) {
     return LONEJSON_STATUS_OK;

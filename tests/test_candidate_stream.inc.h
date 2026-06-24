@@ -306,11 +306,17 @@ static void test_candidate_stream_callback_stop_and_failure(void) {
 
   memset(&state, 0, sizeof(state));
   state.fail_at_begin = 2u;
+  error.code = LONEJSON_STATUS_INVALID_JSON;
+  error.offset = 99u;
+  snprintf(error.message, sizeof(error.message), "stale candidate error");
   status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
                                             strlen(json), &options, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(state.begin_count == 2u);
   EXPECT(state.end_count == 1u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(error.offset == state.begin_offsets[1]);
+  EXPECT(strstr(error.message, "candidate callback failed") != NULL);
 }
 
 static void test_candidate_stream_reader_and_runtime_methods(void) {
