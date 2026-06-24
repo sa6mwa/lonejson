@@ -1109,7 +1109,7 @@ static lonejson_status lonejson__json_value_object_begin(
       parser, value->parse_visitor ? value->parse_visitor->object_begin : NULL,
       value->parse_path_visitor ? value->parse_path_visitor->object_begin
                                 : NULL);
-  if (status == LONEJSON_STATUS_OK &&
+  if ((status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) &&
       lonejson__json_value_parse_path_visitor_active(parser) &&
       parser->json_stream_path_depth < parser->json_stream_path_capacity) {
     parser->json_stream_path_frames[parser->json_stream_path_depth]
@@ -1127,7 +1127,7 @@ static lonejson_status lonejson__json_value_object_end(
       parser, value->parse_visitor ? value->parse_visitor->object_end : NULL,
       value->parse_path_visitor ? value->parse_path_visitor->object_end
                                 : NULL);
-  if (status == LONEJSON_STATUS_OK &&
+  if ((status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) &&
       lonejson__json_value_parse_path_visitor_active(parser) &&
       parser->json_stream_path_depth < parser->json_stream_path_capacity) {
     parser->json_stream_path_frames[parser->json_stream_path_depth]
@@ -1150,7 +1150,7 @@ static lonejson_status lonejson__json_value_array_begin(
       parser, value->parse_visitor ? value->parse_visitor->array_begin : NULL,
       value->parse_path_visitor ? value->parse_path_visitor->array_begin
                                 : NULL);
-  if (status == LONEJSON_STATUS_OK &&
+  if ((status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) &&
       lonejson__json_value_parse_path_visitor_active(parser) &&
       parser->json_stream_path_depth < parser->json_stream_path_capacity) {
     parser->json_stream_path_frames[parser->json_stream_path_depth]
@@ -1169,7 +1169,7 @@ static lonejson_status lonejson__json_value_array_end(
   status = lonejson__json_value_visit_any_event(
       parser, value->parse_visitor ? value->parse_visitor->array_end : NULL,
       value->parse_path_visitor ? value->parse_path_visitor->array_end : NULL);
-  if (status == LONEJSON_STATUS_OK &&
+  if ((status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) &&
       lonejson__json_value_parse_path_visitor_active(parser) &&
       parser->json_stream_path_depth < parser->json_stream_path_capacity) {
     parser->json_stream_path_frames[parser->json_stream_path_depth]

@@ -265,6 +265,7 @@ int main(void) {
   test_json_value_parse_visitor();
   test_json_value_nested_object_parse_visitor();
   test_json_value_parse_path_visitor_paths();
+  test_json_value_parse_path_visitor_truncated_containers();
   test_json_value_parse_path_visitor_zero_depth();
   test_json_value_parse_path_visitor_failure_cleanup();
   test_json_value_parse_path_visitor_api_guards();

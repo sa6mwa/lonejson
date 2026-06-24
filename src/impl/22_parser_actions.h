@@ -428,6 +428,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
   const lonejson_map *map = NULL;
   lonejson_frame *frame;
   lonejson_mapped_array_stream *mapped_stream = NULL;
+  lonejson_status status;
   int started_capture = 0;
   int started_root_visitor = 0;
   int started_root_value = 0;
@@ -472,11 +473,12 @@ lonejson__begin_object_value(lonejson_parser *parser) {
                 parser->error.line, parser->error.column,
                 "JSON value nesting exceeds maximum depth");
           }
-          if (lonejson__json_value_object_begin(parser) !=
-              LONEJSON_STATUS_OK) {
+          status = lonejson__json_value_object_begin(parser);
+          if (status != LONEJSON_STATUS_OK &&
+              status != LONEJSON_STATUS_TRUNCATED) {
             lonejson__parser_clear_json_stream_value(parser);
             parser->json_stream_depth = 0u;
-            return parser->error.code;
+            return status;
           }
         } else if (lonejson__json_value_emit(parser, "{", 1u) !=
                    LONEJSON_STATUS_OK) {
@@ -589,6 +591,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
   const lonejson_field *field = NULL;
   void *object_ptr = NULL;
   lonejson_frame *frame;
+  lonejson_status status;
   int started_capture = 0;
   int started_root_visitor = 0;
   int started_root_value = 0;
@@ -635,10 +638,12 @@ lonejson__begin_array_value(lonejson_parser *parser) {
                 parser->error.line, parser->error.column,
                 "JSON value nesting exceeds maximum depth");
           }
-          if (lonejson__json_value_array_begin(parser) != LONEJSON_STATUS_OK) {
+          status = lonejson__json_value_array_begin(parser);
+          if (status != LONEJSON_STATUS_OK &&
+              status != LONEJSON_STATUS_TRUNCATED) {
             lonejson__parser_clear_json_stream_value(parser);
             parser->json_stream_depth = 0u;
-            return parser->error.code;
+            return status;
           }
         } else if (lonejson__json_value_emit(parser, "[", 1u) !=
                    LONEJSON_STATUS_OK) {
@@ -800,7 +805,8 @@ lonejson__finalize_object(lonejson_parser *parser) {
         lonejson__json_value_parse_visitor_active(parser)
             ? lonejson__json_value_object_end(parser)
             : lonejson__json_value_emit(parser, "}", 1u);
-    if (status != LONEJSON_STATUS_OK) {
+    if (status != LONEJSON_STATUS_OK &&
+        status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
   }
@@ -826,7 +832,8 @@ lonejson__finalize_array(lonejson_parser *parser) {
         lonejson__json_value_parse_visitor_active(parser)
             ? lonejson__json_value_array_end(parser)
             : lonejson__json_value_emit(parser, "]", 1u);
-    if (status != LONEJSON_STATUS_OK) {
+    if (status != LONEJSON_STATUS_OK &&
+        status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
   }
@@ -911,6 +918,7 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
   if (frame == NULL) {
     if (!parser->root_started && parser->validate_only) {
       lonejson_status status = LONEJSON_STATUS_OK;
+      int allow_truncated_status = 0;
 
       if (mode == LONEJSON_LEX_NUMBER &&
           !lonejson__is_valid_json_number(token_text, parser->token.len)) {
@@ -920,6 +928,7 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
       }
       if (parser->json_stream_active) {
         if (lonejson__json_value_parse_visitor_active(parser)) {
+          allow_truncated_status = 1;
           if (mode == LONEJSON_LEX_NUMBER) {
             status = lonejson__json_value_number(parser, token_text,
                                                  parser->token.len);
@@ -940,7 +949,9 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
         } else if (mode == LONEJSON_LEX_NULL) {
           status = lonejson__json_value_emit(parser, "null", 4u);
         }
-        if (status != LONEJSON_STATUS_OK) {
+        if (status != LONEJSON_STATUS_OK &&
+            (!allow_truncated_status ||
+             status != LONEJSON_STATUS_TRUNCATED)) {
           return status;
         }
         lonejson__parser_clear_json_stream_value(parser);

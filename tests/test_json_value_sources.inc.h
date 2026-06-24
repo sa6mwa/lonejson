@@ -967,6 +967,7 @@ typedef struct test_json_value_path_visit_state {
   size_t len;
   size_t callback_count;
   size_t fail_after;
+  int truncate_container_events;
   size_t mismatched_chunk_paths;
   char active_string_path[256];
   char active_number_path[256];
@@ -1077,15 +1078,27 @@ static lonejson_status test_json_value_path_visit_event(
   return status;
 }
 
+static lonejson_status test_json_value_path_visit_container_event(
+    test_json_value_path_visit_state *state, const char *name,
+    const lonejson_value_path *path, lonejson_error *error) {
+  lonejson_status status;
+
+  status = test_json_value_path_visit_event(state, name, path, error);
+  if (status == LONEJSON_STATUS_OK && state->truncate_container_events) {
+    return LONEJSON_STATUS_TRUNCATED;
+  }
+  return status;
+}
+
 static lonejson_status test_json_value_path_visit_object_begin(
     void *user, const lonejson_value_path *path, lonejson_error *error) {
-  return test_json_value_path_visit_event(
+  return test_json_value_path_visit_container_event(
       (test_json_value_path_visit_state *)user, "{", path, error);
 }
 
 static lonejson_status test_json_value_path_visit_object_end(
     void *user, const lonejson_value_path *path, lonejson_error *error) {
-  return test_json_value_path_visit_event(
+  return test_json_value_path_visit_container_event(
       (test_json_value_path_visit_state *)user, "}", path, error);
 }
 
@@ -1120,13 +1133,13 @@ static lonejson_status test_json_value_path_visit_key_end(
 
 static lonejson_status test_json_value_path_visit_array_begin(
     void *user, const lonejson_value_path *path, lonejson_error *error) {
-  return test_json_value_path_visit_event(
+  return test_json_value_path_visit_container_event(
       (test_json_value_path_visit_state *)user, "[", path, error);
 }
 
 static lonejson_status test_json_value_path_visit_array_end(
     void *user, const lonejson_value_path *path, lonejson_error *error) {
-  return test_json_value_path_visit_event(
+  return test_json_value_path_visit_container_event(
       (test_json_value_path_visit_state *)user, "]", path, error);
 }
 
@@ -1318,6 +1331,43 @@ static void test_json_value_parse_path_visitor_paths(void) {
   EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_NULL);
   EXPECT(doc.fields.kind == LONEJSON_JSON_VALUE_NULL);
   EXPECT(doc.last_error.kind == LONEJSON_JSON_VALUE_NULL);
+
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
+}
+
+static void test_json_value_parse_path_visitor_truncated_containers(void) {
+  const char *json =
+      "{\"id\":\"path-truncated\","
+      "\"selector\":{\"items\":[{\"sku\":\"ABC\"},false],\"tail\":true}}";
+  test_json_value_doc doc;
+  lonejson__parse_options options = lonejson__default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_json_value_path_visit_state state;
+  lonejson_path_value_visitor visitor;
+
+  memset(&state, 0, sizeof(state));
+  state.truncate_container_events = 1;
+  visitor = test_json_value_path_visitor();
+  poison_bytes(&doc, sizeof(doc), 0xD1u);
+  test_init_map(&test_json_value_doc_map, &doc);
+  status = lonejson_json_value_set_parse_path_visitor(&doc.selector, &visitor,
+                                                      &state, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  options.clear_destination = 0;
+  status =
+      test_parse_cstr(&test_json_value_doc_map, &doc, json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED);
+  EXPECT(strstr(state.log, "[($/5:items)") != NULL);
+  EXPECT(strstr(state.log,
+                "{($/5:items/1:0)K<($/5:items/1:0)K($/5:items/1:0)=skuK>("
+                "$/5:items/1:0)") != NULL);
+  EXPECT(strstr(state.log,
+                "S<($/5:items/1:0/3:sku)S($/5:items/1:0/3:sku)=ABCS>("
+                "$/5:items/1:0/3:sku)") != NULL);
+  EXPECT(strstr(state.log, "F($/5:items/1:1)") != NULL);
+  EXPECT(strstr(state.log, "T($/4:tail)") != NULL);
+  EXPECT(state.mismatched_chunk_paths == 0u);
 
   lonejson_cleanup(&test_json_value_doc_map, &doc);
 }
