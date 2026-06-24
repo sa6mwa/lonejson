@@ -259,6 +259,7 @@ int main(void) {
   test_json_value_parse_and_roundtrip();
   test_json_value_parse_capture_escapes();
   test_json_value_stream_reuse_releases_capture_budget();
+  test_json_value_capture_small_budget_uses_required_capacity();
   test_nested_json_value_stream_reuse_releases_capture_budget();
   test_json_value_parse_stream_sink();
   test_json_value_nested_object_parse_sink_and_reuse();

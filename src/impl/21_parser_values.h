@@ -486,7 +486,11 @@ static lonejson_status lonejson__json_value_emit(lonejson_parser *parser,
     if (capacity < required) {
       size_t available = lonejson__parser_alloc_available(
           parser, lonejson__parser_alloc_counted_bytes(parser, value->json));
-      next_cap = capacity != 0u ? capacity : 64u;
+      next_cap = capacity != 0u ? capacity : required;
+      if (capacity == 0u &&
+          (available == SIZE_MAX || available >= 256u) && next_cap < 256u) {
+        next_cap = 256u;
+      }
       if (available != SIZE_MAX && available < required) {
         return lonejson__set_error(
             &parser->error, LONEJSON_STATUS_OVERFLOW, parser->error.offset,
@@ -567,7 +571,11 @@ static lonejson_status lonejson__json_buffer_sink_parse(void *user,
     size_t available = lonejson__parser_alloc_available(
         state->parser, lonejson__parser_alloc_counted_bytes(
                            state->parser, state->value->json));
-    next_cap = capacity != 0u ? capacity : 64u;
+    next_cap = capacity != 0u ? capacity : required;
+    if (capacity == 0u && (available == SIZE_MAX || available >= 256u) &&
+        next_cap < 256u) {
+      next_cap = 256u;
+    }
     if (available != SIZE_MAX && available < required) {
       return lonejson__set_error(
           &state->parser->error, LONEJSON_STATUS_OVERFLOW,

@@ -686,6 +686,35 @@ static void test_json_value_stream_reuse_releases_capture_budget(void) {
   EXPECT(alloc.stats.bytes_live == 0u);
 }
 
+static void test_json_value_capture_small_budget_uses_required_capacity(void) {
+  const char *json =
+      "{\"id\":\"low\",\"selector\":1,\"fields\":2,\"last_error\":3}";
+  test_json_value_doc doc;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson__parse_options options = lonejson__default_parse_options();
+
+  options.clear_destination = 0;
+  options.max_alloc_bytes = 12u;
+  test_init_map(&test_json_value_doc_map, &doc);
+  status = lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_json_value_enable_parse_capture(&doc.fields, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  status = lonejson_json_value_enable_parse_capture(&doc.last_error, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+
+  status =
+      test_parse_cstr(&test_json_value_doc_map, &doc, json, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.selector.json != NULL && strcmp(doc.selector.json, "1") == 0);
+  EXPECT(doc.fields.json != NULL && strcmp(doc.fields.json, "2") == 0);
+  EXPECT(doc.last_error.json != NULL &&
+         strcmp(doc.last_error.json, "3") == 0);
+
+  lonejson_cleanup(&test_json_value_doc_map, &doc);
+}
+
 static void test_nested_json_value_stream_reuse_releases_capture_budget(void) {
   test_reader_state state = {
       "{\"type\":\"one\",\"response\":{\"payload\":\"a\"}}"
