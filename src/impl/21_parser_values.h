@@ -472,9 +472,6 @@ static lonejson_status lonejson__json_value_emit(lonejson_parser *parser,
                                "JSON value exceeds maximum total byte limit");
   }
   parser->json_stream_total_bytes += len;
-  if (value->parse_mode == LONEJSON_JSON_VALUE_PARSE_SINK) {
-    return value->parse_sink(value->parse_sink_user, data, len, &parser->error);
-  }
   if (value->parse_mode == LONEJSON_JSON_VALUE_PARSE_CAPTURE) {
     size_t required;
     size_t capacity;
@@ -535,6 +532,9 @@ static lonejson_status lonejson__json_value_emit(lonejson_parser *parser,
     value->json[value->len] = '\0';
     value->kind = LONEJSON_JSON_VALUE_BUFFER;
     return LONEJSON_STATUS_OK;
+  }
+  if (value->parse_mode == LONEJSON_JSON_VALUE_PARSE_SINK) {
+    return value->parse_sink(value->parse_sink_user, data, len, &parser->error);
   }
   return lonejson__set_error(
       &parser->error, LONEJSON_STATUS_INVALID_ARGUMENT, parser->error.offset,
