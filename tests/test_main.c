@@ -75,6 +75,7 @@ int main(void) {
   test_array_stream_streaming_invariants();
   test_array_stream_delimiter_validation_before_yield();
   test_array_stream_mapped_items_do_not_materialize_item();
+  test_array_stream_reused_mapped_destination_resets_allocations();
   test_array_stream_skips_do_not_materialize_values();
   test_array_stream_escaped_key_path_matching();
   test_array_stream_escaped_key_failure_modes();

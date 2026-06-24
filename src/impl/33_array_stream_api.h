@@ -611,6 +611,53 @@ static void lonejson__array_stream_resolve_value_limits(
 }
 
 static lonejson_status
+lonejson__array_stream_start_mapped_value(lonejson__array_stream_state *stream,
+                                          const lonejson_map *map, void *dst) {
+  if (stream->value_parser_initialized &&
+      stream->value_parser.root_map == map && !stream->value_parser.failed) {
+    stream->value_parser.options.clear_destination =
+        stream->options.clear_destination;
+    lonejson__parser_restart_stream(&stream->value_parser, dst);
+  } else {
+    if (stream->value_parser_initialized) {
+      lonejson_parser_destroy(&stream->value_parser);
+      stream->value_parser_initialized = 0;
+      stream->value_prepared_dst = NULL;
+    }
+    lonejson__parser_init_state(
+        &stream->value_parser, map, dst, &stream->options, stream->runtime,
+        0, 0, 0, 0u, stream->value_workspace,
+        sizeof(stream->value_workspace));
+    stream->value_parser_initialized = 1;
+  }
+
+  if (stream->value_parser.options.clear_destination) {
+    if (lonejson__map_is_flat_zeroable(map)) {
+      memset(dst, 0, map->struct_size);
+      stream->value_prepared_dst = dst;
+    } else if (stream->value_prepared_dst == dst) {
+      lonejson__reset_map_parse(&stream->value_parser, map, dst);
+    } else {
+      lonejson__init_map_parse(&stream->value_parser, map, dst);
+      stream->value_prepared_dst = dst;
+    }
+    if (stream->value_parser.failed) {
+      stream->public.error = stream->value_parser.error;
+      stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
+      return stream->value_parser.error.code;
+    }
+    stream->value_parser.options.clear_destination = 0;
+  }
+  stream->value_mode = LONEJSON_ARRAY_STREAM_VALUE_MAPPED;
+  stream->active_map = map;
+  stream->active_dst = dst;
+  stream->active_sink = NULL;
+  stream->active_sink_user = NULL;
+  stream->value_active = 1;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
 lonejson__array_stream_start_value(lonejson__array_stream_state *stream,
                                    lonejson_array_stream_value_mode mode,
                                    const lonejson_map *map, void *dst,
@@ -626,13 +673,21 @@ lonejson__array_stream_start_value(lonejson__array_stream_state *stream,
     }
     return LONEJSON_STATUS_OK;
   }
+  if (mode == LONEJSON_ARRAY_STREAM_VALUE_MAPPED) {
+    return lonejson__array_stream_start_mapped_value(stream, map, dst);
+  }
   if (mode == LONEJSON_ARRAY_STREAM_VALUE_RAW) {
     lonejson__byte_reset(&stream->item);
   }
+  if (stream->value_parser_initialized) {
+    lonejson_parser_destroy(&stream->value_parser);
+    stream->value_parser_initialized = 0;
+    stream->value_prepared_dst = NULL;
+  }
   lonejson__parser_init_state(
-      &stream->value_parser, map, dst, &stream->options, stream->runtime,
-      mode == LONEJSON_ARRAY_STREAM_VALUE_MAPPED ? 0 : 1, 0, 0, 0u,
-      stream->value_workspace, sizeof(stream->value_workspace));
+      &stream->value_parser, map, dst, &stream->options, stream->runtime, 1, 0,
+      0, 0u, stream->value_workspace, sizeof(stream->value_workspace));
+  stream->value_parser_initialized = 1;
   if ((mode == LONEJSON_ARRAY_STREAM_VALUE_SKIP ||
        mode == LONEJSON_ARRAY_STREAM_VALUE_SINK ||
        mode == LONEJSON_ARRAY_STREAM_VALUE_RAW) &&
@@ -699,16 +754,6 @@ lonejson__array_stream_start_value(lonejson__array_stream_state *stream,
     lonejson__parser_set_json_stream_value(&stream->value_parser,
                                            &stream->string_value);
   }
-  if (mode == LONEJSON_ARRAY_STREAM_VALUE_MAPPED &&
-      stream->value_parser.options.clear_destination) {
-    lonejson__init_map_parse(&stream->value_parser, map, dst);
-    if (stream->value_parser.failed) {
-      stream->public.error = stream->value_parser.error;
-      stream->state = LONEJSON_ARRAY_STREAM_STATE_ERROR;
-      return stream->value_parser.error.code;
-    }
-    stream->value_parser.options.clear_destination = 0;
-  }
   stream->value_mode = mode;
   stream->active_map = map;
   stream->active_dst = dst;
@@ -720,8 +765,13 @@ lonejson__array_stream_start_value(lonejson__array_stream_state *stream,
 
 static void
 lonejson__array_stream_clear_value(lonejson__array_stream_state *stream) {
-  if (stream->value_active) {
+  if (stream->value_active &&
+      (stream->value_mode != LONEJSON_ARRAY_STREAM_VALUE_MAPPED ||
+       stream->value_parser.failed ||
+       !lonejson__parser_root_complete(&stream->value_parser))) {
     lonejson_parser_destroy(&stream->value_parser);
+    stream->value_parser_initialized = 0;
+    stream->value_prepared_dst = NULL;
   }
   if (stream->skip_dup_active) {
     lonejson__array_stream_dup_state_cleanup(&stream->skip_dup_state);
@@ -2356,6 +2406,11 @@ void lonejson_array_stream_close(lonejson_array_stream *stream) {
     close(state->fd);
   }
   lonejson__array_stream_clear_value(state);
+  if (state->value_parser_initialized) {
+    lonejson_parser_destroy(&state->value_parser);
+    state->value_parser_initialized = 0;
+    state->value_prepared_dst = NULL;
+  }
   lonejson__byte_free(&state->item, &state->allocator);
   lonejson__byte_free(&state->string_item, &state->allocator);
   lonejson__byte_free(&state->key, &state->allocator);

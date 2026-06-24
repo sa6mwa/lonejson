@@ -125,6 +125,13 @@ typedef struct lonejson__json_path_frame {
   int container_kind;
 } lonejson__json_path_frame;
 
+typedef struct lonejson__json_stream_path_state {
+  lonejson_path_segment *segments;
+  lonejson__json_path_frame *frames;
+  size_t depth;
+  size_t capacity;
+} lonejson__json_stream_path_state;
+
 static size_t lonejson__format_size_decimal(char *out, size_t out_size,
                                             size_t value) {
   char reversed[sizeof(size_t) * 3u + 1u];
@@ -334,10 +341,7 @@ struct lonejson_parser {
   size_t json_stream_total_bytes;
   size_t json_stream_text_bytes;
   int json_stream_text_is_key;
-  lonejson_path_segment *json_stream_path_segments;
-  lonejson__json_path_frame *json_stream_path_frames;
-  size_t json_stream_path_depth;
-  size_t json_stream_path_capacity;
+  lonejson__json_stream_path_state *json_stream_path;
   size_t parse_alloc_bytes_live;
   int root_map_may_allocate;
   lonejson_uint64 root_map_adopt_mask;
@@ -556,10 +560,12 @@ typedef struct lonejson__array_stream_state {
   lonejson_array_stream_value_mode value_mode;
   lonejson_array_stream_value_mode pending_value_mode;
   int value_active;
+  int value_parser_initialized;
   const lonejson_map *active_map;
   const lonejson_map *pending_map;
   void *active_dst;
   void *pending_dst;
+  void *value_prepared_dst;
   lonejson_sink_fn active_sink;
   void *active_sink_user;
   size_t buffered_start;
