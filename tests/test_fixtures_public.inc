@@ -726,11 +726,15 @@ static void test_public_initializers_and_defaults(void) {
 
 static void test_public_dynamic_record_helpers(void) {
   lonejson *runtime;
+  lonejson *limited_runtime;
+  lonejson_config config;
   lonejson_error error;
   test_person person;
+  test_two_alloc_string_doc doc;
   test_item *item;
   char buffer[512];
   size_t needed = 0u;
+  size_t first_alloc_size;
   lonejson_status status;
 
   runtime = lonejson_new(NULL, &error);
@@ -789,6 +793,48 @@ static void test_public_dynamic_record_helpers(void) {
 
   lonejson_cleanup(&test_person_map, &person);
   lonejson_free(runtime);
+
+  runtime = lonejson_new(NULL, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+  lonejson_init(runtime, &test_two_alloc_string_doc_map, &doc);
+  status = lonejson_record_assign_string(
+      runtime, &test_two_alloc_string_doc_map, &doc,
+      &test_two_alloc_string_doc_map.fields[0], "aaaaaaaa", 8u, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.first != NULL);
+  first_alloc_size = lonejson__owned_size(doc.first);
+  EXPECT(first_alloc_size != 0u);
+  lonejson_cleanup(&test_two_alloc_string_doc_map, &doc);
+  lonejson_free(runtime);
+
+  config = lonejson_default_config();
+  config.max_alloc_bytes = first_alloc_size * 2u - 1u;
+  limited_runtime = lonejson_new(&config, &error);
+  EXPECT(limited_runtime != NULL);
+  if (limited_runtime == NULL) {
+    return;
+  }
+  lonejson_init(limited_runtime, &test_two_alloc_string_doc_map, &doc);
+  status = lonejson_record_assign_string(
+      limited_runtime, &test_two_alloc_string_doc_map, &doc,
+      &test_two_alloc_string_doc_map.fields[0], "aaaaaaaa", 8u, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.first != NULL);
+  EXPECT(lonejson__owned_size(doc.first) == first_alloc_size);
+  status = lonejson_record_assign_string(
+      limited_runtime, &test_two_alloc_string_doc_map, &doc,
+      &test_two_alloc_string_doc_map.fields[1], "bbbbbbbb", 8u, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message,
+                "parse allocations exceed configured max bytes") != NULL);
+  EXPECT(doc.first != NULL);
+  EXPECT(strcmp(doc.first, "aaaaaaaa") == 0);
+  EXPECT(doc.second == NULL);
+  lonejson_cleanup(&test_two_alloc_string_doc_map, &doc);
+  lonejson_free(limited_runtime);
 }
 
 static void test_msan_public_boundary_results_are_initialized(void) {

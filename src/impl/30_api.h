@@ -3954,7 +3954,7 @@ static void lonejson__record_assign_parser_init(
                             : lonejson__default_parse_options();
   options.clear_destination = 0;
   lonejson__parser_init_state(parser, map, record, &options, runtime_state, 0,
-                              1, 1, 0u, workspace, workspace_size);
+                              0, 0, 0u, workspace, workspace_size);
 }
 
 static lonejson_status
