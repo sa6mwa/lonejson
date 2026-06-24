@@ -104,6 +104,7 @@ function(lonejson_configure_strict_downstream_target target)
 endfunction()
 
 string(TOLOWER "${LONEJSON_TARGET_OS}" LONEJSON_TARGET_OS_LOWER)
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" LONEJSON_CMAKE_SYSTEM_NAME_LOWER)
 string(TOLOWER "${LONEJSON_TARGET_ARCH}" LONEJSON_TARGET_ARCH_LOWER)
 if(LONEJSON_TARGET_ARCH_LOWER STREQUAL "amd64")
   set(LONEJSON_TARGET_ARCH_LOWER "x86_64")
@@ -121,6 +122,15 @@ elseif(LONEJSON_TARGET_OS_LOWER STREQUAL "darwin" AND
   set(LONEJSON_TARGET_ID "arm64-apple-darwin")
 else()
   set(LONEJSON_TARGET_ID "${LONEJSON_TARGET_ARCH_LOWER}-${LONEJSON_TARGET_OS_LOWER}")
+endif()
+
+set(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS OFF)
+if(NOT CMAKE_CROSSCOMPILING AND
+    LONEJSON_TARGET_OS_LOWER STREQUAL LONEJSON_CMAKE_SYSTEM_NAME_LOWER)
+  if(NOT LONEJSON_TARGET_OS_LOWER STREQUAL "linux" OR
+      LONEJSON_TARGET_LIBC STREQUAL "gnu")
+    set(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS ON)
+  endif()
 endif()
 function(lonejson_find_curl)
   if(LONEJSON_C_PKT_SYSTEMS_ROOT)
@@ -324,38 +334,40 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${LONEJSON_LUA_EXECUTABLE}"
         "${LONEJSON_LUAROCKS_EXECUTABLE}")
-    add_test(
-      NAME lonejson_lua_legacy_uservalue_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_legacy_uservalue.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}"
-        "${CMAKE_CURRENT_BINARY_DIR}")
-    add_test(
-      NAME lonejson_lua_schema_cache_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}"
-        "${CMAKE_CURRENT_BINARY_DIR}")
-    add_test(
-      NAME lonejson_lua_encode_stats_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}"
-        "${CMAKE_CURRENT_BINARY_DIR}")
-    add_test(
-      NAME lonejson_lua_external_liblonejson_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_external_liblonejson.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}"
-        "${CMAKE_CURRENT_BINARY_DIR}")
+    if(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS)
+      add_test(
+        NAME lonejson_lua_legacy_uservalue_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_legacy_uservalue.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}"
+          "${CMAKE_CURRENT_BINARY_DIR}")
+      add_test(
+        NAME lonejson_lua_schema_cache_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}"
+          "${CMAKE_CURRENT_BINARY_DIR}")
+      add_test(
+        NAME lonejson_lua_encode_stats_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}"
+          "${CMAKE_CURRENT_BINARY_DIR}")
+      add_test(
+        NAME lonejson_lua_external_liblonejson_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_external_liblonejson.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}"
+          "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
     add_test(
       NAME lonejson_lua_rock_makefile_deps_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
@@ -415,6 +427,13 @@ if(LONEJSON_BUILD_TESTS)
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_src_rock_privacy.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_lua_native_test_target_filter_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_native_test_target_filter.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_COMMAND}"
+        "${CMAKE_GENERATOR}")
     add_test(
       NAME lonejson_run_release_matrix_darwin_target_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
