@@ -1086,7 +1086,7 @@ lonejson__json_value_path_prepare_key(lonejson_parser *parser) {
   return LONEJSON_STATUS_OK;
 }
 
-static LONEJSON__NOINLINE lonejson_status
+static lonejson_status
 lonejson__json_value_string_begin_visitor(lonejson_parser *parser, int is_key) {
   lonejson_json_value *value = parser->json_stream_value;
 
@@ -1123,7 +1123,7 @@ lonejson__json_value_string_begin_visitor(lonejson_parser *parser, int is_key) {
           : NULL);
 }
 
-static LONEJSON__NOINLINE lonejson_status
+static lonejson_status
 lonejson__json_value_string_chunk_visitor(lonejson_parser *parser,
                                           const char *data, size_t len,
                                           size_t limit, const char *msg) {
@@ -1154,7 +1154,7 @@ lonejson__json_value_string_chunk_visitor(lonejson_parser *parser,
       data, len, &parser->json_stream_text_bytes, limit, msg);
 }
 
-static LONEJSON__NOINLINE lonejson_status
+static lonejson_status
 lonejson__json_value_string_end_visitor(lonejson_parser *parser, int is_key) {
   lonejson_json_value *value = parser->json_stream_value;
   lonejson_status status;
