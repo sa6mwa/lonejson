@@ -320,21 +320,21 @@ if(LONEJSON_BUILD_TESTS)
   find_program(LONEJSON_BASH_EXECUTABLE bash)
   if(LONEJSON_BASH_EXECUTABLE AND LONEJSON_LUA_EXECUTABLE
       AND LONEJSON_LUAROCKS_EXECUTABLE)
-    add_test(
-      NAME lonejson_bench_baseline_history_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_baseline_history.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
-    add_test(
-      NAME lonejson_bench_retry_confirm_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_retry_confirm.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
     if(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS)
+      add_test(
+        NAME lonejson_bench_baseline_history_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_baseline_history.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}")
+      add_test(
+        NAME lonejson_bench_retry_confirm_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_retry_confirm.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}")
       add_test(
         NAME lonejson_lua_legacy_uservalue_tests
         COMMAND "${LONEJSON_BASH_EXECUTABLE}"
@@ -367,13 +367,13 @@ if(LONEJSON_BUILD_TESTS)
           "${LONEJSON_LUA_EXECUTABLE}"
           "${LONEJSON_LUAROCKS_EXECUTABLE}"
           "${CMAKE_CURRENT_BINARY_DIR}")
+      add_test(
+        NAME lonejson_lua_rock_makefile_deps_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_rock_makefile_deps.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}")
     endif()
-    add_test(
-      NAME lonejson_lua_rock_makefile_deps_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_rock_makefile_deps.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
   endif()
   if(LONEJSON_BASH_EXECUTABLE)
     add_test(

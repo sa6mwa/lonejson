@@ -36,15 +36,26 @@ list_tests() {
 assert_has_native_lua_tests() {
   local tests=$1
 
+  printf '%s\n' "$tests" | grep -F 'lonejson_bench_baseline_history_tests' >/dev/null
+  printf '%s\n' "$tests" | grep -F 'lonejson_bench_retry_confirm_tests' >/dev/null
   printf '%s\n' "$tests" | grep -F 'lonejson_lua_legacy_uservalue_tests' >/dev/null
   printf '%s\n' "$tests" | grep -F 'lonejson_lua_schema_cache_tests' >/dev/null
   printf '%s\n' "$tests" | grep -F 'lonejson_lua_encode_stats_tests' >/dev/null
   printf '%s\n' "$tests" | grep -F 'lonejson_lua_external_liblonejson_tests' >/dev/null
+  printf '%s\n' "$tests" | grep -F 'lonejson_lua_rock_makefile_deps_tests' >/dev/null
 }
 
 assert_lacks_native_lua_tests() {
   local tests=$1
 
+  if printf '%s\n' "$tests" | grep -F 'lonejson_bench_baseline_history_tests' >/dev/null; then
+    printf 'bench baseline Lua workflow tests must not run for non-host libc targets\n' >&2
+    exit 1
+  fi
+  if printf '%s\n' "$tests" | grep -F 'lonejson_bench_retry_confirm_tests' >/dev/null; then
+    printf 'bench retry Lua workflow tests must not run for non-host libc targets\n' >&2
+    exit 1
+  fi
   if printf '%s\n' "$tests" | grep -F 'lonejson_lua_legacy_uservalue_tests' >/dev/null; then
     printf 'legacy Lua native tests must not run for non-host libc targets\n' >&2
     exit 1
@@ -61,14 +72,16 @@ assert_lacks_native_lua_tests() {
     printf 'external liblonejson Lua native tests must not run for non-host libc targets\n' >&2
     exit 1
   fi
+  if printf '%s\n' "$tests" | grep -F 'lonejson_lua_rock_makefile_deps_tests' >/dev/null; then
+    printf 'Lua rock Makefile dependency tests must not run for non-host libc targets\n' >&2
+    exit 1
+  fi
 }
 
 configure_target "$tmp_dir/gnu" gnu
 gnu_tests="$(list_tests "$tmp_dir/gnu")"
 assert_has_native_lua_tests "$gnu_tests"
-printf '%s\n' "$gnu_tests" | grep -F 'lonejson_lua_rock_makefile_deps_tests' >/dev/null
 
 configure_target "$tmp_dir/musl" musl
 musl_tests="$(list_tests "$tmp_dir/musl")"
 assert_lacks_native_lua_tests "$musl_tests"
-printf '%s\n' "$musl_tests" | grep -F 'lonejson_lua_rock_makefile_deps_tests' >/dev/null
