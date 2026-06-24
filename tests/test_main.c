@@ -381,6 +381,7 @@ int main(void) {
   test_candidate_stream_capture_sink_and_memory();
   test_candidate_stream_capture_spooled_and_cleanup();
   test_candidate_stream_capture_failure_modes();
+  test_candidate_stream_capture_path_visitor_user();
 #ifdef LONEJSON_WITH_CURL
   test_curl_parse_survives_runtime_free();
   test_curl_parse_reinit_releases_previous_parser();

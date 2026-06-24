@@ -520,3 +520,31 @@ static void test_candidate_stream_capture_failure_modes(void) {
                                             strlen(json), &options, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
 }
+
+static void test_candidate_stream_capture_path_visitor_user(void) {
+  static const char json[] = "{\"a\":1}";
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  lonejson_path_value_visitor visitor;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&state, 0, sizeof(state));
+  visitor = lonejson_default_path_value_visitor();
+  visitor.number_chunk = test_candidate_path_number;
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_MEMORY;
+  options.path_visitor = &visitor;
+  options.visitor_user = &state;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
+                                            strlen(json), &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.end_count == 1u);
+  EXPECT(strcmp(state.payloads[0], "{\"a\":1}") == 0);
+  EXPECT(state.paths_seen == 1u);
+  EXPECT(state.numbers_seen == 1u);
+}
