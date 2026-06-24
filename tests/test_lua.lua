@@ -748,6 +748,18 @@ do
 end
 
 do
+  local default_lj = lonejson.new()
+  local DefaultJsonValue = default_lj.schema("DefaultJsonValue", {
+    default_lj.field("v", default_lj.json_value { required = true }),
+  })
+  local obj = DefaultJsonValue:decode('{"v":{"a":1}}')
+
+  assert_true(obj.v ~= nil)
+  assert_eq(getmetatable(obj.v).__lonejson_json_kind, "object")
+  assert_eq(obj.v.a, 1)
+end
+
+do
   local obj = Query:decode('{"id":"q-42","selector":{"op":"and","clauses":[{"field":"status","value":"open"},{"field":"priority","gte":3}]},"fields":["id","title",{"metrics":[true,null,3.14]}],"last_error":null}')
   assert_eq(obj.id, "q-42")
   assert_eq(getmetatable(obj.selector).__lonejson_json_kind, "object")

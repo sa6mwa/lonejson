@@ -39,8 +39,7 @@ static int ljlua_runtime_new(lua_State *L) {
     }
     return ljlua_push_error(L, &error);
   }
-  ud->capture_runtime =
-      lonejson_new(lua_isnoneornil(L, 1) ? NULL : &capture_config, &error);
+  ud->capture_runtime = lonejson_new(&capture_config, &error);
   if (ud->capture_runtime == NULL) {
     lonejson_free(ud->runtime);
     ud->runtime = NULL;
