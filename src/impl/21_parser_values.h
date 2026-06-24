@@ -145,8 +145,8 @@ static int lonejson__parse_u64_token(const char *value, lonejson_uint64 *out) {
   return 1;
 }
 
-static int lonejson__parse_f64_fast(const char *value, size_t len,
-                                    double *out) {
+static LONEJSON__HOT int lonejson__parse_f64_fast(const char *value, size_t len,
+                                                  double *out) {
   const unsigned char *p;
   const unsigned char *endp;
   double int_part;
@@ -155,6 +155,15 @@ static int lonejson__parse_f64_fast(const char *value, size_t len,
   unsigned exponent;
   int exponent_negative;
   int negative;
+  static const double powers10_small[] = {
+      1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10,
+      1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21,
+      1e22, 1e23, 1e24, 1e25, 1e26, 1e27, 1e28, 1e29, 1e30, 1e31, 1e32};
+  static const double neg_powers10_small[] = {
+      1e0,   1e-1,  1e-2,  1e-3,  1e-4,  1e-5,  1e-6,  1e-7,  1e-8,
+      1e-9,  1e-10, 1e-11, 1e-12, 1e-13, 1e-14, 1e-15, 1e-16, 1e-17,
+      1e-18, 1e-19, 1e-20, 1e-21, 1e-22, 1e-23, 1e-24, 1e-25, 1e-26,
+      1e-27, 1e-28, 1e-29, 1e-30, 1e-31, 1e-32};
 
   if (value == NULL || out == NULL || len == 0u || *value == '\0') {
     return 0;
@@ -199,9 +208,7 @@ static int lonejson__parse_f64_fast(const char *value, size_t len,
         return 0;
       }
     }
-    while (frac_digits-- != 0u) {
-      frac_part /= 10.0;
-    }
+    frac_part *= neg_powers10_small[frac_digits];
   }
   exponent = 0u;
   exponent_negative = 0;
@@ -233,22 +240,30 @@ static int lonejson__parse_f64_fast(const char *value, size_t len,
   }
   scale = int_part + frac_part;
   if (exponent != 0u) {
-    static const double powers10[] = {1e1,  1e2,  1e4,   1e8,  1e16,
-                                      1e32, 1e64, 1e128, 1e256};
-    static const double neg_powers10[] = {1e-1,  1e-2,  1e-4,   1e-8,  1e-16,
-                                          1e-32, 1e-64, 1e-128, 1e-256};
-    const double *powers = exponent_negative ? neg_powers10 : powers10;
-    size_t power_index = 0u;
+    if (exponent < sizeof(powers10_small) / sizeof(powers10_small[0])) {
+      scale *= exponent_negative ? neg_powers10_small[exponent]
+                                 : powers10_small[exponent];
+    } else {
+      static const double powers10[] = {1e1,  1e2,  1e4,   1e8,  1e16,
+                                        1e32, 1e64, 1e128, 1e256};
+      static const double neg_powers10[] = {1e-1,  1e-2,  1e-4,   1e-8,  1e-16,
+                                            1e-32, 1e-64, 1e-128, 1e-256};
+      const double *powers = exponent_negative ? neg_powers10 : powers10;
+      size_t power_index = 0u;
 
-    while (exponent != 0u &&
-           power_index < sizeof(powers10) / sizeof(powers10[0])) {
-      if ((exponent & 1u) != 0u) {
-        scale *= powers[power_index];
+      while (exponent != 0u &&
+             power_index < sizeof(powers10) / sizeof(powers10[0])) {
+        if ((exponent & 1u) != 0u) {
+          scale *= powers[power_index];
+        }
+        exponent >>= 1u;
+        power_index++;
       }
-      exponent >>= 1u;
-      power_index++;
+      if (exponent != 0u) {
+        return 0;
+      }
     }
-    if (exponent != 0u || !lonejson__is_finite_f64(scale)) {
+    if (!lonejson__is_finite_f64(scale)) {
       return 0;
     }
   }
@@ -287,10 +302,9 @@ static lonejson_status lonejson__assign_u64(lonejson_parser *parser,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__assign_f64(lonejson_parser *parser,
-                                            const lonejson_field *field,
-                                            void *ptr, const char *value,
-                                            size_t len) {
+static LONEJSON__HOT lonejson_status lonejson__assign_f64(
+    lonejson_parser *parser, const lonejson_field *field, void *ptr,
+    const char *value, size_t len) {
   char *end = NULL;
   double parsed;
 
