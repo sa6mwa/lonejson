@@ -170,6 +170,10 @@ lonejson__json_cursor_getc(lonejson__json_io *io) {
     io->cursor->has_pushback = 0;
     byte = (unsigned char)io->cursor->pushback;
     io->cursor->last_byte_offset = io->cursor->pushback_offset;
+    if (io->cursor->count_pushback) {
+      io->cursor->count_pushback = 0;
+      goto counted_pushback;
+    }
     return (int)byte;
   }
   if (io->cursor->buffer != NULL) {
@@ -251,6 +255,7 @@ lonejson__json_cursor_getc(lonejson__json_io *io) {
 counted:
   io->cursor->last_byte_offset = io->cursor->stream_offset;
   io->cursor->stream_offset++;
+counted_pushback:
   io->total_bytes++;
   if (io->limits.max_total_bytes != 0u &&
       io->total_bytes > io->limits.max_total_bytes) {
@@ -265,6 +270,7 @@ static LONEJSON__INLINE void lonejson__json_cursor_ungetc(lonejson__json_io *io,
                                                           int ch) {
   if (io->cursor != NULL) {
     io->cursor->has_pushback = 1;
+    io->cursor->count_pushback = 0;
     io->cursor->pushback = ch;
     io->cursor->pushback_offset = io->cursor->last_byte_offset;
   } else {

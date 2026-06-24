@@ -284,6 +284,38 @@ static void test_candidate_stream_malformed_offset(void) {
   EXPECT(strstr(error.message, "candidate offset") != NULL);
 }
 
+static void test_candidate_stream_counts_pushed_back_bytes_for_limits(void) {
+  static const char json[] = "true";
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_status status;
+  lonejson_error error;
+
+  config = lonejson_default_config();
+  config.json_value_max_total_bytes = 3u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+
+  memset(&state, 0, sizeof(state));
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson_visit_candidates_buffer(runtime, json, strlen(json),
+                                            &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 0u);
+  EXPECT(strstr(error.message, "maximum total byte limit") != NULL);
+  lonejson_free(runtime);
+}
+
 static void test_candidate_stream_callback_stop_and_failure(void) {
   static const char json[] = "1 2 3";
   test_candidate_stream_state state;

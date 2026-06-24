@@ -3846,6 +3846,7 @@ static int lonejson__candidate_peek_nonspace(lonejson__candidate_scan *scan) {
   } while (ch >= 0 && lonejson__is_json_space(ch));
   if (ch >= 0) {
     lonejson__json_cursor_ungetc(&io, ch);
+    scan->cursor->count_pushback = 1;
   }
   return ch;
 }
@@ -3869,6 +3870,7 @@ static int lonejson__candidate_peek_nonspace_separator(
   } while (ch >= 0 && lonejson__is_json_space(ch));
   if (ch >= 0) {
     lonejson__json_cursor_ungetc(&io, ch);
+    scan->cursor->count_pushback = 1;
   }
   return ch;
 }
