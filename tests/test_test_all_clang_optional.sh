@@ -29,6 +29,8 @@ printf '%s\n' "$full_support" | grep -E '(^|[[:space:]])make[[:space:]]+msan($|[
 
 tsan_dry_run=$(make -C "$repo_root" -n tsan)
 printf '%s\n' "$tsan_dry_run" | grep -F 'lua_external_liblonejson_tests' >/dev/null
+printf '%s\n' "$tsan_dry_run" | grep -F 'lua_target_tests' >/dev/null
 
 msan_dry_run=$(make -C "$repo_root" -n msan)
 printf '%s\n' "$msan_dry_run" | grep -F 'lua_external_liblonejson_tests' >/dev/null
+printf '%s\n' "$msan_dry_run" | grep -F 'lua_target_tests' >/dev/null

@@ -103,6 +103,23 @@ function(lonejson_configure_strict_downstream_target target)
   endif()
 endfunction()
 
+function(lonejson_configure_lua_c_target target)
+  if(UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    target_compile_definitions(${target} PRIVATE
+      _POSIX_C_SOURCE=200809L
+      _FILE_OFFSET_BITS=64)
+  endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_compile_definitions(${target} PRIVATE _DARWIN_C_SOURCE=1)
+  endif()
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(${target} PRIVATE
+      -std=c99
+      -Wall
+      -Wextra)
+  endif()
+endfunction()
+
 string(TOLOWER "${LONEJSON_TARGET_OS}" LONEJSON_TARGET_OS_LOWER)
 string(TOLOWER "${CMAKE_SYSTEM_NAME}" LONEJSON_CMAKE_SYSTEM_NAME_LOWER)
 string(TOLOWER "${LONEJSON_TARGET_ARCH}" LONEJSON_TARGET_ARCH_LOWER)
@@ -374,6 +391,61 @@ if(LONEJSON_BUILD_TESTS)
           "${CMAKE_CURRENT_SOURCE_DIR}"
           "${LONEJSON_LUAROCKS_EXECUTABLE}")
     endif()
+  endif()
+
+  set(LONEJSON_TARGET_LUA_INCLUDE_DIR
+    "${LONEJSON_C_PKT_SYSTEMS_ROOT}/include")
+  set(LONEJSON_TARGET_LUA_LIBRARY
+    "${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib/liblua.so")
+  if(LONEJSON_TARGET_OS_LOWER STREQUAL "linux" AND
+      LONEJSON_C_PKT_SYSTEMS_ROOT AND
+      EXISTS "${LONEJSON_TARGET_LUA_INCLUDE_DIR}/lua.h" AND
+      EXISTS "${LONEJSON_TARGET_LUA_LIBRARY}")
+    add_library(lonejson_lua_target_core MODULE src/lua/lonejson_lua.c)
+    target_include_directories(lonejson_lua_target_core PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}"
+      "${LONEJSON_TARGET_LUA_INCLUDE_DIR}")
+    target_compile_definitions(lonejson_lua_target_core PRIVATE
+      LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
+      LONEJSON_TEST_MAP_ANALYSIS_COUNTER=1
+      LONEJSON_TEST_LUA_ENCODE_STATS=1)
+    target_link_libraries(lonejson_lua_target_core PRIVATE
+      lonejson_shared
+      "${LONEJSON_TARGET_LUA_LIBRARY}")
+    set_target_properties(lonejson_lua_target_core PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME core
+      LIBRARY_OUTPUT_DIRECTORY
+        "${CMAKE_CURRENT_BINARY_DIR}/lua-target/lonejson"
+      BUILD_RPATH
+        "${CMAKE_CURRENT_BINARY_DIR};${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
+    if(LONEJSON_BUILD_WITH_CURL)
+      target_compile_definitions(lonejson_lua_target_core PRIVATE
+        LONEJSON_WITH_CURL)
+      lonejson_target_include_curl(lonejson_lua_target_core)
+      target_link_libraries(lonejson_lua_target_core PRIVATE CURL::libcurl)
+    endif()
+    lonejson_configure_lua_c_target(lonejson_lua_target_core)
+
+    add_executable(lonejson_lua_target_runner
+      tests/test_lua_embedded_runner.c)
+    target_include_directories(lonejson_lua_target_runner PRIVATE
+      "${LONEJSON_TARGET_LUA_INCLUDE_DIR}")
+    target_link_libraries(lonejson_lua_target_runner PRIVATE
+      "${LONEJSON_TARGET_LUA_LIBRARY}")
+    set_target_properties(lonejson_lua_target_runner PROPERTIES
+      BUILD_RPATH "${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
+    lonejson_configure_lua_c_target(lonejson_lua_target_runner)
+    add_dependencies(lonejson_lua_target_runner lonejson_lua_target_core)
+    add_test(
+      NAME lonejson_lua_target_tests
+      COMMAND lonejson_lua_target_runner
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua.lua"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_fuzz.lua"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.lua"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.lua")
   endif()
   if(LONEJSON_BASH_EXECUTABLE)
     add_test(
@@ -848,6 +920,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_schema_methods.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_stream_spool.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_support.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_embedded_runner.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_validate.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_mapped_parse.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_array_stream.c"
