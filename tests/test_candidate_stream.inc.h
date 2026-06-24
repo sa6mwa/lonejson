@@ -223,6 +223,7 @@ static void test_candidate_stream_repeated_and_auto(void) {
 
 static void test_candidate_stream_rejects_adjacent_repeated_values(void) {
   static const char *const invalid_json[] = {"truefalse", "1true", "{}\"x\""};
+  static const char *const invalid_ndjson[] = {"1,2", "[]{}"};
   test_candidate_stream_state state;
   lonejson_candidate_stream_options options;
   lonejson_status status;
@@ -254,10 +255,51 @@ static void test_candidate_stream_rejects_adjacent_repeated_values(void) {
         test_default_runtime(), invalid_json[i], strlen(invalid_json[i]),
         &options, &error);
     EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
+    EXPECT(state.begin_count <= 1u);
+    EXPECT(state.end_count <= 1u);
+  }
+
+  for (i = 0u; i < sizeof(invalid_ndjson) / sizeof(invalid_ndjson[0]); ++i) {
+    memset(&state, 0, sizeof(state));
+    options = lonejson_default_candidate_stream_options();
+    options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+    options.candidate_begin = test_candidate_begin;
+    options.candidate_end = test_candidate_end;
+    options.candidate_user = &state;
+    status = lonejson_visit_candidates_buffer(
+        test_default_runtime(), invalid_ndjson[i], strlen(invalid_ndjson[i]),
+        &options, &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
     EXPECT(state.begin_count == 1u);
     EXPECT(state.end_count == 1u);
     EXPECT(strstr(error.message, "whitespace between repeated JSON values") !=
            NULL);
+  }
+}
+
+static void test_candidate_stream_accepts_whitespace_separators(void) {
+  static const char *const valid_json[] = {"1 2", "1\n2", "1\t2", "1\r\n2",
+                                           "1 \n\t\r 2"};
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  lonejson_status status;
+  lonejson_error error;
+  size_t i;
+
+  for (i = 0u; i < sizeof(valid_json) / sizeof(valid_json[0]); ++i) {
+    memset(&state, 0, sizeof(state));
+    options = lonejson_default_candidate_stream_options();
+    options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+    options.candidate_begin = test_candidate_begin;
+    options.candidate_end = test_candidate_end;
+    options.candidate_user = &state;
+    status = lonejson_visit_candidates_buffer(
+        test_default_runtime(), valid_json[i], strlen(valid_json[i]), &options,
+        &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(state.begin_count == 2u);
+    EXPECT(state.end_count == 2u);
+    EXPECT(state.begin_offsets[1] > state.begin_offsets[0]);
   }
 }
 
@@ -313,6 +355,69 @@ static void test_candidate_stream_counts_pushed_back_bytes_for_limits(void) {
   EXPECT(state.begin_count == 1u);
   EXPECT(state.end_count == 0u);
   EXPECT(strstr(error.message, "maximum total byte limit") != NULL);
+
+  config = lonejson_default_config();
+  config.json_value_max_total_bytes = 4u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime != NULL) {
+    memset(&state, 0, sizeof(state));
+    options = lonejson_default_candidate_stream_options();
+    options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+    options.candidate_begin = test_candidate_begin;
+    options.candidate_end = test_candidate_end;
+    options.candidate_user = &state;
+    status = lonejson_visit_candidates_buffer(runtime, json, strlen(json),
+                                              &options, &error);
+    EXPECT(status == LONEJSON_STATUS_OK);
+    EXPECT(state.begin_count == 1u);
+    EXPECT(state.end_count == 1u);
+    lonejson_free(runtime);
+  }
+}
+
+static void
+test_candidate_stream_counts_pushed_back_bytes_across_sources(void) {
+  static const char json[] = "1 true";
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_status status;
+  lonejson_error error;
+  test_reader_state reader;
+
+  config = lonejson_default_config();
+  config.json_value_max_total_bytes = 3u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+
+  memset(&state, 0, sizeof(state));
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson_visit_candidates_buffer(runtime, json, strlen(json),
+                                            &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(state.begin_count == 2u);
+  EXPECT(state.end_count == 1u);
+  EXPECT(strstr(error.message, "maximum total byte limit") != NULL);
+
+  memset(&state, 0, sizeof(state));
+  reader.json = json;
+  reader.offset = 0u;
+  reader.chunk_size = 1u;
+  status = lonejson_visit_candidates_reader(runtime, test_state_reader, &reader,
+                                            &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(state.begin_count == 2u);
+  EXPECT(state.end_count == 1u);
+  EXPECT(strstr(error.message, "maximum total byte limit") != NULL);
   lonejson_free(runtime);
 }
 
@@ -348,6 +453,20 @@ static void test_candidate_stream_callback_stop_and_failure(void) {
   EXPECT(state.end_count == 1u);
   EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(error.offset == state.begin_offsets[1]);
+  EXPECT(strstr(error.message, "candidate callback failed") != NULL);
+
+  memset(&state, 0, sizeof(state));
+  state.fail_at_end = 1u;
+  error.code = LONEJSON_STATUS_INVALID_JSON;
+  error.offset = 123u;
+  snprintf(error.message, sizeof(error.message), "stale end candidate error");
+  status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
+                                            strlen(json), &options, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 1u);
+  EXPECT(error.code == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(error.offset == state.end_offsets[0]);
   EXPECT(strstr(error.message, "candidate callback failed") != NULL);
 }
 
