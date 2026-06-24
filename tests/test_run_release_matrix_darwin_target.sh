@@ -16,7 +16,8 @@ printf '%s\n' "$darwin_block" | grep -F -- '-D "CMAKE_OSX_DEPLOYMENT_TARGET=$dar
 printf '%s\n' "$script" | grep -F -- 'target_raw_compile_flags()' >/dev/null
 printf '%s\n' "$script" | grep -F -- 'printf '\''%s\n'\'' "-mmacosx-version-min=$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$script" | grep -F -- 'raw_compile_flags="$(target_raw_compile_flags "$target_id")"' >/dev/null
-printf '%s\n' "$script" | grep -F -- '"$compiler" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"' >/dev/null
+printf '%s\n' "$script" | grep -F -- '"$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"' >/dev/null
+printf '%s\n' "$script" | grep -F -- 'scripts/discover_target_tools.sh' >/dev/null
 printf '%s\n' "$script" | grep -F -- 'missing c.pkt.systems CURL CMake package' >/dev/null
 printf '%s\n' "$script" | grep -F -- '-D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"' >/dev/null
 if printf '%s\n' "$script" | grep -F -- '-D CURL_LIBRARY_RELEASE=' >/dev/null; then

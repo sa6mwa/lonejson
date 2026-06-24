@@ -40,26 +40,6 @@ require_linux_origin_rpath() {
     IFS="$old_ifs"
 }
 
-target_compiler() {
-    target_id="$1"
-
-    case "$target_id" in
-        x86_64-linux-gnu) printf '%s\n' cc ;;
-        x86_64-linux-musl) printf '%s\n' musl-gcc ;;
-        aarch64-linux-gnu) printf '%s\n' aarch64-linux-gnu-gcc ;;
-        aarch64-linux-musl) printf '%s\n' aarch64-linux-musl-gcc ;;
-        armhf-linux-gnu) printf '%s\n' arm-linux-gnueabihf-gcc ;;
-        armhf-linux-musl) printf '%s\n' arm-linux-musleabihf-gcc ;;
-        arm64-apple-darwin)
-            printf '%s\n' "${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/arm64-apple-darwin25-clang"
-            ;;
-        *)
-            printf 'unknown target compiler for %s\n' "$target_id" >&2
-            exit 1
-            ;;
-    esac
-}
-
 target_cmake_system_name() {
     target_id="$1"
 
@@ -105,9 +85,21 @@ release_archive_path() {
     printf '%s\n' "$repo_root/dist/liblonejson-$("$repo_root/scripts/release_version.sh")-$target_id.tar.gz"
 }
 
+load_target_tools() {
+    preset="$1"
+    target_id="$2"
+
+    eval "$("$repo_root/scripts/discover_target_tools.sh" \
+        --build-dir "$repo_root/build/$preset" \
+        --target-id "$target_id")"
+}
+
 require_archive_contract() {
     archive="$1"
     target_id="$2"
+    preset="$3"
+
+    load_target_tools "$preset" "$target_id"
 
     tar -tzf "$archive" | while IFS= read -r entry; do
         entry_without_root="${entry#*/}"
@@ -169,9 +161,11 @@ require_archive_contract() {
             printf 'missing packaged shared library in %s\n' "$archive" >&2
             exit 1
         fi
-        otool_bin="${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/arm64-apple-darwin25-otool"
-        require_command "$otool_bin"
-        dynamic_metadata="$("$otool_bin" -L "$shared_lib"; "$otool_bin" -l "$shared_lib")"
+        if [ -z "$OTOOL" ]; then
+            printf 'missing target otool for %s\n' "$target_id" >&2
+            exit 1
+        fi
+        dynamic_metadata="$("$OTOOL" -L "$shared_lib"; "$OTOOL" -l "$shared_lib")"
         case "$dynamic_metadata" in
             *libcurl* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
                 printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
@@ -189,7 +183,11 @@ require_archive_contract() {
             printf 'missing packaged shared library in %s\n' "$archive" >&2
             exit 1
         fi
-        dynamic_metadata="$(readelf -d "$shared_lib")"
+        if [ -z "$READELF" ]; then
+            printf 'missing target readelf for %s\n' "$target_id" >&2
+            exit 1
+        fi
+        dynamic_metadata="$("$READELF" -d "$shared_lib")"
         case "$dynamic_metadata" in
             *libcurl* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
                 printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
@@ -206,6 +204,9 @@ require_archive_contract() {
 require_archive_consumer_metadata() {
     archive="$1"
     target_id="$2"
+    preset="$3"
+
+    load_target_tools "$preset" "$target_id"
 
     tmp_dir="$(mktemp -d)"
     trap 'rm -rf "$tmp_dir"' EXIT
@@ -215,9 +216,6 @@ require_archive_consumer_metadata() {
         printf 'failed to inspect archive: %s\n' "$archive" >&2
         exit 1
     fi
-
-    compiler="$(target_compiler "$target_id")"
-    require_command "$compiler"
 
     consumer_source="$tmp_dir/consumer.c"
     cat >"$consumer_source" <<'EOF'
@@ -246,7 +244,7 @@ EOF
     raw_compile_flags="$(target_raw_compile_flags "$target_id")"
     raw_link_flags="$(target_raw_link_flags "$target_id")"
     # shellcheck disable=SC2086
-    "$compiler" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
+    "$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
 
     cmake_source_dir="$tmp_dir/cmake-consumer"
     cmake_build_dir="$tmp_dir/cmake-build"
@@ -280,7 +278,7 @@ EOF
             -G Ninja
             -D "CMAKE_PREFIX_PATH=$package_root"
             -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
-            -D "CMAKE_C_COMPILER=$compiler"
+            -D "CMAKE_C_COMPILER=$CC"
             -D "CMAKE_SYSTEM_NAME=$cmake_system_name"
             -D CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
         )
@@ -295,6 +293,9 @@ EOF
 require_curl_symbol() {
     archive="$1"
     target_id="$2"
+    preset="$3"
+
+    load_target_tools "$preset" "$target_id"
 
     tmp_dir="$(mktemp -d)"
     trap 'rm -rf "$tmp_dir"' EXIT
@@ -311,9 +312,11 @@ require_curl_symbol() {
             printf 'missing packaged shared library in %s\n' "$archive" >&2
             exit 1
         fi
-        nm_tool="${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/arm64-apple-darwin25-nm"
-        require_command "$nm_tool"
-        if ! "$nm_tool" -gU "$shared_lib" | grep -Eq '(^|[[:space:]])_?lonejson_curl_parse_init$'; then
+        if [ -z "$NM" ]; then
+            printf 'missing target nm for %s\n' "$target_id" >&2
+            exit 1
+        fi
+        if ! "$NM" -gU "$shared_lib" | grep -Eq '(^|[[:space:]])_?lonejson_curl_parse_init$'; then
             printf 'missing lonejson_curl_* ABI symbol in %s\n' "$archive" >&2
             exit 1
         fi
@@ -323,7 +326,11 @@ require_curl_symbol() {
             printf 'missing packaged shared library in %s\n' "$archive" >&2
             exit 1
         fi
-        if ! nm -D --defined-only "$shared_lib" | grep -Eq '(^|[[:space:]])lonejson_curl_parse_init$'; then
+        if [ -z "$NM" ]; then
+            printf 'missing target nm for %s\n' "$target_id" >&2
+            exit 1
+        fi
+        if ! "$NM" -D --defined-only "$shared_lib" | grep -Eq '(^|[[:space:]])lonejson_curl_parse_init$'; then
             printf 'missing lonejson_curl_* ABI symbol in %s\n' "$archive" >&2
             exit 1
         fi
@@ -359,9 +366,9 @@ run_target() {
     ctest --preset "$preset"
     cmake --build --preset "$package_preset"
     archive="$(release_archive_path "$target_id")"
-    require_archive_contract "$archive" "$target_id"
-    require_curl_symbol "$archive" "$target_id"
-    require_archive_consumer_metadata "$archive" "$target_id"
+    require_archive_contract "$archive" "$target_id" "$preset"
+    require_curl_symbol "$archive" "$target_id" "$preset"
+    require_archive_consumer_metadata "$archive" "$target_id" "$preset"
 }
 
 run_build_only_target() {
@@ -374,9 +381,9 @@ run_build_only_target() {
     cmake --build --preset "$preset"
     cmake --build --preset "$package_preset"
     archive="$(release_archive_path "$target_id")"
-    require_archive_contract "$archive" "$target_id"
-    require_curl_symbol "$archive" "$target_id"
-    require_archive_consumer_metadata "$archive" "$target_id"
+    require_archive_contract "$archive" "$target_id" "$preset"
+    require_curl_symbol "$archive" "$target_id" "$preset"
+    require_archive_consumer_metadata "$archive" "$target_id" "$preset"
 }
 
 require_command cmake
