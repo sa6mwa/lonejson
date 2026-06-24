@@ -131,13 +131,22 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 .PHONY: \
 	help \
 	build \
+	build-debug \
 	build-host \
 	build-release \
 	release-lua-artifacts \
+	package \
+	package-source \
+	package-source-smoke \
+	package-checksums \
 	release-source-artifact \
 	release-source-smoke \
 	release-darwin-smoke-bundle \
 	package-verify \
+	verify-release-archives \
+	verify-release-privacy \
+	prerelease \
+	prerelease-hardening \
 	release \
 	lua-rock \
 	lua-test \
@@ -153,6 +162,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	bench-baseline-history \
 	bench-gate \
 	test \
+	test-debug \
 	test-host \
 	test-host-curl \
 	test-cross \
@@ -188,10 +198,19 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 help:
 	@printf '%s\n' \
 		'make build                  Configure and build the full debug tree (tests and standalone examples, excluding lua-* and curl-examples).' \
+		'make build-debug            Alias for make build.' \
 		'make build-host             Configure and build the host-native release preset.' \
 		'make build-release          Configure and build the full shipped release test matrix.' \
-		'make release                Run the release matrix and package generation.' \
+		'make package                Build all release packages through make release.' \
+		'make package-source         Build the source-only release tarball in dist/.' \
+		'make package-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
+		'make package-checksums      Generate release checksums for existing dist artifacts.' \
 		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
+		'make verify-release-archives Alias for make package-verify.' \
+		'make verify-release-privacy Alias for make package-verify.' \
+		'make prerelease             Run the standard local pre-release confidence gate.' \
+		'make prerelease-hardening   Run the clean release gate.' \
+		'make release                Run the release matrix and package generation.' \
 		'make release-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make release-darwin-smoke-bundle Build the Darwin smoke ZIP with example and link-smoke binaries.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
@@ -208,6 +227,7 @@ help:
 		'make bench-baseline-history Compare frozen C/Lua benchmark baselines across git history.' \
 		'make bench-gate             Run a fresh C benchmark, then enforce the C benchmark gate against the committed C baseline.' \
 		'make test                   Build and run the debug test preset.' \
+		'make test-debug             Alias for make test.' \
 		'make test-host              Build and run the host-native test preset.' \
 		'make test-host-curl         Build and run the host-native curl-enabled test preset.' \
 		'make test-cross             Configure, build, and run all cross release test presets serially.' \
@@ -245,6 +265,8 @@ build:
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset $(DEBUG_PRESET)
 	./scripts/stage_standalone_examples.sh
+
+build-debug: build
 
 build-host:
 	cmake --preset $(HOST_PRESET)
@@ -285,6 +307,10 @@ $(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lu
 
 release-lua-artifacts: $(RELEASE_ROCKSPEC) $(RELEASE_ROCK)
 
+package: release
+
+package-source: release-source-artifact
+
 release-source-artifact:
 	cmake --preset $(HOST_PRESET)
 	cmake --build --preset package-source
@@ -296,12 +322,26 @@ release-source-smoke: release-source-artifact
 	./scripts/test_release_from_source.sh "$(CURDIR)" "$(DIST_DIR)/lonejson-$(RELEASE_VERSION).tar.gz"
 	cmake --build --preset package-checksums
 
+package-source-smoke: release-source-smoke
+
+package-checksums:
+	cmake --preset $(HOST_PRESET)
+	cmake --build --preset package-checksums
+
 release-darwin-smoke-bundle: deps-arm64-apple-darwin
 	cmake --preset arm64-apple-darwin-release
 	cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
 
 package-verify:
 	./scripts/verify_release_artifacts.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
+
+verify-release-archives: package-verify
+
+verify-release-privacy: package-verify
+
+prerelease: test-all package-verify
+
+prerelease-hardening: release
 
 release:
 	./scripts/run_release_matrix.sh
@@ -372,6 +412,8 @@ bench-gate:
 test: build
 	ctest --preset $(DEBUG_PRESET)
 	$(MAKE) lua-test
+
+test-debug: test
 
 test-host: build-host
 	ctest --preset $(HOST_PRESET)
