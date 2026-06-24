@@ -166,16 +166,6 @@ lonejson__json_cursor_getc(lonejson__json_io *io) {
     io->has_pushback = 0;
     return io->pushback;
   }
-  if (io->cursor->has_pushback) {
-    io->cursor->has_pushback = 0;
-    byte = (unsigned char)io->cursor->pushback;
-    io->cursor->last_byte_offset = io->cursor->pushback_offset;
-    if (io->cursor->count_pushback) {
-      io->cursor->count_pushback = 0;
-      goto counted_pushback;
-    }
-    return (int)byte;
-  }
   if (io->cursor->buffer != NULL) {
     if (io->cursor->buffer_off >= io->cursor->buffer_len) {
       return EOF;
@@ -203,6 +193,7 @@ lonejson__json_cursor_getc(lonejson__json_io *io) {
       if (result.bytes_read != 0u) {
         io->cursor->read_buffer_len = result.bytes_read;
         io->cursor->read_buffer_off = 0u;
+        io->cursor->stream_offset += result.bytes_read;
         byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
         goto counted;
       }
@@ -233,6 +224,7 @@ lonejson__json_cursor_getc(lonejson__json_io *io) {
     }
     io->cursor->read_buffer_len = (size_t)got;
     io->cursor->read_buffer_off = 0u;
+    io->cursor->stream_offset += (size_t)got;
     byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
     goto counted;
   }
@@ -251,11 +243,9 @@ lonejson__json_cursor_getc(lonejson__json_io *io) {
   }
   io->cursor->read_buffer_len = (size_t)got;
   io->cursor->read_buffer_off = 0u;
+  io->cursor->stream_offset += (size_t)got;
   byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
 counted:
-  io->cursor->last_byte_offset = io->cursor->stream_offset;
-  io->cursor->stream_offset++;
-counted_pushback:
   io->total_bytes++;
   if (io->limits.max_total_bytes != 0u &&
       io->total_bytes > io->limits.max_total_bytes) {
@@ -268,25 +258,39 @@ counted_pushback:
 
 static LONEJSON__INLINE void lonejson__json_cursor_ungetc(lonejson__json_io *io,
                                                           int ch) {
-  if (io->cursor != NULL) {
-    io->cursor->has_pushback = 1;
-    io->cursor->count_pushback = 0;
-    io->cursor->pushback = ch;
-    io->cursor->pushback_offset = io->cursor->last_byte_offset;
-  } else {
-    io->has_pushback = 1;
-    io->pushback = ch;
-  }
+  io->has_pushback = 1;
+  io->pushback = ch;
 }
 
 static LONEJSON__INLINE lonejson_status
 lonejson__json_cursor_advance_span(lonejson__json_io *io, size_t len) {
+  (void)io;
   if (len == 0u) {
     return LONEJSON_STATUS_OK;
   }
-  io->cursor->last_byte_offset = io->cursor->stream_offset + len - 1u;
-  io->cursor->stream_offset += len;
   return LONEJSON_STATUS_OK;
+}
+
+static LONEJSON__INLINE size_t
+lonejson__json_cursor_next_offset(const lonejson__json_cursor *cursor) {
+  if (cursor == NULL) {
+    return 0u;
+  }
+  if (cursor->buffer != NULL) {
+    return cursor->buffer_off;
+  }
+  if (cursor->stream_offset >=
+      cursor->read_buffer_len - cursor->read_buffer_off) {
+    return cursor->stream_offset - cursor->read_buffer_len +
+           cursor->read_buffer_off;
+  }
+  return 0u;
+}
+
+static LONEJSON__INLINE size_t
+lonejson__json_cursor_last_offset(const lonejson__json_cursor *cursor) {
+  size_t next = lonejson__json_cursor_next_offset(cursor);
+  return next == 0u ? 0u : next - 1u;
 }
 
 static LONEJSON__INLINE int

@@ -14,7 +14,6 @@ typedef struct lonejson__json_cursor {
   size_t read_buffer_len;
   size_t read_buffer_off;
   size_t stream_offset;
-  size_t last_byte_offset;
   size_t pushback_offset;
   int count_pushback;
   int has_pushback;

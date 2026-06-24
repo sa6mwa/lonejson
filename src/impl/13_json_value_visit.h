@@ -298,11 +298,6 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
         } else {
           io->cursor->buffer_off += plain_span;
         }
-        status = lonejson__json_cursor_advance_span(io, plain_span);
-        if (status != LONEJSON_STATUS_OK &&
-            status != LONEJSON_STATUS_TRUNCATED) {
-          return status;
-        }
         if (plain_span == available) {
           span = lonejson__json_cursor_plain_span(io, &available,
                                                   &uses_read_buffer);
@@ -884,11 +879,6 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
         } else {
           io->cursor->buffer_off += plain_span;
         }
-        status = lonejson__json_cursor_advance_span(io, plain_span);
-        if (status != LONEJSON_STATUS_OK &&
-            status != LONEJSON_STATUS_TRUNCATED) {
-          return status;
-        }
         if (plain_span == available) {
           span = lonejson__json_cursor_plain_span(io, &available,
                                                   &uses_read_buffer);
@@ -1457,6 +1447,20 @@ static lonejson_status lonejson__json_visit_cursor(
       io.limits.max_key_bytes = defaults.max_key_bytes;
     }
   }
+  if (cursor->has_pushback) {
+    io.has_pushback = 1;
+    io.pushback = cursor->pushback;
+    cursor->has_pushback = 0;
+  }
+  if (io.has_pushback && cursor->count_pushback) {
+    io.total_bytes = 1u;
+    cursor->count_pushback = 0;
+    if (io.limits.max_total_bytes != 0u &&
+        io.total_bytes > io.limits.max_total_bytes) {
+      return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                                 "JSON value exceeds maximum total byte limit");
+    }
+  }
   if (path_visitor != NULL) {
     io.path_capacity = io.limits.max_depth + 1u;
     io.path_segments = (lonejson_path_segment *)lonejson__owned_malloc(
@@ -1483,6 +1487,11 @@ static lonejson_status lonejson__json_visit_cursor(
           lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
                               "visited JSON must contain exactly one value");
     }
+  }
+  if (io.has_pushback) {
+    cursor->has_pushback = 1;
+    cursor->pushback = io.pushback;
+    cursor->pushback_offset = lonejson__json_cursor_last_offset(cursor);
   }
   if (io.path_frames != NULL) {
     for (i = 0u; i < io.path_capacity; ++i) {
@@ -1538,6 +1547,20 @@ static lonejson_status lonejson__json_visit_one_cursor(
       io.limits.max_key_bytes = defaults.max_key_bytes;
     }
   }
+  if (cursor->has_pushback) {
+    io.has_pushback = 1;
+    io.pushback = cursor->pushback;
+    cursor->has_pushback = 0;
+  }
+  if (io.has_pushback && cursor->count_pushback) {
+    io.total_bytes = 1u;
+    cursor->count_pushback = 0;
+    if (io.limits.max_total_bytes != 0u &&
+        io.total_bytes > io.limits.max_total_bytes) {
+      return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                                 "JSON value exceeds maximum total byte limit");
+    }
+  }
   if (path_visitor != NULL) {
     io.path_capacity = io.limits.max_depth + 1u;
     io.path_segments = (lonejson_path_segment *)lonejson__owned_malloc(
@@ -1557,6 +1580,11 @@ static lonejson_status lonejson__json_visit_one_cursor(
   }
   status = io.path_visitor == NULL ? lonejson__json_visit_value_no_path(&io)
                                    : lonejson__json_visit_value(&io);
+  if (io.has_pushback) {
+    cursor->has_pushback = 1;
+    cursor->pushback = io.pushback;
+    cursor->pushback_offset = lonejson__json_cursor_last_offset(cursor);
+  }
   if (io.path_frames != NULL) {
     for (i = 0u; i < io.path_capacity; ++i) {
       if (io.path_frames[i].key_heap) {
