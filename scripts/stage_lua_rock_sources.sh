@@ -10,7 +10,7 @@ repo_root=$1
 stage_dir=$2
 release_version=$3
 
-files=(
+static_files=(
   LICENSE
   README.md
   lonejson.rockspec.in
@@ -18,14 +18,113 @@ files=(
   scripts/render_release_rockspec.sh
   include/lonejson.h
   src/lua/lonejson_lua.c
-  src/lua/lonejson_lua_module.inc.h
-  src/lua/lonejson_lua_record.inc.h
-  src/lua/lonejson_lua_schema.inc.h
-  src/lua/lonejson_lua_schema_methods.inc.h
-  src/lua/lonejson_lua_stream_spool.inc.h
-  src/lua/lonejson_lua_support.inc.h
   lua/lonejson/init.lua
 )
+
+files=()
+include_scan_queue=()
+include_scan_seen=()
+
+has_entry() {
+  local needle=$1
+  shift
+  local entry
+  for entry in "$@"; do
+    if [[ "$entry" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+append_file() {
+  local path=$1
+  if ! has_entry "$path" "${files[@]}"; then
+    files+=("$path")
+  fi
+}
+
+relative_path() {
+  local base=$1
+  local path=$2
+  local abs_base
+  local abs_dir
+  local abs_path
+
+  abs_base=$(cd "$base" && pwd -P)
+  abs_dir=$(cd "$(dirname "$path")" && pwd -P)
+  abs_path="$abs_dir/$(basename "$path")"
+
+  case "$abs_path" in
+    "$abs_base"/*)
+      printf '%s\n' "${abs_path#"$abs_base"/}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+enqueue_include_scan() {
+  local path=$1
+  case "$path" in
+    *.c|*.h)
+      if ! has_entry "$path" "${include_scan_seen[@]}"; then
+        include_scan_seen+=("$path")
+        include_scan_queue+=("$path")
+      fi
+      ;;
+  esac
+}
+
+resolve_local_include() {
+  local rel_file=$1
+  local include_path=$2
+  local rel_dir
+  local candidate
+  rel_dir=$(dirname "$rel_file")
+
+  for candidate in \
+    "$rel_dir/$include_path" \
+    "include/$include_path" \
+    "src/$include_path"; do
+    if [[ -f "$repo_root/$candidate" ]]; then
+      relative_path "$repo_root" "$repo_root/$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+for path in "${static_files[@]}"; do
+  append_file "$path"
+done
+
+enqueue_include_scan src/lua/lonejson_lua.c
+scan_index=0
+while [[ "$scan_index" -lt "${#include_scan_queue[@]}" ]]; do
+  rel_file=${include_scan_queue[$scan_index]}
+  scan_index=$((scan_index + 1))
+
+  if [[ ! -f "$repo_root/$rel_file" ]]; then
+    printf 'missing Lua rock source input: %s\n' "$rel_file" >&2
+    exit 1
+  fi
+
+  while IFS= read -r line; do
+    if [[ $line =~ ^[[:space:]]*#[[:space:]]*include[[:space:]]*\"([^\"]+)\" ]]; then
+      include_path=${BASH_REMATCH[1]}
+      if ! resolved_include=$(resolve_local_include "$rel_file" "$include_path"); then
+        printf 'unresolved Lua rock source include: %s includes %s\n' \
+          "$rel_file" "$include_path" >&2
+        exit 1
+      fi
+      append_file "$resolved_include"
+      enqueue_include_scan "$resolved_include"
+    fi
+  done <"$repo_root/$rel_file"
+done
 
 rm -rf "$stage_dir"
 mkdir -p "$stage_dir"

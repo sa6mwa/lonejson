@@ -510,6 +510,11 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_src_rock_privacy.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_lua_source_stage_manifest_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_source_stage_manifest.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_release_artifact_verify_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_artifact_verify.sh"
