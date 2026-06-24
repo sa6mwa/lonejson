@@ -3879,6 +3879,8 @@ static lonejson_status lonejson__candidate_callback_status(
 static void lonejson__candidate_set_parse_offset(
     lonejson__candidate_scan *scan, size_t candidate_start) {
   size_t stream_offset;
+  size_t candidate_offset;
+  char original[sizeof(scan->error->message)];
 
   if (scan == NULL || scan->error == NULL) {
     return;
@@ -3888,6 +3890,8 @@ static void lonejson__candidate_set_parse_offset(
                              ? scan->cursor->pushback_offset
                              : scan->cursor->stream_offset)
                       : 0u;
+  candidate_offset =
+      stream_offset >= candidate_start ? stream_offset - candidate_start : 0u;
   if (scan->error->offset == 0u) {
     scan->error->offset = stream_offset;
   }
@@ -3895,8 +3899,13 @@ static void lonejson__candidate_set_parse_offset(
     (void)snprintf(scan->error->message, sizeof(scan->error->message),
                    "candidate parse failed at stream offset %lu, candidate "
                    "offset %lu",
-                   (unsigned long)stream_offset,
-                   (unsigned long)(stream_offset - candidate_start));
+                   (unsigned long)stream_offset, (unsigned long)candidate_offset);
+  } else if (strstr(scan->error->message, "candidate offset") == NULL) {
+    memcpy(original, scan->error->message, sizeof(original));
+    original[sizeof(original) - 1u] = '\0';
+    (void)snprintf(scan->error->message, sizeof(scan->error->message),
+                   "%s [stream offset %lu, candidate offset %lu]", original,
+                   (unsigned long)stream_offset, (unsigned long)candidate_offset);
   }
 }
 

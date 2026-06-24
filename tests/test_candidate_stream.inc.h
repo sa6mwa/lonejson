@@ -240,6 +240,8 @@ static void test_candidate_stream_malformed_offset(void) {
   EXPECT(state.begin_count == 1u);
   EXPECT(state.end_count == 0u);
   EXPECT(error.offset >= state.begin_offsets[0]);
+  EXPECT(strstr(error.message, "stream offset") != NULL);
+  EXPECT(strstr(error.message, "candidate offset") != NULL);
 }
 
 static void test_candidate_stream_callback_stop_and_failure(void) {
