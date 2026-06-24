@@ -10,8 +10,10 @@ typedef struct fuzz_candidate_state {
   size_t end_count;
   size_t event_count;
   size_t last_begin_offset;
+  size_t sink_bytes;
   unsigned stop_after_first;
   unsigned fail_after_first;
+  lonejson_candidate_capture_mode capture_mode;
 } fuzz_candidate_state;
 
 typedef struct fuzz_candidate_reader {
@@ -52,11 +54,30 @@ fuzz_candidate_end(void *user, const lonejson_candidate_info *candidate,
   fuzz_abort_if(state->end_count != candidate->index);
   fuzz_abort_if(candidate->byte_size == (size_t)-1);
   fuzz_abort_if(candidate->stream_offset != state->last_begin_offset);
+  if (state->capture_mode == LONEJSON_CANDIDATE_CAPTURE_MEMORY) {
+    fuzz_abort_if(candidate->payload == NULL && candidate->payload_size != 0u);
+    fuzz_abort_if(candidate->payload_spool != NULL);
+  } else if (state->capture_mode == LONEJSON_CANDIDATE_CAPTURE_SPOOLED) {
+    fuzz_abort_if(candidate->payload_spool == NULL);
+    fuzz_abort_if(candidate->payload != NULL);
+  } else {
+    fuzz_abort_if(candidate->payload != NULL);
+    fuzz_abort_if(candidate->payload_spool != NULL);
+  }
   ++state->end_count;
   if (state->stop_after_first && state->end_count == 1u) {
     return LONEJSON_CANDIDATE_STOP;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lonejson_status fuzz_sink(void *user, const void *data, size_t len,
+                                 lonejson_error *error) {
+  fuzz_candidate_state *state = (fuzz_candidate_state *)user;
+  (void)data;
+  (void)error;
+  state->sink_bytes += len;
+  return LONEJSON_STATUS_OK;
 }
 
 static lonejson_status fuzz_event(void *user, lonejson_error *error) {
@@ -208,6 +229,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   config.json_value_max_key_bytes = 1u + (size_t)data[0] * 16u;
   config.json_value_max_number_bytes = 1u + (size_t)(data[0] & 0x7fu);
   config.json_value_max_total_bytes = (data[0] & 0x80u) ? json_len : 0u;
+  config.spool_default.memory_limit = (size_t)(data[0] & 0x07u);
   runtime = lonejson_new(&config, &error);
   if (runtime == NULL) {
     return 0;
@@ -218,6 +240,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   state.fail_after_first = (unsigned)((data[1] & 0x80u) != 0u);
   options = lonejson_default_candidate_stream_options();
   options.framing = (lonejson_candidate_framing)(data[1] & 0x03u);
+  options.capture_mode = (lonejson_candidate_capture_mode)((data[1] >> 2) & 0x03u);
+  options.max_memory_payload_bytes =
+      (data[0] & 0x20u) != 0u ? (size_t)(data[0] & 0x0fu) : 0u;
+  if (options.capture_mode == LONEJSON_CANDIDATE_CAPTURE_SINK) {
+    options.payload_sink = fuzz_sink;
+    options.payload_sink_user = &state;
+  }
+  state.capture_mode = options.capture_mode;
   options.candidate_begin = fuzz_candidate_begin;
   options.candidate_end = fuzz_candidate_end;
   options.candidate_user = &state;
@@ -236,6 +266,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   memset(&state, 0, sizeof(state));
   state.stop_after_first = (unsigned)((data[1] & 0x40u) != 0u);
   state.fail_after_first = (unsigned)((data[1] & 0x80u) != 0u);
+  state.capture_mode = options.capture_mode;
+  if (options.capture_mode == LONEJSON_CANDIDATE_CAPTURE_SINK) {
+    options.payload_sink_user = &state;
+  }
   reader.data = json;
   reader.len = json_len;
   reader.offset = 0u;

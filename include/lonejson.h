@@ -1797,16 +1797,36 @@ typedef enum lonejson_candidate_callback_result {
   LONEJSON_CANDIDATE_ERROR = 2
 } lonejson_candidate_callback_result;
 
+/** Candidate payload capture policy. */
+typedef enum lonejson_candidate_capture_mode {
+  /** Do not retain or emit candidate payload bytes. */
+  LONEJSON_CANDIDATE_CAPTURE_NONE = 0,
+  /** Stream each candidate as compact JSON to `payload_sink`. */
+  LONEJSON_CANDIDATE_CAPTURE_SINK = 1,
+  /** Retain each compact JSON candidate in bounded memory until end callback.
+   */
+  LONEJSON_CANDIDATE_CAPTURE_MEMORY = 2,
+  /** Retain each compact JSON candidate in a temporary spooled handle until
+   * end callback.
+   */
+  LONEJSON_CANDIDATE_CAPTURE_SPOOLED = 3
+} lonejson_candidate_capture_mode;
+
 /** Boundary information for one arbitrary JSON candidate.
  *
  * `stream_offset` is the byte offset of the first candidate byte in the input
  * stream. `byte_size` is set to `(size_t)-1` at begin callbacks and to the
- * consumed candidate byte count at end callbacks.
+ * consumed candidate byte count at end callbacks. Captured payload pointers
+ * are populated only for end callbacks and are valid only until that callback
+ * returns.
  */
 typedef struct lonejson_candidate_info {
   size_t index;
   size_t stream_offset;
   size_t byte_size;
+  const void *payload;
+  size_t payload_size;
+  const lonejson_spooled *payload_spool;
 } lonejson_candidate_info;
 
 typedef lonejson_candidate_callback_result (*lonejson_candidate_event_fn)(
@@ -1821,6 +1841,10 @@ typedef lonejson_candidate_callback_result (*lonejson_candidate_event_fn)(
  */
 typedef struct lonejson_candidate_stream_options {
   lonejson_candidate_framing framing;
+  lonejson_candidate_capture_mode capture_mode;
+  lonejson_sink_fn payload_sink;
+  void *payload_sink_user;
+  size_t max_memory_payload_bytes;
   const lonejson_value_visitor *visitor;
   const lonejson_path_value_visitor *path_visitor;
   void *visitor_user;
@@ -5754,6 +5778,14 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 /** Parse each top-level array item as one candidate. */
 #define LJ_CANDIDATE_FRAMING_ARRAY_ITEMS                                       \
   LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS
+/** Do not retain or emit candidate payload bytes. */
+#define LJ_CANDIDATE_CAPTURE_NONE LONEJSON_CANDIDATE_CAPTURE_NONE
+/** Stream each compact candidate to a caller sink. */
+#define LJ_CANDIDATE_CAPTURE_SINK LONEJSON_CANDIDATE_CAPTURE_SINK
+/** Retain each compact candidate in bounded callback-scoped memory. */
+#define LJ_CANDIDATE_CAPTURE_MEMORY LONEJSON_CANDIDATE_CAPTURE_MEMORY
+/** Retain each compact candidate in a callback-scoped spooled handle. */
+#define LJ_CANDIDATE_CAPTURE_SPOOLED LONEJSON_CANDIDATE_CAPTURE_SPOOLED
 /** Candidate callback should continue scanning. */
 #define LJ_CANDIDATE_CONTINUE LONEJSON_CANDIDATE_CONTINUE
 /** Candidate callback should stop scanning successfully. */
@@ -6142,6 +6174,8 @@ typedef lonejson_path_value_visitor lj_path_value_visitor;
 typedef lonejson_candidate_framing lj_candidate_framing;
 /** Result returned by candidate boundary callbacks. */
 typedef lonejson_candidate_callback_result lj_candidate_callback_result;
+/** Candidate payload capture policy. */
+typedef lonejson_candidate_capture_mode lj_candidate_capture_mode;
 /** Boundary information for one arbitrary JSON candidate. */
 typedef lonejson_candidate_info lj_candidate_info;
 /** Candidate boundary callback signature. */

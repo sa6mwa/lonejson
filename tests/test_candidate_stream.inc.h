@@ -10,6 +10,11 @@ typedef struct test_candidate_stream_state {
   size_t begin_offsets[8];
   size_t end_offsets[8];
   size_t end_sizes[8];
+  char payloads[8][128];
+  size_t payload_sizes[8];
+  int payload_spilled[8];
+  char payload_spool_paths[8][LONEJSON_SPOOL_TEMP_PATH_CAPACITY];
+  size_t fail_at_end;
 } test_candidate_stream_state;
 
 static lonejson_candidate_callback_result
@@ -35,10 +40,46 @@ test_candidate_end(void *user, const lonejson_candidate_info *candidate,
   (void)error;
   if (state->end_count <
       sizeof(state->end_offsets) / sizeof(state->end_offsets[0])) {
+    size_t slot = state->end_count;
     state->end_offsets[state->end_count] = candidate->stream_offset;
     state->end_sizes[state->end_count] = candidate->byte_size;
+    if (candidate->payload != NULL) {
+      size_t copy = candidate->payload_size;
+      if (copy >= sizeof(state->payloads[slot])) {
+        copy = sizeof(state->payloads[slot]) - 1u;
+      }
+      memcpy(state->payloads[slot], candidate->payload, copy);
+      state->payloads[slot][copy] = '\0';
+      state->payload_sizes[slot] = candidate->payload_size;
+    }
+    if (candidate->payload_spool != NULL) {
+      test_buffer_sink sink;
+      char buffer[128];
+      lonejson_error local_error;
+
+      memset(buffer, 0, sizeof(buffer));
+      memset(&sink, 0, sizeof(sink));
+      sink.buffer = (unsigned char *)buffer;
+      sink.capacity = sizeof(buffer);
+      EXPECT(lonejson_spooled_write_to_sink(candidate->payload_spool,
+                                            test_buffer_sink_write, &sink,
+                                            &local_error) ==
+             LONEJSON_STATUS_OK);
+      memcpy(state->payloads[slot], buffer, sink.length + 1u);
+      state->payload_sizes[slot] = lonejson_spooled_size(candidate->payload_spool);
+      state->payload_spilled[slot] =
+          lonejson_spooled_spilled(candidate->payload_spool);
+      if (candidate->payload_spool->temp_path[0] != '\0') {
+        test_copy_cstr(state->payload_spool_paths[slot],
+                       sizeof(state->payload_spool_paths[slot]),
+                       candidate->payload_spool->temp_path);
+      }
+    }
   }
   ++state->end_count;
+  if (state->fail_at_end != 0u && state->end_count == state->fail_at_end) {
+    return LONEJSON_CANDIDATE_ERROR;
+  }
   if (state->stop_after_end != 0u &&
       state->end_count == state->stop_after_end) {
     return LONEJSON_CANDIDATE_STOP;
@@ -329,4 +370,153 @@ static void test_candidate_stream_file_path_fd_and_large_reader(void) {
   EXPECT(state.end_count == 1u);
   EXPECT(state.end_sizes[0] == strlen(large_json));
   EXPECT(reader.offset == strlen(large_json));
+}
+
+static void test_candidate_stream_capture_sink_and_memory(void) {
+  static const char json[] = "[ { \"a\" : 1 }, true ]";
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  test_buffer_sink sink;
+  char sink_buffer[128];
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&state, 0, sizeof(state));
+  memset(&sink, 0, sizeof(sink));
+  memset(sink_buffer, 0, sizeof(sink_buffer));
+  sink.buffer = (unsigned char *)sink_buffer;
+  sink.capacity = sizeof(sink_buffer);
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SINK;
+  options.payload_sink = test_buffer_sink_write;
+  options.payload_sink_user = &sink;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
+                                            strlen(json), &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.end_count == 2u);
+  EXPECT(strcmp(sink_buffer, "{\"a\":1}true") == 0);
+  EXPECT(state.payload_sizes[0] == 0u);
+
+  memset(&state, 0, sizeof(state));
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_MEMORY;
+  options.payload_sink = NULL;
+  options.payload_sink_user = NULL;
+  options.max_memory_payload_bytes = 16u;
+  status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
+                                            strlen(json), &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.end_count == 2u);
+  EXPECT(strcmp(state.payloads[0], "{\"a\":1}") == 0);
+  EXPECT(state.payload_sizes[0] == strlen("{\"a\":1}"));
+  EXPECT(strcmp(state.payloads[1], "true") == 0);
+  EXPECT(state.payload_sizes[1] == strlen("true"));
+}
+
+static void test_candidate_stream_capture_spooled_and_cleanup(void) {
+  static const char json[] = "[ { \"long\" : \"abcdef\" }, 2 ]";
+  char dir_template[] = "/tmp/lonejson-candidate-spool-XXXXXX";
+  char *dir;
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_status status;
+  lonejson_error error;
+
+  dir = mkdtemp(dir_template);
+  EXPECT(dir != NULL);
+  if (dir == NULL) {
+    return;
+  }
+  config = lonejson_default_config();
+  config.spool_default.memory_limit = 1u;
+  config.spool_default.temp_dir = dir;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    rmdir(dir);
+    return;
+  }
+
+  memset(&state, 0, sizeof(state));
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson_visit_candidates_buffer(runtime, json, strlen(json),
+                                            &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.end_count == 2u);
+  EXPECT(strcmp(state.payloads[0], "{\"long\":\"abcdef\"}") == 0);
+  EXPECT(state.payload_spilled[0] != 0);
+  EXPECT(state.payload_spool_paths[0][0] != '\0');
+  EXPECT(access(state.payload_spool_paths[0], F_OK) != 0);
+
+  memset(&state, 0, sizeof(state));
+  state.fail_at_end = 1u;
+  status = lonejson_visit_candidates_buffer(runtime, json, strlen(json),
+                                            &options, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(state.end_count == 1u);
+  EXPECT(state.payload_spool_paths[0][0] != '\0');
+  EXPECT(access(state.payload_spool_paths[0], F_OK) != 0);
+
+  lonejson_free(runtime);
+  rmdir(dir);
+}
+
+static void test_candidate_stream_capture_failure_modes(void) {
+  static const char json[] = "{\"a\":1}";
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  test_failing_sink failing_sink;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&state, 0, sizeof(state));
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_MEMORY;
+  options.max_memory_payload_bytes = 4u;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
+                                            strlen(json), &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 0u);
+
+  memset(&state, 0, sizeof(state));
+  memset(&failing_sink, 0, sizeof(failing_sink));
+  failing_sink.fail_after = 2u;
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SINK;
+  options.payload_sink = test_failing_sink_write;
+  options.payload_sink_user = &failing_sink;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
+                                            strlen(json), &options, &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 0u);
+
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SINK;
+  status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
+                                            strlen(json), &options, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = (lonejson_candidate_capture_mode)99;
+  status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
+                                            strlen(json), &options, &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
 }
