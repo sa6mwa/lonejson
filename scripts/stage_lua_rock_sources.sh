@@ -18,12 +18,12 @@ files=(
   scripts/render_release_rockspec.sh
   include/lonejson.h
   src/lua/lonejson_lua.c
-  src/lua/lonejson_lua_module.inc
-  src/lua/lonejson_lua_record.inc
-  src/lua/lonejson_lua_schema.inc
-  src/lua/lonejson_lua_schema_methods.inc
-  src/lua/lonejson_lua_stream_spool.inc
-  src/lua/lonejson_lua_support.inc
+  src/lua/lonejson_lua_module.inc.h
+  src/lua/lonejson_lua_record.inc.h
+  src/lua/lonejson_lua_schema.inc.h
+  src/lua/lonejson_lua_schema_methods.inc.h
+  src/lua/lonejson_lua_stream_spool.inc.h
+  src/lua/lonejson_lua_support.inc.h
   lua/lonejson/init.lua
 )
 
@@ -55,7 +55,7 @@ while IFS= read -r staged_file; do
       fi
     fi
   done <"$staged_file"
-done < <(find "$stage_dir" -type f \( -name '*.c' -o -name '*.h' -o -name '*.inc' \) | LC_ALL=C sort)
+done < <(find "$stage_dir" -type f \( -name '*.c' -o -name '*.h' \) | LC_ALL=C sort)
 
 if [[ "$missing" -ne 0 ]]; then
   exit 1

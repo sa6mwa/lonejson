@@ -1,17 +1,17 @@
 #define LONEJSON_TEST_RUNTIME_BORROW_HOOK 1
-#include "test_support.inc"
+#include "test_support.inc.h"
 /* clang-format off */
-#include "test_protocol_framing.inc"
-#include "test_parse_serialize.inc"
-#include "test_array_stream.inc"
-#include "test_array_rewrite.inc"
-#include "test_fixtures_public.inc"
-#include "test_json_value_sources.inc"
-#include "test_allocator_visitor.inc"
-#include "test_generator_omit.inc"
-#include "test_writer.inc"
-#include "test_value_rewrite.inc"
-#include "test_curl_misc.inc"
+#include "test_protocol_framing.inc.h"
+#include "test_parse_serialize.inc.h"
+#include "test_array_stream.inc.h"
+#include "test_array_rewrite.inc.h"
+#include "test_fixtures_public.inc.h"
+#include "test_json_value_sources.inc.h"
+#include "test_allocator_visitor.inc.h"
+#include "test_generator_omit.inc.h"
+#include "test_writer.inc.h"
+#include "test_value_rewrite.inc.h"
+#include "test_curl_misc.inc.h"
 /* clang-format on */
 
 int main(void) {
