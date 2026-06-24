@@ -807,6 +807,18 @@ if(LONEJSON_BUILD_FUZZERS)
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_path_value_visitor)
 
+  add_executable(lonejson_fuzz_candidate_stream
+    fuzz/fuzz_candidate_stream.c)
+  target_include_directories(lonejson_fuzz_candidate_stream
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_candidate_stream PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_candidate_stream PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_candidate_stream PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_candidate_stream)
+
   add_executable(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
   target_include_directories(lonejson_fuzz_value_rewrite PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_link_libraries(lonejson_fuzz_value_rewrite PRIVATE lonejson)
@@ -947,6 +959,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_path_value_visitor.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_candidate_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_rewrite.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_generator_backpressure.c"
