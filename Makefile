@@ -334,6 +334,7 @@ release-darwin-smoke-bundle: deps-arm64-apple-darwin
 
 package-verify:
 	./scripts/verify_release_artifacts.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
+	./scripts/verify_release_archives.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
 
 verify-release-archives: package-verify
 
