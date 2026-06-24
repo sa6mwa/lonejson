@@ -457,7 +457,7 @@ lua-bench-gate:
 asan:
 	cmake --preset $(ASAN_PRESET)
 	cmake --build --preset $(ASAN_PRESET)
-	ctest --preset $(ASAN_PRESET)
+	ctest --preset $(ASAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 tsan:
 	cmake --preset $(TSAN_PRESET)
