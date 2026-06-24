@@ -121,6 +121,7 @@ LUA_ROCK_SOURCES := \
 	scripts/stage_lua_rock_sources.sh \
 	include/lonejson.h \
 	src/lua/lonejson_lua.c \
+	$(wildcard src/lua/*.inc.h) \
 	lua/lonejson/init.lua
 LUA_ROCK_LIBLONEJSON_SOURCES := \
 	CMakeLists.txt \

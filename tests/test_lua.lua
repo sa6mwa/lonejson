@@ -42,6 +42,10 @@ local function assert_rewrite_callback_failed(value, err, needle)
   assert_true(err.message:find(needle, 1, true) ~= nil, err.message)
 end
 
+local function path_key(path)
+  return table.concat(path, "/")
+end
+
 local function exists(path)
   local f
 
@@ -159,6 +163,220 @@ do
   assert_eq(table.concat(sink_chunks), '{"beta":true}')
   assert_eq(colon_lj:decode_json('{"gamma":2}').gamma, 2)
   assert_eq(schema:decode('{"name":"colon"}').name, "colon")
+end
+
+do
+  local events = {}
+  local chunks = {}
+  local ok, err = lj:visit_path_value_string('{"a":{"b":[true,null,"xy",12]}}', {
+    object_begin = function(path)
+      events[#events + 1] = "object:" .. path_key(path)
+    end,
+    object_key_chunk = function(path, chunk)
+      events[#events + 1] = "key:" .. path_key(path) .. "=" .. chunk
+    end,
+    array_begin = function(path)
+      events[#events + 1] = "array:" .. path_key(path)
+    end,
+    boolean_value = function(path, value)
+      events[#events + 1] = "bool:" .. path_key(path) .. "=" .. tostring(value)
+    end,
+    null_value = function(path)
+      events[#events + 1] = "null:" .. path_key(path)
+    end,
+    string_chunk = function(path, chunk)
+      chunks[#chunks + 1] = path_key(path) .. "=" .. chunk
+    end,
+    number_chunk = function(path, chunk)
+      events[#events + 1] = "number:" .. path_key(path) .. "=" .. chunk
+    end,
+  })
+
+  assert_true(ok, err and err.message)
+  assert_true(table.concat(events, "|"):find("object:", 1, true) ~= nil)
+  assert_true(table.concat(events, "|"):find("key:=a", 1, true) ~= nil)
+  assert_true(table.concat(events, "|"):find("key:a=b", 1, true) ~= nil)
+  assert_true(table.concat(events, "|"):find("array:a/b", 1, true) ~= nil)
+  assert_true(table.concat(events, "|"):find("bool:a/b/0=true", 1, true) ~= nil)
+  assert_true(table.concat(events, "|"):find("null:a/b/1", 1, true) ~= nil)
+  assert_true(table.concat(events, "|"):find("number:a/b/3=12", 1, true) ~= nil)
+  assert_eq(table.concat(chunks), "a/b/2=xy")
+end
+
+do
+  local path = "/tmp/lonejson-lua-path-visitor.json"
+  local f = assert(io.open(path, "wb"))
+  local seen = {}
+
+  f:write('{"from":"file","items":[1]}')
+  f:close()
+  assert_true(lonejson.visit_path_value_path(path, {
+    string_chunk = function(p, chunk)
+      seen[#seen + 1] = path_key(p) .. "=" .. chunk
+    end,
+  }))
+  assert_eq(seen[1], "from=file")
+
+  f = assert(io.open(path, "rb"))
+  seen = {}
+  assert_true(lj:visit_path_value_file(f, {
+    number_chunk = function(p, chunk)
+      seen[#seen + 1] = path_key(p) .. "=" .. chunk
+    end,
+  }))
+  assert_eq(seen[1], "items/0=1")
+  f:seek("set", 0)
+  seen = {}
+  assert_true(lj:visit_path_value_fd(f, {
+    object_key_chunk = function(p, chunk)
+      seen[#seen + 1] = path_key(p) .. "=" .. chunk
+    end,
+  }))
+  assert_eq(seen[1], "=from")
+  f:close()
+  os.remove(path)
+end
+
+do
+  local ok, err = lj:visit_path_value_string('{"a":1}', {
+    number_chunk = function()
+      error("path callback failed")
+    end,
+  })
+  assert_true(ok == nil)
+  assert_true(err ~= nil)
+  assert_eq(err.status, "callback_failed")
+  assert_true(err.message:find("path callback failed", 1, true) ~= nil, err.message)
+end
+
+do
+  local begins = {}
+  local ends = {}
+  local paths = {}
+  local ok, err = lj:visit_candidates_string('{"a":1}\n[true]\n"z"', {
+    framing = "ndjson",
+    capture = "memory",
+    candidate_begin = function(info)
+      begins[#begins + 1] = info.index .. ":" .. tostring(info.byte_size)
+      assert_true(info.payload == nil)
+    end,
+    candidate_end = function(info)
+      ends[#ends + 1] = info.index .. ":" .. info.stream_offset .. ":" .. info.byte_size .. ":" .. info.payload
+    end,
+    path_visitor = {
+      number_chunk = function(path, chunk)
+        paths[#paths + 1] = path_key(path) .. "=" .. chunk
+      end,
+      boolean_value = function(path, value)
+        paths[#paths + 1] = path_key(path) .. "=" .. tostring(value)
+      end,
+      string_chunk = function(path, chunk)
+        paths[#paths + 1] = path_key(path) .. "=" .. chunk
+      end,
+    },
+  })
+
+  assert_true(ok, err and err.message)
+  assert_eq(#begins, 3)
+  assert_eq(begins[1], "1:nil")
+  assert_eq(ends[1], '1:0:7:{"a":1}')
+  assert_eq(ends[2], "2:8:6:[true]")
+  assert_eq(ends[3], '3:15:3:"z"')
+  assert_eq(table.concat(paths, "|"), "a=1|0=true|=z")
+end
+
+do
+  local ok, err = lj:visit_candidates_string("truefalse", {
+    framing = "ndjson",
+  })
+  assert_true(ok == nil)
+  assert_true(err ~= nil)
+  assert_true(err.status ~= "ok")
+end
+
+do
+  local chunks = {}
+  local payloads = {}
+  local ok, err = lj:visit_candidates_string('[{"x":1},{"y":2}]', {
+    framing = "array_items",
+    capture = "sink",
+    payload_sink = function(chunk)
+      chunks[#chunks + 1] = chunk
+      return true
+    end,
+    candidate_end = function(info)
+      payloads[#payloads + 1] = tostring(info.payload)
+    end,
+  })
+
+  assert_true(ok, err and err.message)
+  assert_eq(table.concat(chunks), '{"x":1}{"y":2}')
+  assert_eq(table.concat(payloads, "|"), "nil|nil")
+end
+
+do
+  local payloads = {}
+  local ok, err = lj:visit_candidates_string('{"spool":true}', {
+    framing = "single_value",
+    capture = "spooled",
+    candidate_end = function(info)
+      assert_true(info.payload == nil)
+      assert_true(info.payload_spool ~= nil)
+      payloads[#payloads + 1] = info.payload_spool:read_all()
+    end,
+  })
+
+  assert_true(ok, err and err.message)
+  assert_eq(payloads[1], '{"spool":true}')
+end
+
+do
+  local path = "/tmp/lonejson-lua-candidates.json"
+  local f = assert(io.open(path, "wb"))
+  local count = 0
+
+  f:write('{"a":1}\n{"b":2}')
+  f:close()
+  assert_true(lonejson.visit_candidates_path(path, {
+    framing = "ndjson",
+    candidate_end = function()
+      count = count + 1
+    end,
+  }))
+  assert_eq(count, 2)
+
+  f = assert(io.open(path, "rb"))
+  count = 0
+  assert_true(lj:visit_candidates_file(f, {
+    framing = "ndjson",
+    candidate_end = function()
+      count = count + 1
+    end,
+  }))
+  assert_eq(count, 2)
+  f:seek("set", 0)
+  count = 0
+  assert_true(lj:visit_candidates_fd(f, {
+    framing = "ndjson",
+    candidate_end = function()
+      count = count + 1
+    end,
+  }))
+  assert_eq(count, 2)
+  f:close()
+  os.remove(path)
+end
+
+do
+  local ok, err = lj:visit_candidates_string('{"a":1}', {
+    framing = "single_value",
+    candidate_end = function()
+      return false
+    end,
+  })
+  assert_true(ok == nil)
+  assert_true(err ~= nil)
+  assert_eq(err.status, "callback_failed")
 end
 
 local Test = build_test_schema(lj, "Test")
