@@ -7,6 +7,7 @@
 #include "test_array_rewrite.inc.h"
 #include "test_fixtures_public.inc.h"
 #include "test_json_value_sources.inc.h"
+#include "test_candidate_stream.inc.h"
 #include "test_allocator_visitor.inc.h"
 #include "test_generator_omit.inc.h"
 #include "test_writer.inc.h"
@@ -370,6 +371,13 @@ int main(void) {
   test_serialize_omit_empty_implies_null();
   test_serialize_declarative_conditional_helpers();
   test_rewindability_edges_and_measure_preserves_sources();
+  test_candidate_stream_single_object();
+  test_candidate_stream_array_items();
+  test_candidate_stream_repeated_and_auto();
+  test_candidate_stream_malformed_offset();
+  test_candidate_stream_callback_stop_and_failure();
+  test_candidate_stream_reader_and_runtime_methods();
+  test_candidate_stream_file_path_fd_and_large_reader();
 #ifdef LONEJSON_WITH_CURL
   test_curl_parse_survives_runtime_free();
   test_curl_parse_reinit_releases_previous_parser();

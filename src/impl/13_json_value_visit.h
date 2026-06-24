@@ -298,6 +298,11 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
         } else {
           io->cursor->buffer_off += plain_span;
         }
+        status = lonejson__json_cursor_advance_span(io, plain_span);
+        if (status != LONEJSON_STATUS_OK &&
+            status != LONEJSON_STATUS_TRUNCATED) {
+          return status;
+        }
         if (plain_span == available) {
           span = lonejson__json_cursor_plain_span(io, &available,
                                                   &uses_read_buffer);
@@ -878,6 +883,11 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
           io->cursor->read_buffer_off += plain_span;
         } else {
           io->cursor->buffer_off += plain_span;
+        }
+        status = lonejson__json_cursor_advance_span(io, plain_span);
+        if (status != LONEJSON_STATUS_OK &&
+            status != LONEJSON_STATUS_TRUNCATED) {
+          return status;
         }
         if (plain_span == available) {
           span = lonejson__json_cursor_plain_span(io, &available,
@@ -1474,6 +1484,79 @@ static lonejson_status lonejson__json_visit_cursor(
                               "visited JSON must contain exactly one value");
     }
   }
+  if (io.path_frames != NULL) {
+    for (i = 0u; i < io.path_capacity; ++i) {
+      if (io.path_frames[i].key_heap) {
+        lonejson__owned_free(io.path_frames[i].key);
+      }
+    }
+  }
+  lonejson__owned_free(io.path_segments);
+  lonejson__owned_free(io.path_frames);
+  return status;
+}
+
+static lonejson_status lonejson__json_visit_one_cursor(
+    lonejson__json_cursor *cursor, const lonejson_allocator *allocator,
+    const lonejson_value_visitor *visitor, void *user,
+    const lonejson_path_value_visitor *path_visitor,
+    const lonejson__value_limits *limits, lonejson_error *error) {
+  lonejson__json_io io;
+  lonejson__value_limits defaults;
+  lonejson_status status;
+  size_t i;
+
+  if (cursor == NULL || (visitor == NULL && path_visitor == NULL)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "JSON value source and visitor are required");
+  }
+  memset(&io, 0, sizeof(io));
+  io.cursor = cursor;
+  io.visitor = visitor;
+  io.path_visitor = path_visitor;
+  io.visitor_user = user;
+  io.error = error;
+  io.allocator = allocator;
+  if (limits != NULL && limits->max_depth != 0u &&
+      limits->max_string_bytes != 0u && limits->max_number_bytes != 0u &&
+      limits->max_key_bytes != 0u) {
+    io.limits = *limits;
+  } else {
+    defaults = lonejson__default_value_limits();
+    io.limits = limits ? *limits : defaults;
+    if (io.limits.max_depth == 0u) {
+      io.limits.max_depth = defaults.max_depth;
+    }
+    if (io.limits.max_string_bytes == 0u) {
+      io.limits.max_string_bytes = defaults.max_string_bytes;
+    }
+    if (io.limits.max_number_bytes == 0u) {
+      io.limits.max_number_bytes = defaults.max_number_bytes;
+    }
+    if (io.limits.max_key_bytes == 0u) {
+      io.limits.max_key_bytes = defaults.max_key_bytes;
+    }
+  }
+  if (path_visitor != NULL) {
+    io.path_capacity = io.limits.max_depth + 1u;
+    io.path_segments = (lonejson_path_segment *)lonejson__owned_malloc(
+        allocator, io.path_capacity * sizeof(*io.path_segments));
+    io.path_frames = (lonejson__json_path_frame *)lonejson__owned_malloc(
+        allocator, io.path_capacity * sizeof(*io.path_frames));
+    if (io.path_segments == NULL || io.path_frames == NULL) {
+      lonejson__owned_free(io.path_segments);
+      lonejson__owned_free(io.path_frames);
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate JSON path visitor state");
+    }
+    memset(io.path_segments, 0,
+           io.path_capacity * sizeof(*io.path_segments));
+    memset(io.path_frames, 0, io.path_capacity * sizeof(*io.path_frames));
+  }
+  status = io.path_visitor == NULL ? lonejson__json_visit_value_no_path(&io)
+                                   : lonejson__json_visit_value(&io);
   if (io.path_frames != NULL) {
     for (i = 0u; i < io.path_capacity; ++i) {
       if (io.path_frames[i].key_heap) {

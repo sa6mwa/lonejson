@@ -32,6 +32,11 @@ lonejson__json_parse_string(lonejson__json_io *io) {
           return status;
         }
         io->cursor->buffer_off += plain_span;
+        status = lonejson__json_cursor_advance_span(io, plain_span);
+        if (status != LONEJSON_STATUS_OK &&
+            status != LONEJSON_STATUS_TRUNCATED) {
+          return status;
+        }
         continue;
       }
     } else if (!io->has_pushback &&
@@ -56,6 +61,11 @@ lonejson__json_parse_string(lonejson__json_io *io) {
           return status;
         }
         io->cursor->read_buffer_off += plain_span;
+        status = lonejson__json_cursor_advance_span(io, plain_span);
+        if (status != LONEJSON_STATUS_OK &&
+            status != LONEJSON_STATUS_TRUNCATED) {
+          return status;
+        }
         continue;
       }
     }
