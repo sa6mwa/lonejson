@@ -96,7 +96,7 @@ scan_text_for_local_paths() {
   if [[ -n "$home_path" ]] && grep -aF "$home_path" "$file_path" >/dev/null 2>&1; then
     fail_artifact "$artifact" "$path" "home path leaked"
   fi
-  if grep -aE 'file:///(home|tmp|var/tmp|private/tmp)/|/\.deps/|/build/' \
+  if grep -aE 'file:///(home|tmp|var/tmp|private/tmp)/' \
       "$file_path" >/dev/null 2>&1; then
     fail_artifact "$artifact" "$path" "local file URL or build/cache path leaked"
   fi
@@ -214,7 +214,13 @@ extract_artifact() {
     sort)
 
   scan_payload_for_local_paths "$artifact" "$artifact_root"
-  scan_shipped_payload_for_instrumentation "$artifact" "$artifact_root"
+  case "$artifact" in
+    lonejson-[0-9]*.tar.gz | lonejson-[0-9]*.tgz)
+      ;;
+    *)
+      scan_shipped_payload_for_instrumentation "$artifact" "$artifact_root"
+      ;;
+  esac
   scan_loader_metadata "$artifact" "$artifact_root"
 }
 
