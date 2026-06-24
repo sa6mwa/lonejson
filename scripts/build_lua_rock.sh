@@ -2,8 +2,8 @@
 
 set -eu
 
-if [ "$#" -ne 6 ]; then
-  printf 'usage: %s CC CFLAGS LIBFLAG OBJ_EXTENSION LIB_EXTENSION LUA_INCDIR\n' "$0" >&2
+if [ "$#" -ne 7 ]; then
+  printf 'usage: %s CC CFLAGS LIBFLAG OBJ_EXTENSION LIB_EXTENSION LUA_INCDIR LONEJSON_LIBDIR\n' "$0" >&2
   exit 1
 fi
 
@@ -13,6 +13,7 @@ libflag="$3"
 obj_ext="$4"
 lib_ext="$5"
 lua_incdir="$6"
+lonejson_libdir="${LONEJSON_LIBDIR:-$7}"
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 build_root="${repo_root}/.luarocks-build"
@@ -80,6 +81,10 @@ if [ -z "${LONEJSON_LUA_DISABLE_CURL:-}" ]; then
 fi
 
 cppflags=""
+lonejson_libs="-llonejson"
+if [ -n "${lonejson_libdir}" ]; then
+  lonejson_libs="-L${lonejson_libdir} ${lonejson_libs}"
+fi
 libs=""
 if [ "${use_curl}" -eq 1 ]; then
   cppflags="-DLONEJSON_WITH_CURL ${curl_cflags}"
@@ -90,4 +95,4 @@ else
 fi
 
 run_cc ${common_cflags} ${cppflags} -c "${repo_root}/src/lua/lonejson_lua.c" -o "${object_path}"
-run_cc ${libflag} -o "${module_path}" "${object_path}" ${linkflags} ${libs}
+run_cc ${libflag} -o "${module_path}" "${object_path}" ${linkflags} ${lonejson_libs} ${libs}

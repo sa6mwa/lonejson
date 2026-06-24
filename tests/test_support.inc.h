@@ -1440,6 +1440,11 @@ typedef struct test_conditional_doc {
   lonejson_bool_array bools;
 } test_conditional_doc;
 
+typedef struct test_two_alloc_string_doc {
+  char *first;
+  char *second;
+} test_two_alloc_string_doc;
+
 typedef struct test_large_fixed_string_doc {
   char payload[8192];
 } test_large_fixed_string_doc;
@@ -1926,6 +1931,12 @@ static const lonejson_field test_conditional_doc_fields[] = {
                                          LONEJSON_OVERFLOW_FAIL)};
 LONEJSON_MAP_DEFINE(test_conditional_doc_map, test_conditional_doc,
                     test_conditional_doc_fields);
+
+static const lonejson_field test_two_alloc_string_doc_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC(test_two_alloc_string_doc, first, "first"),
+    LONEJSON_FIELD_STRING_ALLOC(test_two_alloc_string_doc, second, "second")};
+LONEJSON_MAP_DEFINE(test_two_alloc_string_doc_map, test_two_alloc_string_doc,
+                    test_two_alloc_string_doc_fields);
 
 static const lonejson_field test_large_fixed_string_doc_fields[] = {
     LONEJSON_FIELD_STRING_FIXED(test_large_fixed_string_doc, payload, "payload",

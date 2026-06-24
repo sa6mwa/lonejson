@@ -402,6 +402,52 @@ static void test_array_stream_mapped_items_do_not_materialize_item(void) {
   lonejson_array_stream_close(stream);
 }
 
+static void
+test_array_stream_reused_mapped_destination_resets_allocations(void) {
+  test_reader_state state = {
+      "[{\"first\":\"aaaaaaaa\",\"second\":\"bbbbbbbb\"},"
+      "{\"first\":\"cc\",\"second\":\"dd\"}]",
+      0u, 7u};
+  lonejson_array_stream *stream;
+  lonejson_array_stream_result result;
+  lonejson_error error;
+  test_two_alloc_string_doc doc;
+
+  reset_lonejson_alloc_stats();
+  lonejson_init(test_default_runtime(), &test_two_alloc_string_doc_map, &doc);
+  stream = test_array_stream_open_reader("", test_state_reader, &state, NULL,
+                                         &error);
+  EXPECT(stream != NULL);
+  if (stream == NULL) {
+    lonejson_cleanup(&test_two_alloc_string_doc_map, &doc);
+    return;
+  }
+
+  result =
+      lonejson_array_stream_next(stream, &test_two_alloc_string_doc_map, &doc,
+                                 &error);
+  EXPECT(result == LONEJSON_ARRAY_STREAM_ITEM);
+  EXPECT(doc.first != NULL && strcmp(doc.first, "aaaaaaaa") == 0);
+  EXPECT(doc.second != NULL && strcmp(doc.second, "bbbbbbbb") == 0);
+
+  result =
+      lonejson_array_stream_next(stream, &test_two_alloc_string_doc_map, &doc,
+                                 &error);
+  EXPECT(result == LONEJSON_ARRAY_STREAM_ITEM);
+  EXPECT(doc.first != NULL && strcmp(doc.first, "cc") == 0);
+  EXPECT(doc.second != NULL && strcmp(doc.second, "dd") == 0);
+
+  result =
+      lonejson_array_stream_next(stream, &test_two_alloc_string_doc_map, &doc,
+                                 &error);
+  EXPECT(result == LONEJSON_ARRAY_STREAM_EOF);
+  EXPECT(error.code == LONEJSON_STATUS_OK);
+
+  lonejson_array_stream_close(stream);
+  lonejson_cleanup(&test_two_alloc_string_doc_map, &doc);
+  EXPECT(g_alloc_record_count == 0u);
+}
+
 static void test_array_stream_skips_do_not_materialize_values(void) {
   char json[1024];
   size_t pos = 0u;

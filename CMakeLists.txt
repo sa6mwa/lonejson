@@ -3,10 +3,16 @@ cmake_minimum_required(VERSION 3.21)
 execute_process(
   COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release_version.sh"
   OUTPUT_VARIABLE LONEJSON_RESOLVED_VERSION
+  ERROR_VARIABLE LONEJSON_VERSION_ERROR
+  RESULT_VARIABLE LONEJSON_VERSION_RESULT
   OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_STRIP_TRAILING_WHITESPACE
 )
-if(NOT LONEJSON_RESOLVED_VERSION)
-  set(LONEJSON_RESOLVED_VERSION "0.0.0")
+if(NOT LONEJSON_VERSION_RESULT EQUAL 0 OR NOT LONEJSON_RESOLVED_VERSION)
+  if(NOT LONEJSON_VERSION_ERROR)
+    set(LONEJSON_VERSION_ERROR "version resolver produced no version")
+  endif()
+  message(FATAL_ERROR "${LONEJSON_VERSION_ERROR}")
 endif()
 
 project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
@@ -28,7 +34,7 @@ option(LONEJSON_ENABLE_TSAN "Enable ThreadSanitizer." OFF)
 option(LONEJSON_ENABLE_MSAN "Enable MemorySanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "16" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "17" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -97,7 +103,25 @@ function(lonejson_configure_strict_downstream_target target)
   endif()
 endfunction()
 
+function(lonejson_configure_lua_c_target target)
+  if(UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    target_compile_definitions(${target} PRIVATE
+      _POSIX_C_SOURCE=200809L
+      _FILE_OFFSET_BITS=64)
+  endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_compile_definitions(${target} PRIVATE _DARWIN_C_SOURCE=1)
+  endif()
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(${target} PRIVATE
+      -std=c99
+      -Wall
+      -Wextra)
+  endif()
+endfunction()
+
 string(TOLOWER "${LONEJSON_TARGET_OS}" LONEJSON_TARGET_OS_LOWER)
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" LONEJSON_CMAKE_SYSTEM_NAME_LOWER)
 string(TOLOWER "${LONEJSON_TARGET_ARCH}" LONEJSON_TARGET_ARCH_LOWER)
 if(LONEJSON_TARGET_ARCH_LOWER STREQUAL "amd64")
   set(LONEJSON_TARGET_ARCH_LOWER "x86_64")
@@ -115,6 +139,15 @@ elseif(LONEJSON_TARGET_OS_LOWER STREQUAL "darwin" AND
   set(LONEJSON_TARGET_ID "arm64-apple-darwin")
 else()
   set(LONEJSON_TARGET_ID "${LONEJSON_TARGET_ARCH_LOWER}-${LONEJSON_TARGET_OS_LOWER}")
+endif()
+
+set(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS OFF)
+if(NOT CMAKE_CROSSCOMPILING AND
+    LONEJSON_TARGET_OS_LOWER STREQUAL LONEJSON_CMAKE_SYSTEM_NAME_LOWER)
+  if(NOT LONEJSON_TARGET_OS_LOWER STREQUAL "linux" OR
+      LONEJSON_TARGET_LIBC STREQUAL "gnu")
+    set(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS ON)
+  endif()
 endif()
 function(lonejson_find_curl)
   if(LONEJSON_C_PKT_SYSTEMS_ROOT)
@@ -304,43 +337,137 @@ if(LONEJSON_BUILD_TESTS)
   find_program(LONEJSON_BASH_EXECUTABLE bash)
   if(LONEJSON_BASH_EXECUTABLE AND LONEJSON_LUA_EXECUTABLE
       AND LONEJSON_LUAROCKS_EXECUTABLE)
+    if(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS)
+      add_test(
+        NAME lonejson_bench_baseline_history_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_baseline_history.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}")
+      add_test(
+        NAME lonejson_bench_retry_confirm_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_retry_confirm.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}")
+      add_test(
+        NAME lonejson_lua_legacy_uservalue_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_legacy_uservalue.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}"
+          "${CMAKE_CURRENT_BINARY_DIR}")
+      add_test(
+        NAME lonejson_lua_schema_cache_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}"
+          "${CMAKE_CURRENT_BINARY_DIR}")
+      add_test(
+        NAME lonejson_lua_encode_stats_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}"
+          "${CMAKE_CURRENT_BINARY_DIR}")
+      add_test(
+        NAME lonejson_lua_external_liblonejson_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_external_liblonejson.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUA_EXECUTABLE}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}"
+          "${CMAKE_CURRENT_BINARY_DIR}")
+      add_test(
+        NAME lonejson_lua_rock_makefile_deps_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_rock_makefile_deps.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+          "${LONEJSON_LUAROCKS_EXECUTABLE}")
+    endif()
+  endif()
+
+  set(LONEJSON_TARGET_LUA_INCLUDE_DIR
+    "${LONEJSON_C_PKT_SYSTEMS_ROOT}/include")
+  set(LONEJSON_TARGET_LUA_LIBRARY
+    "${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib/liblua.so")
+  if(LONEJSON_TARGET_OS_LOWER STREQUAL "linux" AND
+      LONEJSON_C_PKT_SYSTEMS_ROOT AND
+      EXISTS "${LONEJSON_TARGET_LUA_INCLUDE_DIR}/lua.h" AND
+      EXISTS "${LONEJSON_TARGET_LUA_LIBRARY}")
+    add_library(lonejson_lua_target_core MODULE src/lua/lonejson_lua.c)
+    target_include_directories(lonejson_lua_target_core PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}"
+      "${LONEJSON_TARGET_LUA_INCLUDE_DIR}")
+    target_compile_definitions(lonejson_lua_target_core PRIVATE
+      LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
+      LONEJSON_TEST_MAP_ANALYSIS_COUNTER=1
+      LONEJSON_TEST_LUA_ENCODE_STATS=1)
+    target_link_libraries(lonejson_lua_target_core PRIVATE
+      lonejson_shared
+      "${LONEJSON_TARGET_LUA_LIBRARY}")
+    set_target_properties(lonejson_lua_target_core PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME core
+      LIBRARY_OUTPUT_DIRECTORY
+        "${CMAKE_CURRENT_BINARY_DIR}/lua-target/lonejson"
+      BUILD_RPATH
+        "${CMAKE_CURRENT_BINARY_DIR};${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
+    if(LONEJSON_BUILD_WITH_CURL)
+      target_compile_definitions(lonejson_lua_target_core PRIVATE
+        LONEJSON_WITH_CURL)
+      lonejson_target_include_curl(lonejson_lua_target_core)
+      target_link_libraries(lonejson_lua_target_core PRIVATE CURL::libcurl)
+    endif()
+    lonejson_configure_lua_c_target(lonejson_lua_target_core)
+
+    add_executable(lonejson_lua_target_runner
+      tests/test_lua_embedded_runner.c)
+    target_include_directories(lonejson_lua_target_runner PRIVATE
+      "${LONEJSON_TARGET_LUA_INCLUDE_DIR}")
+    target_link_libraries(lonejson_lua_target_runner PRIVATE
+      "${LONEJSON_TARGET_LUA_LIBRARY}")
+    set_target_properties(lonejson_lua_target_runner PROPERTIES
+      BUILD_RPATH "${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
+    lonejson_configure_lua_c_target(lonejson_lua_target_runner)
+    add_dependencies(lonejson_lua_target_runner lonejson_lua_target_core)
     add_test(
-      NAME lonejson_bench_baseline_history_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_baseline_history.sh"
+      NAME lonejson_lua_target_tests
+      COMMAND lonejson_lua_target_runner
         "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
-    add_test(
-      NAME lonejson_bench_retry_confirm_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_retry_confirm.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
-    add_test(
-      NAME lonejson_lua_legacy_uservalue_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_legacy_uservalue.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
-    add_test(
-      NAME lonejson_lua_schema_cache_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
-    add_test(
-      NAME lonejson_lua_encode_stats_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${LONEJSON_LUA_EXECUTABLE}"
-        "${LONEJSON_LUAROCKS_EXECUTABLE}")
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua.lua"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_fuzz.lua"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.lua"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.lua")
   endif()
   if(LONEJSON_BASH_EXECUTABLE)
+    add_test(
+      NAME lonejson_makefile_fuzz_targets_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_makefile_fuzz_targets.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_make_lifecycle_aliases_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_make_lifecycle_aliases.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_discover_target_tools_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_discover_target_tools.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_path_index_formatting_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_path_index_formatting.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_c_pkt_systems_fetch_retry_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
@@ -372,10 +499,33 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_sanitizer_conflicts.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_source_release_tarball_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_source_release_tarball.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_COMMAND}")
+    add_test(
       NAME lonejson_lua_src_rock_privacy_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_src_rock_privacy.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_release_artifact_verify_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_artifact_verify.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_release_archive_verify_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_archive_verify.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_lua_native_test_target_filter_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_native_test_target_filter.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_COMMAND}"
+        "${CMAKE_GENERATOR}")
     add_test(
       NAME lonejson_run_release_matrix_darwin_target_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
@@ -413,6 +563,12 @@ if(LONEJSON_BUILD_TESTS)
     COMMAND lonejson_single_header_strict_warning_tests)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS
     lonejson_single_header_strict_warning_tests)
+  add_test(
+    NAME lonejson_single_header_strict_warning_build_tests
+    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_CURRENT_BINARY_DIR}"
+      --target lonejson_single_header_strict_warning_tests)
+  set_tests_properties(lonejson_single_header_strict_warning_build_tests
+    PROPERTIES RUN_SERIAL TRUE)
 
   if(LONEJSON_CLANG_EXECUTABLE)
     set(LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT
@@ -434,6 +590,12 @@ if(LONEJSON_BUILD_TESTS)
       VERBATIM)
     add_custom_target(lonejson_single_header_strict_clang ALL
       DEPENDS "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}")
+    add_test(
+      NAME lonejson_single_header_strict_clang_build_tests
+      COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_CURRENT_BINARY_DIR}"
+        --target lonejson_single_header_strict_clang)
+    set_tests_properties(lonejson_single_header_strict_clang_build_tests
+      PROPERTIES RUN_SERIAL TRUE)
   endif()
 
   function(lonejson_add_single_header_config_test target)
@@ -633,6 +795,18 @@ if(LONEJSON_BUILD_FUZZERS)
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_value_visitor)
 
+  add_executable(lonejson_fuzz_path_value_visitor
+    fuzz/fuzz_path_value_visitor.c)
+  target_include_directories(lonejson_fuzz_path_value_visitor
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_path_value_visitor PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_path_value_visitor PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_path_value_visitor PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_path_value_visitor)
+
   add_executable(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
   target_include_directories(lonejson_fuzz_value_rewrite PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_link_libraries(lonejson_fuzz_value_rewrite PRIVATE lonejson)
@@ -760,17 +934,19 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/bench/lonejson_bench.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua.c"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_module.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_record.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_schema.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_schema_methods.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_stream_spool.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_support.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_module.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_record.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_schema.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_schema_methods.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_stream_spool.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_support.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_embedded_runner.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_validate.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_mapped_parse.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_array_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_path_value_visitor.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_rewrite.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_generator_backpressure.c"
@@ -779,16 +955,19 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_fixed_string_paths.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_alloc_ceiling.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_parser_boundaries.c"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_visitor.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_stream.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_curl_misc.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixtures_public.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generator_omit.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_json_value_sources.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_visitor.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_rewrite.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_stream.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_curl_misc.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixtures_public.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generator_omit.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_json_value_sources.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_main.c"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_parse_serialize.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_protocol_framing.inc"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_support.inc"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_parse_serialize.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_protocol_framing.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_support.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_value_rewrite.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_writer.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_config_matrix.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_link_consumer.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_short_names.c"

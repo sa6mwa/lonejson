@@ -10,6 +10,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 make --no-print-directory -C "$repo_root" lua-rock \
   LUA="$lua_exec" LUAROCKS="$luarocks_exec" >/dev/null
 eval "$("$luarocks_exec" path --tree "$repo_root/build/luarocks")"
+export LD_LIBRARY_PATH="$repo_root/build/debug:${LD_LIBRARY_PATH:-}"
+export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
 
 write_run() {
   local path=$1

@@ -25,6 +25,7 @@ typedef struct lonejson__json_io {
   lonejson_sink_fn sink;
   void *sink_user;
   const lonejson_value_visitor *visitor;
+  const lonejson_path_value_visitor *path_visitor;
   void *visitor_user;
   lonejson_error *error;
   int pretty;
@@ -35,6 +36,10 @@ typedef struct lonejson__json_io {
   const lonejson_allocator *allocator;
   int has_pushback;
   int pushback;
+  lonejson_path_segment *path_segments;
+  lonejson__json_path_frame *path_frames;
+  size_t path_depth;
+  size_t path_capacity;
 } lonejson__json_io;
 
 static lonejson_status

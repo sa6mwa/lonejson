@@ -126,6 +126,8 @@ lonejson_status lonejson_json_value_set_parse_sink(lonejson_json_value *value,
   value->parse_sink_user = user;
   value->parse_visitor = NULL;
   value->parse_visitor_user = NULL;
+  value->parse_path_visitor = NULL;
+  value->parse_path_visitor_user = NULL;
   lonejson__json_value_note_limits_mode_change(value);
   lonejson__clear_error(error);
   return LONEJSON_STATUS_OK;
@@ -146,6 +148,29 @@ lonejson_json_value_set_parse_visitor(lonejson_json_value *value,
   value->parse_sink_user = NULL;
   value->parse_visitor = visitor;
   value->parse_visitor_user = user;
+  value->parse_path_visitor = NULL;
+  value->parse_path_visitor_user = NULL;
+  lonejson__json_value_note_limits_mode_change(value);
+  lonejson__clear_error(error);
+  return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_json_value_set_parse_path_visitor(
+    lonejson_json_value *value, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error) {
+  if (value == NULL || visitor == NULL) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "JSON value handle and parse path visitor are required");
+  }
+  lonejson__json_value_clear_runtime(value);
+  value->parse_mode = LONEJSON_JSON_VALUE_PARSE_PATH_VISITOR;
+  value->parse_sink = NULL;
+  value->parse_sink_user = NULL;
+  value->parse_visitor = NULL;
+  value->parse_visitor_user = NULL;
+  value->parse_path_visitor = visitor;
+  value->parse_path_visitor_user = user;
   lonejson__json_value_note_limits_mode_change(value);
   lonejson__clear_error(error);
   return LONEJSON_STATUS_OK;
@@ -167,6 +192,8 @@ lonejson_json_value_enable_parse_capture(lonejson_json_value *value,
   value->parse_mode = LONEJSON_JSON_VALUE_PARSE_CAPTURE;
   value->parse_visitor = NULL;
   value->parse_visitor_user = NULL;
+  value->parse_path_visitor = NULL;
+  value->parse_path_visitor_user = NULL;
   lonejson__json_value_note_limits_mode_change(value);
   lonejson__clear_error(error);
   return LONEJSON_STATUS_OK;

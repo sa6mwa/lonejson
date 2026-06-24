@@ -114,6 +114,46 @@ typedef struct lonejson_frame {
   int after_comma;
 } lonejson_frame;
 
+typedef struct lonejson__json_path_frame {
+  char inline_key[64];
+  char index_text[32];
+  char *key;
+  size_t key_len;
+  size_t key_cap;
+  size_t next_index;
+  int key_heap;
+  int container_kind;
+} lonejson__json_path_frame;
+
+typedef struct lonejson__json_stream_path_state {
+  lonejson_path_segment *segments;
+  lonejson__json_path_frame *frames;
+  size_t depth;
+  size_t capacity;
+} lonejson__json_stream_path_state;
+
+static size_t lonejson__format_size_decimal(char *out, size_t out_size,
+                                            size_t value) {
+  char reversed[sizeof(size_t) * 3u + 1u];
+  size_t len = 0u;
+  size_t i;
+
+  do {
+    reversed[len] = (char)('0' + (value % 10u));
+    value /= 10u;
+    ++len;
+  } while (value != 0u && len < sizeof(reversed));
+
+  if (out_size <= len) {
+    return len;
+  }
+  for (i = 0u; i < len; ++i) {
+    out[i] = reversed[len - 1u - i];
+  }
+  out[len] = '\0';
+  return len;
+}
+
 typedef union lonejson__parser_workspace_align_union {
   lonejson_frame frame;
   void *ptr;
@@ -203,6 +243,9 @@ lonejson_status
 lonejson_json_value_set_parse_visitor(lonejson_json_value *value,
                                       const lonejson_value_visitor *visitor,
                                       void *user, lonejson_error *error);
+lonejson_status lonejson_json_value_set_parse_path_visitor(
+    lonejson_json_value *value, const lonejson_path_value_visitor *visitor,
+    void *user, lonejson_error *error);
 lonejson_status
 lonejson_json_value_enable_parse_capture(lonejson_json_value *value,
                                          lonejson_error *error);
@@ -290,12 +333,15 @@ struct lonejson_parser {
   lonejson_uint64 required_masks[LONEJSON__MAP_MASK_CACHE_SIZE];
   lonejson_json_value *json_stream_value;
   int json_stream_active;
+  int json_stream_parse_visitor_active;
   int json_stream_visit_active;
+  int json_stream_path_visit_active;
   int json_stream_sink_active;
   size_t json_stream_depth;
   size_t json_stream_total_bytes;
   size_t json_stream_text_bytes;
   int json_stream_text_is_key;
+  lonejson__json_stream_path_state *json_stream_path;
   size_t parse_alloc_bytes_live;
   int root_map_may_allocate;
   lonejson_uint64 root_map_adopt_mask;
@@ -514,10 +560,12 @@ typedef struct lonejson__array_stream_state {
   lonejson_array_stream_value_mode value_mode;
   lonejson_array_stream_value_mode pending_value_mode;
   int value_active;
+  int value_parser_initialized;
   const lonejson_map *active_map;
   const lonejson_map *pending_map;
   void *active_dst;
   void *pending_dst;
+  void *value_prepared_dst;
   lonejson_sink_fn active_sink;
   void *active_sink_user;
   size_t buffered_start;
@@ -700,6 +748,7 @@ lonejson__parser_set_json_stream_value(lonejson_parser *parser,
                                        lonejson_json_value *value);
 static LONEJSON__INLINE void
 lonejson__parser_clear_json_stream_value(lonejson_parser *parser);
+static void lonejson__parser_cleanup_json_stream_path(lonejson_parser *parser);
 static lonejson_status
 lonejson__json_value_string_begin(lonejson_parser *parser, int is_key);
 static lonejson_status
@@ -1204,6 +1253,13 @@ lonejson_value_visitor lonejson_default_value_visitor(void) {
   return visitor;
 }
 
+lonejson_path_value_visitor lonejson_default_path_value_visitor(void) {
+  lonejson_path_value_visitor visitor;
+
+  memset(&visitor, 0, sizeof(visitor));
+  return visitor;
+}
+
 static void
 lonejson__spooled_apply_options(lonejson_spooled *value,
                                 const lonejson__spool_options *options) {
@@ -1387,6 +1443,7 @@ static const lonejson_json_value_methods g_lonejson_json_value_methods = {
     lonejson_json_value_set_buffer,
     lonejson_json_value_set_parse_sink,
     lonejson_json_value_set_parse_visitor,
+    lonejson_json_value_set_parse_path_visitor,
     lonejson_json_value_enable_parse_capture,
     lonejson_json_value_set_reader,
     lonejson_json_value_set_file,
@@ -1420,6 +1477,8 @@ void lonejson_json_value_init_with_allocator(
   value->parse_sink_user = NULL;
   value->parse_visitor = NULL;
   value->parse_visitor_user = NULL;
+  value->parse_path_visitor = NULL;
+  value->parse_path_visitor_user = NULL;
   value->parse_visitor_limits = lonejson__default_value_limits();
   value->runtime_parse_visitor_limits = value->parse_visitor_limits;
   value->parse_limits_follow_runtime = 1;
@@ -1456,6 +1515,10 @@ void lonejson_json_value_cleanup(lonejson_json_value *value) {
   value->kind = LONEJSON_JSON_VALUE_NULL;
   value->parse_sink = NULL;
   value->parse_sink_user = NULL;
+  value->parse_visitor = NULL;
+  value->parse_visitor_user = NULL;
+  value->parse_path_visitor = NULL;
+  value->parse_path_visitor_user = NULL;
   value->parse_visitor_limits = limits;
   value->runtime_parse_visitor_limits = runtime_limits;
   value->parse_limits_follow_runtime = follow_runtime;

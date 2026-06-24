@@ -1,17 +1,17 @@
 #define LONEJSON_TEST_RUNTIME_BORROW_HOOK 1
-#include "test_support.inc"
+#include "test_support.inc.h"
 /* clang-format off */
-#include "test_protocol_framing.inc"
-#include "test_parse_serialize.inc"
-#include "test_array_stream.inc"
-#include "test_array_rewrite.inc"
-#include "test_fixtures_public.inc"
-#include "test_json_value_sources.inc"
-#include "test_allocator_visitor.inc"
-#include "test_generator_omit.inc"
-#include "test_writer.inc"
-#include "test_value_rewrite.inc"
-#include "test_curl_misc.inc"
+#include "test_protocol_framing.inc.h"
+#include "test_parse_serialize.inc.h"
+#include "test_array_stream.inc.h"
+#include "test_array_rewrite.inc.h"
+#include "test_fixtures_public.inc.h"
+#include "test_json_value_sources.inc.h"
+#include "test_allocator_visitor.inc.h"
+#include "test_generator_omit.inc.h"
+#include "test_writer.inc.h"
+#include "test_value_rewrite.inc.h"
+#include "test_curl_misc.inc.h"
 /* clang-format on */
 
 int main(void) {
@@ -75,6 +75,7 @@ int main(void) {
   test_array_stream_streaming_invariants();
   test_array_stream_delimiter_validation_before_yield();
   test_array_stream_mapped_items_do_not_materialize_item();
+  test_array_stream_reused_mapped_destination_resets_allocations();
   test_array_stream_skips_do_not_materialize_values();
   test_array_stream_escaped_key_path_matching();
   test_array_stream_escaped_key_failure_modes();
@@ -175,6 +176,7 @@ int main(void) {
   test_duplicate_key_policy();
   test_public_api_argument_and_serialization_guards();
   test_public_initializers_and_defaults();
+  test_public_dynamic_record_helpers();
   test_msan_public_boundary_results_are_initialized();
   test_runtime_defaults_and_method_dispatch();
   test_runtime_method_json_value_init_null_does_not_leak_pin();
@@ -257,12 +259,18 @@ int main(void) {
   test_json_value_parse_and_roundtrip();
   test_json_value_parse_capture_escapes();
   test_json_value_stream_reuse_releases_capture_budget();
+  test_json_value_capture_small_budget_uses_required_capacity();
   test_nested_json_value_stream_reuse_releases_capture_budget();
   test_json_value_parse_stream_sink();
   test_json_value_nested_object_parse_sink_and_reuse();
   test_json_value_nested_object_parse_sink_failure_matrix();
   test_json_value_parse_visitor();
   test_json_value_nested_object_parse_visitor();
+  test_json_value_parse_path_visitor_paths();
+  test_json_value_parse_path_visitor_truncated_containers();
+  test_json_value_parse_path_visitor_zero_depth();
+  test_json_value_parse_path_visitor_failure_cleanup();
+  test_json_value_parse_path_visitor_api_guards();
   test_json_value_parse_visitor_fast_path_regressions();
   test_json_value_parse_visitor_total_byte_reset_for_string_regressions();
   test_json_value_parse_visitor_scalar_string_regressions();
@@ -284,6 +292,14 @@ int main(void) {
   test_json_value_nested_failure_matrix();
   test_value_visitor_success_and_limits();
   test_value_visitor_chunking_unicode_and_failures();
+  test_path_index_formatter_uses_full_size_t();
+  test_path_value_visitor_paths_and_chunks();
+  test_path_value_visitor_reader_chunk_paths();
+  test_path_value_visitor_failure_cleans_state();
+  test_path_value_visitor_short_keys_do_not_allocate_per_event();
+  test_path_value_visitor_empty_and_numeric_segments();
+  test_path_value_visitor_source_entry_points_and_args();
+  test_path_value_visitor_limit_failures_cleanup();
   test_visit_value_reader_rejects_would_block();
   test_visit_value_success_clears_error();
   test_custom_allocator_parse_cleanup_and_stream();
