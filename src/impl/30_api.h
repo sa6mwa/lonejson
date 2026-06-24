@@ -3850,6 +3850,29 @@ static int lonejson__candidate_peek_nonspace(lonejson__candidate_scan *scan) {
   return ch;
 }
 
+static int lonejson__candidate_peek_nonspace_separator(
+    lonejson__candidate_scan *scan, int *saw_separator) {
+  lonejson__json_io io;
+  int ch;
+
+  if (saw_separator != NULL) {
+    *saw_separator = 0;
+  }
+  memset(&io, 0, sizeof(io));
+  io.cursor = scan->cursor;
+  io.error = scan->error;
+  do {
+    ch = lonejson__json_cursor_getc(&io);
+    if (ch >= 0 && lonejson__is_json_space(ch) && saw_separator != NULL) {
+      *saw_separator = 1;
+    }
+  } while (ch >= 0 && lonejson__is_json_space(ch));
+  if (ch >= 0) {
+    lonejson__json_cursor_ungetc(&io, ch);
+  }
+  return ch;
+}
+
 static lonejson_status lonejson__candidate_callback_status(
     lonejson__candidate_scan *scan, lonejson_candidate_event_fn callback,
     const lonejson_candidate_info *info) {
@@ -3998,11 +4021,15 @@ static lonejson_status
 lonejson__candidate_scan_repeated(lonejson__candidate_scan *scan, int first) {
   lonejson_status status;
   int ch;
+  int saw_separator;
+  int first_candidate;
 
   ch = first;
+  saw_separator = 0;
+  first_candidate = 1;
   for (;;) {
     if (ch < 0) {
-      ch = lonejson__candidate_peek_nonspace(scan);
+      ch = lonejson__candidate_peek_nonspace_separator(scan, &saw_separator);
     }
     if (ch == EOF) {
       return LONEJSON_STATUS_OK;
@@ -4011,10 +4038,19 @@ lonejson__candidate_scan_repeated(lonejson__candidate_scan *scan, int first) {
       return scan->error != NULL ? scan->error->code
                                  : LONEJSON_STATUS_CALLBACK_FAILED;
     }
+    if (!first_candidate && !saw_separator) {
+      return lonejson__set_error(
+          scan->error, LONEJSON_STATUS_INVALID_JSON,
+          scan->cursor->has_pushback ? scan->cursor->pushback_offset
+                                     : scan->cursor->stream_offset,
+          0u, 0u,
+          "candidate stream expected whitespace between repeated JSON values");
+    }
     status = lonejson__candidate_visit_one(scan);
     if (status != LONEJSON_STATUS_OK || scan->stopped) {
       return status;
     }
+    first_candidate = 0;
     ch = -1;
   }
 }

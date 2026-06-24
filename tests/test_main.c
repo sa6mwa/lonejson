@@ -374,6 +374,7 @@ int main(void) {
   test_candidate_stream_single_object();
   test_candidate_stream_array_items();
   test_candidate_stream_repeated_and_auto();
+  test_candidate_stream_rejects_adjacent_repeated_values();
   test_candidate_stream_malformed_offset();
   test_candidate_stream_callback_stop_and_failure();
   test_candidate_stream_reader_and_runtime_methods();

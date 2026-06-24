@@ -221,6 +221,46 @@ static void test_candidate_stream_repeated_and_auto(void) {
   EXPECT(state.bools_seen == 1u);
 }
 
+static void test_candidate_stream_rejects_adjacent_repeated_values(void) {
+  static const char *const invalid_json[] = {"truefalse", "1true", "{}\"x\""};
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  lonejson_status status;
+  lonejson_error error;
+  size_t i;
+
+  for (i = 0u; i < sizeof(invalid_json) / sizeof(invalid_json[0]); ++i) {
+    memset(&state, 0, sizeof(state));
+    options = lonejson_default_candidate_stream_options();
+    options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+    options.candidate_begin = test_candidate_begin;
+    options.candidate_end = test_candidate_end;
+    options.candidate_user = &state;
+    status = lonejson_visit_candidates_buffer(
+        test_default_runtime(), invalid_json[i], strlen(invalid_json[i]),
+        &options, &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
+    EXPECT(state.begin_count == 1u);
+    EXPECT(state.end_count == 1u);
+    EXPECT(strstr(error.message, "whitespace between repeated JSON values") !=
+           NULL);
+
+    memset(&state, 0, sizeof(state));
+    options = lonejson_default_candidate_stream_options();
+    options.candidate_begin = test_candidate_begin;
+    options.candidate_end = test_candidate_end;
+    options.candidate_user = &state;
+    status = lonejson_visit_candidates_buffer(
+        test_default_runtime(), invalid_json[i], strlen(invalid_json[i]),
+        &options, &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
+    EXPECT(state.begin_count == 1u);
+    EXPECT(state.end_count == 1u);
+    EXPECT(strstr(error.message, "whitespace between repeated JSON values") !=
+           NULL);
+  }
+}
+
 static void test_candidate_stream_malformed_offset(void) {
   static const char json[] = " \n {\"a\":";
   test_candidate_stream_state state;
