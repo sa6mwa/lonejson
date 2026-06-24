@@ -379,6 +379,7 @@ int main(void) {
   test_candidate_stream_malformed_offset();
   test_candidate_stream_counts_pushed_back_bytes_for_limits();
   test_candidate_stream_counts_pushed_back_bytes_across_sources();
+  test_candidate_stream_numeric_delimiters_do_not_count_as_payload();
   test_candidate_stream_callback_stop_and_failure();
   test_candidate_stream_reader_and_runtime_methods();
   test_candidate_stream_file_path_fd_and_large_reader();

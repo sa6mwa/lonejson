@@ -3826,6 +3826,7 @@ lonejson__candidate_io_take_pushback(lonejson__candidate_scan *scan,
                                      lonejson__json_io *io) {
   if (scan != NULL && scan->cursor != NULL && scan->cursor->has_pushback) {
     io->has_pushback = 1;
+    io->pushback_counted = scan->cursor->count_pushback;
     io->pushback = scan->cursor->pushback;
     scan->cursor->has_pushback = 0;
     scan->cursor->count_pushback = 0;

@@ -421,6 +421,65 @@ test_candidate_stream_counts_pushed_back_bytes_across_sources(void) {
   lonejson_free(runtime);
 }
 
+static void test_candidate_stream_numeric_delimiters_do_not_count_as_payload(
+    void) {
+  static const char ndjson[] = "1 2";
+  static const char array_items[] = "[1]";
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_status status;
+  lonejson_error error;
+  test_reader_state reader;
+
+  config = lonejson_default_config();
+  config.json_value_max_total_bytes = 1u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+
+  memset(&state, 0, sizeof(state));
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson_visit_candidates_buffer(runtime, ndjson, strlen(ndjson),
+                                            &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 2u);
+  EXPECT(state.end_count == 2u);
+  EXPECT(state.end_sizes[0] == 1u);
+  EXPECT(state.end_sizes[1] == 1u);
+
+  memset(&state, 0, sizeof(state));
+  reader.json = ndjson;
+  reader.offset = 0u;
+  reader.chunk_size = 1u;
+  status = lonejson_visit_candidates_reader(runtime, test_state_reader, &reader,
+                                            &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 2u);
+  EXPECT(state.end_count == 2u);
+  EXPECT(state.end_sizes[0] == 1u);
+  EXPECT(state.end_sizes[1] == 1u);
+
+  memset(&state, 0, sizeof(state));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
+  status = lonejson_visit_candidates_buffer(runtime, array_items,
+                                            strlen(array_items), &options,
+                                            &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 1u);
+  EXPECT(state.end_sizes[0] == 1u);
+
+  lonejson_free(runtime);
+}
+
 static void test_candidate_stream_callback_stop_and_failure(void) {
   static const char json[] = "1 2 3";
   test_candidate_stream_state state;

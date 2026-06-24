@@ -40,6 +40,8 @@ typedef struct lonejson__json_io {
   lonejson__value_limits limits;
   const lonejson_allocator *allocator;
   int has_pushback;
+  int pushback_counted;
+  int last_getc_counted;
   int pushback;
   lonejson_path_segment *path_segments;
   lonejson__json_path_frame *path_frames;

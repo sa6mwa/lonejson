@@ -541,9 +541,16 @@ static lonejson_status lonejson__json_visit_number_no_path(
                                "JSON number exceeds maximum byte limit");
   }
   buffer[len++] = (char)first;
-  ch = lonejson__json_cursor_getc(io);
+  ch = lonejson__json_cursor_getc_lookahead(io);
   while (ch >= 0 && (lonejson__is_digit(ch) || ch == '+' || ch == '-' ||
                      ch == '.' || ch == 'e' || ch == 'E')) {
+    status = lonejson__json_enforce_total_limit(io);
+    if (status != LONEJSON_STATUS_OK) {
+      if (buffer != stack_buf) {
+        lonejson__owned_free(buffer);
+      }
+      return status;
+    }
     if (len >= io->limits.max_number_bytes) {
       if (buffer != stack_buf) {
         lonejson__owned_free(buffer);
@@ -552,7 +559,7 @@ static lonejson_status lonejson__json_visit_number_no_path(
                                  0u, "JSON number exceeds maximum byte limit");
     }
     buffer[len++] = (char)ch;
-    ch = lonejson__json_cursor_getc(io);
+    ch = lonejson__json_cursor_getc_lookahead(io);
   }
   if (ch >= 0) {
     lonejson__json_cursor_ungetc(io, ch);
@@ -1129,9 +1136,16 @@ static lonejson_status lonejson__json_visit_number(lonejson__json_io *io,
                                "JSON number exceeds maximum byte limit");
   }
   buffer[len++] = (char)first;
-  ch = lonejson__json_cursor_getc(io);
+  ch = lonejson__json_cursor_getc_lookahead(io);
   while (ch >= 0 && (lonejson__is_digit(ch) || ch == '+' || ch == '-' ||
                      ch == '.' || ch == 'e' || ch == 'E')) {
+    status = lonejson__json_enforce_total_limit(io);
+    if (status != LONEJSON_STATUS_OK) {
+      if (buffer != stack_buf) {
+        lonejson__owned_free(buffer);
+      }
+      return status;
+    }
     if (len >= io->limits.max_number_bytes) {
       if (buffer != stack_buf) {
         lonejson__owned_free(buffer);
@@ -1140,7 +1154,7 @@ static lonejson_status lonejson__json_visit_number(lonejson__json_io *io,
                                  0u, "JSON number exceeds maximum byte limit");
     }
     buffer[len++] = (char)ch;
-    ch = lonejson__json_cursor_getc(io);
+    ch = lonejson__json_cursor_getc_lookahead(io);
   }
   if (ch >= 0) {
     lonejson__json_cursor_ungetc(io, ch);
@@ -1449,17 +1463,10 @@ static lonejson_status lonejson__json_visit_cursor(
   }
   if (cursor->has_pushback) {
     io.has_pushback = 1;
+    io.pushback_counted = cursor->count_pushback;
     io.pushback = cursor->pushback;
     cursor->has_pushback = 0;
-  }
-  if (io.has_pushback && cursor->count_pushback) {
-    io.total_bytes = 1u;
     cursor->count_pushback = 0;
-    if (io.limits.max_total_bytes != 0u &&
-        io.total_bytes > io.limits.max_total_bytes) {
-      return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                                 "JSON value exceeds maximum total byte limit");
-    }
   }
   if (path_visitor != NULL) {
     io.path_capacity = io.limits.max_depth + 1u;
@@ -1490,6 +1497,7 @@ static lonejson_status lonejson__json_visit_cursor(
   }
   if (io.has_pushback) {
     cursor->has_pushback = 1;
+    cursor->count_pushback = io.pushback_counted;
     cursor->pushback = io.pushback;
     cursor->pushback_offset = lonejson__json_cursor_last_offset(cursor);
   }
@@ -1549,17 +1557,10 @@ static lonejson_status lonejson__json_visit_one_cursor(
   }
   if (cursor->has_pushback) {
     io.has_pushback = 1;
+    io.pushback_counted = cursor->count_pushback;
     io.pushback = cursor->pushback;
     cursor->has_pushback = 0;
-  }
-  if (io.has_pushback && cursor->count_pushback) {
-    io.total_bytes = 1u;
     cursor->count_pushback = 0;
-    if (io.limits.max_total_bytes != 0u &&
-        io.total_bytes > io.limits.max_total_bytes) {
-      return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                                 "JSON value exceeds maximum total byte limit");
-    }
   }
   if (path_visitor != NULL) {
     io.path_capacity = io.limits.max_depth + 1u;
@@ -1582,6 +1583,7 @@ static lonejson_status lonejson__json_visit_one_cursor(
                                    : lonejson__json_visit_value(&io);
   if (io.has_pushback) {
     cursor->has_pushback = 1;
+    cursor->count_pushback = io.pushback_counted;
     cursor->pushback = io.pushback;
     cursor->pushback_offset = lonejson__json_cursor_last_offset(cursor);
   }
