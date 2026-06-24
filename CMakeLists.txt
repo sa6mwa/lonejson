@@ -452,6 +452,12 @@ if(LONEJSON_BUILD_TESTS)
     COMMAND lonejson_single_header_strict_warning_tests)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS
     lonejson_single_header_strict_warning_tests)
+  add_test(
+    NAME lonejson_single_header_strict_warning_build_tests
+    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_CURRENT_BINARY_DIR}"
+      --target lonejson_single_header_strict_warning_tests)
+  set_tests_properties(lonejson_single_header_strict_warning_build_tests
+    PROPERTIES RUN_SERIAL TRUE)
 
   if(LONEJSON_CLANG_EXECUTABLE)
     set(LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT
@@ -473,6 +479,12 @@ if(LONEJSON_BUILD_TESTS)
       VERBATIM)
     add_custom_target(lonejson_single_header_strict_clang ALL
       DEPENDS "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}")
+    add_test(
+      NAME lonejson_single_header_strict_clang_build_tests
+      COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_CURRENT_BINARY_DIR}"
+        --target lonejson_single_header_strict_clang)
+    set_tests_properties(lonejson_single_header_strict_clang_build_tests
+      PROPERTIES RUN_SERIAL TRUE)
   endif()
 
   function(lonejson_add_single_header_config_test target)

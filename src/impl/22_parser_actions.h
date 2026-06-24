@@ -507,7 +507,7 @@ lonejson__begin_object_value(lonejson_parser *parser) {
       map = NULL;
       object_ptr = NULL;
     } else if (parent->field->kind == LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM) {
-      lonejson_status status = lonejson__mapped_array_stream_require_handler(
+      status = lonejson__mapped_array_stream_require_handler(
           parser, parent->field,
           (lonejson_mapped_array_stream *)lonejson__field_ptr(
               parent->object_ptr, parent->field));
@@ -677,7 +677,7 @@ lonejson__begin_array_value(lonejson_parser *parser) {
           lonejson_mapped_array_stream *stream =
               (lonejson_mapped_array_stream *)lonejson__field_ptr(object_ptr,
                                                                   field);
-          lonejson_status status =
+          status =
               lonejson__mapped_array_stream_require_handler(parser, field,
                                                             stream);
           if (status != LONEJSON_STATUS_OK) {
