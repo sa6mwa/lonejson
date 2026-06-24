@@ -137,6 +137,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	release-source-artifact \
 	release-source-smoke \
 	release-darwin-smoke-bundle \
+	package-verify \
 	release \
 	lua-rock \
 	lua-test \
@@ -190,6 +191,7 @@ help:
 		'make build-host             Configure and build the host-native release preset.' \
 		'make build-release          Configure and build the full shipped release test matrix.' \
 		'make release                Run the release matrix and package generation.' \
+		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
 		'make release-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make release-darwin-smoke-bundle Build the Darwin smoke ZIP with example and link-smoke binaries.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
@@ -297,6 +299,9 @@ release-source-smoke: release-source-artifact
 release-darwin-smoke-bundle: deps-arm64-apple-darwin
 	cmake --preset arm64-apple-darwin-release
 	cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
+
+package-verify:
+	./scripts/verify_release_artifacts.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
 
 release:
 	./scripts/run_release_matrix.sh

@@ -430,5 +430,6 @@ cmake --build --preset package-single-header
 cmake --build --preset package-source
 make release-lua-artifacts
 cmake --build --preset package-checksums
+make package-verify
 
 printf '\nRelease matrix completed successfully.\n'
