@@ -166,11 +166,115 @@ lonejson__json_enforce_total_limit(lonejson__json_io *io) {
   return LONEJSON_STATUS_OK;
 }
 
+static LONEJSON__INLINE lonejson_status
+lonejson__json_cursor_add_stream_bytes(lonejson__json_io *io, size_t len) {
+  lonejson_uint64 add = (lonejson_uint64)len;
+
+  if ((size_t)add != len ||
+      io->cursor->stream_offset > LONEJSON_UINT64_MAX - add) {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "JSON stream offset exceeds uint64 range");
+  }
+  io->cursor->stream_offset += add;
+  return LONEJSON_STATUS_OK;
+}
+
+static LONEJSON__NOINLINE LONEJSON__COLD int
+lonejson__json_cursor_refill_source_getc(lonejson__json_io *io) {
+  unsigned char byte = 0u;
+  ssize_t got;
+  lonejson_status status;
+
+  if (io->cursor->use_fd) {
+    got = read(io->cursor->value->fd, io->cursor->read_buffer,
+               sizeof(io->cursor->read_buffer));
+    if (got < 0) {
+      if (io->error != NULL) {
+        io->error->system_errno = errno;
+      }
+      lonejson__set_error(io->error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
+                          "failed to read JSON value fd");
+      return -2;
+    }
+    if (got == 0) {
+      return EOF;
+    }
+    io->cursor->read_buffer_len = (size_t)got;
+    io->cursor->read_buffer_off = 0u;
+    status = lonejson__json_cursor_add_stream_bytes(io, (size_t)got);
+    if (status != LONEJSON_STATUS_OK) {
+      return -2;
+    }
+    return io->cursor->read_buffer[io->cursor->read_buffer_off++];
+  }
+  got = (ssize_t)fread(io->cursor->read_buffer, 1u,
+                       sizeof(io->cursor->read_buffer), io->cursor->fp);
+  if (got <= 0) {
+    if (ferror(io->cursor->fp)) {
+      if (io->error != NULL) {
+        io->error->system_errno = errno;
+      }
+      lonejson__set_error(io->error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
+                          "failed to read JSON value stream");
+      return -2;
+    }
+    return EOF;
+  }
+  io->cursor->read_buffer_len = (size_t)got;
+  io->cursor->read_buffer_off = 0u;
+  status = lonejson__json_cursor_add_stream_bytes(io, (size_t)got);
+  if (status != LONEJSON_STATUS_OK) {
+    return -2;
+  }
+  byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
+  return (int)byte;
+}
+
+static LONEJSON__NOINLINE LONEJSON__HOT int
+lonejson__json_cursor_refill_getc(lonejson__json_io *io) {
+  lonejson_read_result result;
+  lonejson_status status;
+
+  if (io->cursor->reader == NULL) {
+    return lonejson__json_cursor_refill_source_getc(io);
+  }
+  for (;;) {
+    result = io->cursor->reader(io->cursor->reader_user,
+                                io->cursor->read_buffer,
+                                sizeof(io->cursor->read_buffer));
+    if (result.error_code != 0) {
+      if (io->error != NULL) {
+        io->error->system_errno = result.error_code;
+      }
+      lonejson__set_error(io->error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
+                          0u, "reader callback failed");
+      return -2;
+    }
+    if (result.bytes_read != 0u) {
+      io->cursor->read_buffer_len = result.bytes_read;
+      io->cursor->read_buffer_off = 0u;
+      status = lonejson__json_cursor_add_stream_bytes(io, result.bytes_read);
+      if (status != LONEJSON_STATUS_OK) {
+        return -2;
+      }
+      return io->cursor->read_buffer[io->cursor->read_buffer_off++];
+    }
+    if (result.eof) {
+      return EOF;
+    }
+    if (result.would_block) {
+      lonejson__set_error(io->error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
+                          0u, "reader would block");
+      return -2;
+    }
+    return EOF;
+  }
+}
+
 static LONEJSON__INLINE LONEJSON__HOT int
 lonejson__json_cursor_getc(lonejson__json_io *io) {
   unsigned char byte = 0u;
-  lonejson_read_result result;
-  ssize_t got;
+  int ch;
 
   if (io->has_pushback) {
     io->has_pushback = 0;
@@ -186,85 +290,23 @@ lonejson__json_cursor_getc(lonejson__json_io *io) {
     }
     return io->pushback;
   }
-  if (io->cursor->buffer != NULL) {
+  if (LONEJSON__LIKELY(io->cursor->buffer != NULL)) {
     if (io->cursor->buffer_off >= io->cursor->buffer_len) {
       return EOF;
     }
     byte = io->cursor->buffer[io->cursor->buffer_off++];
     goto counted;
   }
-  if (io->cursor->read_buffer_off < io->cursor->read_buffer_len) {
+  if (LONEJSON__LIKELY(io->cursor->read_buffer_off <
+                       io->cursor->read_buffer_len)) {
     byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
     goto counted;
   }
-  if (io->cursor->reader != NULL) {
-    for (;;) {
-      result =
-          io->cursor->reader(io->cursor->reader_user, io->cursor->read_buffer,
-                             sizeof(io->cursor->read_buffer));
-      if (result.error_code != 0) {
-        if (io->error != NULL) {
-          io->error->system_errno = result.error_code;
-        }
-        lonejson__set_error(io->error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
-                            0u, "reader callback failed");
-        return -2;
-      }
-      if (result.bytes_read != 0u) {
-        io->cursor->read_buffer_len = result.bytes_read;
-        io->cursor->read_buffer_off = 0u;
-        io->cursor->stream_offset += result.bytes_read;
-        byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
-        goto counted;
-      }
-      if (result.eof) {
-        return EOF;
-      }
-      if (result.would_block) {
-        lonejson__set_error(io->error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
-                            0u, "reader would block");
-        return -2;
-      }
-      return EOF;
-    }
+  ch = lonejson__json_cursor_refill_getc(io);
+  if (ch < 0) {
+    return ch;
   }
-  if (io->cursor->use_fd) {
-    got = read(io->cursor->value->fd, io->cursor->read_buffer,
-               sizeof(io->cursor->read_buffer));
-    if (got < 0) {
-      if (io->error != NULL) {
-        io->error->system_errno = errno;
-      }
-      lonejson__set_error(io->error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                          "failed to read JSON value fd");
-      return -2;
-    }
-    if (got == 0) {
-      return EOF;
-    }
-    io->cursor->read_buffer_len = (size_t)got;
-    io->cursor->read_buffer_off = 0u;
-    io->cursor->stream_offset += (size_t)got;
-    byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
-    goto counted;
-  }
-  got = (ssize_t)fread(io->cursor->read_buffer, 1u,
-                       sizeof(io->cursor->read_buffer), io->cursor->fp);
-  if (got <= 0) {
-    if (ferror(io->cursor->fp)) {
-      if (io->error != NULL) {
-        io->error->system_errno = errno;
-      }
-      lonejson__set_error(io->error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                          "failed to read JSON value stream");
-      return -2;
-    }
-    return EOF;
-  }
-  io->cursor->read_buffer_len = (size_t)got;
-  io->cursor->read_buffer_off = 0u;
-  io->cursor->stream_offset += (size_t)got;
-  byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
+  byte = (unsigned char)ch;
 counted:
   io->last_getc_counted = 1;
   io->total_bytes++;
@@ -277,8 +319,7 @@ counted:
 static LONEJSON__INLINE int
 lonejson__json_cursor_getc_lookahead(lonejson__json_io *io) {
   unsigned char byte = 0u;
-  lonejson_read_result result;
-  ssize_t got;
+  int ch;
 
   if (io->has_pushback) {
     io->has_pushback = 0;
@@ -291,85 +332,23 @@ lonejson__json_cursor_getc_lookahead(lonejson__json_io *io) {
     }
     return io->pushback;
   }
-  if (io->cursor->buffer != NULL) {
+  if (LONEJSON__LIKELY(io->cursor->buffer != NULL)) {
     if (io->cursor->buffer_off >= io->cursor->buffer_len) {
       return EOF;
     }
     byte = io->cursor->buffer[io->cursor->buffer_off++];
     goto counted;
   }
-  if (io->cursor->read_buffer_off < io->cursor->read_buffer_len) {
+  if (LONEJSON__LIKELY(io->cursor->read_buffer_off <
+                       io->cursor->read_buffer_len)) {
     byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
     goto counted;
   }
-  if (io->cursor->reader != NULL) {
-    for (;;) {
-      result =
-          io->cursor->reader(io->cursor->reader_user, io->cursor->read_buffer,
-                             sizeof(io->cursor->read_buffer));
-      if (result.error_code != 0) {
-        if (io->error != NULL) {
-          io->error->system_errno = result.error_code;
-        }
-        lonejson__set_error(io->error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
-                            0u, "reader callback failed");
-        return -2;
-      }
-      if (result.bytes_read != 0u) {
-        io->cursor->read_buffer_len = result.bytes_read;
-        io->cursor->read_buffer_off = 0u;
-        io->cursor->stream_offset += result.bytes_read;
-        byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
-        goto counted;
-      }
-      if (result.eof) {
-        return EOF;
-      }
-      if (result.would_block) {
-        lonejson__set_error(io->error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
-                            0u, "reader would block");
-        return -2;
-      }
-      return EOF;
-    }
+  ch = lonejson__json_cursor_refill_getc(io);
+  if (ch < 0) {
+    return ch;
   }
-  if (io->cursor->use_fd) {
-    got = read(io->cursor->value->fd, io->cursor->read_buffer,
-               sizeof(io->cursor->read_buffer));
-    if (got < 0) {
-      if (io->error != NULL) {
-        io->error->system_errno = errno;
-      }
-      lonejson__set_error(io->error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                          "failed to read JSON value fd");
-      return -2;
-    }
-    if (got == 0) {
-      return EOF;
-    }
-    io->cursor->read_buffer_len = (size_t)got;
-    io->cursor->read_buffer_off = 0u;
-    io->cursor->stream_offset += (size_t)got;
-    byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
-    goto counted;
-  }
-  got = (ssize_t)fread(io->cursor->read_buffer, 1u,
-                       sizeof(io->cursor->read_buffer), io->cursor->fp);
-  if (got <= 0) {
-    if (ferror(io->cursor->fp)) {
-      if (io->error != NULL) {
-        io->error->system_errno = errno;
-      }
-      lonejson__set_error(io->error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                          "failed to read JSON value stream");
-      return -2;
-    }
-    return EOF;
-  }
-  io->cursor->read_buffer_len = (size_t)got;
-  io->cursor->read_buffer_off = 0u;
-  io->cursor->stream_offset += (size_t)got;
-  byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
+  byte = (unsigned char)ch;
 counted:
   io->last_getc_counted = 1;
   io->total_bytes++;
@@ -396,25 +375,26 @@ lonejson__json_cursor_advance_span(lonejson__json_io *io, size_t len) {
   return LONEJSON_STATUS_OK;
 }
 
-static LONEJSON__INLINE size_t
+static LONEJSON__INLINE lonejson_uint64
 lonejson__json_cursor_next_offset(const lonejson__json_cursor *cursor) {
   if (cursor == NULL) {
     return 0u;
   }
   if (cursor->buffer != NULL) {
-    return cursor->buffer_off;
+    return (lonejson_uint64)cursor->buffer_off;
   }
   if (cursor->stream_offset >=
-      cursor->read_buffer_len - cursor->read_buffer_off) {
-    return cursor->stream_offset - cursor->read_buffer_len +
-           cursor->read_buffer_off;
+      (lonejson_uint64)(cursor->read_buffer_len - cursor->read_buffer_off)) {
+    return cursor->stream_offset -
+           (lonejson_uint64)(cursor->read_buffer_len -
+                             cursor->read_buffer_off);
   }
   return 0u;
 }
 
-static LONEJSON__INLINE size_t
+static LONEJSON__INLINE lonejson_uint64
 lonejson__json_cursor_last_offset(const lonejson__json_cursor *cursor) {
-  size_t next = lonejson__json_cursor_next_offset(cursor);
+  lonejson_uint64 next = lonejson__json_cursor_next_offset(cursor);
   return next == 0u ? 0u : next - 1u;
 }
 

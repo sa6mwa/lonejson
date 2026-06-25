@@ -274,6 +274,9 @@ int luaopen_lonejson_core(lua_State *L) {
       {"_test_reset_encode_stats", ljlua_test_reset_encode_stats_lua},
       {"_test_get_encode_stats", ljlua_test_get_encode_stats_lua},
 #endif
+#if defined(LONEJSON_TEST_LUA_CANDIDATE_INFO)
+      {"_test_candidate_info_u64", ljlua_test_candidate_info_u64},
+#endif
       {NULL, NULL}};
 
   luaL_checkversion(L);

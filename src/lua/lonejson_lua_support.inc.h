@@ -870,9 +870,18 @@ static void ljlua_u64_to_decimal(char *buf, size_t capacity,
 }
 
 static int ljlua_push_u64(lua_State *L, lonejson_uint64 value) {
-#if defined(LUA_MAXINTEGER)
+#if defined(LUA_MAXINTEGER) && !defined(LONEJSON_TEST_LUA_SIMULATE_NO_MAXINTEGER)
   if (value <= (lonejson_uint64)LUA_MAXINTEGER) {
     lua_pushinteger(L, (lua_Integer)value);
+    return 1;
+  }
+#else
+#if DBL_MANT_DIG >= 64
+  if (1) {
+#else
+  if (value <= (((lonejson_uint64)1u) << DBL_MANT_DIG)) {
+#endif
+    lua_pushnumber(L, (lua_Number)value);
     return 1;
   }
 #endif
@@ -881,6 +890,14 @@ static int ljlua_push_u64(lua_State *L, lonejson_uint64 value) {
     ljlua_u64_to_decimal(buf, sizeof(buf), value);
     lua_pushstring(L, buf);
   }
+  return 1;
+}
+
+static int ljlua_push_u64_plus_one(lua_State *L, lonejson_uint64 value) {
+  if (value != LONEJSON_UINT64_MAX) {
+    return ljlua_push_u64(L, value + 1u);
+  }
+  lua_pushstring(L, "18446744073709551616");
   return 1;
 }
 

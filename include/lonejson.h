@@ -119,6 +119,10 @@ typedef unsigned long long lonejson_uint64;
 #define SIZE_MAX ((size_t)-1)
 #endif
 
+#if !defined(LONEJSON_UINT64_MAX)
+#define LONEJSON_UINT64_MAX ((lonejson_uint64) ~(lonejson_uint64)0)
+#endif
+
 #if defined(_MSC_VER)
 #define LONEJSON_SHORT_ALIAS_INLINE static __inline
 #elif defined(__GNUC__) || defined(__clang__)
@@ -492,7 +496,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 18
+#define LONEJSON_ABI_VERSION 19
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -1815,17 +1819,20 @@ typedef enum lonejson_candidate_capture_mode {
 /** Boundary information for one arbitrary JSON candidate.
  *
  * `stream_offset` is the byte offset of the first candidate byte in the input
- * stream. `byte_size` is set to `(size_t)-1` at begin callbacks and to the
- * consumed candidate byte count at end callbacks. Captured payload pointers
- * are populated only for end callbacks and are valid only until that callback
- * returns.
+ * stream. `byte_size` is set to
+ * `LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN` at begin callbacks and to the
+ * consumed candidate byte count at end callbacks. Captured payload pointers are
+ * populated only for end callbacks and are valid only until that callback
+ * returns. Range fields are fixed-width 64-bit values so seekable callers can
+ * describe large input ranges independently of native pointer size.
  */
+#define LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN LONEJSON_UINT64_MAX
 typedef struct lonejson_candidate_info {
-  size_t index;
-  size_t stream_offset;
-  size_t byte_size;
+  lonejson_uint64 index;
+  lonejson_uint64 stream_offset;
+  lonejson_uint64 byte_size;
   const void *payload;
-  size_t payload_size;
+  lonejson_uint64 payload_size;
   const lonejson_spooled *payload_spool;
 } lonejson_candidate_info;
 
@@ -5664,6 +5671,8 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_VERSION_PATCH LONEJSON_VERSION_PATCH
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
 #define LJ_ABI_VERSION LONEJSON_ABI_VERSION
+
+#define LJ_UINT64_MAX LONEJSON_UINT64_MAX
 /** Marks a mapping field as required during parse. */
 #define LJ_FIELD_REQUIRED LONEJSON_FIELD_REQUIRED
 /** Omits an optional field during serialization when its value is JSON `null`.
@@ -6178,6 +6187,7 @@ typedef lonejson_candidate_callback_result lj_candidate_callback_result;
 typedef lonejson_candidate_capture_mode lj_candidate_capture_mode;
 /** Boundary information for one arbitrary JSON candidate. */
 typedef lonejson_candidate_info lj_candidate_info;
+#define LJ_CANDIDATE_BYTE_SIZE_UNKNOWN LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN
 /** Candidate boundary callback signature. */
 typedef lonejson_candidate_event_fn lj_candidate_event_fn;
 /** Options for arbitrary JSON candidate streams. */

@@ -42,6 +42,13 @@ local function assert_rewrite_callback_failed(value, err, needle)
   assert_true(err.message:find(needle, 1, true) ~= nil, err.message)
 end
 
+local function stable_int_text(value)
+  if type(value) == "number" and value % 1 == 0 then
+    return string.format("%.0f", value)
+  end
+  return tostring(value)
+end
+
 local function path_key(path)
   return table.concat(path, "/")
 end
@@ -257,11 +264,28 @@ do
     framing = "ndjson",
     capture = "memory",
     candidate_begin = function(info)
-      begins[#begins + 1] = info.index .. ":" .. tostring(info.byte_size)
+      assert_eq(type(info.index), "number")
+      assert_eq(type(info.index0), "number")
+      assert_eq(type(info.stream_offset), "number")
+      assert_eq(type(info.payload_size), "number")
+      assert_eq(info.index0 + 1, info.index)
+      begins[#begins + 1] =
+          stable_int_text(info.index) .. ":" .. tostring(info.byte_size)
       assert_true(info.payload == nil)
+      assert_eq(stable_int_text(info.payload_size), "0")
     end,
     candidate_end = function(info)
-      ends[#ends + 1] = info.index .. ":" .. info.stream_offset .. ":" .. info.byte_size .. ":" .. info.payload
+      assert_eq(type(info.index), "number")
+      assert_eq(type(info.index0), "number")
+      assert_eq(type(info.stream_offset), "number")
+      assert_eq(type(info.byte_size), "number")
+      assert_eq(type(info.payload_size), "number")
+      assert_eq(info.stream_offset + info.byte_size, info.stream_offset + #info.payload)
+      ends[#ends + 1] =
+          stable_int_text(info.index) .. ":" ..
+          stable_int_text(info.stream_offset) .. ":" ..
+          stable_int_text(info.byte_size) .. ":" .. info.payload
+      assert_eq(stable_int_text(info.payload_size), stable_int_text(#info.payload))
     end,
     path_visitor = {
       number_chunk = function(path, chunk)
@@ -286,6 +310,66 @@ do
 end
 
 do
+  local begins = {}
+  local ends = {}
+  local ok, err = lj:visit_candidates_string(' {"a":1} \n [true] ', {
+    framing = "ndjson",
+    candidate_begin = function(info)
+      assert_eq(type(info.index), "number")
+      assert_eq(type(info.index0), "number")
+      assert_eq(type(info.stream_offset), "number")
+      assert_eq(type(info.payload_size), "number")
+      assert_true(info.byte_size == nil)
+      begins[#begins + 1] = table.concat({
+        stable_int_text(info.index),
+        stable_int_text(info.index0),
+        stable_int_text(info.stream_offset),
+        tostring(info.byte_size),
+        stable_int_text(info.payload_size),
+        tostring(info.payload),
+        tostring(info.payload_spool),
+      }, ":")
+    end,
+    candidate_end = function(info)
+      assert_eq(type(info.index), "number")
+      assert_eq(type(info.index0), "number")
+      assert_eq(type(info.stream_offset), "number")
+      assert_eq(type(info.byte_size), "number")
+      assert_eq(type(info.payload_size), "number")
+      ends[#ends + 1] = table.concat({
+        stable_int_text(info.index),
+        stable_int_text(info.index0),
+        stable_int_text(info.stream_offset),
+        stable_int_text(info.byte_size),
+        stable_int_text(info.payload_size),
+        tostring(info.payload),
+        tostring(info.payload_spool),
+      }, ":")
+    end,
+  })
+
+  assert_true(ok, err and err.message)
+  assert_eq(begins[1], "1:0:1:nil:0:nil:nil")
+  assert_eq(begins[2], "2:1:11:nil:0:nil:nil")
+  assert_eq(ends[1], "1:0:1:7:0:nil:nil")
+  assert_eq(ends[2], "2:1:11:6:0:nil:nil")
+end
+
+if lonejson._test_candidate_info_u64 ~= nil then
+  local info = lonejson._test_candidate_info_u64()
+  assert_eq(type(info.index), "string")
+  assert_eq(type(info.index0), "string")
+  assert_eq(type(info.stream_offset), "string")
+  assert_eq(type(info.byte_size), "string")
+  assert_eq(type(info.payload_size), "string")
+  assert_eq(tostring(info.index), "9007199254740994")
+  assert_eq(tostring(info.index0), "9007199254740993")
+  assert_eq(tostring(info.stream_offset), "9007199254740994")
+  assert_eq(tostring(info.byte_size), "9007199254740995")
+  assert_eq(tostring(info.payload_size), "9007199254740996")
+end
+
+do
   local ok, err = lj:visit_candidates_string("truefalse", {
     framing = "ndjson",
   })
@@ -306,6 +390,7 @@ do
     end,
     candidate_end = function(info)
       payloads[#payloads + 1] = tostring(info.payload)
+      assert_eq(stable_int_text(info.payload_size), "0")
     end,
   })
 
@@ -323,6 +408,7 @@ do
       assert_true(info.payload == nil)
       assert_true(info.payload_spool ~= nil)
       payloads[#payloads + 1] = info.payload_spool:read_all()
+      assert_eq(stable_int_text(info.payload_size), stable_int_text(#payloads[#payloads]))
     end,
   })
 

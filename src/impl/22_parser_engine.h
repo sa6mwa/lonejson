@@ -645,13 +645,31 @@ lonejson__consume_string_fast(lonejson_parser *parser,
   if (parser == NULL || bytes == NULL) {
     return LONEJSON_STATUS_INVALID_ARGUMENT;
   }
+  pos = 0u;
   if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_DISCARD) {
     return lonejson__consume_string_discard_fast(parser, bytes, avail, used);
   }
   if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_DIRECT) {
     return lonejson__consume_string_direct_fast(parser, bytes, avail, used);
   }
-  pos = 0u;
+  if (parser->lex_is_key &&
+      parser->string_capture_mode == LONEJSON_STRING_CAPTURE_TOKEN &&
+      parser->token.len == 0u) {
+    while (pos < avail && bytes[pos] != '"' && bytes[pos] != '\\' &&
+           bytes[pos] >= 0x20u) {
+      pos++;
+    }
+    if (pos < avail && bytes[pos] == '"') {
+      parser->error.offset += pos + 1u;
+      parser->error.column += pos + 1u;
+      parser->lex_mode = LONEJSON_LEX_NONE;
+      if (used != NULL) {
+        *used = pos + 1u;
+      }
+      return lonejson__deliver_key_text(parser, (const char *)bytes, pos);
+    }
+    pos = 0u;
+  }
   while (pos < avail) {
     size_t start;
 

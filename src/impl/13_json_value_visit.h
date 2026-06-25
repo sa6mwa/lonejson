@@ -198,6 +198,7 @@ lonejson__json_cursor_plain_span(lonejson__json_io *io, size_t *available,
 
 static lonejson_status
 lonejson__json_visit_plain_chunk_no_path(lonejson__json_io *io, int is_key,
+                                         lonejson_value_chunk_fn fn,
                                          unsigned char *plain,
                                          size_t *plain_len,
                                          size_t *decoded_bytes, size_t limit,
@@ -206,8 +207,6 @@ lonejson__json_visit_plain_chunk_no_path(lonejson__json_io *io, int is_key,
   lonejson_status status;
   size_t take;
   size_t offset = 0u;
-  lonejson_value_chunk_fn fn =
-      is_key ? io->visitor->object_key_chunk : io->visitor->string_chunk;
 
   if (len == 0u) {
     return LONEJSON_STATUS_OK;
@@ -226,8 +225,11 @@ lonejson__json_visit_plain_chunk_no_path(lonejson__json_io *io, int is_key,
                                       : "JSON string exceeds maximum decoded "
                                         "byte limit");
   }
+  if (fn == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
   if (*plain_len == 0u) {
-    return lonejson__json_visit_chunk(io, fn, (const char *)data, len);
+    return fn(io->visitor_user, (const char *)data, len, io->error);
   }
   while (offset < len) {
     take = len - offset;
@@ -241,8 +243,8 @@ lonejson__json_visit_plain_chunk_no_path(lonejson__json_io *io, int is_key,
     *plain_len += take;
     offset += take;
     if (*plain_len == sizeof(unsigned char[256])) {
-      status =
-          lonejson__json_visit_chunk(io, fn, (const char *)plain, *plain_len);
+      status = fn(io->visitor_user, (const char *)plain, *plain_len,
+                  io->error);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
       }
@@ -264,11 +266,18 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
   lonejson_status status;
   size_t limit =
       is_key ? io->limits.max_key_bytes : io->limits.max_string_bytes;
+  lonejson_value_event_fn begin_fn =
+      is_key ? io->visitor->object_key_begin : io->visitor->string_begin;
+  lonejson_value_chunk_fn chunk_fn =
+      is_key ? io->visitor->object_key_chunk : io->visitor->string_chunk;
+  lonejson_value_event_fn end_fn =
+      is_key ? io->visitor->object_key_end : io->visitor->string_end;
 
-  status = lonejson__json_visit_event(io, is_key ? io->visitor->object_key_begin
-                                                 : io->visitor->string_begin);
-  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
-    return status;
+  if (begin_fn != NULL) {
+    status = begin_fn(io->visitor_user, io->error);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return status;
+    }
   }
   for (;;) {
     const unsigned char *span;
@@ -287,7 +296,7 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
       }
       if (plain_span != 0u) {
         status = lonejson__json_visit_plain_chunk_no_path(
-            io, is_key, plain, &plain_len, &decoded_bytes, limit, span,
+            io, is_key, chunk_fn, plain, &plain_len, &decoded_bytes, limit, span,
             plain_span);
         if (status != LONEJSON_STATUS_OK &&
             status != LONEJSON_STATUS_TRUNCATED) {
@@ -316,18 +325,19 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
                                  0u, 0u, "unterminated JSON string");
     }
     if (ch == '"') {
-      if (plain_len != 0u) {
-        status = lonejson__json_visit_chunk(
-            io,
-            is_key ? io->visitor->object_key_chunk : io->visitor->string_chunk,
-            (const char *)plain, plain_len);
+      if (plain_len != 0u && chunk_fn != NULL) {
+        status =
+            chunk_fn(io->visitor_user, (const char *)plain, plain_len,
+                     io->error);
         if (status != LONEJSON_STATUS_OK &&
             status != LONEJSON_STATUS_TRUNCATED) {
           return status;
         }
       }
-      return lonejson__json_visit_event(io, is_key ? io->visitor->object_key_end
-                                                   : io->visitor->string_end);
+      if (end_fn == NULL) {
+        return LONEJSON_STATUS_OK;
+      }
+      return end_fn(io->visitor_user, io->error);
     }
     if (ch < 0x20) {
       return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
@@ -345,13 +355,13 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
                                             "decoded byte limit");
       }
       if (plain_len == sizeof(plain)) {
-        status = lonejson__json_visit_chunk(
-            io,
-            is_key ? io->visitor->object_key_chunk : io->visitor->string_chunk,
-            (const char *)plain, plain_len);
-        if (status != LONEJSON_STATUS_OK &&
-            status != LONEJSON_STATUS_TRUNCATED) {
-          return status;
+        if (chunk_fn != NULL) {
+          status = chunk_fn(io->visitor_user, (const char *)plain, plain_len,
+                            io->error);
+          if (status != LONEJSON_STATUS_OK &&
+              status != LONEJSON_STATUS_TRUNCATED) {
+            return status;
+          }
         }
         plain_len = 0u;
       }
@@ -359,12 +369,13 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
     }
 
     if (plain_len != 0u) {
-      status = lonejson__json_visit_chunk(io,
-                                          is_key ? io->visitor->object_key_chunk
-                                                 : io->visitor->string_chunk,
-                                          (const char *)plain, plain_len);
-      if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
-        return status;
+      if (chunk_fn != NULL) {
+        status = chunk_fn(io->visitor_user, (const char *)plain, plain_len,
+                          io->error);
+        if (status != LONEJSON_STATUS_OK &&
+            status != LONEJSON_STATUS_TRUNCATED) {
+          return status;
+        }
       }
       plain_len = 0u;
     }
@@ -386,12 +397,12 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
         return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
                                    0u, "decoded JSON text exceeds limit");
       }
-      status = lonejson__json_visit_chunk(io,
-                                          is_key ? io->visitor->object_key_chunk
-                                                 : io->visitor->string_chunk,
-                                          &out, 1u);
-      if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
-        return status;
+      if (chunk_fn != NULL) {
+        status = chunk_fn(io->visitor_user, &out, 1u, io->error);
+        if (status != LONEJSON_STATUS_OK &&
+            status != LONEJSON_STATUS_TRUNCATED) {
+          return status;
+        }
       }
       break;
     }
@@ -410,12 +421,12 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
         return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
                                    0u, "decoded JSON text exceeds limit");
       }
-      status = lonejson__json_visit_chunk(io,
-                                          is_key ? io->visitor->object_key_chunk
-                                                 : io->visitor->string_chunk,
-                                          &out, 1u);
-      if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
-        return status;
+      if (chunk_fn != NULL) {
+        status = chunk_fn(io->visitor_user, &out, 1u, io->error);
+        if (status != LONEJSON_STATUS_OK &&
+            status != LONEJSON_STATUS_TRUNCATED) {
+          return status;
+        }
       }
       break;
     }
@@ -493,12 +504,13 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
         return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
                                    0u, "decoded JSON text exceeds limit");
       }
-      status = lonejson__json_visit_chunk(io,
-                                          is_key ? io->visitor->object_key_chunk
-                                                 : io->visitor->string_chunk,
-                                          (const char *)utf8, scratch.len);
-      if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
-        return status;
+      if (chunk_fn != NULL) {
+        status = chunk_fn(io->visitor_user, (const char *)utf8, scratch.len,
+                          io->error);
+        if (status != LONEJSON_STATUS_OK &&
+            status != LONEJSON_STATUS_TRUNCATED) {
+          return status;
+        }
       }
       break;
     }

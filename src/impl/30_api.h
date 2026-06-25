@@ -3230,7 +3230,7 @@ typedef struct lonejson__candidate_scan {
   const lonejson__value_limits *limits;
   lonejson_error *error;
   lonejson_value_visitor empty_visitor;
-  size_t next_index;
+  lonejson_uint64 next_index;
   int stopped;
 } lonejson__candidate_scan;
 
@@ -3259,6 +3259,10 @@ typedef struct lonejson__candidate_capture {
   int writer_open;
   int spool_init;
 } lonejson__candidate_capture;
+
+static size_t lonejson__candidate_error_offset(lonejson_uint64 offset) {
+  return offset <= (lonejson_uint64)SIZE_MAX ? (size_t)offset : SIZE_MAX;
+}
 
 static lonejson_status lonejson__byte_append(lonejson__byte_buffer *buffer,
                                              const void *data, size_t len,
@@ -3803,6 +3807,7 @@ static lonejson_status lonejson__candidate_capture_close(
     lonejson__candidate_scan *scan, lonejson__candidate_capture *capture,
     lonejson_candidate_info *info) {
   lonejson_status status;
+  size_t payload_size;
 
   if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_NONE) {
     return LONEJSON_STATUS_OK;
@@ -3813,10 +3818,22 @@ static lonejson_status lonejson__candidate_capture_close(
   }
   if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_MEMORY) {
     info->payload = capture->memory.bytes.data;
-    info->payload_size = capture->memory.bytes.len;
+    payload_size = capture->memory.bytes.len;
+    if ((size_t)(lonejson_uint64)payload_size != payload_size) {
+      return lonejson__set_error(scan->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                                 0u,
+                                 "candidate payload size exceeds uint64 range");
+    }
+    info->payload_size = (lonejson_uint64)payload_size;
   } else if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_SPOOLED) {
     info->payload_spool = &capture->spool;
-    info->payload_size = lonejson_spooled_size(&capture->spool);
+    payload_size = lonejson_spooled_size(&capture->spool);
+    if ((size_t)(lonejson_uint64)payload_size != payload_size) {
+      return lonejson__set_error(scan->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                                 0u,
+                                 "candidate payload size exceeds uint64 range");
+    }
+    info->payload_size = (lonejson_uint64)payload_size;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -3921,18 +3938,22 @@ static lonejson_status lonejson__candidate_callback_status(
       (scan->error->code == LONEJSON_STATUS_OK ||
        scan->error->code == (lonejson_status)0)) {
     return lonejson__set_error(scan->error, LONEJSON_STATUS_CALLBACK_FAILED,
-                               info != NULL ? info->stream_offset : 0u, 0u,
-                               0u, "candidate callback failed");
+                               info != NULL ? lonejson__candidate_error_offset(
+                                                  info->stream_offset)
+                                            : 0u,
+                               0u, 0u, "candidate callback failed");
   }
   return LONEJSON_STATUS_CALLBACK_FAILED;
 }
 
 static void lonejson__candidate_set_parse_offset(
-    lonejson__candidate_scan *scan, size_t candidate_start) {
-  size_t stream_offset;
-  size_t candidate_offset;
+    lonejson__candidate_scan *scan, lonejson_uint64 candidate_start) {
+  lonejson_uint64 stream_offset;
+  lonejson_uint64 candidate_offset;
   char original[sizeof(scan->error->message)];
-  char suffix[80];
+  char stream_text[32];
+  char candidate_text[32];
+  char suffix[128];
   size_t suffix_len;
   size_t original_len;
   size_t max_original;
@@ -3948,17 +3969,21 @@ static void lonejson__candidate_set_parse_offset(
   candidate_offset =
       stream_offset >= candidate_start ? stream_offset - candidate_start : 0u;
   if (scan->error->offset == 0u) {
-    scan->error->offset = stream_offset;
+    scan->error->offset = lonejson__candidate_error_offset(stream_offset);
   }
+  (void)lonejson__format_u64_decimal(stream_text, sizeof(stream_text),
+                                     stream_offset);
+  (void)lonejson__format_u64_decimal(candidate_text, sizeof(candidate_text),
+                                     candidate_offset);
   if (scan->error->message[0] == '\0') {
     (void)snprintf(scan->error->message, sizeof(scan->error->message),
-                   "candidate parse failed at stream offset %lu, candidate "
-                   "offset %lu",
-                   (unsigned long)stream_offset, (unsigned long)candidate_offset);
+                   "candidate parse failed at stream offset %s, candidate "
+                   "offset %s",
+                   stream_text, candidate_text);
   } else if (strstr(scan->error->message, "candidate offset") == NULL) {
     (void)snprintf(suffix, sizeof(suffix),
-                   " [stream offset %lu, candidate offset %lu]",
-                   (unsigned long)stream_offset, (unsigned long)candidate_offset);
+                   " [stream offset %s, candidate offset %s]", stream_text,
+                   candidate_text);
     suffix_len = strlen(suffix);
     max_original = sizeof(scan->error->message) - 1u;
     if (suffix_len < max_original) {
@@ -3982,7 +4007,8 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
   lonejson__candidate_capture capture;
   lonejson_candidate_info info;
   lonejson_status status;
-  size_t start;
+  lonejson_uint64 start;
+  lonejson_uint64 end;
   const lonejson_value_visitor *visitor;
   const lonejson_path_value_visitor *path_visitor;
   void *visitor_user;
@@ -3994,7 +4020,7 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
 
   info.index = scan->next_index;
   info.stream_offset = start;
-  info.byte_size = (size_t)-1;
+  info.byte_size = LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN;
   status = lonejson__candidate_callback_status(
       scan, scan->options->candidate_begin, &info);
   if (status != LONEJSON_STATUS_OK || scan->stopped) {
@@ -4028,10 +4054,15 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
     return status;
   }
 
-  info.byte_size = (scan->cursor->has_pushback
-                        ? scan->cursor->pushback_offset
-                        : lonejson__json_cursor_next_offset(scan->cursor)) -
-                   start;
+  end = scan->cursor->has_pushback
+            ? scan->cursor->pushback_offset
+            : lonejson__json_cursor_next_offset(scan->cursor);
+  if (end < start) {
+    lonejson__candidate_capture_cleanup(&capture);
+    return lonejson__set_error(scan->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                               0u, "candidate byte range overflow");
+  }
+  info.byte_size = end - start;
   status = lonejson__candidate_capture_close(scan, &capture, &info);
   if (status != LONEJSON_STATUS_OK) {
     lonejson__candidate_capture_cleanup(&capture);
@@ -4041,6 +4072,10 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
       scan, scan->options->candidate_end, &info);
   lonejson__candidate_capture_cleanup(&capture);
   if (status == LONEJSON_STATUS_OK) {
+    if (scan->next_index == LONEJSON_UINT64_MAX) {
+      return lonejson__set_error(scan->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                                 0u, "candidate index exceeds uint64 range");
+    }
     ++scan->next_index;
   }
   return status;
@@ -4057,7 +4092,9 @@ static lonejson_status lonejson__candidate_require_eof(
   }
   if (ch != EOF) {
     return lonejson__set_error(scan->error, LONEJSON_STATUS_INVALID_JSON,
-                               lonejson__json_cursor_next_offset(scan->cursor),
+                               lonejson__candidate_error_offset(
+                                   lonejson__json_cursor_next_offset(
+                                       scan->cursor)),
                                0u, 0u, "%s",
                                message);
   }
@@ -4088,9 +4125,10 @@ lonejson__candidate_scan_repeated(lonejson__candidate_scan *scan, int first) {
     if (!first_candidate && !saw_separator) {
       return lonejson__set_error(
           scan->error, LONEJSON_STATUS_INVALID_JSON,
-          scan->cursor->has_pushback ? scan->cursor->pushback_offset
-                                     : lonejson__json_cursor_next_offset(
-                                           scan->cursor),
+          lonejson__candidate_error_offset(
+              scan->cursor->has_pushback
+                  ? scan->cursor->pushback_offset
+                  : lonejson__json_cursor_next_offset(scan->cursor)),
           0u, 0u,
           "candidate stream expected whitespace between repeated JSON values");
     }
@@ -4113,7 +4151,9 @@ lonejson__candidate_scan_single(lonejson__candidate_scan *scan, int first) {
   }
   if (ch == EOF) {
     return lonejson__set_error(scan->error, LONEJSON_STATUS_INVALID_JSON,
-                               lonejson__json_cursor_next_offset(scan->cursor),
+                               lonejson__candidate_error_offset(
+                                   lonejson__json_cursor_next_offset(
+                                       scan->cursor)),
                                0u, 0u,
                                "candidate stream is empty");
   }
@@ -4145,7 +4185,9 @@ lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
   }
   if (ch != '[') {
     return lonejson__set_error(scan->error, LONEJSON_STATUS_INVALID_JSON,
-                               lonejson__json_cursor_next_offset(scan->cursor),
+                               lonejson__candidate_error_offset(
+                                   lonejson__json_cursor_next_offset(
+                                       scan->cursor)),
                                0u, 0u,
                                "candidate stream expected top-level array");
   }
@@ -4162,7 +4204,9 @@ lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
   }
   if (ch == EOF) {
     return lonejson__set_error(scan->error, LONEJSON_STATUS_INVALID_JSON,
-                               lonejson__json_cursor_next_offset(scan->cursor),
+                               lonejson__candidate_error_offset(
+                                   lonejson__json_cursor_next_offset(
+                                       scan->cursor)),
                                0u, 0u,
                                "unterminated candidate array");
   }
@@ -4185,8 +4229,9 @@ lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
       }
       if (ch == EOF || ch == ']') {
         return lonejson__set_error(scan->error, LONEJSON_STATUS_INVALID_JSON,
-                                   lonejson__json_cursor_next_offset(
-                                       scan->cursor),
+                                   lonejson__candidate_error_offset(
+                                       lonejson__json_cursor_next_offset(
+                                           scan->cursor)),
                                    0u, 0u,
                                    "candidate array has missing item");
       }
@@ -4198,13 +4243,16 @@ lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
     }
     if (ch == EOF) {
       return lonejson__set_error(scan->error, LONEJSON_STATUS_INVALID_JSON,
-                                 lonejson__json_cursor_next_offset(
-                                     scan->cursor),
+                                 lonejson__candidate_error_offset(
+                                     lonejson__json_cursor_next_offset(
+                                         scan->cursor)),
                                  0u, 0u,
                                  "unterminated candidate array");
     }
     return lonejson__set_error(scan->error, LONEJSON_STATUS_INVALID_JSON,
-                               lonejson__json_cursor_next_offset(scan->cursor),
+                               lonejson__candidate_error_offset(
+                                   lonejson__json_cursor_next_offset(
+                                       scan->cursor)),
                                0u, 0u,
                                "candidate array expected comma or ']'");
   }

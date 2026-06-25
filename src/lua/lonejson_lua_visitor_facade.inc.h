@@ -410,19 +410,23 @@ static int ljlua_visit_path_value_fd(lua_State *L) {
 
 static void ljlua_push_candidate_info(lua_State *L,
                                       const lonejson_candidate_info *info) {
-  lua_createtable(L, 0, 6);
-  lua_pushinteger(L, (lua_Integer)info->index + 1);
+  lua_createtable(L, 0, 8);
+  ljlua_push_u64_plus_one(L, info->index);
   lua_setfield(L, -2, "index");
-  lua_pushinteger(L, (lua_Integer)info->stream_offset);
+  ljlua_push_u64(L, info->index);
+  lua_setfield(L, -2, "index0");
+  ljlua_push_u64(L, info->stream_offset);
   lua_setfield(L, -2, "stream_offset");
-  if (info->byte_size == (size_t)-1) {
+  if (info->byte_size == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN) {
     lua_pushnil(L);
   } else {
-    lua_pushinteger(L, (lua_Integer)info->byte_size);
+    ljlua_push_u64(L, info->byte_size);
   }
   lua_setfield(L, -2, "byte_size");
+  ljlua_push_u64(L, info->payload_size);
+  lua_setfield(L, -2, "payload_size");
   if (info->payload != NULL) {
-    lua_pushlstring(L, (const char *)info->payload, info->payload_size);
+    lua_pushlstring(L, (const char *)info->payload, (size_t)info->payload_size);
     lua_setfield(L, -2, "payload");
   }
   if (info->payload_spool != NULL) {
@@ -430,6 +434,20 @@ static void ljlua_push_candidate_info(lua_State *L,
     lua_setfield(L, -2, "payload_spool");
   }
 }
+
+#if defined(LONEJSON_TEST_LUA_CANDIDATE_INFO)
+static int ljlua_test_candidate_info_u64(lua_State *L) {
+  lonejson_candidate_info info;
+
+  memset(&info, 0, sizeof(info));
+  info.index = ((lonejson_uint64)1u << 53u) + 1u;
+  info.stream_offset = ((lonejson_uint64)1u << 53u) + 2u;
+  info.byte_size = ((lonejson_uint64)1u << 53u) + 3u;
+  info.payload_size = ((lonejson_uint64)1u << 53u) + 4u;
+  ljlua_push_candidate_info(L, &info);
+  return 1;
+}
+#endif
 
 static lonejson_candidate_callback_result ljlua_call_candidate_callback(
     ljlua_candidate_visit_state *state, const char *name,

@@ -373,10 +373,17 @@ int main(void) {
   test_rewindability_edges_and_measure_preserves_sources();
   test_candidate_stream_single_object();
   test_candidate_stream_array_items();
+  test_candidate_stream_public_ranges_are_u64();
+  test_candidate_stream_offsets_above_uint32();
+  test_candidate_stream_offset_overflow_fails();
   test_candidate_stream_repeated_and_auto();
+  test_candidate_stream_index_above_uint32();
+  test_candidate_stream_index_overflow_fails();
+  test_candidate_stream_callback_error_above_uint32();
   test_candidate_stream_rejects_adjacent_repeated_values();
   test_candidate_stream_accepts_whitespace_separators();
   test_candidate_stream_malformed_offset();
+  test_candidate_stream_malformed_offset_above_uint32();
   test_candidate_stream_counts_pushed_back_bytes_for_limits();
   test_candidate_stream_counts_pushed_back_bytes_across_sources();
   test_candidate_stream_numeric_delimiters_do_not_count_as_payload();

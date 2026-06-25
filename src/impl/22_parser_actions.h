@@ -877,6 +877,41 @@ static int lonejson__mapped_numeric_target(const lonejson_frame *frame) {
 }
 
 static LONEJSON__INLINE lonejson_status
+lonejson__deliver_key_text(lonejson_parser *parser, const char *key,
+                           size_t key_len) {
+  lonejson_frame *frame = (parser->frame_count != 0u)
+                              ? &parser->frames[parser->frame_count - 1u]
+                              : NULL;
+
+  if (frame == NULL || frame->kind != LONEJSON_CONTAINER_OBJECT ||
+      frame->state != LONEJSON_FRAME_OBJECT_KEY_OR_END) {
+    return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
+                               parser->error.offset, parser->error.line,
+                               parser->error.column,
+                               "object key outside object context");
+  }
+  if (lonejson__json_value_parse_visitor_active(parser)) {
+    frame->pending_field = NULL;
+    frame->state = LONEJSON_FRAME_OBJECT_COLON;
+    return LONEJSON_STATUS_OK;
+  }
+  frame->pending_field = lonejson__find_field(frame->map, frame, key, key_len);
+  if (parser->json_stream_active) {
+    lonejson_status status =
+        lonejson__json_value_emit_string(parser, key, key_len);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    status = lonejson__json_value_emit(parser, ":", 1u);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  frame->state = LONEJSON_FRAME_OBJECT_COLON;
+  return LONEJSON_STATUS_OK;
+}
+
+static LONEJSON__INLINE lonejson_status
 lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
   lonejson_frame *frame = (parser->frame_count != 0u)
                               ? &parser->frames[parser->frame_count - 1u]
@@ -886,33 +921,7 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
   token_text = lonejson__scratch_cstr(&parser->token);
 
   if (parser->lex_is_key) {
-    if (frame == NULL || frame->kind != LONEJSON_CONTAINER_OBJECT ||
-        frame->state != LONEJSON_FRAME_OBJECT_KEY_OR_END) {
-      return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
-                                 parser->error.offset, parser->error.line,
-                                 parser->error.column,
-                                 "object key outside object context");
-    }
-    if (lonejson__json_value_parse_visitor_active(parser)) {
-      frame->pending_field = NULL;
-      frame->state = LONEJSON_FRAME_OBJECT_COLON;
-      return LONEJSON_STATUS_OK;
-    }
-    frame->pending_field =
-        lonejson__find_field(frame->map, frame, token_text, parser->token.len);
-    if (parser->json_stream_active) {
-      lonejson_status status = lonejson__json_value_emit_string(
-          parser, token_text, parser->token.len);
-      if (status != LONEJSON_STATUS_OK) {
-        return status;
-      }
-      status = lonejson__json_value_emit(parser, ":", 1u);
-      if (status != LONEJSON_STATUS_OK) {
-        return status;
-      }
-    }
-    frame->state = LONEJSON_FRAME_OBJECT_COLON;
-    return LONEJSON_STATUS_OK;
+    return lonejson__deliver_key_text(parser, token_text, parser->token.len);
   }
 
   if (frame == NULL) {

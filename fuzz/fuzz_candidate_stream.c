@@ -9,7 +9,7 @@ typedef struct fuzz_candidate_state {
   size_t begin_count;
   size_t end_count;
   size_t event_count;
-  size_t last_begin_offset;
+  lonejson_uint64 last_begin_offset;
   size_t sink_bytes;
   unsigned stop_after_first;
   unsigned fail_after_first;
@@ -35,7 +35,7 @@ fuzz_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   fuzz_candidate_state *state = (fuzz_candidate_state *)user;
   (void)error;
   fuzz_abort_if(candidate == NULL);
-  fuzz_abort_if(candidate->byte_size != (size_t)-1);
+  fuzz_abort_if(candidate->byte_size != LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
   fuzz_abort_if(state->begin_count != candidate->index);
   state->last_begin_offset = candidate->stream_offset;
   ++state->begin_count;
@@ -52,7 +52,7 @@ fuzz_candidate_end(void *user, const lonejson_candidate_info *candidate,
   (void)error;
   fuzz_abort_if(candidate == NULL);
   fuzz_abort_if(state->end_count != candidate->index);
-  fuzz_abort_if(candidate->byte_size == (size_t)-1);
+  fuzz_abort_if(candidate->byte_size == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
   fuzz_abort_if(candidate->stream_offset != state->last_begin_offset);
   if (state->capture_mode == LONEJSON_CANDIDATE_CAPTURE_MEMORY) {
     fuzz_abort_if(candidate->payload == NULL && candidate->payload_size != 0u);

@@ -281,6 +281,9 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
       return status;
     }
     parser->string_capture_mode = LONEJSON_STRING_CAPTURE_STREAM;
+    parser->token.data = NULL;
+    parser->token.cap = 0u;
+    parser->token.len = 0u;
     return LONEJSON_STATUS_OK;
   }
   if (field != NULL && field->kind == LONEJSON_FIELD_KIND_STRING &&

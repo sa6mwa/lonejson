@@ -7,11 +7,14 @@ typedef struct test_candidate_stream_state {
   size_t nulls_seen;
   size_t stop_after_end;
   size_t fail_at_begin;
-  size_t begin_offsets[8];
-  size_t end_offsets[8];
-  size_t end_sizes[8];
+  lonejson_uint64 begin_indices[8];
+  lonejson_uint64 end_indices[8];
+  lonejson_uint64 begin_offsets[8];
+  lonejson_uint64 begin_sizes[8];
+  lonejson_uint64 end_offsets[8];
+  lonejson_uint64 end_sizes[8];
   char payloads[8][128];
-  size_t payload_sizes[8];
+  lonejson_uint64 payload_sizes[8];
   int payload_spilled[8];
   char payload_spool_paths[8][LONEJSON_SPOOL_TEMP_PATH_CAPACITY];
   size_t fail_at_end;
@@ -24,7 +27,9 @@ test_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   (void)error;
   if (state->begin_count <
       sizeof(state->begin_offsets) / sizeof(state->begin_offsets[0])) {
+    state->begin_indices[state->begin_count] = candidate->index;
     state->begin_offsets[state->begin_count] = candidate->stream_offset;
+    state->begin_sizes[state->begin_count] = candidate->byte_size;
   }
   ++state->begin_count;
   if (state->fail_at_begin != 0u && state->begin_count == state->fail_at_begin) {
@@ -41,10 +46,11 @@ test_candidate_end(void *user, const lonejson_candidate_info *candidate,
   if (state->end_count <
       sizeof(state->end_offsets) / sizeof(state->end_offsets[0])) {
     size_t slot = state->end_count;
+    state->end_indices[state->end_count] = candidate->index;
     state->end_offsets[state->end_count] = candidate->stream_offset;
     state->end_sizes[state->end_count] = candidate->byte_size;
     if (candidate->payload != NULL) {
-      size_t copy = candidate->payload_size;
+      size_t copy = (size_t)candidate->payload_size;
       if (copy >= sizeof(state->payloads[slot])) {
         copy = sizeof(state->payloads[slot]) - 1u;
       }
@@ -66,7 +72,8 @@ test_candidate_end(void *user, const lonejson_candidate_info *candidate,
                                             &local_error) ==
              LONEJSON_STATUS_OK);
       memcpy(state->payloads[slot], buffer, sink.length + 1u);
-      state->payload_sizes[slot] = lonejson_spooled_size(candidate->payload_spool);
+      state->payload_sizes[slot] =
+          (lonejson_uint64)lonejson_spooled_size(candidate->payload_spool);
       state->payload_spilled[slot] =
           lonejson_spooled_spilled(candidate->payload_spool);
       if (candidate->payload_spool->temp_path[0] != '\0') {
@@ -85,6 +92,80 @@ test_candidate_end(void *user, const lonejson_candidate_info *candidate,
     return LONEJSON_CANDIDATE_STOP;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lonejson_read_result test_candidate_eof_reader(void *user,
+                                                      unsigned char *buffer,
+                                                      size_t capacity) {
+  lonejson_read_result result;
+
+  (void)user;
+  (void)buffer;
+  (void)capacity;
+  memset(&result, 0, sizeof(result));
+  result.eof = 1;
+  return result;
+}
+
+typedef struct test_candidate_once_reader_state {
+  const unsigned char *data;
+  size_t len;
+  int used;
+} test_candidate_once_reader_state;
+
+static lonejson_read_result
+test_candidate_once_reader(void *user, unsigned char *buffer,
+                           size_t capacity) {
+  test_candidate_once_reader_state *state =
+      (test_candidate_once_reader_state *)user;
+  lonejson_read_result result;
+
+  memset(&result, 0, sizeof(result));
+  if (state->used) {
+    result.eof = 1;
+    return result;
+  }
+  state->used = 1;
+  if (state->len > capacity) {
+    result.error_code = EOVERFLOW;
+    return result;
+  }
+  memcpy(buffer, state->data, state->len);
+  result.bytes_read = state->len;
+  return result;
+}
+
+static void test_candidate_stream_public_ranges_are_u64(void) {
+  lonejson_candidate_info info;
+  lonejson_uint64 *index = &info.index;
+  lonejson_uint64 *stream_offset = &info.stream_offset;
+  lonejson_uint64 *byte_size = &info.byte_size;
+  lonejson_uint64 *payload_size = &info.payload_size;
+  lj_candidate_info alias_info;
+  lj_uint64 *alias_index = &alias_info.index;
+  lj_uint64 *alias_stream_offset = &alias_info.stream_offset;
+  lj_uint64 *alias_byte_size = &alias_info.byte_size;
+  lj_uint64 *alias_payload_size = &alias_info.payload_size;
+
+  (void)index;
+  (void)stream_offset;
+  (void)byte_size;
+  (void)payload_size;
+  (void)alias_index;
+  (void)alias_stream_offset;
+  (void)alias_byte_size;
+  (void)alias_payload_size;
+  EXPECT(LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN == LONEJSON_UINT64_MAX);
+  EXPECT(LJ_CANDIDATE_BYTE_SIZE_UNKNOWN ==
+         LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(sizeof(info.index) == sizeof(lonejson_uint64));
+  EXPECT(sizeof(info.stream_offset) == sizeof(lonejson_uint64));
+  EXPECT(sizeof(info.byte_size) == sizeof(lonejson_uint64));
+  EXPECT(sizeof(info.payload_size) == sizeof(lonejson_uint64));
+  EXPECT(sizeof(info.index) == 8u);
+  EXPECT(sizeof(info.stream_offset) == 8u);
+  EXPECT(sizeof(info.byte_size) == 8u);
+  EXPECT(sizeof(info.payload_size) == 8u);
 }
 
 static lonejson_status test_candidate_path_number(
@@ -129,7 +210,7 @@ static lonejson_status test_candidate_null(void *user, lonejson_error *error) {
 }
 
 static void test_candidate_stream_single_object(void) {
-  static const char json[] = "{\"a\":1}";
+  static const char json[] = " \t{\"a\":1}\r\n";
   test_candidate_stream_state state;
   lonejson_candidate_stream_options options;
   lonejson_path_value_visitor visitor;
@@ -151,14 +232,17 @@ static void test_candidate_stream_single_object(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(state.begin_count == 1u);
   EXPECT(state.end_count == 1u);
-  EXPECT(state.begin_offsets[0] == 0u);
-  EXPECT(state.end_offsets[0] == 0u);
-  EXPECT(state.end_sizes[0] == strlen(json));
+  EXPECT(state.begin_indices[0] == 0u);
+  EXPECT(state.end_indices[0] == 0u);
+  EXPECT(state.begin_offsets[0] == 2u);
+  EXPECT(state.begin_sizes[0] == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(state.end_offsets[0] == 2u);
+  EXPECT(state.end_sizes[0] == strlen("{\"a\":1}"));
   EXPECT(state.paths_seen == 1u);
 }
 
 static void test_candidate_stream_array_items(void) {
-  static const char json[] = "[{\"a\":1}, 2, null]";
+  static const char json[] = "[ \n {\"a\":1} ,\t2 , null \n]";
   test_candidate_stream_state state;
   lonejson_candidate_stream_options options;
   lonejson_value_visitor visitor;
@@ -181,18 +265,92 @@ static void test_candidate_stream_array_items(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(state.begin_count == 3u);
   EXPECT(state.end_count == 3u);
-  EXPECT(state.begin_offsets[0] == 1u);
+  EXPECT(state.begin_indices[0] == 0u);
+  EXPECT(state.begin_indices[1] == 1u);
+  EXPECT(state.begin_indices[2] == 2u);
+  EXPECT(state.end_indices[0] == 0u);
+  EXPECT(state.end_indices[1] == 1u);
+  EXPECT(state.end_indices[2] == 2u);
+  EXPECT(state.begin_offsets[0] == 4u);
+  EXPECT(state.begin_sizes[0] == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
   EXPECT(state.end_sizes[0] == 7u);
-  EXPECT(state.begin_offsets[1] == 10u);
+  EXPECT(state.begin_offsets[1] == 14u);
+  EXPECT(state.begin_sizes[1] == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
   EXPECT(state.end_sizes[1] == 1u);
-  EXPECT(state.begin_offsets[2] == 13u);
+  EXPECT(state.begin_offsets[2] == 18u);
+  EXPECT(state.begin_sizes[2] == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
   EXPECT(state.end_sizes[2] == 4u);
   EXPECT(state.numbers_seen == 2u);
   EXPECT(state.nulls_seen == 1u);
 }
 
+static void test_candidate_stream_offsets_above_uint32(void) {
+  static const unsigned char buffered[] = " true";
+  const lonejson_uint64 base = ((lonejson_uint64)0xffffffffu) + 17u;
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  const lonejson_runtime *runtime_state =
+      lonejson__runtime_const(test_default_runtime());
+  lonejson__json_cursor cursor;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&state, 0, sizeof(state));
+  memset(&cursor, 0, sizeof(cursor));
+  memcpy(cursor.read_buffer, buffered, sizeof(buffered) - 1u);
+  cursor.read_buffer_len = sizeof(buffered) - 1u;
+  cursor.read_buffer_off = 0u;
+  cursor.stream_offset = base + (lonejson_uint64)cursor.read_buffer_len;
+  cursor.reader = test_candidate_eof_reader;
+
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson__visit_candidates_cursor_with_limits(
+      &cursor, &options, runtime_state, NULL, runtime_state->config.allocator,
+      &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 1u);
+  EXPECT(state.begin_indices[0] == 0u);
+  EXPECT(state.end_indices[0] == 0u);
+  EXPECT(state.begin_offsets[0] == base + 1u);
+  EXPECT(state.end_offsets[0] == base + 1u);
+  EXPECT(state.begin_sizes[0] == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(state.end_sizes[0] == 4u);
+}
+
+static void test_candidate_stream_offset_overflow_fails(void) {
+  static const unsigned char space[] = " ";
+  test_candidate_once_reader_state reader;
+  lonejson_candidate_stream_options options;
+  const lonejson_runtime *runtime_state =
+      lonejson__runtime_const(test_default_runtime());
+  lonejson__json_cursor cursor;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = space;
+  reader.len = sizeof(space) - 1u;
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.stream_offset = LONEJSON_UINT64_MAX;
+  cursor.reader = test_candidate_once_reader;
+  cursor.reader_user = &reader;
+
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+  status = lonejson__visit_candidates_cursor_with_limits(
+      &cursor, &options, runtime_state, NULL, runtime_state->config.allocator,
+      &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(strstr(error.message, "uint64 range") != NULL);
+}
+
 static void test_candidate_stream_repeated_and_auto(void) {
-  static const char json[] = "1\n{\"x\":2}\ntrue";
+  static const char json[] = " \n1 \t {\"x\":2}\r\n true ";
   test_candidate_stream_state state;
   lonejson_candidate_stream_options options;
   lonejson_value_visitor visitor;
@@ -214,11 +372,148 @@ static void test_candidate_stream_repeated_and_auto(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(state.begin_count == 3u);
   EXPECT(state.end_count == 3u);
-  EXPECT(state.begin_offsets[0] == 0u);
-  EXPECT(state.begin_offsets[1] == 2u);
-  EXPECT(state.begin_offsets[2] == 10u);
+  EXPECT(state.begin_indices[0] == 0u);
+  EXPECT(state.begin_indices[1] == 1u);
+  EXPECT(state.begin_indices[2] == 2u);
+  EXPECT(state.end_indices[0] == 0u);
+  EXPECT(state.end_indices[1] == 1u);
+  EXPECT(state.end_indices[2] == 2u);
+  EXPECT(state.begin_offsets[0] == 2u);
+  EXPECT(state.begin_offsets[1] == 6u);
+  EXPECT(state.begin_offsets[2] == 16u);
+  EXPECT(state.begin_sizes[0] == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(state.begin_sizes[1] == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(state.begin_sizes[2] == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(state.end_offsets[0] == state.begin_offsets[0]);
+  EXPECT(state.end_offsets[1] == state.begin_offsets[1]);
+  EXPECT(state.end_offsets[2] == state.begin_offsets[2]);
+  EXPECT(state.end_sizes[0] == 1u);
+  EXPECT(state.end_sizes[1] == strlen("{\"x\":2}"));
+  EXPECT(state.end_sizes[2] == strlen("true"));
   EXPECT(state.numbers_seen == 2u);
   EXPECT(state.bools_seen == 1u);
+}
+
+static void test_candidate_stream_index_above_uint32(void) {
+  static const char json[] = "true";
+  const lonejson_uint64 base_index = ((lonejson_uint64)0xffffffffu) + 19u;
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  const lonejson_runtime *runtime_state =
+      lonejson__runtime_const(test_default_runtime());
+  lonejson__json_cursor cursor;
+  lonejson__candidate_scan scan;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&state, 0, sizeof(state));
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.buffer = (const unsigned char *)json;
+  cursor.buffer_len = strlen(json);
+
+  options = lonejson_default_candidate_stream_options();
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+
+  memset(&scan, 0, sizeof(scan));
+  scan.cursor = &cursor;
+  scan.options = &options;
+  scan.runtime = runtime_state;
+  scan.allocator = runtime_state->config.allocator;
+  scan.error = &error;
+  scan.next_index = base_index;
+
+  status = lonejson__candidate_visit_one(&scan);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 1u);
+  EXPECT(state.begin_indices[0] == base_index);
+  EXPECT(state.end_indices[0] == base_index);
+  EXPECT(scan.next_index == base_index + 1u);
+}
+
+static void test_candidate_stream_index_overflow_fails(void) {
+  static const char json[] = "true";
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  const lonejson_runtime *runtime_state =
+      lonejson__runtime_const(test_default_runtime());
+  lonejson__json_cursor cursor;
+  lonejson__candidate_scan scan;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&state, 0, sizeof(state));
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.buffer = (const unsigned char *)json;
+  cursor.buffer_len = strlen(json);
+
+  options = lonejson_default_candidate_stream_options();
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+
+  memset(&scan, 0, sizeof(scan));
+  scan.cursor = &cursor;
+  scan.options = &options;
+  scan.runtime = runtime_state;
+  scan.allocator = runtime_state->config.allocator;
+  scan.error = &error;
+  scan.next_index = LONEJSON_UINT64_MAX;
+
+  status = lonejson__candidate_visit_one(&scan);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 1u);
+  EXPECT(state.begin_indices[0] == LONEJSON_UINT64_MAX);
+  EXPECT(state.end_indices[0] == LONEJSON_UINT64_MAX);
+  EXPECT(scan.next_index == LONEJSON_UINT64_MAX);
+  EXPECT(strstr(error.message, "candidate index exceeds uint64 range") != NULL);
+}
+
+static void test_candidate_stream_callback_error_above_uint32(void) {
+  static const unsigned char buffered[] = " true";
+  const lonejson_uint64 base = ((lonejson_uint64)0xffffffffu) + 91u;
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  const lonejson_runtime *runtime_state =
+      lonejson__runtime_const(test_default_runtime());
+  lonejson__json_cursor cursor;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&state, 0, sizeof(state));
+  state.fail_at_begin = 1u;
+  memset(&cursor, 0, sizeof(cursor));
+  memcpy(cursor.read_buffer, buffered, sizeof(buffered) - 1u);
+  cursor.read_buffer_len = sizeof(buffered) - 1u;
+  cursor.read_buffer_off = 0u;
+  cursor.stream_offset = base + (lonejson_uint64)cursor.read_buffer_len;
+  cursor.reader = test_candidate_eof_reader;
+
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  error.code = LONEJSON_STATUS_INVALID_JSON;
+  error.offset = 17u;
+  snprintf(error.message, sizeof(error.message), "stale callback error");
+
+  status = lonejson__visit_candidates_cursor_with_limits(
+      &cursor, &options, runtime_state, NULL, runtime_state->config.allocator,
+      &error);
+  EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.end_count == 0u);
+  EXPECT(state.begin_offsets[0] == base + 1u);
+  if (base + 1u > (lonejson_uint64)SIZE_MAX) {
+    EXPECT(error.offset == SIZE_MAX);
+  } else {
+    EXPECT(error.offset == (size_t)(base + 1u));
+  }
+  EXPECT(strstr(error.message, "candidate callback failed") != NULL);
 }
 
 static void test_candidate_stream_rejects_adjacent_repeated_values(void) {
@@ -322,6 +617,53 @@ static void test_candidate_stream_malformed_offset(void) {
   EXPECT(state.begin_count == 1u);
   EXPECT(state.end_count == 0u);
   EXPECT(error.offset >= state.begin_offsets[0]);
+  EXPECT(strstr(error.message, "stream offset") != NULL);
+  EXPECT(strstr(error.message, "candidate offset") != NULL);
+}
+
+static void test_candidate_stream_malformed_offset_above_uint32(void) {
+  static const unsigned char buffered[] = " {\"a\":";
+  const lonejson_uint64 base = ((lonejson_uint64)0xffffffffu) + 123u;
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  const lonejson_runtime *runtime_state =
+      lonejson__runtime_const(test_default_runtime());
+  lonejson__json_cursor cursor;
+  lonejson_status status;
+  lonejson_error error;
+  char expected_stream_offset[32];
+
+  memset(&state, 0, sizeof(state));
+  memset(&cursor, 0, sizeof(cursor));
+  memcpy(cursor.read_buffer, buffered, sizeof(buffered) - 1u);
+  cursor.read_buffer_len = sizeof(buffered) - 1u;
+  cursor.read_buffer_off = 0u;
+  cursor.stream_offset = base + (lonejson_uint64)cursor.read_buffer_len;
+  cursor.reader = test_candidate_eof_reader;
+
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson__visit_candidates_cursor_with_limits(
+      &cursor, &options, runtime_state, NULL, runtime_state->config.allocator,
+      &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(state.begin_count == 1u);
+  EXPECT(state.begin_offsets[0] == base + 1u);
+  EXPECT(state.end_count == 0u);
+  (void)lonejson__format_u64_decimal(
+      expected_stream_offset, sizeof(expected_stream_offset),
+      base + (lonejson_uint64)(sizeof(buffered) - 1u));
+  if (base + (lonejson_uint64)(sizeof(buffered) - 1u) >
+      (lonejson_uint64)SIZE_MAX) {
+    EXPECT(error.offset == SIZE_MAX);
+  } else {
+    EXPECT(error.offset ==
+           (size_t)(base + (lonejson_uint64)(sizeof(buffered) - 1u)));
+  }
+  EXPECT(strstr(error.message, expected_stream_offset) != NULL);
   EXPECT(strstr(error.message, "stream offset") != NULL);
   EXPECT(strstr(error.message, "candidate offset") != NULL);
 }

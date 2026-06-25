@@ -11,6 +11,22 @@ static LONEJSON__INLINE size_t lonejson__popcount_u64(lonejson_uint64 value) {
   return (size_t)((value * bytes) >> 56u);
 }
 
+static size_t lonejson__required_count_for_large_map(const lonejson_map *map) {
+  size_t count;
+  size_t i;
+
+  if (map == NULL) {
+    return 0u;
+  }
+  count = 0u;
+  for (i = 0u; i < map->field_count; ++i) {
+    if ((map->fields[i].flags & LONEJSON_FIELD_REQUIRED) != 0u) {
+      count++;
+    }
+  }
+  return count;
+}
+
 static lonejson_uint64
 lonejson__required_mask_for_map(lonejson_parser *parser,
                                 const lonejson_map *map) {
@@ -38,9 +54,6 @@ lonejson__required_mask_for_map(lonejson_parser *parser,
 
 static size_t lonejson__required_count_for_map(lonejson_parser *parser,
                                                const lonejson_map *map) {
-  size_t count;
-  size_t i;
-
   if (parser == NULL || map == NULL) {
     return 0u;
   }
@@ -48,13 +61,7 @@ static size_t lonejson__required_count_for_map(lonejson_parser *parser,
     lonejson_uint64 mask = lonejson__required_mask_for_map(parser, map);
     return lonejson__popcount_u64(mask);
   }
-  count = 0u;
-  for (i = 0u; i < map->field_count; ++i) {
-    if ((map->fields[i].flags & LONEJSON_FIELD_REQUIRED) != 0u) {
-      count++;
-    }
-  }
-  return count;
+  return lonejson__required_count_for_large_map(map);
 }
 
 static int lonejson__field_has_presence(const lonejson_field *field);

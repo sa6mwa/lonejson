@@ -34,7 +34,7 @@ option(LONEJSON_ENABLE_TSAN "Enable ThreadSanitizer." OFF)
 option(LONEJSON_ENABLE_MSAN "Enable MemorySanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "18" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "19" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -410,7 +410,9 @@ if(LONEJSON_BUILD_TESTS)
     target_compile_definitions(lonejson_lua_target_core PRIVATE
       LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
       LONEJSON_TEST_MAP_ANALYSIS_COUNTER=1
-      LONEJSON_TEST_LUA_ENCODE_STATS=1)
+      LONEJSON_TEST_LUA_ENCODE_STATS=1
+      LONEJSON_TEST_LUA_CANDIDATE_INFO=1
+      LONEJSON_TEST_LUA_SIMULATE_NO_MAXINTEGER=1)
     target_link_libraries(lonejson_lua_target_core PRIVATE
       lonejson_shared
       "${LONEJSON_TARGET_LUA_LIBRARY}")

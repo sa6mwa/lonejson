@@ -140,6 +140,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	build-release \
 	release-lua-artifacts \
 	package \
+	prerelease-artifacts \
 	package-source \
 	package-source-smoke \
 	package-checksums \
@@ -206,6 +207,7 @@ help:
 		'make build-host             Configure and build the host-native release preset.' \
 		'make build-release          Configure and build the full shipped release test matrix.' \
 		'make package                Build all release packages through make release.' \
+		'make prerelease-artifacts   Build and verify current-version source, single-header, and Lua release artifacts from a clean dist/.' \
 		'make package-source         Build the source-only release tarball in dist/.' \
 		'make package-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make package-checksums      Generate release checksums for existing dist artifacts.' \
@@ -336,6 +338,15 @@ release-darwin-smoke-bundle: deps-arm64-apple-darwin
 	cmake --preset arm64-apple-darwin-release
 	cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
 
+prerelease-artifacts:
+	cmake --preset $(HOST_PRESET)
+	cmake --build --preset package-clean-dist
+	cmake --build --preset package-single-header
+	cmake --build --preset package-source
+	$(MAKE) release-lua-artifacts
+	cmake --build --preset package-checksums
+	$(MAKE) package-verify
+
 package-verify:
 	./scripts/verify_release_artifacts.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
 	./scripts/verify_release_archives.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
@@ -344,7 +355,7 @@ verify-release-archives: package-verify
 
 verify-release-privacy: package-verify
 
-prerelease: test-all package-verify
+prerelease: test-all prerelease-artifacts
 
 prerelease-hardening: release
 
