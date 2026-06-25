@@ -1260,6 +1260,15 @@ lonejson_path_value_visitor lonejson_default_path_value_visitor(void) {
   return visitor;
 }
 
+lonejson_candidate_stream_options lonejson_default_candidate_stream_options(
+    void) {
+  lonejson_candidate_stream_options options;
+
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_AUTO;
+  return options;
+}
+
 static void
 lonejson__spooled_apply_options(lonejson_spooled *value,
                                 const lonejson__spool_options *options) {

@@ -99,6 +99,14 @@ M.encode_value = core.encode_json
 M.encode_value_to_sink = core.encode_json_to_sink
 M.decode_json = core.decode_json
 M.decode_value = core.decode_json
+M.visit_path_value_string = core.visit_path_value_string
+M.visit_path_value_path = core.visit_path_value_path
+M.visit_path_value_file = core.visit_path_value_file
+M.visit_path_value_fd = core.visit_path_value_fd
+M.visit_candidates_string = core.visit_candidates_string
+M.visit_candidates_path = core.visit_candidates_path
+M.visit_candidates_file = core.visit_candidates_file
+M.visit_candidates_fd = core.visit_candidates_fd
 M.fixed_string_scratch = core.fixed_string_scratch
 M.core = core
 M.json_null = core.json_null()
@@ -175,6 +183,38 @@ function M.new(config)
     return runtime:decode_json(json)
   end
   obj.decode_value = obj.decode_json
+  obj.visit_path_value_string = function(first, ...)
+    local json, callbacks = runtime_method_args(obj, first, ...)
+    return runtime:visit_path_value_string(json, callbacks)
+  end
+  obj.visit_path_value_path = function(first, ...)
+    local path, callbacks = runtime_method_args(obj, first, ...)
+    return runtime:visit_path_value_path(path, callbacks)
+  end
+  obj.visit_path_value_file = function(first, ...)
+    local file, callbacks = runtime_method_args(obj, first, ...)
+    return runtime:visit_path_value_file(file, callbacks)
+  end
+  obj.visit_path_value_fd = function(first, ...)
+    local fd, callbacks = runtime_method_args(obj, first, ...)
+    return runtime:visit_path_value_fd(fd, callbacks)
+  end
+  obj.visit_candidates_string = function(first, ...)
+    local json, options = runtime_method_args(obj, first, ...)
+    return runtime:visit_candidates_string(json, options)
+  end
+  obj.visit_candidates_path = function(first, ...)
+    local path, options = runtime_method_args(obj, first, ...)
+    return runtime:visit_candidates_path(path, options)
+  end
+  obj.visit_candidates_file = function(first, ...)
+    local file, options = runtime_method_args(obj, first, ...)
+    return runtime:visit_candidates_file(file, options)
+  end
+  obj.visit_candidates_fd = function(first, ...)
+    local fd, options = runtime_method_args(obj, first, ...)
+    return runtime:visit_candidates_fd(fd, options)
+  end
 
   return obj
 end

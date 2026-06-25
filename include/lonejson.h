@@ -492,7 +492,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 17
+#define LONEJSON_ABI_VERSION 18
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -1767,6 +1767,92 @@ typedef struct lonejson_path_value_visitor {
   lonejson_path_value_event_fn null_value;
 } lonejson_path_value_visitor;
 
+/** Input framing policy for arbitrary JSON candidate streams. */
+typedef enum lonejson_candidate_framing {
+  /** Detect the stream shape from the first non-space byte. A root array is
+   * treated as an array-item candidate stream; other roots are treated as
+   * repeated top-level JSON values until EOF.
+   */
+  LONEJSON_CANDIDATE_FRAMING_AUTO = 0,
+  /** The input must contain exactly one JSON value. */
+  LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE = 1,
+  /** The input contains one or more whitespace/newline-separated JSON values.
+   */
+  LONEJSON_CANDIDATE_FRAMING_NDJSON = 2,
+  /** The input must be a top-level JSON array and each array item is one
+   * candidate.
+   */
+  LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS = 3
+} lonejson_candidate_framing;
+
+/** Result returned by candidate boundary callbacks. */
+typedef enum lonejson_candidate_callback_result {
+  /** Continue scanning candidates. */
+  LONEJSON_CANDIDATE_CONTINUE = 0,
+  /** Stop scanning successfully after the current boundary callback. */
+  LONEJSON_CANDIDATE_STOP = 1,
+  /** Fail the candidate stream. The callback should populate `error` when it
+   * can provide a more specific diagnostic.
+   */
+  LONEJSON_CANDIDATE_ERROR = 2
+} lonejson_candidate_callback_result;
+
+/** Candidate payload capture policy. */
+typedef enum lonejson_candidate_capture_mode {
+  /** Do not retain or emit candidate payload bytes. */
+  LONEJSON_CANDIDATE_CAPTURE_NONE = 0,
+  /** Stream each candidate as compact JSON to `payload_sink`. */
+  LONEJSON_CANDIDATE_CAPTURE_SINK = 1,
+  /** Retain each compact JSON candidate in bounded memory until end callback.
+   */
+  LONEJSON_CANDIDATE_CAPTURE_MEMORY = 2,
+  /** Retain each compact JSON candidate in a temporary spooled handle until
+   * end callback.
+   */
+  LONEJSON_CANDIDATE_CAPTURE_SPOOLED = 3
+} lonejson_candidate_capture_mode;
+
+/** Boundary information for one arbitrary JSON candidate.
+ *
+ * `stream_offset` is the byte offset of the first candidate byte in the input
+ * stream. `byte_size` is set to `(size_t)-1` at begin callbacks and to the
+ * consumed candidate byte count at end callbacks. Captured payload pointers
+ * are populated only for end callbacks and are valid only until that callback
+ * returns.
+ */
+typedef struct lonejson_candidate_info {
+  size_t index;
+  size_t stream_offset;
+  size_t byte_size;
+  const void *payload;
+  size_t payload_size;
+  const lonejson_spooled *payload_spool;
+} lonejson_candidate_info;
+
+typedef lonejson_candidate_callback_result (*lonejson_candidate_event_fn)(
+    void *user, const lonejson_candidate_info *candidate,
+    lonejson_error *error);
+
+/** Options for arbitrary JSON candidate streams.
+ *
+ * The candidate stream is explicitly streaming: lonejson parses each candidate
+ * from the underlying source and emits visitor callbacks as JSON is consumed.
+ * This default no-capture mode does not materialize candidate payload bytes.
+ */
+typedef struct lonejson_candidate_stream_options {
+  lonejson_candidate_framing framing;
+  lonejson_candidate_capture_mode capture_mode;
+  lonejson_sink_fn payload_sink;
+  void *payload_sink_user;
+  size_t max_memory_payload_bytes;
+  const lonejson_value_visitor *visitor;
+  const lonejson_path_value_visitor *path_visitor;
+  void *visitor_user;
+  lonejson_candidate_event_fn candidate_begin;
+  lonejson_candidate_event_fn candidate_end;
+  void *candidate_user;
+} lonejson_candidate_stream_options;
+
 struct lonejson_json_value;
 typedef struct lonejson_json_value_methods {
   void (*reset)(struct lonejson_json_value *value);
@@ -2037,6 +2123,31 @@ struct lonejson {
   lonejson_status (*visit_path_value_fd)(
       lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
       void *user, lonejson_error *error);
+  /** Streams arbitrary JSON candidates from a caller-owned buffer. */
+  lonejson_status (*visit_candidates_buffer)(
+      lonejson *runtime, const void *data, size_t len,
+      const struct lonejson_candidate_stream_options *options,
+      lonejson_error *error);
+  /** Streams arbitrary JSON candidates from a reader callback. */
+  lonejson_status (*visit_candidates_reader)(
+      lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+      const struct lonejson_candidate_stream_options *options,
+      lonejson_error *error);
+  /** Streams arbitrary JSON candidates from an open `FILE *`. */
+  lonejson_status (*visit_candidates_filep)(
+      lonejson *runtime, FILE *fp,
+      const struct lonejson_candidate_stream_options *options,
+      lonejson_error *error);
+  /** Streams arbitrary JSON candidates from a filesystem path. */
+  lonejson_status (*visit_candidates_path)(
+      lonejson *runtime, const char *path,
+      const struct lonejson_candidate_stream_options *options,
+      lonejson_error *error);
+  /** Streams arbitrary JSON candidates from a file descriptor. */
+  lonejson_status (*visit_candidates_fd)(
+      lonejson *runtime, int fd,
+      const struct lonejson_candidate_stream_options *options,
+      lonejson_error *error);
   /** Initializes a mapped value according to one schema. */
   void (*init)(lonejson *runtime, const lonejson_map *map, void *value);
   /** Resets a mapped value while preserving caller-owned fixed backing. */
@@ -3830,6 +3941,15 @@ void lonejson_error_init(lonejson_error *error);
 lonejson_allocator lonejson_default_allocator(void);
 /** Returns the empty default read result used by reader callbacks. */
 lonejson_read_result lonejson_default_read_result(void);
+/** Returns default candidate-stream options.
+ *
+ * Defaults to `LONEJSON_CANDIDATE_FRAMING_AUTO`, no payload capture, and no
+ * visitor callbacks. Install `candidate_begin` / `candidate_end` to observe
+ * boundaries and `visitor` or `path_visitor` to receive streaming arbitrary
+ * JSON value events for each candidate.
+ */
+lonejson_candidate_stream_options lonejson_default_candidate_stream_options(
+    void);
 /** Initializes a memory-buffer reader adapter.
  *
  * The adapter reads directly from the caller-owned `data` buffer without
@@ -4803,6 +4923,32 @@ lonejson_status lonejson_visit_path_value_fd(
     lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
     void *user, lonejson_error *error);
 
+/** Streams arbitrary JSON candidates from a caller-provided buffer.
+ *
+ * The input is scanned according to `options->framing`. Candidate payloads are
+ * not captured by default; installed value/path-value visitors receive each
+ * candidate incrementally as the source is consumed.
+ */
+lonejson_status lonejson_visit_candidates_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lonejson_candidate_stream_options *options, lonejson_error *error);
+/** Streams arbitrary JSON candidates from a caller-provided reader callback. */
+lonejson_status lonejson_visit_candidates_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    const lonejson_candidate_stream_options *options, lonejson_error *error);
+/** Streams arbitrary JSON candidates from an open `FILE *`. */
+lonejson_status lonejson_visit_candidates_filep(
+    lonejson *runtime, FILE *fp,
+    const lonejson_candidate_stream_options *options, lonejson_error *error);
+/** Streams arbitrary JSON candidates from a filesystem path. */
+lonejson_status lonejson_visit_candidates_path(
+    lonejson *runtime, const char *path,
+    const lonejson_candidate_stream_options *options, lonejson_error *error);
+/** Streams arbitrary JSON candidates from a file descriptor. */
+lonejson_status lonejson_visit_candidates_fd(
+    lonejson *runtime, int fd,
+    const lonejson_candidate_stream_options *options, lonejson_error *error);
+
 /** Serializes a mapped struct to a generic output sink callback using runtime
  * write policy.
  */
@@ -5622,6 +5768,31 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 /** lonejson encountered an unexpected internal state. */
 #define LJ_STATUS_INTERNAL_ERROR LONEJSON_STATUS_INTERNAL_ERROR
 
+/** Auto-detect arbitrary JSON candidate stream framing. */
+#define LJ_CANDIDATE_FRAMING_AUTO LONEJSON_CANDIDATE_FRAMING_AUTO
+/** Require exactly one top-level JSON candidate. */
+#define LJ_CANDIDATE_FRAMING_SINGLE_VALUE                                      \
+  LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE
+/** Parse repeated top-level JSON candidates. */
+#define LJ_CANDIDATE_FRAMING_NDJSON LONEJSON_CANDIDATE_FRAMING_NDJSON
+/** Parse each top-level array item as one candidate. */
+#define LJ_CANDIDATE_FRAMING_ARRAY_ITEMS                                       \
+  LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS
+/** Do not retain or emit candidate payload bytes. */
+#define LJ_CANDIDATE_CAPTURE_NONE LONEJSON_CANDIDATE_CAPTURE_NONE
+/** Stream each compact candidate to a caller sink. */
+#define LJ_CANDIDATE_CAPTURE_SINK LONEJSON_CANDIDATE_CAPTURE_SINK
+/** Retain each compact candidate in bounded callback-scoped memory. */
+#define LJ_CANDIDATE_CAPTURE_MEMORY LONEJSON_CANDIDATE_CAPTURE_MEMORY
+/** Retain each compact candidate in a callback-scoped spooled handle. */
+#define LJ_CANDIDATE_CAPTURE_SPOOLED LONEJSON_CANDIDATE_CAPTURE_SPOOLED
+/** Candidate callback should continue scanning. */
+#define LJ_CANDIDATE_CONTINUE LONEJSON_CANDIDATE_CONTINUE
+/** Candidate callback should stop scanning successfully. */
+#define LJ_CANDIDATE_STOP LONEJSON_CANDIDATE_STOP
+/** Candidate callback failed the stream. */
+#define LJ_CANDIDATE_ERROR LONEJSON_CANDIDATE_ERROR
+
 /** JSON string stored in a fixed buffer or allocated `char *`. */
 #define LJ_FIELD_KIND_STRING LONEJSON_FIELD_KIND_STRING
 /** JSON string streamed into a `lonejson_spooled` handle. */
@@ -5999,6 +6170,18 @@ typedef lonejson_path_segment lj_path_segment;
 typedef lonejson_value_path lj_value_path;
 /** Path-aware visitor callbacks for one arbitrary JSON value. */
 typedef lonejson_path_value_visitor lj_path_value_visitor;
+/** Input framing policy for arbitrary JSON candidate streams. */
+typedef lonejson_candidate_framing lj_candidate_framing;
+/** Result returned by candidate boundary callbacks. */
+typedef lonejson_candidate_callback_result lj_candidate_callback_result;
+/** Candidate payload capture policy. */
+typedef lonejson_candidate_capture_mode lj_candidate_capture_mode;
+/** Boundary information for one arbitrary JSON candidate. */
+typedef lonejson_candidate_info lj_candidate_info;
+/** Candidate boundary callback signature. */
+typedef lonejson_candidate_event_fn lj_candidate_event_fn;
+/** Options for arbitrary JSON candidate streams. */
+typedef lonejson_candidate_stream_options lj_candidate_stream_options;
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
  * per item. `end` is called only after the string item is complete; the JSON
@@ -6386,6 +6569,11 @@ LONEJSON_SHORT_ALIAS_INLINE lj_value_visitor lj_default_value_visitor(void) {
 LONEJSON_SHORT_ALIAS_INLINE lj_path_value_visitor
 lj_default_path_value_visitor(void) {
   return lonejson_default_path_value_visitor();
+}
+/** Returns default candidate-stream options. */
+LONEJSON_SHORT_ALIAS_INLINE lj_candidate_stream_options
+lj_default_candidate_stream_options(void) {
+  return lonejson_default_candidate_stream_options();
 }
 /** Initializes a mapped string-array stream field with no handler. */
 LONEJSON_SHORT_ALIAS_INLINE void
@@ -7249,6 +7437,38 @@ lj_visit_path_value_fd(lonejson *runtime, int fd,
                        const lj_path_value_visitor *visitor, void *user,
                        lj_error *error) {
   return lonejson_visit_path_value_fd(runtime, fd, visitor, user, error);
+}
+/** Streams arbitrary JSON candidates from a caller-provided buffer. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_candidates_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lj_candidate_stream_options *options, lj_error *error) {
+  return lonejson_visit_candidates_buffer(runtime, data, len, options, error);
+}
+/** Streams arbitrary JSON candidates from a caller-provided reader callback. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_candidates_reader(
+    lonejson *runtime, lj_reader_fn reader, void *reader_user,
+    const lj_candidate_stream_options *options, lj_error *error) {
+  return lonejson_visit_candidates_reader(runtime, reader, reader_user, options,
+                                          error);
+}
+/** Streams arbitrary JSON candidates from an open `FILE *`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_candidates_filep(
+    lonejson *runtime, FILE *fp, const lj_candidate_stream_options *options,
+    lj_error *error) {
+  return lonejson_visit_candidates_filep(runtime, fp, options, error);
+}
+/** Streams arbitrary JSON candidates from a filesystem path. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_candidates_path(
+    lonejson *runtime, const char *path,
+    const lj_candidate_stream_options *options, lj_error *error) {
+  return lonejson_visit_candidates_path(runtime, path, options, error);
+}
+/** Streams arbitrary JSON candidates from a file descriptor. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_visit_candidates_fd(lonejson *runtime, int fd,
+                       const lj_candidate_stream_options *options,
+                       lj_error *error) {
+  return lonejson_visit_candidates_fd(runtime, fd, options, error);
 }
 /** Pull-style JSON generator state. */
 typedef lonejson_generator lj_generator;

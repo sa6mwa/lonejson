@@ -34,7 +34,7 @@ option(LONEJSON_ENABLE_TSAN "Enable ThreadSanitizer." OFF)
 option(LONEJSON_ENABLE_MSAN "Enable MemorySanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "17" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "18" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -69,6 +69,7 @@ function(lonejson_configure_c_target target)
       -Wextra
       -Wpedantic
       -pedantic-errors
+      $<$<CONFIG:Release>:-Werror>
     )
   endif()
 endfunction()
@@ -116,7 +117,8 @@ function(lonejson_configure_lua_c_target target)
     target_compile_options(${target} PRIVATE
       -std=c99
       -Wall
-      -Wextra)
+      -Wextra
+      $<$<CONFIG:Release>:-Werror>)
   endif()
 endfunction()
 
@@ -499,6 +501,13 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_sanitizer_conflicts.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_release_werror_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_werror.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_COMMAND}"
+        "${CMAKE_GENERATOR}")
+    add_test(
       NAME lonejson_source_release_tarball_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_source_release_tarball.sh"
@@ -508,6 +517,11 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_lua_src_rock_privacy_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_src_rock_privacy.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_lua_source_stage_manifest_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_source_stage_manifest.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_release_artifact_verify_tests
@@ -807,6 +821,18 @@ if(LONEJSON_BUILD_FUZZERS)
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_path_value_visitor)
 
+  add_executable(lonejson_fuzz_candidate_stream
+    fuzz/fuzz_candidate_stream.c)
+  target_include_directories(lonejson_fuzz_candidate_stream
+    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_candidate_stream PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_candidate_stream PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_candidate_stream PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_candidate_stream)
+
   add_executable(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
   target_include_directories(lonejson_fuzz_value_rewrite PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_link_libraries(lonejson_fuzz_value_rewrite PRIVATE lonejson)
@@ -940,6 +966,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_schema_methods.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_stream_spool.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_support.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_visitor_facade.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_embedded_runner.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_validate.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_mapped_parse.c"
@@ -947,6 +974,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_path_value_visitor.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_candidate_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_rewrite.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_generator_backpressure.c"

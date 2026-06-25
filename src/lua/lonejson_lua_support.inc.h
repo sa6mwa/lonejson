@@ -939,10 +939,6 @@ static int ljlua_json_buf_append(ljlua_json_buf *buf, const void *data,
   return 1;
 }
 
-static int ljlua_json_buf_append_cstr(ljlua_json_buf *buf, const char *text) {
-  return ljlua_json_buf_append(buf, text, strlen(text));
-}
-
 static lonejson_status ljlua_json_buf_sink(void *user, const void *data,
                                            size_t len, lonejson_error *error) {
   (void)error;
@@ -1072,7 +1068,7 @@ static int ljlua_json_buffer_add_utf8(luaL_Buffer *buffer,
 
 static lonejson_uint64 ljlua_check_u64(lua_State *L, int index) {
   int type;
-  lonejson_uint64 value;
+  lonejson_uint64 value = 0u;
 
   type = lua_type(L, index);
   if (type == LUA_TNUMBER) {

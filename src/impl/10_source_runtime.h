@@ -13,6 +13,11 @@ typedef struct lonejson__json_cursor {
   unsigned char read_buffer[4096];
   size_t read_buffer_len;
   size_t read_buffer_off;
+  size_t stream_offset;
+  size_t pushback_offset;
+  int count_pushback;
+  int has_pushback;
+  int pushback;
   lonejson_reader_fn reader;
   void *reader_user;
   FILE *fp;
@@ -35,6 +40,8 @@ typedef struct lonejson__json_io {
   lonejson__value_limits limits;
   const lonejson_allocator *allocator;
   int has_pushback;
+  int pushback_counted;
+  int last_getc_counted;
   int pushback;
   lonejson_path_segment *path_segments;
   lonejson__json_path_frame *path_frames;
