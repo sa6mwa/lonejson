@@ -343,42 +343,33 @@ require_curl_symbol() {
   local archive=$1
   local target_id=$2
   local preset=$3
-  local tmp_dir package_root shared_lib
-
-  load_target_tools "$preset" "$target_id"
+  local tmp_dir package_root shared_lib static_lib
 
   tmp_dir="$(mktemp -d)"
   package_root="$(extract_archive "$archive" "$tmp_dir")"
 
   if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
     shared_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson*.dylib' | sort | head -n 1)"
-    if [[ -z "$shared_lib" ]]; then
-      printf 'missing packaged shared library in %s\n' "$archive" >&2
-      exit 1
-    fi
-    if [[ -z "$NM" ]]; then
-      printf 'missing target nm for %s\n' "$target_id" >&2
-      exit 1
-    fi
-    if ! "$NM" -gU "$shared_lib" | grep -Eq '(^|[[:space:]])_?lonejson_curl_parse_init$'; then
-      printf 'missing lonejson_curl_* ABI symbol in %s\n' "$archive" >&2
-      exit 1
-    fi
   else
     shared_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson.so*' ! -type l | sort | head -n 1)"
-    if [[ -z "$shared_lib" ]]; then
-      printf 'missing packaged shared library in %s\n' "$archive" >&2
-      exit 1
-    fi
-    if [[ -z "$NM" ]]; then
-      printf 'missing target nm for %s\n' "$target_id" >&2
-      exit 1
-    fi
-    if ! "$NM" -D --defined-only "$shared_lib" | grep -Eq '(^|[[:space:]])lonejson_curl_parse_init$'; then
-      printf 'missing lonejson_curl_* ABI symbol in %s\n' "$archive" >&2
-      exit 1
-    fi
   fi
+  if [[ -z "$shared_lib" ]]; then
+    printf 'missing packaged shared library in %s\n' "$archive" >&2
+    exit 1
+  fi
+  static_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson.a' | sort | head -n 1)"
+  if [[ -z "$static_lib" ]]; then
+    printf 'missing packaged static library in %s\n' "$archive" >&2
+    exit 1
+  fi
+
+  "$repo_root/scripts/check_curl_abi_symbols.sh" \
+    "$repo_root" \
+    "$build_root/$preset" \
+    "$target_id" \
+    "$shared_lib" \
+    "$static_lib" \
+    "$archive"
 
   rm -rf "$tmp_dir"
 }

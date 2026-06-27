@@ -11,6 +11,7 @@ fake_modules="$tmp_dir/modules"
 stale_root="$tmp_dir/stale-curl/root"
 root_build_dir="$tmp_dir/root-build"
 module_build_dir="$tmp_dir/module-build"
+unsupported_target_build_dir="$tmp_dir/unsupported-target-build"
 missing_root_build_dir="$tmp_dir/missing-root-build"
 missing_config_build_dir="$tmp_dir/missing-config-build"
 missing_config_root="$tmp_dir/missing-config-root"
@@ -82,6 +83,22 @@ cmake -S "$repo_root" -B "$module_build_dir" \
   -D LONEJSON_BUILD_TESTS=OFF \
   -D LONEJSON_BUILD_EXAMPLES=OFF \
   >"$tmp_dir/module-configure.log" 2>&1
+
+cmake -S "$repo_root" -B "$unsupported_target_build_dir" \
+  -G Ninja \
+  -D CMAKE_MODULE_PATH="$fake_modules" \
+  -D LONEJSON_BUILD_WITH_CURL=ON \
+  -D LONEJSON_TARGET_OS=FreeBSD \
+  -D LONEJSON_BUILD_TESTS=ON \
+  -D LONEJSON_BUILD_EXAMPLES=OFF \
+  >"$tmp_dir/unsupported-target-configure.log" 2>&1
+ctest --test-dir "$unsupported_target_build_dir" -N \
+  >"$tmp_dir/unsupported-target-ctest.log"
+if grep -F 'lonejson_build_tree_curl_abi_tests' \
+    "$tmp_dir/unsupported-target-ctest.log" >/dev/null; then
+  printf 'curl ABI CTest should not be registered for unsupported target IDs\n' >&2
+  exit 1
+fi
 
 if cmake -S "$repo_root" -B "$missing_root_build_dir" \
   -G Ninja \

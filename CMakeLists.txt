@@ -142,6 +142,14 @@ elseif(LONEJSON_TARGET_OS_LOWER STREQUAL "darwin" AND
 else()
   set(LONEJSON_TARGET_ID "${LONEJSON_TARGET_ARCH_LOWER}-${LONEJSON_TARGET_OS_LOWER}")
 endif()
+set(LONEJSON_RELEASE_TARGET_IDS
+  x86_64-linux-gnu
+  x86_64-linux-musl
+  aarch64-linux-gnu
+  aarch64-linux-musl
+  armhf-linux-gnu
+  armhf-linux-musl
+  arm64-apple-darwin)
 
 set(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS OFF)
 if(NOT CMAKE_CROSSCOMPILING AND
@@ -308,6 +316,21 @@ set_target_properties(lonejson_static PROPERTIES
 
 if(LONEJSON_BUILD_TESTS)
   enable_testing()
+  if(LONEJSON_BUILD_WITH_CURL AND LONEJSON_TARGET_ID IN_LIST LONEJSON_RELEASE_TARGET_IDS)
+    add_test(NAME lonejson_build_tree_curl_abi_tests
+      COMMAND bash
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_curl_abi_symbols.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        "${LONEJSON_TARGET_ID}"
+        "$<TARGET_FILE:lonejson_shared>"
+        "$<TARGET_FILE:lonejson_static>"
+        "build tree ${LONEJSON_TARGET_ID}")
+    set_tests_properties(lonejson_build_tree_curl_abi_tests PROPERTIES
+      LABELS "packaging;smoke;local"
+      TIMEOUT 20)
+  endif()
+
   add_executable(lonejson_tests tests/test_main.c)
   target_include_directories(lonejson_tests PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_compile_definitions(lonejson_tests PRIVATE

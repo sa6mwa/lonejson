@@ -139,3 +139,68 @@ tar -C "$tmp_dir/package" -czf \
   "$repo_root" \
   "$dist_dir/lonejson-9.9.9-CHECKSUMS" \
   "$build_root"
+
+"$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$tmp_dir/missing-build-root"
+
+broken_dist_dir="$tmp_dir/broken-dist"
+broken_package_dir="$tmp_dir/broken-package"
+broken_package_root="$broken_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$broken_dist_dir"
+cp -R "$tmp_dir/package" "$broken_package_dir"
+
+cat >"$tmp_dir/lonejson_static_without_curl.c" <<'EOF'
+#include <lonejson.h>
+
+struct lonejson {
+  int unused;
+};
+
+static lonejson runtime;
+
+void lonejson_error_init(lonejson_error *error) {
+  if (error != 0) {
+    error->code = 0;
+  }
+}
+
+lonejson *lonejson_new(const void *config, lonejson_error *error) {
+  (void)config;
+  lonejson_error_init(error);
+  return &runtime;
+}
+
+void lonejson_free(lonejson *runtime_arg) {
+  (void)runtime_arg;
+}
+
+lonejson_status lonejson_validate_cstr(lonejson *runtime_arg, const char *json, lonejson_error *error) {
+  (void)runtime_arg;
+  (void)json;
+  lonejson_error_init(error);
+  return LONEJSON_STATUS_OK;
+}
+EOF
+
+cc -c -I"$broken_package_root/include" "$tmp_dir/lonejson_static_without_curl.c" \
+  -o "$tmp_dir/lonejson_static_without_curl.o"
+rm -f "$broken_package_root/lib/liblonejson.a"
+ar rcs "$broken_package_root/lib/liblonejson.a" \
+  "$tmp_dir/lonejson_static_without_curl.o"
+
+tar -C "$broken_package_dir" -czf \
+  "$broken_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$broken_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+
+broken_log="$tmp_dir/broken.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$broken_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$broken_log" 2>&1; then
+  printf 'expected archive verification to fail when static library lacks curl ABI\n' >&2
+  exit 1
+fi
+grep -F 'missing lonejson_curl_* ABI symbol in static library' "$broken_log" >/dev/null
