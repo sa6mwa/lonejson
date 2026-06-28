@@ -34,6 +34,7 @@ option(LONEJSON_ENABLE_TSAN "Enable ThreadSanitizer." OFF)
 option(LONEJSON_ENABLE_MSAN "Enable MemorySanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
+option(LONEJSON_BUILD_WITH_OPENSSL "Build lonejson with OpenSSL-backed auth/crypto support enabled." OFF)
 set(LONEJSON_ABI_VERSION "19" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
@@ -196,6 +197,46 @@ endfunction()
 
 if(LONEJSON_BUILD_WITH_CURL)
   lonejson_find_curl()
+endif()
+
+function(lonejson_find_openssl)
+  if(LONEJSON_C_PKT_SYSTEMS_ROOT)
+    get_filename_component(_cpkt_root "${LONEJSON_C_PKT_SYSTEMS_ROOT}" ABSOLUTE)
+    set(_cpkt_openssl_config
+        "${_cpkt_root}/lib/cmake/OpenSSL/OpenSSLConfig.cmake")
+    if(NOT IS_DIRECTORY "${_cpkt_root}")
+      message(FATAL_ERROR
+        "LONEJSON_C_PKT_SYSTEMS_ROOT does not exist: ${_cpkt_root}. "
+        "Run the matching make deps-* target or unset "
+        "LONEJSON_C_PKT_SYSTEMS_ROOT to use system OpenSSL.")
+    endif()
+    if(NOT EXISTS "${_cpkt_openssl_config}")
+      message(FATAL_ERROR
+        "LONEJSON_C_PKT_SYSTEMS_ROOT is missing OpenSSLConfig.cmake: "
+        "${_cpkt_openssl_config}. Use a c.pkt.systems v0.6.0 or newer "
+        "bundle, or unset LONEJSON_C_PKT_SYSTEMS_ROOT to use system OpenSSL.")
+    endif()
+    set(LONEJSON_C_PKT_SYSTEMS_ROOT "${_cpkt_root}" CACHE PATH
+        "Root directory for extracted c.pkt.systems dependency bundle content."
+        FORCE)
+    set(OpenSSL_DIR "${_cpkt_root}/lib/cmake/OpenSSL" CACHE PATH
+        "Directory containing OpenSSLConfig.cmake." FORCE)
+    find_package(OpenSSL CONFIG REQUIRED
+      PATHS "${_cpkt_root}"
+      NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH)
+  else()
+    find_package(OpenSSL REQUIRED)
+  endif()
+  if(NOT TARGET OpenSSL::SSL OR NOT TARGET OpenSSL::Crypto)
+    message(FATAL_ERROR
+      "OpenSSL was found but did not provide OpenSSL::SSL and "
+      "OpenSSL::Crypto targets.")
+  endif()
+endfunction()
+
+if(LONEJSON_BUILD_WITH_OPENSSL)
+  lonejson_find_openssl()
 endif()
 
 function(lonejson_target_include_curl target)
@@ -1124,6 +1165,7 @@ add_custom_target(package-archive
     -DLONEJSON_SHARED_LIB_NAME=$<TARGET_FILE_NAME:lonejson_shared>
     -DLONEJSON_SHARED_SONAME=$<TARGET_SONAME_FILE_NAME:lonejson_shared>
     -DLONEJSON_BUILD_WITH_CURL=${LONEJSON_BUILD_WITH_CURL}
+    -DLONEJSON_BUILD_WITH_OPENSSL=${LONEJSON_BUILD_WITH_OPENSSL}
     -DLONEJSON_STRIP=${CMAKE_STRIP}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_archive.cmake
   DEPENDS lonejson_shared lonejson_static

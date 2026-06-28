@@ -6,6 +6,7 @@ matrix_script_path="$repo_root/scripts/run_release_matrix.sh"
 matrix_script="$(cat "$matrix_script_path")"
 verify_script_path="$repo_root/scripts/verify_release_archives.sh"
 verify_script="$(cat "$verify_script_path")"
+cmake_lists="$(cat "$repo_root/CMakeLists.txt")"
 
 printf '%s\n' "$verify_script" | grep -F -- 'darwin_deployment_target="$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- '-D "LONEJSON_MACOS_DEPLOYMENT_TARGET=$darwin_deployment_target"' >/dev/null
@@ -30,6 +31,9 @@ if printf '%s\n' "$matrix_script" | grep -F -- 'require_archive_contract' >/dev/
   exit 1
 fi
 printf '%s\n' "$matrix_script" | grep -F -- 'missing c.pkt.systems CURL CMake package' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'missing c.pkt.systems OpenSSL CMake package' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OPENSSL=ON' >/dev/null
+printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OPENSSL=${LONEJSON_BUILD_WITH_OPENSSL}' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"' >/dev/null
 if printf '%s\n' "$matrix_script" | grep -F -- '-D CURL_LIBRARY_RELEASE=' >/dev/null; then
   printf 'run_release_matrix.sh must not inject raw CURL_LIBRARY_RELEASE paths\n' >&2
@@ -41,5 +45,13 @@ if printf '%s\n' "$matrix_script" | grep -F -- '-D CURL_INCLUDE_DIR=' >/dev/null
 fi
 if printf '%s\n' "$matrix_script" | grep -F -- '-U CURL_' >/dev/null; then
   printf 'run_release_matrix.sh must not clean legacy CURL cache variables\n' >&2
+  exit 1
+fi
+if printf '%s\n' "$matrix_script" | grep -F -- '-D OPENSSL_' >/dev/null; then
+  printf 'run_release_matrix.sh must not inject raw OPENSSL paths\n' >&2
+  exit 1
+fi
+if printf '%s\n' "$matrix_script" | grep -F -- '-U OPENSSL_' >/dev/null; then
+  printf 'run_release_matrix.sh must not clean legacy OPENSSL cache variables\n' >&2
   exit 1
 fi

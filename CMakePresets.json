@@ -39,7 +39,8 @@
       "name": "host-curl",
       "inherits": "host",
       "cacheVariables": {
-        "LONEJSON_BUILD_WITH_CURL": "ON"
+        "LONEJSON_BUILD_WITH_CURL": "ON",
+        "LONEJSON_BUILD_WITH_OPENSSL": "ON"
       }
     },
     {
@@ -48,6 +49,7 @@
       "cacheVariables": {
         "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root",
         "LONEJSON_BUILD_WITH_CURL": "ON",
+        "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_TARGET_ARCH": "x86_64",
         "LONEJSON_TARGET_OS": "linux",
         "LONEJSON_TARGET_LIBC": "gnu"
@@ -60,6 +62,7 @@
       "cacheVariables": {
         "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-musl/root",
         "LONEJSON_BUILD_WITH_CURL": "ON",
+        "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_TARGET_ARCH": "x86_64",
         "LONEJSON_TARGET_OS": "linux",
         "LONEJSON_TARGET_LIBC": "musl"
@@ -71,7 +74,8 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-gnu.cmake",
       "cacheVariables": {
         "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-gnu/root",
-        "LONEJSON_BUILD_WITH_CURL": "ON"
+        "LONEJSON_BUILD_WITH_CURL": "ON",
+        "LONEJSON_BUILD_WITH_OPENSSL": "ON"
       }
     },
     {
@@ -80,7 +84,8 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-musl.cmake",
       "cacheVariables": {
         "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-musl/root",
-        "LONEJSON_BUILD_WITH_CURL": "ON"
+        "LONEJSON_BUILD_WITH_CURL": "ON",
+        "LONEJSON_BUILD_WITH_OPENSSL": "ON"
       }
     },
     {
@@ -89,7 +94,8 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-gnu.cmake",
       "cacheVariables": {
         "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-gnu/root",
-        "LONEJSON_BUILD_WITH_CURL": "ON"
+        "LONEJSON_BUILD_WITH_CURL": "ON",
+        "LONEJSON_BUILD_WITH_OPENSSL": "ON"
       }
     },
     {
@@ -98,7 +104,8 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-musl.cmake",
       "cacheVariables": {
         "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-musl/root",
-        "LONEJSON_BUILD_WITH_CURL": "ON"
+        "LONEJSON_BUILD_WITH_CURL": "ON",
+        "LONEJSON_BUILD_WITH_OPENSSL": "ON"
       }
     },
     {
@@ -107,7 +114,8 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-apple-darwin.cmake",
       "cacheVariables": {
         "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/arm64-apple-darwin/root",
-        "LONEJSON_BUILD_WITH_CURL": "ON"
+        "LONEJSON_BUILD_WITH_CURL": "ON",
+        "LONEJSON_BUILD_WITH_OPENSSL": "ON"
       }
     },
     {

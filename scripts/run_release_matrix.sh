@@ -27,9 +27,14 @@ configure_release_target() {
         printf 'missing c.pkt.systems CURL CMake package for %s under %s\n' "$target_id" "$bundle_root/lib/cmake/CURL" >&2
         exit 1
     fi
+    if [ ! -f "$bundle_root/lib/cmake/OpenSSL/OpenSSLConfig.cmake" ]; then
+        printf 'missing c.pkt.systems OpenSSL CMake package for %s under %s\n' "$target_id" "$bundle_root/lib/cmake/OpenSSL" >&2
+        exit 1
+    fi
 
     cmake --preset "$preset" \
         -D LONEJSON_BUILD_WITH_CURL=ON \
+        -D LONEJSON_BUILD_WITH_OPENSSL=ON \
         -D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"
 }
 
