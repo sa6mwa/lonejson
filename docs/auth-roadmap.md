@@ -44,11 +44,20 @@ The proposed feature gates are:
 - `LONEJSON_WITH_OIDC`: enables combined OAuth2/OIDC helpers. This requires
   `LONEJSON_WITH_CURL`, `LONEJSON_WITH_OPENSSL`, and `LONEJSON_WITH_JWT`.
 
-`LONEJSON_WITH_OIDC` should cover both OAuth2 and OpenID Connect flows rather
-than splitting the public surface into two competing gates. OIDC is layered on
-OAuth2 in practice, and the lonejson use case is an authentication facade, not
-a standards taxonomy exercise. API names may still use `oauth2` where the
-operation is specifically OAuth2, such as token endpoint exchange.
+`LONEJSON_WITH_OIDC` is the single feature gate for the combined OAuth2/OIDC
+facade. We should not split this into competing `LONEJSON_WITH_OAUTH2` and
+`LONEJSON_WITH_OIDC` build gates unless a later requirement needs a pure OAuth2
+surface that intentionally excludes OIDC discovery, JWKS, and JWT validation.
+OIDC is layered on OAuth2 in practice, and the lonejson use case is an
+authentication facade, not a standards taxonomy exercise.
+
+Public API names should still use precise terminology:
+
+- use `oauth2` for OAuth2-generic operations such as token endpoint exchange,
+  client credentials, refresh token exchange, and authorization-code exchange,
+- use `oidc` for issuer discovery, ID-token validation helpers, OIDC session
+  setup, nonce handling, and JWKS-backed issuer validation,
+- use `jwt` and `jwk` for standalone token and key primitives.
 
 The dependency model should follow the curl precedent:
 
