@@ -35,7 +35,7 @@ RELEASE_HEADER_GZ := $(DIST_DIR)/lonejson-$(RELEASE_VERSION).h.gz
 RELEASE_ROCKSPEC := $(DIST_DIR)/lonejson-$(RELEASE_VERSION)-1.rockspec
 RELEASE_PACK_DIR := $(DIST_DIR)/.pack
 RELEASE_PACK_STAGE_DIR := $(RELEASE_PACK_DIR)/lonejson-$(RELEASE_VERSION)
-RELEASE_PACK_SOURCE_TARBALL := $(RELEASE_PACK_DIR)/lonejson-$(RELEASE_VERSION).tar.gz
+RELEASE_LUA_SOURCE_TARBALL := $(DIST_DIR)/lonejson-lua-$(RELEASE_VERSION).tar.gz
 RELEASE_PACK_ROCKSPEC := $(RELEASE_PACK_DIR)/lonejson-$(RELEASE_VERSION)-1.rockspec
 RELEASE_ROCK := $(DIST_DIR)/lonejson-$(RELEASE_VERSION)-1.src.rock
 RELEASE_CHECKSUMS := $(DIST_DIR)/lonejson-$(RELEASE_VERSION)-CHECKSUMS
@@ -134,6 +134,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 
 .PHONY: \
 	help \
+	finalize-slice \
 	build \
 	build-debug \
 	build-host \
@@ -151,7 +152,9 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	verify-release-archives \
 	verify-release-privacy \
 	prerelease \
+	prerelease-live \
 	prerelease-hardening \
+	release-matrix \
 	release \
 	lua-rock \
 	lua-test \
@@ -173,6 +176,8 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	test-cross \
 	test-all \
 	test-all-bindings \
+	test-install-tree \
+	example-smoke-local \
 	asan \
 	tsan \
 	msan \
@@ -181,6 +186,8 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	fuzz-long \
 	stack-usage \
 	format \
+	deps-debug \
+	deps-release \
 	deps-host \
 	deps-x86_64-linux-gnu \
 	deps-x86_64-linux-musl \
@@ -192,6 +199,10 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	deps-cross \
 	deps-all \
 	certs \
+	dev-up \
+	dev-down \
+	dev-reset \
+	dev-logs \
 	compose-up \
 	compose-down \
 	compose-logs \
@@ -202,6 +213,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 
 help:
 	@printf '%s\n' \
+		'make finalize-slice         Format, build, and run the debug CTest suite before committing a slice.' \
 		'make build                  Configure and build the full debug tree (tests and standalone examples, excluding lua-* and curl-examples).' \
 		'make build-debug            Alias for make build.' \
 		'make build-host             Configure and build the host-native release preset.' \
@@ -215,8 +227,10 @@ help:
 		'make verify-release-archives Alias for make package-verify.' \
 		'make verify-release-privacy Alias for make package-verify.' \
 		'make prerelease             Run the standard local pre-release confidence gate.' \
+		'make prerelease-live        Refuse live external-provider release checks unless explicitly enabled.' \
 		'make prerelease-hardening   Run the clean release gate.' \
-		'make release                Run the release matrix and package generation.' \
+		'make release-matrix         Build, test, package, checksum, and verify every release target without cleaning first.' \
+		'make release                Clean generated state, then run the release matrix and package generation.' \
 		'make release-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make release-darwin-smoke-bundle Build the Darwin smoke ZIP with example and link-smoke binaries.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
@@ -239,6 +253,8 @@ help:
 		'make test-cross             Configure, build, and run all cross release test presets serially.' \
 		'make test-all               Run debug, host, host-curl, cross, ASan, benchmark gates, and fuzz-smoke serially; TSan/MSan are included when clang is available.' \
 		'make test-all-bindings      Run test-all plus the optional Lua binding suite.' \
+		'make test-install-tree      Verify checksum-listed SDK archives through installed CMake and pkg-config consumers.' \
+		'make example-smoke-local    Build and stage standalone local examples.' \
 		'make asan                   Build and run the ASan/UBSan preset.' \
 		'make tsan                   Build the TSan preset and run the pure-C CTest subset that does not depend on external unsanitized runtimes.' \
 		'make msan                   Build the MSan preset and run the pure-C CTest subset that does not depend on external unsanitized runtimes.' \
@@ -247,6 +263,8 @@ help:
 		'make fuzz-long              Run the same fuzz targets with a several-minute soak per target.' \
 		'make stack-usage            Build with compiler stack-usage reporting and print the report.' \
 		'make format                 Run clang-format over the C sources.' \
+		'make deps-debug             Alias for make deps-host.' \
+		'make deps-release           Alias for make deps-all.' \
 		'make deps-host              Download and extract the host-native c.pkt.systems dependency bundle.' \
 		'make deps-x86_64-linux-gnu  Download and extract the x86_64 glibc c.pkt.systems bundle.' \
 		'make deps-x86_64-linux-musl Download and extract the x86_64 musl c.pkt.systems bundle.' \
@@ -258,6 +276,10 @@ help:
 		'make deps-cross             Download and extract bundles required by make test-cross.' \
 		'make deps-all               Download and extract every supported c.pkt.systems bundle.' \
 		'make certs                  Generate the local self-signed localhost TLS cert for nginx.' \
+		'make dev-up                 Alias for make compose-up.' \
+		'make dev-down               Alias for make compose-down.' \
+		'make dev-reset              Stop the local compose stack and remove generated local service state.' \
+		'make dev-logs               Alias for make compose-logs.' \
 		'make compose-up             Start the local nginx + sink HTTP/HTTPS test rig.' \
 		'make compose-down           Stop and remove the local compose stack.' \
 		'make compose-logs           Tail logs from the local compose stack.' \
@@ -266,6 +288,10 @@ help:
 		'make release-source-artifact Build the source-only release tarball in dist/.' \
 		'make clean                  Remove build/, dist/, .deps/, examples/bin/, and generated Lua module artifacts.' \
 		'make clean-dist             Remove dist/ release artifacts only.'
+
+finalize-slice:
+	$(MAKE) format
+	$(MAKE) test-debug
 
 build:
 	cmake --preset $(DEBUG_PRESET)
@@ -293,25 +319,25 @@ $(RELEASE_PACK_DIR):
 $(RELEASE_PACK_STAGE_DIR): Makefile $(LUA_ROCK_SOURCES) | $(RELEASE_PACK_DIR)
 	./scripts/stage_lua_rock_sources.sh "$(CURDIR)" "$(RELEASE_PACK_STAGE_DIR)" "$(RELEASE_VERSION)"
 
-$(RELEASE_PACK_SOURCE_TARBALL): $(RELEASE_PACK_STAGE_DIR)
-	rm -f "$(RELEASE_PACK_DIR)/lonejson-$(RELEASE_VERSION).tar" "$(RELEASE_PACK_SOURCE_TARBALL)"
-	cd "$(RELEASE_PACK_DIR)" && tar -cf "lonejson-$(RELEASE_VERSION).tar" "lonejson-$(RELEASE_VERSION)"
-	gzip -9 -f "$(RELEASE_PACK_DIR)/lonejson-$(RELEASE_VERSION).tar"
+$(RELEASE_LUA_SOURCE_TARBALL): $(RELEASE_PACK_STAGE_DIR) | $(DIST_DIR)
+	rm -f "$(DIST_DIR)/lonejson-lua-$(RELEASE_VERSION).tar" "$(RELEASE_LUA_SOURCE_TARBALL)"
+	cd "$(RELEASE_PACK_DIR)" && tar -cf "$(DIST_DIR)/lonejson-lua-$(RELEASE_VERSION).tar" "lonejson-$(RELEASE_VERSION)"
+	gzip -9 -f "$(DIST_DIR)/lonejson-lua-$(RELEASE_VERSION).tar"
 
 $(RELEASE_ROCKSPEC): lonejson.rockspec.in scripts/render_release_rockspec.sh | $(DIST_DIR)
 	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(RELEASE_ROCKSPEC)" "" "" "$$lib_ext"
 
-$(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_PACK_SOURCE_TARBALL)
-	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(notdir $(RELEASE_PACK_SOURCE_TARBALL))" "" "$$lib_ext"
+$(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_LUA_SOURCE_TARBALL)
+	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(notdir $(RELEASE_LUA_SOURCE_TARBALL))" "" "$$lib_ext"
 
 $(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lua_src_rock.sh scripts/smoke_lua_src_rock.sh
-	./scripts/package_lua_src_rock.sh "$(RELEASE_ROCK)" "$(RELEASE_PACK_ROCKSPEC)" "$(RELEASE_PACK_SOURCE_TARBALL)"
+	./scripts/package_lua_src_rock.sh "$(RELEASE_ROCK)" "$(RELEASE_PACK_ROCKSPEC)" "$(RELEASE_LUA_SOURCE_TARBALL)"
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared
 	./scripts/smoke_lua_src_rock.sh "$(RELEASE_ROCK)" "$(LONEJSON_LUA_LIBDIR)"
 	rm -rf "$(RELEASE_PACK_DIR)"
 
-release-lua-artifacts: $(RELEASE_ROCKSPEC) $(RELEASE_ROCK)
+release-lua-artifacts: $(RELEASE_ROCKSPEC) $(RELEASE_LUA_SOURCE_TARBALL) $(RELEASE_ROCK)
 
 package: release
 
@@ -357,10 +383,17 @@ verify-release-privacy: package-verify
 
 prerelease: test-all prerelease-artifacts
 
+prerelease-live:
+	@test "$${LONEJSON_ENABLE_LIVE_TESTS:-}" = "1" || (printf '%s\n' 'Set LONEJSON_ENABLE_LIVE_TESTS=1 to run live prerelease checks; no live prerelease checks are currently defined.' >&2; exit 1)
+
 prerelease-hardening: release
 
-release:
+release-matrix:
 	./scripts/run_release_matrix.sh
+
+release:
+	./scripts/clean.sh
+	$(MAKE) release-matrix
 
 bench:
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
@@ -469,6 +502,10 @@ endif
 test-all-bindings:
 	$(MAKE) test-all
 	$(MAKE) lua-test
+
+test-install-tree: package-verify
+
+example-smoke-local: build
 
 lua-rock: $(LUA_ROCK_STAMP)
 
@@ -647,6 +684,10 @@ format:
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset format
 
+deps-debug: deps-host
+
+deps-release: deps-all
+
 deps-host:
 	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -P cmake/fetch_c_pkt_systems.cmake
 
@@ -688,6 +729,15 @@ deps-all: \
 
 certs:
 	./scripts/ensure_test_certs.sh
+
+dev-up: compose-up
+
+dev-down: compose-down
+
+dev-reset: compose-down
+	cmake -E rm -rf docker/nginx/generated
+
+dev-logs: compose-logs
 
 compose-up:
 	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)

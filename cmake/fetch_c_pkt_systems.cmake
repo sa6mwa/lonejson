@@ -4,7 +4,8 @@ if(NOT DEFINED LONEJSON_SOURCE_DIR)
   get_filename_component(LONEJSON_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 endif()
 
-set(LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION "0.5.0")
+include("${CMAKE_CURRENT_LIST_DIR}/c_pkt_systems_metadata.cmake")
+
 if(DEFINED LONEJSON_C_PKT_SYSTEMS_VERSION AND
    NOT LONEJSON_C_PKT_SYSTEMS_VERSION STREQUAL LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION)
   message(FATAL_ERROR
@@ -15,7 +16,7 @@ if(DEFINED LONEJSON_C_PKT_SYSTEMS_VERSION AND
 endif()
 set(LONEJSON_C_PKT_SYSTEMS_VERSION "${LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION}")
 set(LONEJSON_C_PKT_SYSTEMS_BASE_URL
-    "https://github.com/sa6mwa/c.pkt.systems/releases/download/v${LONEJSON_C_PKT_SYSTEMS_VERSION}"
+    "${LONEJSON_C_PKT_SYSTEMS_BASE_URL_DEFAULT}"
     CACHE STRING "Base URL for c.pkt.systems release downloads.")
 set(LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES "4" CACHE STRING
     "Number of download attempts for c.pkt.systems bundles before failing.")
@@ -120,27 +121,6 @@ if(NOT LONEJSON_C_PKT_SYSTEMS_TARGET_ID IN_LIST _supported_targets)
     "Unsupported c.pkt.systems target '${LONEJSON_C_PKT_SYSTEMS_TARGET_ID}'. "
     "Supported values: ${_supported_targets}.")
 endif()
-
-function(lonejson_c_pkt_systems_sha256 target_id out_var)
-  if(target_id STREQUAL "x86_64-linux-gnu")
-    set(_sha256 "737e1bc3992f00e9d4c71c6cae87db8dce669ce795b42ba769e686ff263cfaea")
-  elseif(target_id STREQUAL "x86_64-linux-musl")
-    set(_sha256 "435c25dfa05e831c5183ed0628730749625aa68804e21a3615937d36d11b7384")
-  elseif(target_id STREQUAL "aarch64-linux-gnu")
-    set(_sha256 "e7163bea53ec8b72bd88b6387289eddc6d11383e8903ae756b06aea03853ee9d")
-  elseif(target_id STREQUAL "aarch64-linux-musl")
-    set(_sha256 "ee19c298dffe5b9b3d304d416de95a897c547f9489eb52493500576c0d36830f")
-  elseif(target_id STREQUAL "armhf-linux-gnu")
-    set(_sha256 "b6f12112207232ef16123d19535d36d73c9a0c75fdd9c1566684f2f36b384d94")
-  elseif(target_id STREQUAL "armhf-linux-musl")
-    set(_sha256 "2de19d4fb76379a7585382ac6b77d3d9a70c505f8ef9334a5ff531336c84b368")
-  elseif(target_id STREQUAL "arm64-apple-darwin")
-    set(_sha256 "ebf1caf096df8c17067df2bd02efe65793ad98f65dafb5f29384ce6a6269a829")
-  else()
-    message(FATAL_ERROR "No pinned c.pkt.systems checksum for ${target_id}")
-  endif()
-  set(${out_var} "${_sha256}" PARENT_SCOPE)
-endfunction()
 
 function(lonejson_download_c_pkt_systems_bundle url archive_path expected_sha256)
   if(NOT LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES MATCHES "^[0-9]+$")

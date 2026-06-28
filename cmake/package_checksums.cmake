@@ -6,9 +6,11 @@ file(MAKE_DIRECTORY "${dist_dir}")
 file(GLOB release_entries RELATIVE "${dist_dir}"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}.tar.gz"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}.h.gz"
+  "${dist_dir}/lonejson-lua-${LONEJSON_VERSION}.tar.gz"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}-*.rockspec"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}-*.src.rock"
   "${dist_dir}/liblonejson-${LONEJSON_VERSION}-*.tar.gz"
+  "${dist_dir}/liblonejson-${LONEJSON_VERSION}-*-smoke-test.zip"
 )
 
 set(checksum_inputs "")

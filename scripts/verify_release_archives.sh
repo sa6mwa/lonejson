@@ -71,6 +71,7 @@ target_raw_compile_flags() {
   case "$target_id" in
     arm64-apple-darwin)
       printf '%s\n' "-mmacosx-version-min=$(target_darwin_deployment_target)"
+      printf '%s\n' "-Wno-fuse-ld-path"
       ;;
     *) printf '%s\n' "" ;;
   esac
@@ -80,7 +81,11 @@ target_raw_link_flags() {
   local target_id=$1
   case "$target_id" in
     arm64-apple-darwin)
-      printf '%s\n' "--ld-path=${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/${CPKT_OSXCROSS_HOST:-arm64-apple-darwin25}-ld"
+      if [[ -z "${LINKER:-}" ]]; then
+        printf 'missing target linker for %s\n' "$target_id" >&2
+        exit 1
+      fi
+      printf '%s\n' "-fuse-ld=$LINKER"
       ;;
     *) printf '%s\n' "" ;;
   esac
@@ -93,6 +98,19 @@ load_target_tools() {
   eval "$("$repo_root/scripts/discover_target_tools.sh" \
     --build-dir "$build_root/$preset" \
     --target-id "$target_id")"
+}
+
+run_with_target_path() {
+  local target_id=$1
+  shift
+
+  if [[ "${target_id#*apple-darwin}" != "$target_id" && -n "${LINKER:-}" ]]; then
+    local linker_dir
+    linker_dir="$(dirname -- "$LINKER")"
+    PATH="$linker_dir:$PATH" "$@"
+  else
+    "$@"
+  fi
 }
 
 require_linux_origin_rpath() {
@@ -156,7 +174,7 @@ require_archive_contract() {
   local archive=$1
   local target_id=$2
   local preset=$3
-  local tmp_dir package_root shared_lib dynamic_metadata rpath_paths
+  local tmp_dir package_root shared_lib dynamic_metadata rpath_paths dependency_manifest
 
   load_target_tools "$preset" "$target_id"
 
@@ -179,6 +197,8 @@ require_archive_contract() {
       "lib/pkgconfig/" | \
       "lib/pkgconfig/lonejson.pc" | \
       "share/" | \
+      "share/lonejson/" | \
+      "share/lonejson/dependencies.json" | \
       "share/doc/" | \
       "share/doc/liblonejson/" | \
       "share/doc/liblonejson/LICENSE" | \
@@ -197,6 +217,8 @@ require_archive_contract() {
   require_file "$package_root/lib/pkgconfig/lonejson.pc"
   require_file "$package_root/lib/cmake/lonejson/lonejsonConfig.cmake"
   require_file "$package_root/lib/cmake/lonejson/lonejsonConfigVersion.cmake"
+  dependency_manifest="$package_root/share/lonejson/dependencies.json"
+  require_file "$dependency_manifest"
   if grep -RE 'libcurl|c\.pkt\.systems|\.deps/|/home/|/build/' \
       "$package_root/lib/pkgconfig/lonejson.pc" \
       "$package_root/lib/cmake/lonejson" >/dev/null; then
@@ -207,6 +229,24 @@ require_archive_contract() {
     printf 'unexpected curl pkg-config dependency in %s\n' "$archive" >&2
     exit 1
   fi
+  if grep -E '\.deps/|/home/|/build/|file://' "$dependency_manifest" >/dev/null; then
+    printf 'forbidden path leak in dependency manifest for %s\n' "$archive" >&2
+    exit 1
+  fi
+  for required_metadata in \
+      '"schema": "pkt.systems.dependencies.v1"' \
+      '"name": "c.pkt.systems"' \
+      '"version": "0.6.0"' \
+      "\"target_id\": \"$target_id\"" \
+      '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.6.0/c.pkt.systems-0.6.0-' \
+      '"sha256": "' \
+      '"bundled": false' \
+      '"external": true'; do
+    if ! grep -F "$required_metadata" "$dependency_manifest" >/dev/null; then
+      printf 'missing dependency manifest metadata in %s: %s\n' "$archive" "$required_metadata" >&2
+      exit 1
+    fi
+  done
 
   if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
     shared_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson*.dylib' | sort | head -n 1)"
@@ -218,6 +258,12 @@ require_archive_contract() {
       printf 'missing target otool for %s\n' "$target_id" >&2
       exit 1
     fi
+    "$repo_root/scripts/check_darwin_macho_metadata.sh" \
+      "$repo_root" \
+      "$build_root/$preset" \
+      "$target_id" \
+      "$shared_lib" \
+      "$archive"
     dynamic_metadata="$("$OTOOL" -L "$shared_lib"; "$OTOOL" -l "$shared_lib")"
     case "$dynamic_metadata" in
       *libcurl* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
@@ -294,7 +340,7 @@ EOF
   raw_compile_flags="$(target_raw_compile_flags "$target_id")"
   raw_link_flags="$(target_raw_link_flags "$target_id")"
   # shellcheck disable=SC2086
-  "$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
+  run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
 
   cmake_source_dir="$tmp_dir/cmake-consumer"
   cmake_build_dir="$tmp_dir/cmake-build"
@@ -333,8 +379,8 @@ EOF
       -D CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
     )
   fi
-  cmake "${cmake_args[@]}"
-  cmake --build "$cmake_build_dir"
+  run_with_target_path "$target_id" cmake "${cmake_args[@]}"
+  run_with_target_path "$target_id" cmake --build "$cmake_build_dir"
 
   rm -rf "$tmp_dir"
 }

@@ -310,6 +310,12 @@ set_target_properties(lonejson_shared PROPERTIES
   VERSION ${PROJECT_VERSION}
   SOVERSION ${LONEJSON_ABI_VERSION}
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set_target_properties(lonejson_shared PROPERTIES
+    MACOSX_RPATH ON
+    INSTALL_NAME_DIR "@rpath"
+    BUILD_WITH_INSTALL_NAME_DIR ON)
+endif()
 set_target_properties(lonejson_static PROPERTIES
   OUTPUT_NAME lonejson
 )
@@ -491,6 +497,16 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_discover_target_tools.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_darwin_macho_metadata_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_darwin_macho_metadata.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_darwin_linker_route_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_darwin_linker_route.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_path_index_formatting_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_path_index_formatting.sh"
@@ -570,6 +586,16 @@ if(LONEJSON_BUILD_TESTS)
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_run_release_matrix_darwin_target.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_release_checksum_manifest_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_checksum_manifest.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_ctest_metadata_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ctest_metadata.sh"
+        "${CMAKE_CURRENT_BINARY_DIR}")
   endif()
 
   add_executable(lonejson_short_names_tests tests/test_short_names.c)
@@ -715,6 +741,20 @@ if(LONEJSON_BUILD_TESTS)
       -DLONEJSON_RELEASE_VERSION=${LONEJSON_RESOLVED_VERSION}
       -DLONEJSON_SINGLE_HEADER_DIST_GZ=${LONEJSON_SINGLE_HEADER_DIST_GZ}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_single_header_release_version.cmake)
+
+  get_property(lonejson_registered_tests DIRECTORY PROPERTY TESTS)
+  foreach(lonejson_registered_test IN LISTS lonejson_registered_tests)
+    get_property(lonejson_test_has_timeout TEST
+      "${lonejson_registered_test}" PROPERTY TIMEOUT SET)
+    if(NOT lonejson_test_has_timeout)
+      set_property(TEST "${lonejson_registered_test}" PROPERTY TIMEOUT 120)
+    endif()
+    get_property(lonejson_test_has_labels TEST
+      "${lonejson_registered_test}" PROPERTY LABELS SET)
+    if(NOT lonejson_test_has_labels)
+      set_property(TEST "${lonejson_registered_test}" PROPERTY LABELS local)
+    endif()
+  endforeach()
 endif()
 
 if(LONEJSON_BUILD_EXAMPLES)

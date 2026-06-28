@@ -32,6 +32,7 @@ mkdir -p \
   "$package_root/include" \
   "$package_root/lib/cmake/lonejson" \
   "$package_root/lib/pkgconfig" \
+  "$package_root/share/lonejson" \
   "$package_root/share/doc/liblonejson"
 
 cat >"$package_root/include/lonejson.h" <<'EOF'
@@ -121,6 +122,27 @@ set(PACKAGE_VERSION 9.9.9)
 set(PACKAGE_VERSION_COMPATIBLE TRUE)
 EOF
 
+cat >"$package_root/share/lonejson/dependencies.json" <<'EOF'
+{
+  "schema": "pkt.systems.dependencies.v1",
+  "project": "lonejson",
+  "version": "9.9.9",
+  "target_id": "x86_64-linux-gnu",
+  "dependencies": [
+    {
+      "name": "c.pkt.systems",
+      "version": "0.6.0",
+      "target_id": "x86_64-linux-gnu",
+      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.6.0/c.pkt.systems-0.6.0-x86_64-linux-gnu.tar.gz",
+      "sha256": "0e3f96cef656ad927ff952e5fb195fabaea551150017df0368f6fd30c5fa8039",
+      "bundled": false,
+      "external": true,
+      "role": "release-sdk-build-dependency"
+    }
+  ]
+}
+EOF
+
 printf 'license\n' >"$package_root/share/doc/liblonejson/LICENSE"
 printf 'readme\n' >"$package_root/share/doc/liblonejson/README.md"
 
@@ -144,6 +166,25 @@ tar -C "$tmp_dir/package" -czf \
   "$repo_root" \
   "$dist_dir/lonejson-9.9.9-CHECKSUMS" \
   "$tmp_dir/missing-build-root"
+
+missing_metadata_dist_dir="$tmp_dir/missing-metadata-dist"
+missing_metadata_package_dir="$tmp_dir/missing-metadata-package"
+mkdir -p "$missing_metadata_dist_dir"
+cp -R "$tmp_dir/package" "$missing_metadata_package_dir"
+rm -f "$missing_metadata_package_dir/liblonejson-9.9.9-x86_64-linux-gnu/share/lonejson/dependencies.json"
+tar -C "$missing_metadata_package_dir" -czf \
+  "$missing_metadata_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$missing_metadata_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+missing_metadata_log="$tmp_dir/missing-metadata.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$missing_metadata_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$missing_metadata_log" 2>&1; then
+  printf 'expected archive verification to fail when dependency manifest is missing\n' >&2
+  exit 1
+fi
+grep -F 'missing required file:' "$missing_metadata_log" >/dev/null
 
 broken_dist_dir="$tmp_dir/broken-dist"
 broken_package_dir="$tmp_dir/broken-package"

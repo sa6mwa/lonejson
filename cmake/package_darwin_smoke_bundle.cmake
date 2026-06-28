@@ -28,7 +28,9 @@ endfunction()
 
 lonejson_import_cache_path(CMAKE_C_COMPILER)
 lonejson_import_cache_path(CMAKE_LINKER)
+lonejson_import_cache_path(CMAKE_OTOOL)
 lonejson_import_cache_path(CMAKE_BUILD_TYPE)
+lonejson_import_cache_path(LONEJSON_ABI_VERSION)
 lonejson_import_cache_path(LONEJSON_MACOS_DEPLOYMENT_TARGET)
 lonejson_import_cache_path(LONEJSON_OSXCROSS_HOST)
 
@@ -45,6 +47,9 @@ endif()
 if(NOT LONEJSON_MACOS_DEPLOYMENT_TARGET)
   set(LONEJSON_MACOS_DEPLOYMENT_TARGET "15.0")
 endif()
+if(NOT LONEJSON_ABI_VERSION)
+  set(LONEJSON_ABI_VERSION "19")
+endif()
 
 get_filename_component(_lonejson_compiler_dir "${CMAKE_C_COMPILER}" DIRECTORY)
 if(NOT CMAKE_LINKER OR NOT EXISTS "${CMAKE_LINKER}")
@@ -57,23 +62,36 @@ endif()
 if(NOT EXISTS "${CMAKE_LINKER}")
   message(FATAL_ERROR "CMAKE_LINKER is required for Darwin smoke bundle")
 endif()
+get_filename_component(_lonejson_linker_dir "${CMAKE_LINKER}" DIRECTORY)
+set(ENV{PATH} "${_lonejson_linker_dir}:$ENV{PATH}")
+if(NOT CMAKE_OTOOL OR NOT EXISTS "${CMAKE_OTOOL}")
+  if(NOT LONEJSON_OSXCROSS_HOST)
+    set(LONEJSON_OSXCROSS_HOST "arm64-apple-darwin25")
+  endif()
+  set(CMAKE_OTOOL
+      "${_lonejson_linker_dir}/${LONEJSON_OSXCROSS_HOST}-otool")
+endif()
+if(NOT EXISTS "${CMAKE_OTOOL}")
+  message(FATAL_ERROR "CMAKE_OTOOL is required for Darwin smoke bundle")
+endif()
 
 set(bundle_root "${LONEJSON_BINARY_DIR}/darwin-smoke-bundle")
 set(extract_root "${bundle_root}/release")
 set(consumer_bin_dir "${bundle_root}/consumer-bin")
-set(stage_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}-smoke")
+set(stage_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}-smoke-test")
 set(stage_root "${bundle_root}/${stage_name}")
 set(release_archive
     "${LONEJSON_ROOT}/dist/liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}.tar.gz")
 set(release_prefix
     "${extract_root}/liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}")
-set(smoke_archive "${bundle_root}/${stage_name}.zip")
+set(smoke_archive "${LONEJSON_ROOT}/dist/${stage_name}.zip")
 
 if(NOT EXISTS "${release_archive}")
   message(FATAL_ERROR "missing Darwin release archive: ${release_archive}")
 endif()
 
 file(REMOVE_RECURSE "${bundle_root}")
+file(MAKE_DIRECTORY "${LONEJSON_ROOT}/dist")
 file(MAKE_DIRECTORY
   "${extract_root}"
   "${consumer_bin_dir}"
@@ -100,8 +118,9 @@ set(common_compile_args
   -Wall
   -Wextra
   -Werror
+  -Wno-fuse-ld-path
   "-mmacosx-version-min=${LONEJSON_MACOS_DEPLOYMENT_TARGET}"
-  "--ld-path=${CMAKE_LINKER}"
+  "-fuse-ld=${CMAKE_LINKER}"
   -I "${release_prefix}/include"
   "${LONEJSON_ROOT}/tests/test_link_consumer.c")
 
@@ -186,7 +205,7 @@ foreach(release_dylib IN LISTS release_dylibs)
 endforeach()
 set(versioned_dylib "${stage_root}/lib/liblonejson.${LONEJSON_VERSION}.dylib")
 if(EXISTS "${versioned_dylib}")
-  file(COPY_FILE "${versioned_dylib}" "${stage_root}/lib/liblonejson.4.dylib")
+  file(COPY_FILE "${versioned_dylib}" "${stage_root}/lib/liblonejson.${LONEJSON_ABI_VERSION}.dylib")
   file(COPY_FILE "${versioned_dylib}" "${stage_root}/lib/liblonejson.dylib")
 endif()
 
@@ -230,30 +249,23 @@ file(CHMOD "${stage_root}/run-smoke.sh"
     GROUP_READ GROUP_EXECUTE
     WORLD_READ WORLD_EXECUTE)
 
-find_program(LONEJSON_OTOOL NAMES
-  "${LONEJSON_OSXCROSS_HOST}-otool"
-  arm64-apple-darwin25-otool
-  otool
-  HINTS "${_lonejson_compiler_dir}")
-if(LONEJSON_OTOOL)
-  foreach(smoke_binary
-          lonejson_static_smoke
-          lonejson_shared_smoke
-          example_array_stream
-          example_parse_string
-          example_serialize_jsonl)
-    execute_process(
-      COMMAND "${LONEJSON_OTOOL}" -hv "${stage_root}/bin/${smoke_binary}"
-      RESULT_VARIABLE otool_result
-      OUTPUT_VARIABLE otool_output
-      ERROR_VARIABLE otool_error)
-    if(NOT otool_result EQUAL 0 OR NOT otool_output MATCHES "ARM64")
-      message(FATAL_ERROR
-        "Darwin smoke binary is not an arm64 Mach-O executable: "
-        "${smoke_binary}\n${otool_output}${otool_error}")
-    endif()
-  endforeach()
-endif()
+foreach(smoke_binary
+        lonejson_static_smoke
+        lonejson_shared_smoke
+        example_array_stream
+        example_parse_string
+        example_serialize_jsonl)
+  execute_process(
+    COMMAND "${CMAKE_OTOOL}" -hv "${stage_root}/bin/${smoke_binary}"
+    RESULT_VARIABLE otool_result
+    OUTPUT_VARIABLE otool_output
+    ERROR_VARIABLE otool_error)
+  if(NOT otool_result EQUAL 0 OR NOT otool_output MATCHES "ARM64")
+    message(FATAL_ERROR
+      "Darwin smoke binary is not an arm64 Mach-O executable: "
+      "${smoke_binary}\n${otool_output}${otool_error}")
+  endif()
+endforeach()
 
 file(REMOVE "${smoke_archive}")
 execute_process(

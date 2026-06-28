@@ -34,6 +34,9 @@ set(CMAKE_LINKER
 set(CMAKE_INSTALL_NAME_TOOL
     "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-install_name_tool"
     CACHE FILEPATH "")
+set(CMAKE_OTOOL
+    "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-otool"
+    CACHE FILEPATH "")
 set(CMAKE_STRIP
     "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-strip"
     CACHE FILEPATH "")
@@ -44,6 +47,7 @@ foreach(_lonejson_required_tool
         CMAKE_RANLIB
         CMAKE_LINKER
         CMAKE_INSTALL_NAME_TOOL
+        CMAKE_OTOOL
         CMAKE_STRIP)
   if(NOT EXISTS "${${_lonejson_required_tool}}")
     message(FATAL_ERROR
@@ -54,14 +58,25 @@ foreach(_lonejson_required_tool
   endif()
 endforeach()
 
-set(_lonejson_darwin_linker_flag "--ld-path=${CMAKE_LINKER}")
+set(_lonejson_darwin_linker_flag "-fuse-ld=${CMAKE_LINKER}")
+string(CONCAT _lonejson_legacy_darwin_linker_regex "(^| )--" "ld-path=[^ ]+")
 foreach(_lonejson_linker_flags
         CMAKE_EXE_LINKER_FLAGS
         CMAKE_SHARED_LINKER_FLAGS
         CMAKE_MODULE_LINKER_FLAGS)
-  if(NOT "${${_lonejson_linker_flags}}" MATCHES "(^| )(-fuse-ld=|--ld-path=)")
+  set(_lonejson_current_linker_flags "${${_lonejson_linker_flags}}")
+  string(REGEX REPLACE "${_lonejson_legacy_darwin_linker_regex}" ""
+         _lonejson_current_linker_flags "${_lonejson_current_linker_flags}")
+  string(STRIP "${_lonejson_current_linker_flags}"
+         _lonejson_current_linker_flags)
+  if(NOT "${_lonejson_current_linker_flags}" MATCHES "(^| )-fuse-ld=")
+    set(_lonejson_current_linker_flags
+        "${_lonejson_darwin_linker_flag} ${_lonejson_current_linker_flags}")
+  endif()
+  if(NOT "${${_lonejson_linker_flags}}" STREQUAL
+      "${_lonejson_current_linker_flags}")
     set(${_lonejson_linker_flags}
-        "${_lonejson_darwin_linker_flag} ${${_lonejson_linker_flags}}"
+        "${_lonejson_current_linker_flags}"
         CACHE STRING "" FORCE)
   endif()
 endforeach()

@@ -39,15 +39,21 @@ fi
 
 mkdir -p "$lua_rock_tree"
 touch "$lua_rockspec" "$lua_stamp"
+touch -t 200001010000 "$lua_rockspec" "$lua_stamp"
 
-if ! make_lua_rock -n -W src/lonejson.c lua-rock |
-  grep -q 'cmake --build --preset debug --target lonejson_shared'; then
+core_source_dry_run=$(make_lua_rock -n lua-rock)
+if ! printf '%s\n' "$core_source_dry_run" |
+    grep -q 'cmake --build --preset debug --target lonejson_shared'; then
+  printf '%s\n' "$core_source_dry_run" >&2
   printf 'lua-rock stamp did not rebuild when src/lonejson.c changed\n' >&2
   exit 1
 fi
 
-if ! make_lua_rock -n -W src/impl/00_prelude.h lua-rock |
-  grep -q 'cmake --build --preset debug --target lonejson_shared'; then
+touch -t 200001010000 "$lua_rockspec" "$lua_stamp"
+impl_header_dry_run=$(make_lua_rock -n lua-rock)
+if ! printf '%s\n' "$impl_header_dry_run" |
+    grep -q 'cmake --build --preset debug --target lonejson_shared'; then
+  printf '%s\n' "$impl_header_dry_run" >&2
   printf 'lua-rock stamp did not rebuild when src/impl headers changed\n' >&2
   exit 1
 fi

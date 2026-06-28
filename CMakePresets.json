@@ -25,6 +25,10 @@
       }
     },
     {
+      "name": "debug-lua",
+      "inherits": "debug"
+    },
+    {
       "name": "host",
       "inherits": "base",
       "cacheVariables": {
@@ -152,6 +156,10 @@
     {
       "name": "debug",
       "configurePreset": "debug"
+    },
+    {
+      "name": "debug-lua",
+      "configurePreset": "debug-lua"
     },
     {
       "name": "host",
@@ -308,6 +316,13 @@
     {
       "name": "debug",
       "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-lua",
+      "configurePreset": "debug-lua",
       "output": {
         "outputOnFailure": true
       }

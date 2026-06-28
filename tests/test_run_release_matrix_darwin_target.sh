@@ -13,9 +13,18 @@ printf '%s\n' "$verify_script" | grep -F -- '-D "CMAKE_OSX_DEPLOYMENT_TARGET=$da
 printf '%s\n' "$verify_script" | grep -F -- 'target_raw_compile_flags()' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-mmacosx-version-min=$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'raw_compile_flags="$(target_raw_compile_flags "$target_id")"' >/dev/null
-printf '%s\n' "$verify_script" | grep -F -- '"$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"' >/dev/null
+printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-fuse-ld=$LINKER"' >/dev/null
+printf '%s\n' "$verify_script" | grep -F -- 'run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'scripts/discover_target_tools.sh' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'package-darwin-smoke-bundle' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'make package-verify' >/dev/null
+grep -F 'liblonejson.${LONEJSON_ABI_VERSION}.dylib' \
+  "$repo_root/cmake/package_darwin_smoke_bundle.cmake" >/dev/null
+if grep -F 'liblonejson.4.dylib' \
+    "$repo_root/cmake/package_darwin_smoke_bundle.cmake" >/dev/null; then
+  printf 'Darwin smoke bundle must not hard-code ABI dylib aliases\n' >&2
+  exit 1
+fi
 if printf '%s\n' "$matrix_script" | grep -F -- 'require_archive_contract' >/dev/null; then
   printf 'run_release_matrix.sh must delegate archive checks to package-verify\n' >&2
   exit 1

@@ -8,10 +8,15 @@ set(archive_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}")
 set(package_stage_root "${LONEJSON_BINARY_DIR}/package/archive")
 set(package_root "${package_stage_root}/${archive_name}")
 file(REMOVE_RECURSE "${package_stage_root}")
+include("${LONEJSON_ROOT}/cmake/c_pkt_systems_metadata.cmake")
+lonejson_c_pkt_systems_sha256("${LONEJSON_TARGET_ID}" c_pkt_systems_sha256)
+set(c_pkt_systems_url
+    "${LONEJSON_C_PKT_SYSTEMS_BASE_URL_DEFAULT}/c.pkt.systems-${LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION}-${LONEJSON_TARGET_ID}.tar.gz")
 file(MAKE_DIRECTORY "${package_root}/include")
 file(MAKE_DIRECTORY "${package_root}/lib")
 file(MAKE_DIRECTORY "${package_root}/lib/cmake/lonejson")
 file(MAKE_DIRECTORY "${package_root}/lib/pkgconfig")
+file(MAKE_DIRECTORY "${package_root}/share/lonejson")
 file(MAKE_DIRECTORY "${package_root}/share/doc/liblonejson")
 
 file(COPY "${LONEJSON_PUBLIC_HEADER}" DESTINATION "${package_root}/include")
@@ -60,6 +65,32 @@ endif()
 
 file(COPY "${LONEJSON_ROOT}/LICENSE" DESTINATION "${package_root}/share/doc/liblonejson")
 file(COPY "${LONEJSON_ROOT}/README.md" DESTINATION "${package_root}/share/doc/liblonejson")
+
+set(dependencies_file "${package_root}/share/lonejson/dependencies.json")
+file(WRITE "${dependencies_file}"
+"{
+  \"schema\": \"pkt.systems.dependencies.v1\",
+  \"project\": \"lonejson\",
+  \"version\": \"${LONEJSON_VERSION}\",
+  \"target_id\": \"${LONEJSON_TARGET_ID}\",
+  \"dependencies\": [
+    {
+      \"name\": \"c.pkt.systems\",
+      \"version\": \"${LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION}\",
+      \"target_id\": \"${LONEJSON_TARGET_ID}\",
+      \"source_url\": \"${c_pkt_systems_url}\",
+      \"sha256\": \"${c_pkt_systems_sha256}\",
+      \"bundled\": false,
+      \"external\": true,
+      \"role\": \"release-sdk-build-dependency\",
+      \"provides\": [
+        \"curl\",
+        \"openssl\"
+      ]
+    }
+  ]
+}
+")
 
 set(pkgconfig_file "${package_root}/lib/pkgconfig/lonejson.pc")
 file(WRITE "${pkgconfig_file}"

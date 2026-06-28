@@ -92,6 +92,8 @@ run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64
 run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu
 run_target armhf-linux-musl-release armhf-linux-musl package-archive-armhf-linux-musl
 if [ -x "$darwin_toolchain" ]; then
+    darwin_tool_bin="$(dirname -- "$darwin_toolchain")"
+    export PATH="$darwin_tool_bin:$PATH"
     cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=arm64-apple-darwin -P cmake/fetch_c_pkt_systems.cmake
     run_build_only_target arm64-apple-darwin-release arm64-apple-darwin package-archive-arm64-apple-darwin
     ./scripts/smoke_darwin_release.sh arm64-apple-darwin-release
