@@ -702,10 +702,179 @@ static void test_oidc_discovery_failures(void) {
          LONEJSON_STATUS_INVALID_JSON);
   lonejson_oidc_discovery_cleanup(&discovery);
 }
+
+static lonejson_oidc_jwks_cache_policy test_oidc_jwks_cache_policy(void) {
+  lonejson_oidc_jwks_cache_policy policy;
+
+  memset(&policy, 0, sizeof(policy));
+  policy.issuer = "https://id.example";
+  policy.jwks_uri = "https://id.example/jwks";
+  policy.max_jwks_bytes = 4096u;
+  policy.now = 1000;
+  policy.ttl_seconds = 60;
+  return policy;
+}
+
+static void test_oidc_jwks_cache_update_and_select(void) {
+  static const char jwks_json[] =
+      "{\"keys\":["
+      "{\"kty\":\"RSA\",\"kid\":\"rsa-test\",\"use\":\"sig\",\"alg\":\"RS256\","
+      "\"n\":\"AQIDBA\",\"e\":\"AQAB\"},"
+      "{\"kty\":\"EC\",\"kid\":\"ec\",\"use\":\"sig\",\"alg\":\"ES256\","
+      "\"crv\":\"P-256\",\"x\":\"AAEC\",\"y\":\"AwQF\"}"
+      "]}";
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_policy policy;
+  lonejson_jwk_select_options options;
+  const lonejson_jwk *selected;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  lonejson_oidc_jwks_cache_init(&cache);
+  policy = test_oidc_jwks_cache_policy();
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &policy, jwks_json,
+             strlen(jwks_json), &error) == LONEJSON_STATUS_OK);
+  EXPECT(cache.has_jwks);
+  EXPECT(cache.fetched_at == 1000);
+  EXPECT(cache.expires_at == 1060);
+  EXPECT(strcmp(cache.issuer, "https://id.example") == 0);
+  EXPECT(strcmp(cache.jwks_uri, "https://id.example/jwks") == 0);
+  EXPECT(lj_oidc_jwks_cache_is_fresh(&cache, &policy));
+
+  memset(&options, 0, sizeof(options));
+  options.kid = "rsa-test";
+  options.kty = "RSA";
+  options.alg = "RS256";
+  options.use = "sig";
+  EXPECT(lonejson_oidc_jwks_cache_select(&cache, &policy, &options, &selected,
+                                         &error) == LONEJSON_STATUS_OK);
+  EXPECT(selected != NULL);
+  EXPECT(strcmp(selected->kid, "rsa-test") == 0);
+
+  policy.now = 1060;
+  EXPECT(!lonejson_oidc_jwks_cache_is_fresh(&cache, &policy));
+  EXPECT(lonejson_oidc_jwks_cache_select(&cache, &policy, &options, &selected,
+                                         &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  policy = test_oidc_jwks_cache_policy();
+  policy.issuer = "https://other.example";
+  EXPECT(lonejson_oidc_jwks_cache_select(&cache, &policy, &options, &selected,
+                                         &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+  EXPECT(cache.jwks.keys.items == NULL);
+}
+
+static void test_oidc_jwks_cache_failure_modes(void) {
+  static const char good_jwks[] =
+      "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"rsa-test\",\"use\":\"sig\","
+      "\"alg\":\"RS256\",\"n\":\"AQIDBA\",\"e\":\"AQAB\"}]}";
+  static const char bad_jwks[] = "{\"keys\":[]}";
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_policy policy;
+  lonejson_jwk_select_options options;
+  const lonejson_jwk *selected;
+  lonejson_error error;
+  const char *old_issuer;
+
+  lonejson_error_init(&error);
+  lonejson_oidc_jwks_cache_init(&cache);
+  policy = test_oidc_jwks_cache_policy();
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &policy, good_jwks,
+             strlen(good_jwks), &error) == LONEJSON_STATUS_OK);
+  old_issuer = cache.issuer;
+
+  policy.max_jwks_bytes = 4u;
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &policy, good_jwks,
+             strlen(good_jwks), &error) == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(cache.issuer == old_issuer);
+
+  policy = test_oidc_jwks_cache_policy();
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &policy, bad_jwks,
+             strlen(bad_jwks), &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(cache.issuer == old_issuer);
+
+  policy.ttl_seconds = 0;
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &policy, good_jwks,
+             strlen(good_jwks), &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  policy = test_oidc_jwks_cache_policy();
+  policy.issuer = "http://id.example";
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &policy, good_jwks,
+             strlen(good_jwks), &error) == LONEJSON_STATUS_INVALID_JSON);
+  policy = test_oidc_jwks_cache_policy();
+  policy.now = (lonejson_int64)(LONEJSON_UINT64_MAX >> 1) - 1;
+  policy.ttl_seconds = 2;
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &policy, good_jwks,
+             strlen(good_jwks), &error) == LONEJSON_STATUS_OVERFLOW);
+
+  memset(&options, 0, sizeof(options));
+  EXPECT(lonejson_oidc_jwks_cache_select(&cache, NULL, &options, &selected,
+                                         &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_oidc_jwks_cache_select(&cache, &policy, &options, NULL,
+                                         &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+}
+
+static void test_oidc_jwks_cache_curl_adapter(void) {
+  static const char chunk0[] =
+      "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"rsa-test\",";
+  static const char chunk1[] =
+      "\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"AQIDBA\",\"e\":\"AQAB\"}]}";
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_parse parse;
+  lonejson_oidc_jwks_cache_policy policy;
+  lonejson_jwk_select_options options;
+  const lonejson_jwk *selected;
+  size_t wrote;
+
+  lonejson_oidc_jwks_cache_init(&cache);
+  memset(&parse, 0, sizeof(parse));
+  policy = test_oidc_jwks_cache_policy();
+  EXPECT(lonejson_oidc_jwks_cache_parse_init(&parse, test_default_runtime(),
+                                             &cache, &policy) ==
+         LONEJSON_STATUS_OK);
+  wrote = lonejson_oidc_jwks_cache_write_callback(
+      (char *)chunk0, 1u, strlen(chunk0), &parse);
+  EXPECT(wrote == strlen(chunk0));
+  wrote = parse.write_callback(&parse, (char *)chunk1, 1u, strlen(chunk1));
+  EXPECT(wrote == strlen(chunk1));
+  EXPECT(parse.finish(&parse) == LONEJSON_STATUS_OK);
+
+  memset(&options, 0, sizeof(options));
+  options.kid = "rsa-test";
+  EXPECT(lonejson_oidc_jwks_cache_select(&cache, &policy, &options, &selected,
+                                         &parse.error) == LONEJSON_STATUS_OK);
+  EXPECT(selected != NULL);
+  parse.cleanup(&parse);
+
+  policy.max_jwks_bytes = 8u;
+  EXPECT(lj_oidc_jwks_cache_parse_init(&parse, test_default_runtime(), &cache,
+                                       &policy) == LJ_STATUS_OK);
+  wrote = lj_oidc_jwks_cache_write_callback((char *)chunk0, 1u,
+                                            strlen(chunk0), &parse);
+  EXPECT(wrote == 0u);
+  EXPECT(lonejson_oidc_jwks_cache_parse_finish(&parse) ==
+         LONEJSON_STATUS_OVERFLOW);
+  lonejson_oidc_jwks_cache_parse_cleanup(&parse);
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+}
 #else
 static void test_oidc_discovery_url(void) {}
 static void test_oidc_discovery_parse_and_validate(void) {}
 static void test_oidc_discovery_failures(void) {}
+static void test_oidc_jwks_cache_update_and_select(void) {}
+static void test_oidc_jwks_cache_failure_modes(void) {}
+static void test_oidc_jwks_cache_curl_adapter(void) {}
 #endif
 #else
 static void test_jwt_base64url_decode_vectors(void) {}
@@ -722,4 +891,7 @@ static void test_jwt_decode_claim_failures(void) {}
 static void test_oidc_discovery_url(void) {}
 static void test_oidc_discovery_parse_and_validate(void) {}
 static void test_oidc_discovery_failures(void) {}
+static void test_oidc_jwks_cache_update_and_select(void) {}
+static void test_oidc_jwks_cache_failure_modes(void) {}
+static void test_oidc_jwks_cache_curl_adapter(void) {}
 #endif

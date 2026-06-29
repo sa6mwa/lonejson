@@ -84,6 +84,29 @@ ljlua_auth_push_oidc_discovery(lua_State *L,
                                   "token_endpoint");
   ljlua_auth_push_optional_string(L, discovery->jwks_uri, "jwks_uri");
 }
+
+static void ljlua_auth_read_jwks_cache_policy(
+    lua_State *L, int index, lonejson_oidc_jwks_cache_policy *policy) {
+  memset(policy, 0, sizeof(*policy));
+  luaL_checktype(L, index, LUA_TTABLE);
+  index = lua_absindex(L, index);
+  lua_getfield(L, index, "issuer");
+  policy->issuer = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  lua_getfield(L, index, "jwks_uri");
+  policy->jwks_uri = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  lua_getfield(L, index, "now");
+  policy->now = (lonejson_int64)luaL_checkinteger(L, -1);
+  lua_pop(L, 1);
+  lua_getfield(L, index, "ttl_seconds");
+  policy->ttl_seconds = (lonejson_int64)luaL_checkinteger(L, -1);
+  lua_pop(L, 1);
+  lua_getfield(L, index, "max_jwks_bytes");
+  policy->max_jwks_bytes =
+      lua_isnil(L, -1) ? 0u : (size_t)luaL_checkinteger(L, -1);
+  lua_pop(L, 1);
+}
 #endif
 
 static lonejson *ljlua_auth_runtime_arg(lua_State *L, int *arg,
@@ -436,6 +459,51 @@ static int ljlua_oidc_discovery_parse_json(lua_State *L) {
   }
   ljlua_auth_push_oidc_discovery(L, &discovery);
   lonejson_oidc_discovery_cleanup(&discovery);
+  return 1;
+}
+
+static int ljlua_oidc_jwks_cache_select_json(lua_State *L) {
+  lonejson *runtime;
+  lonejson *owned_runtime;
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_policy policy;
+  lonejson_jwk_select_options options;
+  const lonejson_jwk *selected;
+  lonejson_error error;
+  lonejson_status status;
+  const char *json;
+  size_t len;
+  int arg;
+
+  runtime = ljlua_auth_runtime_arg(L, &arg, &owned_runtime, &error);
+  if (runtime == NULL) {
+    return ljlua_push_status_result(L, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                    &error);
+  }
+  json = luaL_checklstring(L, arg, &len);
+  ljlua_auth_read_jwks_cache_policy(L, arg + 1, &policy);
+  ljlua_auth_read_jwk_select(L, arg + 2, &options);
+  lonejson_oidc_jwks_cache_init(&cache);
+  status = lonejson_oidc_jwks_cache_update_json(runtime, &cache, &policy, json,
+                                                len, &error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_oidc_jwks_cache_select(&cache, &policy, &options,
+                                             &selected, &error);
+  }
+  if (owned_runtime != NULL) {
+    lonejson_free(owned_runtime);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oidc_jwks_cache_cleanup(&cache);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  if (selected == NULL) {
+    lonejson_oidc_jwks_cache_cleanup(&cache);
+    lua_pushnil(L);
+    return 1;
+  }
+  ljlua_auth_push_jwk(L, selected);
+  lonejson_oidc_jwks_cache_cleanup(&cache);
   return 1;
 }
 #endif

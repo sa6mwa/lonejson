@@ -67,6 +67,15 @@ void lonejson_oidc_discovery_url(void);
 void lonejson_oidc_discovery_parse_json(void);
 void lonejson_oidc_discovery_validate_issuer(void);
 void lonejson_oidc_discovery_cleanup(void);
+void lonejson_oidc_jwks_cache_init(void);
+void lonejson_oidc_jwks_cache_cleanup(void);
+void lonejson_oidc_jwks_cache_update_json(void);
+void lonejson_oidc_jwks_cache_is_fresh(void);
+void lonejson_oidc_jwks_cache_select(void);
+void lonejson_oidc_jwks_cache_parse_init(void);
+void lonejson_oidc_jwks_cache_write_callback(void);
+void lonejson_oidc_jwks_cache_parse_finish(void);
+void lonejson_oidc_jwks_cache_parse_cleanup(void);
 
 #endif
 EOF
@@ -149,6 +158,33 @@ void lonejson_oidc_discovery_validate_issuer(void) {
 }
 
 void lonejson_oidc_discovery_cleanup(void) {
+}
+
+void lonejson_oidc_jwks_cache_init(void) {
+}
+
+void lonejson_oidc_jwks_cache_cleanup(void) {
+}
+
+void lonejson_oidc_jwks_cache_update_json(void) {
+}
+
+void lonejson_oidc_jwks_cache_is_fresh(void) {
+}
+
+void lonejson_oidc_jwks_cache_select(void) {
+}
+
+void lonejson_oidc_jwks_cache_parse_init(void) {
+}
+
+void lonejson_oidc_jwks_cache_write_callback(void) {
+}
+
+void lonejson_oidc_jwks_cache_parse_finish(void) {
+}
+
+void lonejson_oidc_jwks_cache_parse_cleanup(void) {
 }
 EOF
 

@@ -59,6 +59,7 @@ LONEJSON_MAP_DEFINE(lonejson__oidc_discovery_map, lonejson_oidc_discovery,
 #define LONEJSON__JWT_DEFAULT_MAX_HEADER_BYTES (16u * 1024u)
 #define LONEJSON__JWT_DEFAULT_MAX_CLAIMS_BYTES (256u * 1024u)
 #define LONEJSON__JWT_MAX_RSA_COMPONENT_BYTES (8u * 1024u)
+#define LONEJSON__OIDC_DEFAULT_MAX_JWKS_BYTES (1024u * 1024u)
 
 typedef enum lonejson__jwt_claim_field {
   LONEJSON__JWT_FIELD_NONE = 0,
@@ -711,6 +712,256 @@ lonejson_status lonejson_oidc_discovery_validate_issuer(
   }
   return LONEJSON_STATUS_OK;
 }
+
+static lonejson_status lonejson__oidc_jwks_cache_validate_policy(
+    const lonejson_oidc_jwks_cache_policy *policy, lonejson_error *error) {
+  lonejson_int64 max_i64 = (lonejson_int64)(LONEJSON_UINT64_MAX >> 1);
+
+  if (policy == NULL || policy->issuer == NULL || policy->jwks_uri == NULL) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "OIDC JWKS cache policy, issuer, and jwks_uri are required");
+  }
+  if (policy->ttl_seconds <= 0) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "OIDC JWKS cache ttl_seconds must be positive");
+  }
+  if (policy->now > 0 && policy->ttl_seconds > max_i64 - policy->now) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "OIDC JWKS cache expiry overflows");
+  }
+  if (lonejson__oidc_require_https_url(policy->issuer, "issuer", 0, error) !=
+      LONEJSON_STATUS_OK) {
+    return error != NULL ? error->code : LONEJSON_STATUS_INVALID_JSON;
+  }
+  return lonejson__oidc_require_https_url(policy->jwks_uri, "jwks_uri", 1,
+                                          error);
+}
+
+static int lonejson__oidc_jwks_cache_matches_policy(
+    const lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy) {
+  return cache != NULL && policy != NULL && cache->has_jwks &&
+         cache->issuer != NULL && cache->jwks_uri != NULL &&
+         strcmp(cache->issuer, policy->issuer) == 0 &&
+         strcmp(cache->jwks_uri, policy->jwks_uri) == 0 &&
+         policy->now < cache->expires_at;
+}
+
+void lonejson_oidc_jwks_cache_init(lonejson_oidc_jwks_cache *cache) {
+  if (cache != NULL) {
+    memset(cache, 0, sizeof(*cache));
+  }
+}
+
+void lonejson_oidc_jwks_cache_cleanup(lonejson_oidc_jwks_cache *cache) {
+  if (cache != NULL) {
+    lonejson__owned_free(cache->issuer);
+    lonejson__owned_free(cache->jwks_uri);
+    lonejson_jwks_cleanup(&cache->jwks);
+    memset(cache, 0, sizeof(*cache));
+  }
+}
+
+lonejson_status lonejson_oidc_jwks_cache_update_json(
+    lonejson *runtime, lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy, const char *json, size_t len,
+    lonejson_error *error) {
+  lonejson_jwks next_jwks;
+  char *issuer = NULL;
+  char *jwks_uri = NULL;
+  size_t max_bytes;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (cache == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OIDC JWKS cache is required");
+  }
+  if (json == NULL && len != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OIDC JWKS JSON input is required");
+  }
+  status = lonejson__oidc_jwks_cache_validate_policy(policy, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  max_bytes = policy->max_jwks_bytes == 0u
+                  ? LONEJSON__OIDC_DEFAULT_MAX_JWKS_BYTES
+                  : policy->max_jwks_bytes;
+  if (len > max_bytes) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, len, 0u, 0u,
+                               "OIDC JWKS response exceeds configured limit");
+  }
+  lonejson_jwks_init(&next_jwks);
+  status = lonejson_jwks_parse_json(runtime, json, len, &next_jwks, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  issuer = lonejson__owned_strdup(NULL, policy->issuer);
+  jwks_uri = lonejson__owned_strdup(NULL, policy->jwks_uri);
+  if (issuer == NULL || jwks_uri == NULL) {
+    lonejson__owned_free(issuer);
+    lonejson__owned_free(jwks_uri);
+    lonejson_jwks_cleanup(&next_jwks);
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to allocate OIDC JWKS metadata");
+  }
+  lonejson_oidc_jwks_cache_cleanup(cache);
+  cache->issuer = issuer;
+  cache->jwks_uri = jwks_uri;
+  cache->fetched_at = policy->now;
+  cache->expires_at = policy->now + policy->ttl_seconds;
+  cache->max_jwks_bytes = max_bytes;
+  cache->has_jwks = 1;
+  cache->jwks = next_jwks;
+  return LONEJSON_STATUS_OK;
+}
+
+int lonejson_oidc_jwks_cache_is_fresh(
+    const lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy) {
+  return lonejson__oidc_jwks_cache_matches_policy(cache, policy);
+}
+
+lonejson_status lonejson_oidc_jwks_cache_select(
+    const lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy,
+    const lonejson_jwk_select_options *options, const lonejson_jwk **out,
+    lonejson_error *error) {
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OIDC JWKS selected key output is required");
+  }
+  *out = NULL;
+  status = lonejson__oidc_jwks_cache_validate_policy(policy, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (!lonejson__oidc_jwks_cache_matches_policy(cache, policy)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "OIDC JWKS cache is missing or stale");
+  }
+  return lonejson_jwks_select(&cache->jwks, options, out, error);
+}
+
+#ifdef LONEJSON_WITH_CURL
+lonejson_status lonejson_oidc_jwks_cache_parse_init(
+    lonejson_oidc_jwks_cache_parse *ctx, lonejson *runtime,
+    lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy) {
+  lonejson_status status;
+  char *issuer;
+  char *jwks_uri;
+
+  if (ctx == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (lonejson__curl_state_is_live(ctx->_reserved_state)) {
+    lonejson_oidc_jwks_cache_parse_cleanup(ctx);
+  }
+  memset(ctx, 0, sizeof(*ctx));
+  lonejson__oidc_jwks_cache_assign_methods(ctx);
+  lonejson__curl_state_mark_live(ctx->_reserved_state);
+  lonejson_owned_buffer_init(&ctx->response);
+  if (runtime == NULL || cache == NULL || policy == NULL) {
+    return lonejson__set_error(
+        &ctx->error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "runtime, JWKS cache, and cache policy are required");
+  }
+  status = lonejson__oidc_jwks_cache_validate_policy(policy, &ctx->error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  issuer = lonejson__owned_strdup(NULL, policy->issuer);
+  jwks_uri = lonejson__owned_strdup(NULL, policy->jwks_uri);
+  if (issuer == NULL || jwks_uri == NULL) {
+    lonejson__owned_free(issuer);
+    lonejson__owned_free(jwks_uri);
+    return lonejson__set_error(&ctx->error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                               0u, 0u, 0u,
+                               "failed to allocate OIDC JWKS cache policy");
+  }
+  ctx->runtime = runtime;
+  ctx->cache = cache;
+  ctx->policy = *policy;
+  ctx->policy.issuer = issuer;
+  ctx->policy.jwks_uri = jwks_uri;
+  return LONEJSON_STATUS_OK;
+}
+
+size_t lonejson_oidc_jwks_cache_write_callback(char *ptr, size_t size,
+                                               size_t nmemb, void *userdata) {
+  lonejson_oidc_jwks_cache_parse *ctx =
+      (lonejson_oidc_jwks_cache_parse *)userdata;
+  size_t bytes;
+  size_t max_bytes;
+
+  if (ctx == NULL || !lonejson__curl_state_is_live(ctx->_reserved_state)) {
+    return 0u;
+  }
+  if (size != 0u && nmemb > SIZE_MAX / size) {
+    (void)lonejson__set_error(&ctx->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                              "OIDC JWKS response chunk size overflows");
+    return 0u;
+  }
+  bytes = size * nmemb;
+  if (bytes == 0u) {
+    return 0u;
+  }
+  if (ptr == NULL) {
+    (void)lonejson__set_error(&ctx->error, LONEJSON_STATUS_INVALID_ARGUMENT,
+                              0u, 0u, 0u,
+                              "OIDC JWKS response chunk is required");
+    return 0u;
+  }
+  max_bytes = ctx->policy.max_jwks_bytes == 0u
+                  ? LONEJSON__OIDC_DEFAULT_MAX_JWKS_BYTES
+                  : ctx->policy.max_jwks_bytes;
+  if (ctx->response.len > max_bytes ||
+      bytes > max_bytes - ctx->response.len) {
+    (void)lonejson__set_error(&ctx->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                              "OIDC JWKS response exceeds configured limit");
+    return 0u;
+  }
+  return lonejson_owned_buffer_sink(&ctx->response, ptr, bytes, &ctx->error) ==
+                 LONEJSON_STATUS_OK
+             ? bytes
+             : 0u;
+}
+
+lonejson_status lonejson_oidc_jwks_cache_parse_finish(
+    lonejson_oidc_jwks_cache_parse *ctx) {
+  if (ctx == NULL || !lonejson__curl_state_is_live(ctx->_reserved_state)) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (ctx->error.code != LONEJSON_STATUS_OK) {
+    return ctx->error.code;
+  }
+  return lonejson_oidc_jwks_cache_update_json(
+      ctx->runtime, ctx->cache, &ctx->policy, ctx->response.data,
+      ctx->response.len, &ctx->error);
+}
+
+void lonejson_oidc_jwks_cache_parse_cleanup(
+    lonejson_oidc_jwks_cache_parse *ctx) {
+  if (ctx == NULL) {
+    return;
+  }
+  if (!lonejson__curl_state_is_live(ctx->_reserved_state)) {
+    return;
+  }
+  lonejson__owned_free((void *)ctx->policy.issuer);
+  lonejson__owned_free((void *)ctx->policy.jwks_uri);
+  lonejson_owned_buffer_free(&ctx->response);
+  memset(ctx, 0, sizeof(*ctx));
+  lonejson__oidc_jwks_cache_assign_methods(ctx);
+}
+#endif
 #endif
 
 static int lonejson__jwt_path_is(const lonejson_value_path *path,

@@ -237,16 +237,48 @@ if lonejson.jwt_parse_compact ~= nil then
         '"token_endpoint":"https://id.example/token",' ..
         '"jwks_uri":"https://id.example/jwks"}'
     local discovery = lj:oidc_discovery_parse_json(discovery_json, "https://id.example/tenant")
+    local cache_policy = {
+      issuer = "https://id.example/tenant",
+      jwks_uri = "https://id.example/jwks",
+      now = 1000,
+      ttl_seconds = 60,
+      max_jwks_bytes = 4096,
+    }
+    local cache_selected = lj:oidc_jwks_cache_select_json(
+        jwks_json, cache_policy, { kid = "rsa1", kty = "RSA", alg = "RS256", use = "sig" })
+    local cache_missing = lonejson.oidc_jwks_cache_select_json(
+        jwks_json, cache_policy, { kid = "missing" })
 
     assert_eq(lonejson.oidc_discovery_url("https://id.example/tenant/"),
               "https://id.example/.well-known/openid-configuration/tenant")
     assert_eq(discovery.issuer, "https://id.example/tenant")
     assert_eq(discovery.token_endpoint, "https://id.example/token")
     assert_eq(discovery.jwks_uri, "https://id.example/jwks")
+    assert_eq(cache_selected.kid, "rsa1")
+    assert_true(cache_missing == nil)
 
     bad, err = lonejson.oidc_discovery_parse_json(discovery_json, "https://id.example")
     assert_true(bad == nil)
     assert_eq(err.status, "type_mismatch")
+
+    bad, err = lj:oidc_jwks_cache_select_json(jwks_json, {
+      issuer = "https://id.example/tenant",
+      jwks_uri = "https://id.example/jwks",
+      now = 1000,
+      ttl_seconds = 0,
+    }, { kid = "rsa1" })
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
+
+    bad, err = lj:oidc_jwks_cache_select_json(jwks_json, {
+      issuer = "https://id.example/tenant",
+      jwks_uri = "https://id.example/jwks",
+      now = 1000,
+      ttl_seconds = 60,
+      max_jwks_bytes = 4,
+    }, { kid = "rsa1" })
+    assert_true(bad == nil)
+    assert_eq(err.status, "overflow")
   end
 
   bad, err = lj:jwt_validate_compact_claims(jwt_token, {

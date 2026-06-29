@@ -205,8 +205,10 @@ The implementation must test and enforce at least these invariants:
 5. Add claim validation policy and failure diagnostics.
 6. Add Lua facade for JWT/JWK parse and validation.
 7. Add OIDC discovery and JWKS retrieval/cache over curl. Discovery URL
-   construction, discovery JSON parsing, issuer validation, and Lua facade are
-   implemented; JWKS retrieval/cache composition remains.
+   construction, discovery JSON parsing, issuer validation, Lua facade, bounded
+   JWKS cache installation, cache selection, and a curl write/finish adapter are
+   implemented. The network fetch remains caller-owned so lonejson does not hide
+   retry, timeout, credential, proxy, or event-loop policy.
 8. Add client credentials flow.
 9. Add authorization-code with PKCE flow-control helpers.
 10. Add framework-neutral server-side bearer validation helpers.

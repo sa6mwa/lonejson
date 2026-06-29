@@ -144,6 +144,7 @@ static const luaL_Reg ljlua_runtime_methods[] = {
 #ifdef LONEJSON_WITH_OIDC
     {"oidc_discovery_url", ljlua_oidc_discovery_url},
     {"oidc_discovery_parse_json", ljlua_oidc_discovery_parse_json},
+    {"oidc_jwks_cache_select_json", ljlua_oidc_jwks_cache_select_json},
 #endif
 #endif
     {NULL, NULL}};
@@ -285,6 +286,7 @@ int luaopen_lonejson_core(lua_State *L) {
 #ifdef LONEJSON_WITH_OIDC
       {"oidc_discovery_url", ljlua_oidc_discovery_url},
       {"oidc_discovery_parse_json", ljlua_oidc_discovery_parse_json},
+      {"oidc_jwks_cache_select_json", ljlua_oidc_jwks_cache_select_json},
 #endif
 #endif
       {"fixed_string_scratch", ljlua_fixed_string_scratch_new},

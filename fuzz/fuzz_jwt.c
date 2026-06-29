@@ -59,6 +59,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_jwt_claim_policy policy;
   lonejson_jwk jwk;
   lonejson_jwks jwks;
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_parse cache_parse;
+  lonejson_oidc_jwks_cache_policy cache_policy;
   lonejson_oidc_discovery discovery;
   lonejson_owned_buffer discovery_url;
   lonejson_error error;
@@ -181,6 +184,42 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       }
     }
     lonejson_jwks_cleanup(&jwks);
+
+    memset(&cache_policy, 0, sizeof(cache_policy));
+    cache_policy.issuer = "https://issuer.example";
+    cache_policy.jwks_uri = "https://issuer.example/jwks";
+    cache_policy.max_jwks_bytes = 4096u;
+    cache_policy.now = 1000;
+    cache_policy.ttl_seconds = 60;
+    lonejson_oidc_jwks_cache_init(&cache);
+    if (lonejson_oidc_jwks_cache_update_json(runtime, &cache, &cache_policy,
+                                             text, size, &error) ==
+        LONEJSON_STATUS_OK) {
+      lonejson_jwk_select_options options;
+      const lonejson_jwk *selected;
+      memset(&options, 0, sizeof(options));
+      (void)lonejson_oidc_jwks_cache_is_fresh(&cache, &cache_policy);
+      (void)lonejson_oidc_jwks_cache_select(&cache, &cache_policy, &options,
+                                            &selected, &error);
+    }
+    lonejson_oidc_jwks_cache_cleanup(&cache);
+
+    if (size > 6u && memcmp(text, "cache:", 6u) == 0) {
+      mode_text = text + 6u;
+      mode_size = size - 6u;
+      lonejson_oidc_jwks_cache_init(&cache);
+      if (lonejson_oidc_jwks_cache_parse_init(&cache_parse, runtime, &cache,
+                                              &cache_policy) ==
+          LONEJSON_STATUS_OK) {
+        if (mode_size != 0u) {
+          (void)lonejson_oidc_jwks_cache_write_callback(
+              (char *)mode_text, 1u, mode_size, &cache_parse);
+        }
+        (void)lonejson_oidc_jwks_cache_parse_finish(&cache_parse);
+        cache_parse.cleanup(&cache_parse);
+      }
+      lonejson_oidc_jwks_cache_cleanup(&cache);
+    }
 
     lonejson_owned_buffer_init(&discovery_url);
     (void)lonejson_oidc_discovery_url(text, &discovery_url, &error);

@@ -101,7 +101,16 @@ for symbol in \
     lonejson_oidc_discovery_url \
     lonejson_oidc_discovery_parse_json \
     lonejson_oidc_discovery_validate_issuer \
-    lonejson_oidc_discovery_cleanup; do
+    lonejson_oidc_discovery_cleanup \
+    lonejson_oidc_jwks_cache_init \
+    lonejson_oidc_jwks_cache_cleanup \
+    lonejson_oidc_jwks_cache_update_json \
+    lonejson_oidc_jwks_cache_is_fresh \
+    lonejson_oidc_jwks_cache_select \
+    lonejson_oidc_jwks_cache_parse_init \
+    lonejson_oidc_jwks_cache_write_callback \
+    lonejson_oidc_jwks_cache_parse_finish \
+    lonejson_oidc_jwks_cache_parse_cleanup; do
   if ! symbol_present "$shared_symbols" "$symbol" "$symbol_prefix_optional"; then
     printf 'missing lonejson_jwt_* ABI symbol in shared library for %s: %s\n' "$context" "$symbol" >&2
     exit 1

@@ -1168,6 +1168,10 @@ typedef struct lonejson_curl_string_array_parse
 typedef struct lonejson_curl_string_items_parse
     lonejson_curl_string_items_parse;
 typedef struct lonejson_curl_upload lonejson_curl_upload;
+#ifdef LONEJSON_WITH_OIDC
+typedef struct lonejson_oidc_jwks_cache_parse
+    lonejson_oidc_jwks_cache_parse;
+#endif
 #endif
 /** Object-framed JSON stream cursor. */
 typedef struct lonejson_stream lonejson_stream;
@@ -1314,6 +1318,35 @@ typedef struct lonejson_oidc_discovery {
   /** JWK Set endpoint used for JWT signature key retrieval. Required. */
   char *jwks_uri;
 } lonejson_oidc_discovery;
+
+/** Explicit policy for installing and selecting a cached JWKS document. */
+typedef struct lonejson_oidc_jwks_cache_policy {
+  /** Expected issuer owning the JWKS document. Required and must be HTTPS. */
+  const char *issuer;
+  /** JWKS endpoint URI used for the fetch. Required and must be HTTPS. */
+  const char *jwks_uri;
+  /** Maximum JWKS JSON response size in bytes. Zero means the default limit. */
+  size_t max_jwks_bytes;
+  /** Current time in seconds since Unix epoch. */
+  lonejson_int64 now;
+  /** Cache lifetime in seconds. Must be positive. */
+  lonejson_int64 ttl_seconds;
+} lonejson_oidc_jwks_cache_policy;
+
+/** Parsed, bounded JWKS cache for one issuer/JWKS URI pair.
+ *
+ * The cache owns all strings and keys. It never fetches on its own; callers or
+ * curl adapters provide JWKS JSON bytes explicitly.
+ */
+typedef struct lonejson_oidc_jwks_cache {
+  char *issuer;
+  char *jwks_uri;
+  lonejson_int64 fetched_at;
+  lonejson_int64 expires_at;
+  size_t max_jwks_bytes;
+  int has_jwks;
+  lonejson_jwks jwks;
+} lonejson_oidc_jwks_cache;
 #endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
@@ -5759,6 +5792,32 @@ lonejson_status lonejson_oidc_discovery_parse_json(lonejson *runtime,
 lonejson_status lonejson_oidc_discovery_validate_issuer(
     const lonejson_oidc_discovery *discovery, const char *expected_issuer,
     lonejson_error *error);
+/** Initializes a JWKS cache for later update or cleanup. */
+void lonejson_oidc_jwks_cache_init(lonejson_oidc_jwks_cache *cache);
+/** Releases all storage owned by a JWKS cache. */
+void lonejson_oidc_jwks_cache_cleanup(lonejson_oidc_jwks_cache *cache);
+/** Installs caller-provided JWKS JSON into a bounded cache.
+ *
+ * This parses and validates a JWKS document, records the expected issuer and
+ * JWKS URI, and sets `expires_at = policy->now + policy->ttl_seconds`. Network
+ * retrieval remains caller-owned.
+ */
+lonejson_status lonejson_oidc_jwks_cache_update_json(
+    lonejson *runtime, lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy, const char *json, size_t len,
+    lonejson_error *error);
+/** Returns non-zero when a cache has keys for the configured issuer/URI and is
+ * not expired at `policy->now`.
+ */
+int lonejson_oidc_jwks_cache_is_fresh(
+    const lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy);
+/** Selects a key from a fresh JWKS cache. */
+lonejson_status lonejson_oidc_jwks_cache_select(
+    const lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy,
+    const lonejson_jwk_select_options *options, const lonejson_jwk **out,
+    lonejson_error *error);
 #endif
 
 #ifdef LONEJSON_WITH_CURL
@@ -5876,6 +5935,25 @@ struct lonejson_curl_upload {
   void (*cleanup)(struct lonejson_curl_upload *ctx);
 };
 
+#ifdef LONEJSON_WITH_OIDC
+/** Curl response adapter that installs a bounded JWKS response into a cache at
+ * EOF. The policy strings are copied at init; `runtime` and `cache` are
+ * caller-owned and must remain valid until finish/cleanup.
+ */
+struct lonejson_oidc_jwks_cache_parse {
+  lonejson_owned_buffer response;
+  lonejson *runtime;
+  lonejson_oidc_jwks_cache *cache;
+  lonejson_oidc_jwks_cache_policy policy;
+  lonejson_error error;
+  unsigned char _reserved_state[8];
+  size_t (*write_callback)(struct lonejson_oidc_jwks_cache_parse *ctx,
+                           char *ptr, size_t size, size_t nmemb);
+  lonejson_status (*finish)(struct lonejson_oidc_jwks_cache_parse *ctx);
+  void (*cleanup)(struct lonejson_oidc_jwks_cache_parse *ctx);
+};
+#endif
+
 /** Initializes a curl parse adapter suitable for `CURLOPT_WRITEFUNCTION`. */
 lonejson_status lonejson_curl_parse_init(lonejson_curl_parse *ctx,
                                          lonejson *runtime,
@@ -5958,6 +6036,26 @@ size_t lonejson_curl_read_callback(char *ptr, size_t size, size_t nmemb,
 curl_off_t lonejson_curl_upload_size(const lonejson_curl_upload *ctx);
 /** Releases resources owned by a curl upload adapter. */
 void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
+#ifdef LONEJSON_WITH_OIDC
+/** Initializes a curl write adapter for a bounded JWKS cache refresh.
+ *
+ * The adapter copies the policy strings. The runtime and cache pointers remain
+ * caller-owned and must outlive finish/cleanup.
+ */
+lonejson_status lonejson_oidc_jwks_cache_parse_init(
+    lonejson_oidc_jwks_cache_parse *ctx, lonejson *runtime,
+    lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy);
+/** Curl write callback for a JWKS cache refresh adapter. */
+size_t lonejson_oidc_jwks_cache_write_callback(char *ptr, size_t size,
+                                               size_t nmemb, void *userdata);
+/** Finalizes a JWKS cache refresh adapter after curl EOF. */
+lonejson_status lonejson_oidc_jwks_cache_parse_finish(
+    lonejson_oidc_jwks_cache_parse *ctx);
+/** Releases resources owned by a JWKS cache refresh adapter. */
+void lonejson_oidc_jwks_cache_parse_cleanup(
+    lonejson_oidc_jwks_cache_parse *ctx);
+#endif
 #endif
 
 #ifndef LONEJSON_DISABLE_SHORT_NAMES
@@ -6509,6 +6607,8 @@ typedef lonejson_jwt_claim_policy lj_jwt_claim_policy;
 #endif
 #ifdef LONEJSON_WITH_OIDC
 typedef lonejson_oidc_discovery lj_oidc_discovery;
+typedef lonejson_oidc_jwks_cache_policy lj_oidc_jwks_cache_policy;
+typedef lonejson_oidc_jwks_cache lj_oidc_jwks_cache;
 #endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
@@ -8485,6 +8585,39 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_discovery_validate_issuer(
   return lonejson_oidc_discovery_validate_issuer(discovery, expected_issuer,
                                                  error);
 }
+/** Initializes a JWKS cache for later update or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_jwks_cache_init(lj_oidc_jwks_cache *cache) {
+  lonejson_oidc_jwks_cache_init(cache);
+}
+/** Releases all storage owned by a JWKS cache. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_jwks_cache_cleanup(lj_oidc_jwks_cache *cache) {
+  lonejson_oidc_jwks_cache_cleanup(cache);
+}
+/** Installs caller-provided JWKS JSON into a bounded cache. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_jwks_cache_update_json(
+    lj *runtime, lj_oidc_jwks_cache *cache,
+    const lj_oidc_jwks_cache_policy *policy, const char *json, size_t len,
+    lj_error *error) {
+  return lonejson_oidc_jwks_cache_update_json(runtime, cache, policy, json, len,
+                                              error);
+}
+/** Returns non-zero when a cache has fresh keys for the configured issuer/URI.
+ */
+LONEJSON_SHORT_ALIAS_INLINE int lj_oidc_jwks_cache_is_fresh(
+    const lj_oidc_jwks_cache *cache,
+    const lj_oidc_jwks_cache_policy *policy) {
+  return lonejson_oidc_jwks_cache_is_fresh(cache, policy);
+}
+/** Selects a key from a fresh JWKS cache. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_jwks_cache_select(
+    const lj_oidc_jwks_cache *cache,
+    const lj_oidc_jwks_cache_policy *policy,
+    const lj_jwk_select_options *options, const lj_jwk **out,
+    lj_error *error) {
+  return lonejson_oidc_jwks_cache_select(cache, policy, options, out, error);
+}
 #endif
 #ifdef LONEJSON_WITH_CURL
 /** Curl response parse adapter state for incremental `CURLOPT_WRITEFUNCTION`
@@ -8504,6 +8637,10 @@ typedef lonejson_curl_string_array_parse lj_curl_string_array_parse;
 typedef lonejson_curl_string_items_parse lj_curl_string_items_parse;
 /** Curl upload adapter state for streaming generated JSON to libcurl. */
 typedef lonejson_curl_upload lj_curl_upload;
+#ifdef LONEJSON_WITH_OIDC
+/** Curl response adapter that installs a bounded JWKS response into a cache. */
+typedef lonejson_oidc_jwks_cache_parse lj_oidc_jwks_cache_parse;
+#endif
 /** Initializes a curl parse adapter suitable for `CURLOPT_WRITEFUNCTION`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_curl_parse_init(lj_curl_parse *ctx,
                                                          lj *runtime,
@@ -8630,6 +8767,29 @@ lj_curl_upload_size(const lj_curl_upload *ctx) {
 LONEJSON_SHORT_ALIAS_INLINE void lj_curl_upload_cleanup(lj_curl_upload *ctx) {
   lonejson_curl_upload_cleanup(ctx);
 }
+#ifdef LONEJSON_WITH_OIDC
+/** Initializes a curl write adapter for a bounded JWKS cache refresh. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_jwks_cache_parse_init(
+    lj_oidc_jwks_cache_parse *ctx, lj *runtime, lj_oidc_jwks_cache *cache,
+    const lj_oidc_jwks_cache_policy *policy) {
+  return lonejson_oidc_jwks_cache_parse_init(ctx, runtime, cache, policy);
+}
+/** Curl write callback for a JWKS cache refresh adapter. */
+LONEJSON_SHORT_ALIAS_INLINE size_t lj_oidc_jwks_cache_write_callback(
+    char *ptr, size_t size, size_t nmemb, void *userdata) {
+  return lonejson_oidc_jwks_cache_write_callback(ptr, size, nmemb, userdata);
+}
+/** Finalizes a JWKS cache refresh adapter after curl EOF. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_jwks_cache_parse_finish(lj_oidc_jwks_cache_parse *ctx) {
+  return lonejson_oidc_jwks_cache_parse_finish(ctx);
+}
+/** Releases resources owned by a JWKS cache refresh adapter. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_jwks_cache_parse_cleanup(lj_oidc_jwks_cache_parse *ctx) {
+  lonejson_oidc_jwks_cache_parse_cleanup(ctx);
+}
+#endif
 #endif
 #endif
 

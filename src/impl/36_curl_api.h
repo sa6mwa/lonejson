@@ -66,6 +66,19 @@ lonejson__curl_upload_size_method(const lonejson_curl_upload *ctx) {
   return lonejson_curl_upload_size(ctx);
 }
 
+#ifdef LONEJSON_WITH_OIDC
+static size_t
+lonejson__oidc_jwks_cache_write_method(lonejson_oidc_jwks_cache_parse *ctx,
+                                       char *ptr, size_t size, size_t nmemb) {
+  return lonejson_oidc_jwks_cache_write_callback(ptr, size, nmemb, ctx);
+}
+
+static lonejson_status
+lonejson__oidc_jwks_cache_finish_method(lonejson_oidc_jwks_cache_parse *ctx) {
+  return lonejson_oidc_jwks_cache_parse_finish(ctx);
+}
+#endif
+
 static void lonejson__curl_parse_assign_methods(lonejson_curl_parse *ctx) {
   if (ctx == NULL) {
     return;
@@ -113,6 +126,18 @@ static void lonejson__curl_upload_assign_methods(lonejson_curl_upload *ctx) {
   ctx->size_fn = lonejson__curl_upload_size_method;
   ctx->cleanup = lonejson_curl_upload_cleanup;
 }
+
+#ifdef LONEJSON_WITH_OIDC
+static void lonejson__oidc_jwks_cache_assign_methods(
+    lonejson_oidc_jwks_cache_parse *ctx) {
+  if (ctx == NULL) {
+    return;
+  }
+  ctx->write_callback = lonejson__oidc_jwks_cache_write_method;
+  ctx->finish = lonejson__oidc_jwks_cache_finish_method;
+  ctx->cleanup = lonejson_oidc_jwks_cache_parse_cleanup;
+}
+#endif
 
 lonejson_status lonejson_curl_parse_init(lonejson_curl_parse *ctx,
                                          lonejson *runtime,
@@ -509,4 +534,5 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx) {
   memset(ctx, 0, sizeof(*ctx));
   lonejson__curl_upload_assign_methods(ctx);
 }
+
 #endif
