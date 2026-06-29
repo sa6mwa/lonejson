@@ -50,12 +50,11 @@ static int ljlua_runtime_new(lua_State *L) {
   }
   ud->magic = LJLUA_RUNTIME_MAGIC;
   ud->clear_destination = config.clear_destination_by_default ? 1 : 0;
-  ud->reject_duplicate_keys =
-      config.reject_duplicate_keys_by_default ? 1 : 0;
+  ud->reject_duplicate_keys = config.reject_duplicate_keys_by_default ? 1 : 0;
   ud->write_pretty = config.write_pretty ? 1 : 0;
-  ud->write_max_output_bytes =
-      config.write_max_output_bytes != 0u ? config.write_max_output_bytes
-                                          : LONEJSON_WRITE_MAX_OUTPUT_BYTES;
+  ud->write_max_output_bytes = config.write_max_output_bytes != 0u
+                                   ? config.write_max_output_bytes
+                                   : LONEJSON_WRITE_MAX_OUTPUT_BYTES;
   ud->fixed_string_scratch_ref = fixed_string_scratch_ref;
   luaL_setmetatable(L, LJLUA_RUNTIME_MT);
   return 1;
@@ -141,6 +140,10 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"jwk_parse_json", ljlua_jwk_parse_json},
     {"jwks_parse_json", ljlua_jwks_parse_json},
     {"jwks_select_json", ljlua_jwks_select_json},
+#ifdef LONEJSON_WITH_OIDC
+    {"oidc_discovery_url", ljlua_oidc_discovery_url},
+    {"oidc_discovery_parse_json", ljlua_oidc_discovery_parse_json},
+#endif
 #endif
     {NULL, NULL}};
 
@@ -277,6 +280,10 @@ int luaopen_lonejson_core(lua_State *L) {
       {"jwk_parse_json", ljlua_jwk_parse_json},
       {"jwks_parse_json", ljlua_jwks_parse_json},
       {"jwks_select_json", ljlua_jwks_select_json},
+#ifdef LONEJSON_WITH_OIDC
+      {"oidc_discovery_url", ljlua_oidc_discovery_url},
+      {"oidc_discovery_parse_json", ljlua_oidc_discovery_parse_json},
+#endif
 #endif
       {"fixed_string_scratch", ljlua_fixed_string_scratch_new},
       {"json_null", ljlua_json_null},
@@ -695,7 +702,8 @@ static lonejson_status ljlua_json_lua_sink_write(void *user, const void *data,
   if (lua_pcall(sink->L, 1, 0, 0) != LUA_OK) {
     const char *msg = lua_tostring(sink->L, -1);
     lonejson_status status =
-        ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,                             "%s", msg != NULL ? msg : "Lua sink failed");
+        ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, "%s",
+                        msg != NULL ? msg : "Lua sink failed");
     lua_pop(sink->L, 1);
     return status;
   }

@@ -1,5 +1,7 @@
 #define LONEJSON_WITH_OPENSSL 1
 #define LONEJSON_WITH_JWT 1
+#define LONEJSON_WITH_CURL 1
+#define LONEJSON_WITH_OIDC 1
 #include "lonejson.h"
 
 #include <stdint.h>
@@ -38,6 +40,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_jwt_claim_policy policy;
   lonejson_jwk jwk;
   lonejson_jwks jwks;
+  lonejson_oidc_discovery discovery;
+  lonejson_owned_buffer discovery_url;
   lonejson_error error;
   lonejson *runtime;
   char *text;
@@ -45,13 +49,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   if (size > 65536u) {
     return 0;
   }
-  text = (char *)malloc(size == 0u ? 1u : size);
+  text = (char *)malloc(size + 1u);
   if (text == NULL) {
     return 0;
   }
   if (size != 0u) {
     memcpy(text, data, size);
   }
+  text[size] = '\0';
 
   fuzz_decode_segment(text, size);
   lonejson_error_init(&error);
@@ -115,6 +120,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       }
     }
     lonejson_jwks_cleanup(&jwks);
+
+    lonejson_owned_buffer_init(&discovery_url);
+    (void)lonejson_oidc_discovery_url(text, &discovery_url, &error);
+    lonejson_owned_buffer_free(&discovery_url);
+
+    lonejson_oidc_discovery_init(&discovery);
+    if (lonejson_oidc_discovery_parse_json(runtime, text, size, &discovery,
+                                           &error) == LONEJSON_STATUS_OK) {
+      (void)lonejson_oidc_discovery_validate_issuer(
+          &discovery, "https://issuer.example", &error);
+      if (discovery.issuer != NULL) {
+        (void)lonejson_oidc_discovery_validate_issuer(&discovery,
+                                                      discovery.issuer, &error);
+      }
+    }
+    lonejson_oidc_discovery_cleanup(&discovery);
     lonejson_free(runtime);
   }
   free(text);

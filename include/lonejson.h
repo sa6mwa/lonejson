@@ -46,8 +46,17 @@
 #if defined(LJ_WITH_JWT) && !defined(LONEJSON_WITH_JWT)
 #define LONEJSON_WITH_JWT
 #endif
+#if defined(LJ_WITH_OIDC) && !defined(LONEJSON_WITH_OIDC)
+#define LONEJSON_WITH_OIDC
+#endif
 #if defined(LONEJSON_WITH_JWT) && !defined(LONEJSON_WITH_OPENSSL)
 #error "LONEJSON_WITH_JWT requires LONEJSON_WITH_OPENSSL"
+#endif
+#if defined(LONEJSON_WITH_OIDC) &&                                             \
+    (!defined(LONEJSON_WITH_CURL) || !defined(LONEJSON_WITH_OPENSSL) ||        \
+     !defined(LONEJSON_WITH_JWT))
+#error                                                                         \
+    "LONEJSON_WITH_OIDC requires LONEJSON_WITH_CURL, LONEJSON_WITH_OPENSSL, and LONEJSON_WITH_JWT"
 #endif
 #if defined(LJ_MALLOC) && !defined(LONEJSON_MALLOC)
 #define LONEJSON_MALLOC LJ_MALLOC
@@ -522,7 +531,7 @@ extern "C" {
 #define LONEJSON_FIELD_ACCEPT_NULL (1u << 4)
 /* Internal-only flag used by implementation-generated maps. */
 #define LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE (1u << 31)
-#define LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE                             \
+#define LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE                              \
   LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE
 
 /** Internal/runtime flag indicating that an array container owns its backing
@@ -1288,6 +1297,24 @@ typedef struct lonejson_jwt_claim_policy {
   size_t max_decoded_claims_bytes;
 } lonejson_jwt_claim_policy;
 #endif
+#ifdef LONEJSON_WITH_OIDC
+/** Parsed OpenID Connect discovery metadata retained by lonejson.
+ *
+ * This object is metadata only. Fetching remains caller-owned; pair this with
+ * the curl adapter APIs when parsing bytes from a curl transfer.
+ */
+typedef struct lonejson_oidc_discovery {
+  /** Discovery issuer. Required and must match the expected issuer before use.
+   */
+  char *issuer;
+  /** OAuth2/OIDC authorization endpoint, when advertised. */
+  char *authorization_endpoint;
+  /** OAuth2 token endpoint. Required for client-credentials flows. */
+  char *token_endpoint;
+  /** JWK Set endpoint used for JWT signature key retrieval. Required. */
+  char *jwks_uri;
+} lonejson_oidc_discovery;
+#endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
  * so callers that need to retain an item must copy it here.
@@ -1873,7 +1900,8 @@ typedef struct lonejson_path_value_visitor {
   lonejson_path_value_event_fn object_begin;
   /** Called when an object ends at `path`. */
   lonejson_path_value_event_fn object_end;
-  /** Called before chunks for an object key are delivered at the parent path. */
+  /** Called before chunks for an object key are delivered at the parent path.
+   */
   lonejson_path_value_event_fn object_key_begin;
   /** Delivers one decoded UTF-8 object-key chunk at the parent path. */
   lonejson_path_value_chunk_fn object_key_chunk;
@@ -2246,9 +2274,8 @@ struct lonejson {
    * callbacks.
    */
   lonejson_status (*visit_path_value_filep)(
-      lonejson *runtime, FILE *fp,
-      const lonejson_path_value_visitor *visitor, void *user,
-      lonejson_error *error);
+      lonejson *runtime, FILE *fp, const lonejson_path_value_visitor *visitor,
+      void *user, lonejson_error *error);
   /** Visits exactly one JSON value from a filesystem path with path-aware
    * callbacks.
    */
@@ -4087,8 +4114,8 @@ lonejson_read_result lonejson_default_read_result(void);
  * boundaries and `visitor` or `path_visitor` to receive streaming arbitrary
  * JSON value events for each candidate.
  */
-lonejson_candidate_stream_options lonejson_default_candidate_stream_options(
-    void);
+lonejson_candidate_stream_options
+lonejson_default_candidate_stream_options(void);
 /** Initializes a memory-buffer reader adapter.
  *
  * The adapter reads directly from the caller-owned `data` buffer without
@@ -5024,43 +5051,47 @@ lonejson_status lonejson_visit_value_fd(lonejson *runtime, int fd,
  * fails on malformed JSON or on trailing non-whitespace bytes after the first
  * complete value.
  */
-lonejson_status lonejson_visit_path_value_buffer(
-    lonejson *runtime, const void *data, size_t len,
-    const lonejson_path_value_visitor *visitor, void *user,
-    lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_buffer(lonejson *runtime, const void *data,
+                                 size_t len,
+                                 const lonejson_path_value_visitor *visitor,
+                                 void *user, lonejson_error *error);
 /** Visits exactly one JSON value from a NUL-terminated string and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_cstr(
-    lonejson *runtime, const char *json,
-    const lonejson_path_value_visitor *visitor, void *user,
-    lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_cstr(lonejson *runtime, const char *json,
+                               const lonejson_path_value_visitor *visitor,
+                               void *user, lonejson_error *error);
 /** Visits exactly one JSON value from a caller-provided reader callback and
  * supplies the normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_reader(
-    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
-    const lonejson_path_value_visitor *visitor, void *user,
-    lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_reader(lonejson *runtime, lonejson_reader_fn reader,
+                                 void *reader_user,
+                                 const lonejson_path_value_visitor *visitor,
+                                 void *user, lonejson_error *error);
 /** Visits exactly one JSON value from an open `FILE *` and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_filep(
-    lonejson *runtime, FILE *fp, const lonejson_path_value_visitor *visitor,
-    void *user, lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_filep(lonejson *runtime, FILE *fp,
+                                const lonejson_path_value_visitor *visitor,
+                                void *user, lonejson_error *error);
 /** Visits exactly one JSON value from a filesystem path and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_path(
-    lonejson *runtime, const char *path,
-    const lonejson_path_value_visitor *visitor, void *user,
-    lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_path(lonejson *runtime, const char *path,
+                               const lonejson_path_value_visitor *visitor,
+                               void *user, lonejson_error *error);
 /** Visits exactly one JSON value from a file descriptor and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_fd(
-    lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
-    void *user, lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_fd(lonejson *runtime, int fd,
+                             const lonejson_path_value_visitor *visitor,
+                             void *user, lonejson_error *error);
 
 /** Streams arbitrary JSON candidates from a caller-provided buffer.
  *
@@ -5080,13 +5111,15 @@ lonejson_status lonejson_visit_candidates_filep(
     lonejson *runtime, FILE *fp,
     const lonejson_candidate_stream_options *options, lonejson_error *error);
 /** Streams arbitrary JSON candidates from a filesystem path. */
-lonejson_status lonejson_visit_candidates_path(
-    lonejson *runtime, const char *path,
-    const lonejson_candidate_stream_options *options, lonejson_error *error);
+lonejson_status
+lonejson_visit_candidates_path(lonejson *runtime, const char *path,
+                               const lonejson_candidate_stream_options *options,
+                               lonejson_error *error);
 /** Streams arbitrary JSON candidates from a file descriptor. */
-lonejson_status lonejson_visit_candidates_fd(
-    lonejson *runtime, int fd,
-    const lonejson_candidate_stream_options *options, lonejson_error *error);
+lonejson_status
+lonejson_visit_candidates_fd(lonejson *runtime, int fd,
+                             const lonejson_candidate_stream_options *options,
+                             lonejson_error *error);
 
 /** Serializes a mapped struct to a generic output sink callback using runtime
  * write policy.
@@ -5551,49 +5584,59 @@ int lonejson_field_has_presence(const lonejson_field *field);
 void lonejson_field_set_presence(void *record, const lonejson_field *field,
                                  int present);
 /** Assigns JSON null semantics to one field in an initialized mapped record. */
-lonejson_status lonejson_record_assign_null(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_error *error);
+lonejson_status lonejson_record_assign_null(lonejson *runtime,
+                                            const lonejson_map *map,
+                                            void *record,
+                                            const lonejson_field *field,
+                                            lonejson_error *error);
 /** Assigns one decoded string value to a string field in an initialized mapped
  * record, applying fixed-capacity overflow and allocation limits.
  */
-lonejson_status lonejson_record_assign_string(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, const char *data, size_t len,
-    lonejson_error *error);
+lonejson_status lonejson_record_assign_string(lonejson *runtime,
+                                              const lonejson_map *map,
+                                              void *record,
+                                              const lonejson_field *field,
+                                              const char *data, size_t len,
+                                              lonejson_error *error);
 /** Appends one decoded string item to a mapped string array field. */
 lonejson_status lonejson_record_array_append_string(
     lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_string_array *array,
-    const char *data, size_t len, lonejson_error *error);
+    const lonejson_field *field, lonejson_string_array *array, const char *data,
+    size_t len, lonejson_error *error);
 /** Appends one signed integer item to a mapped i64 array field. */
-lonejson_status lonejson_record_array_append_i64(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_i64_array *array,
-    lonejson_int64 value, lonejson_error *error);
+lonejson_status
+lonejson_record_array_append_i64(lonejson *runtime, const lonejson_map *map,
+                                 void *record, const lonejson_field *field,
+                                 lonejson_i64_array *array,
+                                 lonejson_int64 value, lonejson_error *error);
 /** Appends one unsigned integer item to a mapped u64 array field. */
-lonejson_status lonejson_record_array_append_u64(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_u64_array *array,
-    lonejson_uint64 value, lonejson_error *error);
+lonejson_status
+lonejson_record_array_append_u64(lonejson *runtime, const lonejson_map *map,
+                                 void *record, const lonejson_field *field,
+                                 lonejson_u64_array *array,
+                                 lonejson_uint64 value, lonejson_error *error);
 /** Appends one number item to a mapped f64 array field. */
-lonejson_status lonejson_record_array_append_f64(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_f64_array *array, double value,
-    lonejson_error *error);
+lonejson_status
+lonejson_record_array_append_f64(lonejson *runtime, const lonejson_map *map,
+                                 void *record, const lonejson_field *field,
+                                 lonejson_f64_array *array, double value,
+                                 lonejson_error *error);
 /** Appends one boolean item to a mapped bool array field. */
-lonejson_status lonejson_record_array_append_bool(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_bool_array *array, int value,
-    lonejson_error *error);
+lonejson_status
+lonejson_record_array_append_bool(lonejson *runtime, const lonejson_map *map,
+                                  void *record, const lonejson_field *field,
+                                  lonejson_bool_array *array, int value,
+                                  lonejson_error *error);
 /** Appends one uninitialized slot to a mapped object array field and returns
  * the slot pointer. The caller should initialize/populate it with the field's
  * submap before serialization.
  */
-void *lonejson_record_object_array_append_slot(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_object_array *array,
-    lonejson_error *error);
+void *lonejson_record_object_array_append_slot(lonejson *runtime,
+                                               const lonejson_map *map,
+                                               void *record,
+                                               const lonejson_field *field,
+                                               lonejson_object_array *array,
+                                               lonejson_error *error);
 
 #ifdef LONEJSON_WITH_JWT
 /** Computes the decoded byte length of one unpadded base64url segment.
@@ -5664,10 +5707,11 @@ void lonejson_jwt_claims_cleanup(lonejson_jwt_claims *claims);
  * JSON syntax, duplicate registered claims, and registered claim types. It
  * does not validate signatures or trust.
  */
-lonejson_status lonejson_jwt_decode_compact(
-    lonejson *runtime, const char *token, size_t len,
-    const lonejson_jwt_claim_policy *limits, lonejson_jwt_header *header,
-    lonejson_jwt_claims *claims, lonejson_error *error);
+lonejson_status
+lonejson_jwt_decode_compact(lonejson *runtime, const char *token, size_t len,
+                            const lonejson_jwt_claim_policy *limits,
+                            lonejson_jwt_header *header,
+                            lonejson_jwt_claims *claims, lonejson_error *error);
 /** Validates decoded JWT header and claims against an explicit policy.
  *
  * This is a trust decision for claims only. Signature validation must be
@@ -5676,6 +5720,35 @@ lonejson_status lonejson_jwt_decode_compact(
 lonejson_status lonejson_jwt_validate_claims(
     const lonejson_jwt_header *header, const lonejson_jwt_claims *claims,
     const lonejson_jwt_claim_policy *policy, lonejson_error *error);
+#endif
+#ifdef LONEJSON_WITH_OIDC
+/** Initializes OIDC discovery metadata storage. */
+void lonejson_oidc_discovery_init(lonejson_oidc_discovery *discovery);
+/** Releases storage owned by OIDC discovery metadata. */
+void lonejson_oidc_discovery_cleanup(lonejson_oidc_discovery *discovery);
+/** Builds the OIDC discovery URL for an HTTPS issuer.
+ *
+ * Path-based issuers follow OpenID Connect Discovery placement:
+ * `https://host/path` becomes
+ * `https://host/.well-known/openid-configuration/path`.
+ */
+lonejson_status lonejson_oidc_discovery_url(const char *issuer,
+                                            lonejson_owned_buffer *out,
+                                            lonejson_error *error);
+/** Parses one OIDC discovery JSON object into `out`.
+ *
+ * This validates required metadata shape only. It does not fetch JWKS, validate
+ * signatures, validate tokens, or establish issuer trust.
+ */
+lonejson_status lonejson_oidc_discovery_parse_json(lonejson *runtime,
+                                                   const char *json, size_t len,
+                                                   lonejson_oidc_discovery *out,
+                                                   lonejson_error *error);
+/** Validates parsed discovery metadata against the issuer configured by caller.
+ */
+lonejson_status lonejson_oidc_discovery_validate_issuer(
+    const lonejson_oidc_discovery *discovery, const char *expected_issuer,
+    lonejson_error *error);
 #endif
 
 #ifdef LONEJSON_WITH_CURL
@@ -6000,8 +6073,7 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 /** Parse repeated top-level JSON candidates. */
 #define LJ_CANDIDATE_FRAMING_NDJSON LONEJSON_CANDIDATE_FRAMING_NDJSON
 /** Parse each top-level array item as one candidate. */
-#define LJ_CANDIDATE_FRAMING_ARRAY_ITEMS                                       \
-  LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS
+#define LJ_CANDIDATE_FRAMING_ARRAY_ITEMS LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS
 /** Do not retain or emit candidate payload bytes. */
 #define LJ_CANDIDATE_CAPTURE_NONE LONEJSON_CANDIDATE_CAPTURE_NONE
 /** Stream each compact candidate to a caller sink. */
@@ -6424,6 +6496,9 @@ typedef lonejson_jwt_header lj_jwt_header;
 typedef lonejson_jwt_claims lj_jwt_claims;
 /** Explicit trust policy for validating parsed JWT header and claims. */
 typedef lonejson_jwt_claim_policy lj_jwt_claim_policy;
+#endif
+#ifdef LONEJSON_WITH_OIDC
+typedef lonejson_oidc_discovery lj_oidc_discovery;
 #endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
@@ -7030,7 +7105,7 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_parse_path_visitor(
     lj_json_value *value, const lj_path_value_visitor *visitor, void *user,
     lj_error *error) {
   return lonejson_json_value_set_parse_path_visitor(value, visitor, user,
-                                                   error);
+                                                    error);
 }
 
 /** Enables explicit parse-time capture of one inbound JSON value into owned
@@ -7675,10 +7750,9 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_path_value_path(
 /** Visits exactly one JSON value from a file descriptor and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_visit_path_value_fd(lonejson *runtime, int fd,
-                       const lj_path_value_visitor *visitor, void *user,
-                       lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_path_value_fd(
+    lonejson *runtime, int fd, const lj_path_value_visitor *visitor, void *user,
+    lj_error *error) {
   return lonejson_visit_path_value_fd(runtime, fd, visitor, user, error);
 }
 /** Streams arbitrary JSON candidates from a caller-provided buffer. */
@@ -7707,10 +7781,9 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_candidates_path(
   return lonejson_visit_candidates_path(runtime, path, options, error);
 }
 /** Streams arbitrary JSON candidates from a file descriptor. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_visit_candidates_fd(lonejson *runtime, int fd,
-                       const lj_candidate_stream_options *options,
-                       lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_candidates_fd(
+    lonejson *runtime, int fd, const lj_candidate_stream_options *options,
+    lj_error *error) {
   return lonejson_visit_candidates_fd(runtime, fd, options, error);
 }
 /** Pull-style JSON generator state. */
@@ -8285,21 +8358,21 @@ LONEJSON_SHORT_ALIAS_INLINE void lj_reset(lonejson *runtime, const lj_map *map,
 }
 #ifdef LONEJSON_WITH_JWT
 /** Computes the decoded byte length of one unpadded base64url segment. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_base64url_decoded_len(const char *data, size_t len, size_t *out_len,
-                         lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_base64url_decoded_len(
+    const char *data, size_t len, size_t *out_len, lj_error *error) {
   return lonejson_base64url_decoded_len(data, len, out_len, error);
 }
 /** Decodes one unpadded base64url segment into caller-provided storage. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_base64url_decode(
-    const char *data, size_t len, unsigned char *out, size_t capacity,
-    size_t *needed, lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_base64url_decode(const char *data, size_t len, unsigned char *out,
+                    size_t capacity, size_t *needed, lj_error *error) {
   return lonejson_base64url_decode(data, len, out, capacity, needed, error);
 }
 /** Parses one JWT compact serialization into caller-owned segment slices. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_jwt_parse_compact(const char *token, size_t len, lj_jwt_compact *out,
-                     lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_parse_compact(const char *token,
+                                                           size_t len,
+                                                           lj_jwt_compact *out,
+                                                           lj_error *error) {
   return lonejson_jwt_parse_compact(token, len, out, error);
 }
 /** Initializes a JWK object for parsing or cleanup. */
@@ -8319,8 +8392,10 @@ LONEJSON_SHORT_ALIAS_INLINE void lj_jwks_cleanup(lj_jwks *jwks) {
   lonejson_jwks_cleanup(jwks);
 }
 /** Parses one JWK JSON object into `out`. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwk_parse_json(
-    lj *runtime, const char *json, size_t len, lj_jwk *out, lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwk_parse_json(lj *runtime,
+                                                        const char *json,
+                                                        size_t len, lj_jwk *out,
+                                                        lj_error *error) {
   return lonejson_jwk_parse_json(runtime, json, len, out, error);
 }
 /** Parses one JWKS JSON object with a required `keys` array. */
@@ -8329,9 +8404,9 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwks_parse_json(
   return lonejson_jwks_parse_json(runtime, json, len, out, error);
 }
 /** Selects the first JWK matching all non-NULL filters. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwks_select(
-    const lj_jwks *jwks, const lj_jwk_select_options *options,
-    const lj_jwk **out, lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_jwks_select(const lj_jwks *jwks, const lj_jwk_select_options *options,
+               const lj_jwk **out, lj_error *error) {
   return lonejson_jwks_select(jwks, options, out, error);
 }
 /** Initializes decoded JWT header storage. */
@@ -8351,18 +8426,48 @@ LONEJSON_SHORT_ALIAS_INLINE void lj_jwt_claims_cleanup(lj_jwt_claims *claims) {
   lonejson_jwt_claims_cleanup(claims);
 }
 /** Decodes and parses the header and claims payload from one compact JWT. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_decode_compact(
-    lj *runtime, const char *token, size_t len,
-    const lj_jwt_claim_policy *limits, lj_jwt_header *header,
-    lj_jwt_claims *claims, lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_jwt_decode_compact(lj *runtime, const char *token, size_t len,
+                      const lj_jwt_claim_policy *limits, lj_jwt_header *header,
+                      lj_jwt_claims *claims, lj_error *error) {
   return lonejson_jwt_decode_compact(runtime, token, len, limits, header,
                                      claims, error);
 }
 /** Validates decoded JWT header and claims against an explicit policy. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_validate_claims(
-    const lj_jwt_header *header, const lj_jwt_claims *claims,
-    const lj_jwt_claim_policy *policy, lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_jwt_validate_claims(const lj_jwt_header *header, const lj_jwt_claims *claims,
+                       const lj_jwt_claim_policy *policy, lj_error *error) {
   return lonejson_jwt_validate_claims(header, claims, policy, error);
+}
+#endif
+#ifdef LONEJSON_WITH_OIDC
+/** Initializes OIDC discovery metadata storage. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_discovery_init(lj_oidc_discovery *discovery) {
+  lonejson_oidc_discovery_init(discovery);
+}
+/** Releases storage owned by OIDC discovery metadata. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_discovery_cleanup(lj_oidc_discovery *discovery) {
+  lonejson_oidc_discovery_cleanup(discovery);
+}
+/** Builds the OIDC discovery URL for an HTTPS issuer. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_discovery_url(
+    const char *issuer, lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oidc_discovery_url(issuer, out, error);
+}
+/** Parses one OIDC discovery JSON object into `out`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_discovery_parse_json(lj *runtime, const char *json, size_t len,
+                             lj_oidc_discovery *out, lj_error *error) {
+  return lonejson_oidc_discovery_parse_json(runtime, json, len, out, error);
+}
+/** Validates parsed discovery metadata against the caller-configured issuer. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_discovery_validate_issuer(
+    const lj_oidc_discovery *discovery, const char *expected_issuer,
+    lj_error *error) {
+  return lonejson_oidc_discovery_validate_issuer(discovery, expected_issuer,
+                                                 error);
 }
 #endif
 #ifdef LONEJSON_WITH_CURL

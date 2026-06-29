@@ -26,6 +26,9 @@ int main(void) {
   test_jwt_decode_and_validate_claims();
   test_jwt_claim_validation_failures();
   test_jwt_decode_claim_failures();
+  test_oidc_discovery_url();
+  test_oidc_discovery_parse_and_validate();
+  test_oidc_discovery_failures();
   test_parse_implicit_destination_reset();
   test_dynamic_allocation_cleanup_balance();
   test_dynamic_allocation_reset_reparse_balance();

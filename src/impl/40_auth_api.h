@@ -36,6 +36,19 @@ static const lonejson_field lonejson__jwks_fields[] = {
                                 &lonejson__jwk_map, LONEJSON_OVERFLOW_FAIL)};
 LONEJSON_MAP_DEFINE(lonejson__jwks_map, lonejson_jwks, lonejson__jwks_fields);
 
+#ifdef LONEJSON_WITH_OIDC
+static const lonejson_field lonejson__oidc_discovery_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC_REQ(lonejson_oidc_discovery, issuer, "issuer"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oidc_discovery, authorization_endpoint,
+                                "authorization_endpoint"),
+    LONEJSON_FIELD_STRING_ALLOC_REQ(lonejson_oidc_discovery, token_endpoint,
+                                    "token_endpoint"),
+    LONEJSON_FIELD_STRING_ALLOC_REQ(lonejson_oidc_discovery, jwks_uri,
+                                    "jwks_uri")};
+LONEJSON_MAP_DEFINE(lonejson__oidc_discovery_map, lonejson_oidc_discovery,
+                    lonejson__oidc_discovery_fields);
+#endif
+
 #define LONEJSON__JWT_DEFAULT_MAX_HEADER_BYTES (16u * 1024u)
 #define LONEJSON__JWT_DEFAULT_MAX_CLAIMS_BYTES (256u * 1024u)
 
@@ -73,9 +86,9 @@ typedef struct lonejson__jwt_claim_visit {
   int seen_iat;
 } lonejson__jwt_claim_visit;
 
-static lonejson_status
-lonejson__base64url_check(const char *data, size_t len, size_t *out_len,
-                          lonejson_error *error) {
+static lonejson_status lonejson__base64url_check(const char *data, size_t len,
+                                                 size_t *out_len,
+                                                 lonejson_error *error) {
   size_t i;
   size_t rem;
   size_t decoded_len;
@@ -86,12 +99,13 @@ lonejson__base64url_check(const char *data, size_t len, size_t *out_len,
   }
   if (out_len == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "base64url decoded length output is required");
+                               0u,
+                               "base64url decoded length output is required");
   }
   for (i = 0u; i < len; ++i) {
     if (lonejson__base64url_value((unsigned char)data[i]) < 0) {
-      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, i, 0u,
-                                 0u, "invalid base64url character");
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, i, 0u, 0u,
+                                 "invalid base64url character");
     }
   }
   rem = len & 3u;
@@ -169,8 +183,7 @@ lonejson_status lonejson_base64url_decode(const char *data, size_t len,
         (group_len > 3u)
             ? lonejson__base64url_value((unsigned char)data[in_pos + 3u])
             : 0;
-    bits = ((unsigned int)values[0] << 18) |
-           ((unsigned int)values[1] << 12) |
+    bits = ((unsigned int)values[0] << 18) | ((unsigned int)values[1] << 12) |
            ((unsigned int)values[2] << 6) | (unsigned int)values[3];
     if (group_len >= 2u) {
       out[out_pos++] = (unsigned char)((bits >> 16) & 0xffu);
@@ -201,8 +214,8 @@ static lonejson_status lonejson__jwt_check_segment(const char *token,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, begin, 0u,
                                0u, "JWT compact segment must not be empty");
   }
-  status =
-      lonejson__base64url_check(token + begin, end - begin, &decoded_len, error);
+  status = lonejson__base64url_check(token + begin, end - begin, &decoded_len,
+                                     error);
   if (status != LONEJSON_STATUS_OK) {
     if (error != NULL) {
       error->offset += begin;
@@ -243,7 +256,8 @@ lonejson_status lonejson_jwt_parse_compact(const char *token, size_t len,
         seen_second = 1;
       } else {
         return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, i, 0u,
-                                   0u, "JWT compact token has too many segments");
+                                   0u,
+                                   "JWT compact token has too many segments");
       }
     }
   }
@@ -282,9 +296,10 @@ static int lonejson__auth_streq(const char *a, const char *b) {
   return strcmp(a, b) == 0;
 }
 
-static lonejson_status lonejson__jwk_require_member(
-    const lonejson_jwk *jwk, const char *value, const char *member,
-    lonejson_error *error) {
+static lonejson_status lonejson__jwk_require_member(const lonejson_jwk *jwk,
+                                                    const char *value,
+                                                    const char *member,
+                                                    lonejson_error *error) {
   (void)jwk;
   if (value == NULL || value[0] == '\0') {
     char message[160];
@@ -296,8 +311,9 @@ static lonejson_status lonejson__jwk_require_member(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwk_check_base64url_member(
-    const char *value, const char *member, int required, lonejson_error *error) {
+static lonejson_status
+lonejson__jwk_check_base64url_member(const char *value, const char *member,
+                                     int required, lonejson_error *error) {
   size_t decoded_len;
   lonejson_status status;
 
@@ -421,8 +437,8 @@ lonejson_status lonejson_jwk_parse_json(lonejson *runtime, const char *json,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "JWK JSON input is required");
   }
-  status = lonejson_parse_buffer(runtime, &lonejson__jwk_map, out, json, len,
-                                 error);
+  status =
+      lonejson_parse_buffer(runtime, &lonejson__jwk_map, out, json, len, error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson_jwk_cleanup(out);
     return status;
@@ -505,6 +521,190 @@ lonejson_status lonejson_jwks_select(const lonejson_jwks *jwks,
   return LONEJSON_STATUS_OK;
 }
 
+#ifdef LONEJSON_WITH_OIDC
+static int lonejson__oidc_find_https_authority_end(const char *url, size_t len,
+                                                   int allow_query_fragment,
+                                                   size_t *authority_end) {
+  size_t i;
+  size_t authority_start = 8u;
+
+  if (url == NULL || len <= authority_start ||
+      memcmp(url, "https://", authority_start) != 0) {
+    return 0;
+  }
+  if (url[authority_start] == '/' || url[authority_start] == '?' ||
+      url[authority_start] == '#') {
+    return 0;
+  }
+  for (i = authority_start; i < len; ++i) {
+    if (url[i] == '/' || url[i] == '?' || url[i] == '#') {
+      break;
+    }
+  }
+  if (i == authority_start) {
+    return 0;
+  }
+  if (!allow_query_fragment) {
+    size_t j;
+    for (j = i; j < len; ++j) {
+      if (url[j] == '?' || url[j] == '#') {
+        return 0;
+      }
+    }
+  }
+  if (authority_end != NULL) {
+    *authority_end = i;
+  }
+  return 1;
+}
+
+static lonejson_status
+lonejson__oidc_require_https_url(const char *value, const char *member,
+                                 int allow_query_fragment,
+                                 lonejson_error *error) {
+  if (value == NULL || value[0] == '\0' ||
+      !lonejson__oidc_find_https_authority_end(value, strlen(value),
+                                               allow_query_fragment, NULL)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "OIDC %s must be an https URL with a host",
+                               member);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+void lonejson_oidc_discovery_init(lonejson_oidc_discovery *discovery) {
+  if (discovery != NULL) {
+    memset(discovery, 0, sizeof(*discovery));
+  }
+}
+
+void lonejson_oidc_discovery_cleanup(lonejson_oidc_discovery *discovery) {
+  if (discovery != NULL) {
+    lonejson_cleanup(&lonejson__oidc_discovery_map, discovery);
+    memset(discovery, 0, sizeof(*discovery));
+  }
+}
+
+lonejson_status lonejson_oidc_discovery_url(const char *issuer,
+                                            lonejson_owned_buffer *out,
+                                            lonejson_error *error) {
+  static const char well_known[] = "/.well-known/openid-configuration";
+  size_t issuer_len;
+  size_t authority_end;
+  size_t trim_len;
+  size_t path_len;
+  size_t total_len;
+  lonejson_allocator allocator;
+  char *data;
+
+  lonejson__clear_error(error);
+  if (issuer == NULL || out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OIDC issuer and output are required");
+  }
+  issuer_len = strlen(issuer);
+  if (!lonejson__oidc_find_https_authority_end(issuer, issuer_len, 0,
+                                               &authority_end)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "OIDC issuer must be an https URL with a host");
+  }
+  trim_len = issuer_len;
+  while (trim_len > authority_end && issuer[trim_len - 1u] == '/') {
+    --trim_len;
+  }
+  path_len = trim_len > authority_end ? trim_len - authority_end : 0u;
+  if (authority_end > SIZE_MAX - (sizeof(well_known) - 1u) ||
+      authority_end + (sizeof(well_known) - 1u) > SIZE_MAX - path_len - 1u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "OIDC discovery URL is too large");
+  }
+  total_len = authority_end + (sizeof(well_known) - 1u) + path_len;
+  allocator = lonejson_default_allocator();
+  data = (char *)lonejson__buffer_alloc(&allocator, total_len + 1u);
+  if (data == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to allocate OIDC discovery URL");
+  }
+  memcpy(data, issuer, authority_end);
+  memcpy(data + authority_end, well_known, sizeof(well_known) - 1u);
+  if (path_len != 0u) {
+    memcpy(data + authority_end + (sizeof(well_known) - 1u),
+           issuer + authority_end, path_len);
+  }
+  data[total_len] = '\0';
+  lonejson_owned_buffer_free(out);
+  out->data = data;
+  out->len = total_len;
+  out->alloc_size = total_len + 1u;
+  out->allocator = allocator;
+  return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_oidc_discovery_parse_json(lonejson *runtime,
+                                                   const char *json, size_t len,
+                                                   lonejson_oidc_discovery *out,
+                                                   lonejson_error *error) {
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OIDC discovery output is required");
+  }
+  if (json == NULL && len != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OIDC discovery JSON input is required");
+  }
+  status = lonejson_parse_buffer(runtime, &lonejson__oidc_discovery_map, out,
+                                 json, len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oidc_discovery_cleanup(out);
+    return status;
+  }
+  status = lonejson__oidc_require_https_url(out->issuer, "issuer", 0, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oidc_require_https_url(out->token_endpoint,
+                                              "token_endpoint", 1, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status =
+        lonejson__oidc_require_https_url(out->jwks_uri, "jwks_uri", 1, error);
+  }
+  if (status == LONEJSON_STATUS_OK && out->authorization_endpoint != NULL) {
+    status = lonejson__oidc_require_https_url(
+        out->authorization_endpoint, "authorization_endpoint", 1, error);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oidc_discovery_cleanup(out);
+  }
+  return status;
+}
+
+lonejson_status lonejson_oidc_discovery_validate_issuer(
+    const lonejson_oidc_discovery *discovery, const char *expected_issuer,
+    lonejson_error *error) {
+  lonejson__clear_error(error);
+  if (discovery == NULL || expected_issuer == NULL) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "OIDC discovery and expected issuer are required");
+  }
+  if (!lonejson__oidc_find_https_authority_end(
+          expected_issuer, strlen(expected_issuer), 0, NULL)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+        "OIDC expected issuer must be an https URL with a host");
+  }
+  if (discovery->issuer == NULL ||
+      strcmp(discovery->issuer, expected_issuer) != 0) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "OIDC discovery issuer does not match expected issuer");
+  }
+  return LONEJSON_STATUS_OK;
+}
+#endif
+
 static int lonejson__jwt_path_is(const lonejson_value_path *path,
                                  const char *name) {
   return path != NULL && path->segment_count == 1u &&
@@ -537,15 +737,16 @@ static lonejson_status lonejson__jwt_claim_type_error(lonejson_error *error,
                              "JWT claim has invalid type: %s", claim);
 }
 
-static lonejson_status lonejson__jwt_claim_duplicate_error(
-    lonejson_error *error, const char *claim) {
-  return lonejson__set_error(error, LONEJSON_STATUS_DUPLICATE_FIELD, 0u, 0u,
-                             0u, "duplicate JWT registered claim: %s", claim);
+static lonejson_status
+lonejson__jwt_claim_duplicate_error(lonejson_error *error, const char *claim) {
+  return lonejson__set_error(error, LONEJSON_STATUS_DUPLICATE_FIELD, 0u, 0u, 0u,
+                             "duplicate JWT registered claim: %s", claim);
 }
 
-static lonejson_status lonejson__jwt_visit_buffer_append(
-    lonejson__jwt_claim_visit *state, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_visit_buffer_append(lonejson__jwt_claim_visit *state,
+                                  const char *data, size_t len,
+                                  lonejson_error *error) {
   char *next;
   size_t next_cap;
 
@@ -601,8 +802,9 @@ static char *lonejson__jwt_visit_buffer_take(lonejson__jwt_claim_visit *state) {
   return out;
 }
 
-static lonejson_status lonejson__jwt_string_array_append(
-    lonejson_string_array *array, char *value, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_string_array_append(lonejson_string_array *array, char *value,
+                                  lonejson_error *error) {
   char **next;
   size_t next_capacity;
 
@@ -627,9 +829,10 @@ static lonejson_status lonejson__jwt_string_array_append(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_begin_string_field(
-    lonejson__jwt_claim_visit *state, lonejson__jwt_claim_field field,
-    int *seen, const char *name, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_begin_string_field(lonejson__jwt_claim_visit *state,
+                                 lonejson__jwt_claim_field field, int *seen,
+                                 const char *name, lonejson_error *error) {
   if (*seen) {
     return lonejson__jwt_claim_duplicate_error(error, name);
   }
@@ -639,56 +842,58 @@ static lonejson_status lonejson__jwt_begin_string_field(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_claim_string_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_claim_string_begin(void *user, const lonejson_value_path *path,
+                                 lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
 
   if (state->header_mode) {
     if (lonejson__jwt_path_is(path, "alg")) {
-      return lonejson__jwt_begin_string_field(
-          state, LONEJSON__JWT_FIELD_HEADER_ALG, &state->seen_alg, "alg",
-          error);
+      return lonejson__jwt_begin_string_field(state,
+                                              LONEJSON__JWT_FIELD_HEADER_ALG,
+                                              &state->seen_alg, "alg", error);
     }
     if (lonejson__jwt_path_is(path, "kid")) {
-      return lonejson__jwt_begin_string_field(
-          state, LONEJSON__JWT_FIELD_HEADER_KID, &state->seen_kid, "kid",
-          error);
+      return lonejson__jwt_begin_string_field(state,
+                                              LONEJSON__JWT_FIELD_HEADER_KID,
+                                              &state->seen_kid, "kid", error);
     }
     if (lonejson__jwt_path_is(path, "typ")) {
-      return lonejson__jwt_begin_string_field(
-          state, LONEJSON__JWT_FIELD_HEADER_TYP, &state->seen_typ, "typ",
-          error);
+      return lonejson__jwt_begin_string_field(state,
+                                              LONEJSON__JWT_FIELD_HEADER_TYP,
+                                              &state->seen_typ, "typ", error);
     }
     return LONEJSON_STATUS_OK;
   }
   if (lonejson__jwt_path_is(path, "iss")) {
-    return lonejson__jwt_begin_string_field(
-        state, LONEJSON__JWT_FIELD_ISS, &state->seen_iss, "iss", error);
+    return lonejson__jwt_begin_string_field(state, LONEJSON__JWT_FIELD_ISS,
+                                            &state->seen_iss, "iss", error);
   }
   if (lonejson__jwt_path_is(path, "sub")) {
-    return lonejson__jwt_begin_string_field(
-        state, LONEJSON__JWT_FIELD_SUB, &state->seen_sub, "sub", error);
+    return lonejson__jwt_begin_string_field(state, LONEJSON__JWT_FIELD_SUB,
+                                            &state->seen_sub, "sub", error);
   }
   if (lonejson__jwt_path_is(path, "aud")) {
     return lonejson__jwt_begin_string_field(
-        state, LONEJSON__JWT_FIELD_AUD_STRING, &state->seen_aud, "aud",
-        error);
+        state, LONEJSON__JWT_FIELD_AUD_STRING, &state->seen_aud, "aud", error);
   }
   if (lonejson__jwt_path_is_aud_item(path)) {
     state->active = LONEJSON__JWT_FIELD_AUD_ARRAY_ITEM;
     lonejson__jwt_visit_buffer_reset(state);
     return LONEJSON_STATUS_OK;
   }
-  if (lonejson__jwt_path_is(path, "exp") || lonejson__jwt_path_is(path, "nbf") ||
+  if (lonejson__jwt_path_is(path, "exp") ||
+      lonejson__jwt_path_is(path, "nbf") ||
       lonejson__jwt_path_is(path, "iat")) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_claim_string_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_claim_string_chunk(void *user, const lonejson_value_path *path,
+                                 const char *data, size_t len,
+                                 lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
   (void)path;
   if (state->active == LONEJSON__JWT_FIELD_NONE) {
@@ -697,8 +902,9 @@ static lonejson_status lonejson__jwt_claim_string_chunk(
   return lonejson__jwt_visit_buffer_append(state, data, len, error);
 }
 
-static lonejson_status lonejson__jwt_claim_string_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_claim_string_end(void *user, const lonejson_value_path *path,
+                               lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
   char *value;
   (void)path;
@@ -765,9 +971,10 @@ static lonejson_status lonejson__jwt_claim_string_end(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_begin_number_field(
-    lonejson__jwt_claim_visit *state, lonejson__jwt_claim_field field,
-    int *seen, const char *name, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_begin_number_field(lonejson__jwt_claim_visit *state,
+                                 lonejson__jwt_claim_field field, int *seen,
+                                 const char *name, lonejson_error *error) {
   if (*seen) {
     return lonejson__jwt_claim_duplicate_error(error, name);
   }
@@ -777,30 +984,33 @@ static lonejson_status lonejson__jwt_begin_number_field(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_claim_number_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_claim_number_begin(void *user, const lonejson_value_path *path,
+                                 lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
 
   if (state->header_mode) {
-    if (lonejson__jwt_path_is(path, "alg") || lonejson__jwt_path_is(path, "kid") ||
+    if (lonejson__jwt_path_is(path, "alg") ||
+        lonejson__jwt_path_is(path, "kid") ||
         lonejson__jwt_path_is(path, "typ")) {
       return lonejson__jwt_claim_type_error(error, "registered");
     }
     return LONEJSON_STATUS_OK;
   }
   if (lonejson__jwt_path_is(path, "exp")) {
-    return lonejson__jwt_begin_number_field(
-        state, LONEJSON__JWT_FIELD_EXP, &state->seen_exp, "exp", error);
+    return lonejson__jwt_begin_number_field(state, LONEJSON__JWT_FIELD_EXP,
+                                            &state->seen_exp, "exp", error);
   }
   if (lonejson__jwt_path_is(path, "nbf")) {
-    return lonejson__jwt_begin_number_field(
-        state, LONEJSON__JWT_FIELD_NBF, &state->seen_nbf, "nbf", error);
+    return lonejson__jwt_begin_number_field(state, LONEJSON__JWT_FIELD_NBF,
+                                            &state->seen_nbf, "nbf", error);
   }
   if (lonejson__jwt_path_is(path, "iat")) {
-    return lonejson__jwt_begin_number_field(
-        state, LONEJSON__JWT_FIELD_IAT, &state->seen_iat, "iat", error);
+    return lonejson__jwt_begin_number_field(state, LONEJSON__JWT_FIELD_IAT,
+                                            &state->seen_iat, "iat", error);
   }
-  if (lonejson__jwt_path_is(path, "iss") || lonejson__jwt_path_is(path, "sub") ||
+  if (lonejson__jwt_path_is(path, "iss") ||
+      lonejson__jwt_path_is(path, "sub") ||
       lonejson__jwt_path_is(path, "aud") ||
       lonejson__jwt_path_is_aud_item(path)) {
     return lonejson__jwt_claim_type_error(error, "registered");
@@ -808,9 +1018,10 @@ static lonejson_status lonejson__jwt_claim_number_begin(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_claim_number_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_claim_number_chunk(void *user, const lonejson_value_path *path,
+                                 const char *data, size_t len,
+                                 lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
   (void)path;
   if (state->active != LONEJSON__JWT_FIELD_EXP &&
@@ -821,8 +1032,9 @@ static lonejson_status lonejson__jwt_claim_number_chunk(
   return lonejson__jwt_visit_buffer_append(state, data, len, error);
 }
 
-static lonejson_status lonejson__jwt_claim_number_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_claim_number_end(void *user, const lonejson_value_path *path,
+                               lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
   lonejson_int64 value;
   (void)path;
@@ -836,13 +1048,13 @@ static lonejson_status lonejson__jwt_claim_number_end(
   if (state->buffer == NULL ||
       !lonejson__parse_i64_token(state->buffer, &value)) {
     state->active = LONEJSON__JWT_FIELD_NONE;
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "JWT date claim must be an integer");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT date claim must be an integer");
   }
   if (value < 0) {
     state->active = LONEJSON__JWT_FIELD_NONE;
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "JWT date claim must be non-negative");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT date claim must be non-negative");
   }
   if (state->active == LONEJSON__JWT_FIELD_EXP) {
     state->claims->exp = value;
@@ -859,8 +1071,9 @@ static lonejson_status lonejson__jwt_claim_number_end(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_claim_object_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_claim_object_begin(void *user, const lonejson_value_path *path,
+                                 lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
   if (path != NULL && path->segment_count == 0u) {
     if (state->root_object_seen) {
@@ -870,23 +1083,26 @@ static lonejson_status lonejson__jwt_claim_object_begin(
     state->root_object_seen = 1;
     return LONEJSON_STATUS_OK;
   }
-  if (state->header_mode &&
-      (lonejson__jwt_path_is(path, "alg") || lonejson__jwt_path_is(path, "kid") ||
-       lonejson__jwt_path_is(path, "typ"))) {
+  if (state->header_mode && (lonejson__jwt_path_is(path, "alg") ||
+                             lonejson__jwt_path_is(path, "kid") ||
+                             lonejson__jwt_path_is(path, "typ"))) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
-  if (!state->header_mode &&
-      (lonejson__jwt_path_is(path, "iss") || lonejson__jwt_path_is(path, "sub") ||
-       lonejson__jwt_path_is(path, "aud") || lonejson__jwt_path_is(path, "exp") ||
-       lonejson__jwt_path_is(path, "nbf") || lonejson__jwt_path_is(path, "iat") ||
-       lonejson__jwt_path_is_aud_item(path))) {
+  if (!state->header_mode && (lonejson__jwt_path_is(path, "iss") ||
+                              lonejson__jwt_path_is(path, "sub") ||
+                              lonejson__jwt_path_is(path, "aud") ||
+                              lonejson__jwt_path_is(path, "exp") ||
+                              lonejson__jwt_path_is(path, "nbf") ||
+                              lonejson__jwt_path_is(path, "iat") ||
+                              lonejson__jwt_path_is_aud_item(path))) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_claim_array_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_claim_array_begin(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
   if (!state->header_mode && lonejson__jwt_path_is(path, "aud")) {
     if (state->seen_aud) {
@@ -895,43 +1111,48 @@ static lonejson_status lonejson__jwt_claim_array_begin(
     state->seen_aud = 1;
     return LONEJSON_STATUS_OK;
   }
-  if (state->header_mode &&
-      (lonejson__jwt_path_is(path, "alg") || lonejson__jwt_path_is(path, "kid") ||
-       lonejson__jwt_path_is(path, "typ"))) {
+  if (state->header_mode && (lonejson__jwt_path_is(path, "alg") ||
+                             lonejson__jwt_path_is(path, "kid") ||
+                             lonejson__jwt_path_is(path, "typ"))) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
-  if (!state->header_mode &&
-      (lonejson__jwt_path_is(path, "iss") || lonejson__jwt_path_is(path, "sub") ||
-       lonejson__jwt_path_is(path, "exp") || lonejson__jwt_path_is(path, "nbf") ||
-       lonejson__jwt_path_is(path, "iat") ||
-       lonejson__jwt_path_is_aud_item(path))) {
+  if (!state->header_mode && (lonejson__jwt_path_is(path, "iss") ||
+                              lonejson__jwt_path_is(path, "sub") ||
+                              lonejson__jwt_path_is(path, "exp") ||
+                              lonejson__jwt_path_is(path, "nbf") ||
+                              lonejson__jwt_path_is(path, "iat") ||
+                              lonejson__jwt_path_is_aud_item(path))) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_claim_literal_type(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_claim_literal_type(void *user, const lonejson_value_path *path,
+                                 lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
-  if (state->header_mode &&
-      (lonejson__jwt_path_is(path, "alg") || lonejson__jwt_path_is(path, "kid") ||
-       lonejson__jwt_path_is(path, "typ"))) {
+  if (state->header_mode && (lonejson__jwt_path_is(path, "alg") ||
+                             lonejson__jwt_path_is(path, "kid") ||
+                             lonejson__jwt_path_is(path, "typ"))) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
-  if (!state->header_mode &&
-      (lonejson__jwt_path_is(path, "iss") || lonejson__jwt_path_is(path, "sub") ||
-       lonejson__jwt_path_is(path, "aud") || lonejson__jwt_path_is(path, "exp") ||
-       lonejson__jwt_path_is(path, "nbf") || lonejson__jwt_path_is(path, "iat") ||
-       lonejson__jwt_path_is_aud_item(path))) {
+  if (!state->header_mode && (lonejson__jwt_path_is(path, "iss") ||
+                              lonejson__jwt_path_is(path, "sub") ||
+                              lonejson__jwt_path_is(path, "aud") ||
+                              lonejson__jwt_path_is(path, "exp") ||
+                              lonejson__jwt_path_is(path, "nbf") ||
+                              lonejson__jwt_path_is(path, "iat") ||
+                              lonejson__jwt_path_is_aud_item(path))) {
     return lonejson__jwt_claim_type_error(
         error, path->segment_count == 0u ? "root" : "registered");
   }
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__jwt_claim_bool(
-    void *user, const lonejson_value_path *path, int value,
-    lonejson_error *error) {
+static lonejson_status lonejson__jwt_claim_bool(void *user,
+                                                const lonejson_value_path *path,
+                                                int value,
+                                                lonejson_error *error) {
   (void)value;
   return lonejson__jwt_claim_literal_type(user, path, error);
 }
@@ -1006,8 +1227,7 @@ static lonejson_status lonejson__jwt_parse_decoded_json(
     return status;
   }
   if (!state.root_object_seen) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u,
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                header_mode ? "JWT header must be an object"
                                            : "JWT claims must be an object");
   }
@@ -1036,7 +1256,8 @@ lonejson_status lonejson_jwt_decode_compact(
   lonejson__clear_error(error);
   if (header == NULL || claims == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "JWT header and claims outputs are required");
+                               0u,
+                               "JWT header and claims outputs are required");
   }
   if (limits != NULL && limits->max_token_bytes != 0u &&
       len > limits->max_token_bytes) {
@@ -1049,15 +1270,13 @@ lonejson_status lonejson_jwt_decode_compact(
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson_base64url_decoded_len(compact.header.data,
-                                          compact.header.len, &header_len,
-                                          error);
+  status = lonejson_base64url_decoded_len(
+      compact.header.data, compact.header.len, &header_len, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson_base64url_decoded_len(compact.payload.data,
-                                          compact.payload.len, &claims_len,
-                                          error);
+  status = lonejson_base64url_decoded_len(
+      compact.payload.data, compact.payload.len, &claims_len, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -1076,27 +1295,26 @@ lonejson_status lonejson_jwt_decode_compact(
   if (header_json == NULL || claims_json == NULL) {
     lonejson__owned_free(header_json);
     lonejson__owned_free(claims_json);
-    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
-                               0u, 0u, "failed to allocate decoded JWT JSON");
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to allocate decoded JWT JSON");
   }
   status = lonejson_base64url_decode(compact.header.data, compact.header.len,
                                      (unsigned char *)header_json, header_len,
                                      &needed, error);
   if (status == LONEJSON_STATUS_OK) {
     header_json[header_len] = '\0';
-    status = lonejson_base64url_decode(compact.payload.data,
-                                       compact.payload.len,
-                                       (unsigned char *)claims_json,
-                                       claims_len, &needed, error);
+    status = lonejson_base64url_decode(
+        compact.payload.data, compact.payload.len, (unsigned char *)claims_json,
+        claims_len, &needed, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     claims_json[claims_len] = '\0';
     status = lonejson__jwt_parse_decoded_json(runtime, header_json, header_len,
-                                             1, header, claims, error);
+                                              1, header, claims, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__jwt_parse_decoded_json(runtime, claims_json, claims_len,
-                                             0, header, claims, error);
+                                              0, header, claims, error);
   }
   lonejson__owned_free(header_json);
   lonejson__owned_free(claims_json);
@@ -1122,8 +1340,8 @@ static int lonejson__jwt_string_in_list(const char *value,
   return 0;
 }
 
-static int lonejson__jwt_claim_has_audience(
-    const lonejson_jwt_claims *claims, const char *audience) {
+static int lonejson__jwt_claim_has_audience(const lonejson_jwt_claims *claims,
+                                            const char *audience) {
   size_t i;
   if (claims->aud != NULL && strcmp(claims->aud, audience) == 0) {
     return 1;
@@ -1137,8 +1355,9 @@ static int lonejson__jwt_claim_has_audience(
   return 0;
 }
 
-static int lonejson__jwt_any_audience_accepted(
-    const lonejson_jwt_claims *claims, const lonejson_jwt_claim_policy *policy) {
+static int
+lonejson__jwt_any_audience_accepted(const lonejson_jwt_claims *claims,
+                                    const lonejson_jwt_claim_policy *policy) {
   size_t i;
   for (i = 0u; i < policy->accepted_audience_count; ++i) {
     if (policy->accepted_audiences[i] != NULL &&
@@ -1182,7 +1401,8 @@ lonejson_status lonejson_jwt_validate_claims(
   lonejson__clear_error(error);
   if (header == NULL || claims == NULL || policy == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "JWT header, claims, and policy are required");
+                               0u,
+                               "JWT header, claims, and policy are required");
   }
   if (policy->accepted_algs == NULL || policy->accepted_alg_count == 0u ||
       policy->accepted_issuers == NULL || policy->accepted_issuer_count == 0u ||
@@ -1195,41 +1415,40 @@ lonejson_status lonejson_jwt_validate_claims(
   if (header->alg == NULL || strcmp(header->alg, "none") == 0 ||
       !lonejson__jwt_string_in_list(header->alg, policy->accepted_algs,
                                     policy->accepted_alg_count)) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "JWT algorithm is not accepted");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT algorithm is not accepted");
   }
   if (!lonejson__jwt_string_in_list(claims->iss, policy->accepted_issuers,
                                     policy->accepted_issuer_count)) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "JWT issuer is not accepted");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT issuer is not accepted");
   }
   if (!lonejson__jwt_any_audience_accepted(claims, policy)) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "JWT audience is not accepted");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT audience is not accepted");
   }
   for (i = 0u; i < policy->required_claim_count; ++i) {
     if (policy->required_claims == NULL || policy->required_claims[i] == NULL ||
         !lonejson__jwt_has_required_claim(claims, policy->required_claims[i])) {
       return lonejson__set_error(error, LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
-                                 0u, 0u, 0u,
-                                 "JWT required claim is missing");
+                                 0u, 0u, 0u, "JWT required claim is missing");
     }
   }
   skew = policy->allowed_clock_skew;
   if (claims->has_exp && policy->now >= claims->exp &&
       policy->now - claims->exp >= skew) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "JWT is expired");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT is expired");
   }
   if (claims->has_nbf && policy->now < claims->nbf &&
       claims->nbf - policy->now > skew) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "JWT is not yet valid");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT is not yet valid");
   }
   if (claims->has_iat && policy->now < claims->iat &&
       claims->iat - policy->now > skew) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "JWT issued-at time is in the future");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT issued-at time is in the future");
   }
   return LONEJSON_STATUS_OK;
 }

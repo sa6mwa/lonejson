@@ -62,6 +62,10 @@ void lonejson_jwt_decode_compact(void);
 void lonejson_jwt_validate_claims(void);
 void lonejson_jwt_header_cleanup(void);
 void lonejson_jwt_claims_cleanup(void);
+void lonejson_oidc_discovery_url(void);
+void lonejson_oidc_discovery_parse_json(void);
+void lonejson_oidc_discovery_validate_issuer(void);
+void lonejson_oidc_discovery_cleanup(void);
 
 #endif
 EOF
@@ -129,6 +133,18 @@ void lonejson_jwt_header_cleanup(void) {
 }
 
 void lonejson_jwt_claims_cleanup(void) {
+}
+
+void lonejson_oidc_discovery_url(void) {
+}
+
+void lonejson_oidc_discovery_parse_json(void) {
+}
+
+void lonejson_oidc_discovery_validate_issuer(void) {
+}
+
+void lonejson_oidc_discovery_cleanup(void) {
 }
 EOF
 

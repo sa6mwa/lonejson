@@ -36,6 +36,7 @@ option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when suppo
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
 option(LONEJSON_BUILD_WITH_OPENSSL "Build lonejson with OpenSSL-backed auth/crypto support enabled." OFF)
 option(LONEJSON_BUILD_WITH_JWT "Build lonejson with JWT/JWK auth APIs enabled." OFF)
+option(LONEJSON_BUILD_WITH_OIDC "Build lonejson with OIDC/OAuth2 helper APIs enabled." OFF)
 set(LONEJSON_ABI_VERSION "20" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
@@ -243,6 +244,12 @@ endif()
 if(LONEJSON_BUILD_WITH_JWT AND NOT LONEJSON_BUILD_WITH_OPENSSL)
   message(FATAL_ERROR "LONEJSON_BUILD_WITH_JWT requires LONEJSON_BUILD_WITH_OPENSSL=ON.")
 endif()
+if(LONEJSON_BUILD_WITH_OIDC AND
+    (NOT LONEJSON_BUILD_WITH_CURL OR NOT LONEJSON_BUILD_WITH_OPENSSL OR NOT LONEJSON_BUILD_WITH_JWT))
+  message(FATAL_ERROR
+    "LONEJSON_BUILD_WITH_OIDC requires LONEJSON_BUILD_WITH_CURL=ON, "
+    "LONEJSON_BUILD_WITH_OPENSSL=ON, and LONEJSON_BUILD_WITH_JWT=ON.")
+endif()
 
 function(lonejson_target_include_curl target)
   if(CURL_INCLUDE_DIRS)
@@ -341,6 +348,9 @@ foreach(target lonejson_shared lonejson_static)
   if(LONEJSON_BUILD_WITH_JWT)
     target_compile_definitions(${target} PRIVATE LONEJSON_WITH_JWT)
   endif()
+  if(LONEJSON_BUILD_WITH_OIDC)
+    target_compile_definitions(${target} PRIVATE LONEJSON_WITH_OIDC)
+  endif()
 endforeach()
 
 if(LONEJSON_BUILD_FUZZERS)
@@ -418,6 +428,9 @@ if(LONEJSON_BUILD_TESTS)
   endif()
   if(LONEJSON_BUILD_WITH_JWT)
     target_compile_definitions(lonejson_tests PRIVATE LONEJSON_WITH_JWT)
+  endif()
+  if(LONEJSON_BUILD_WITH_OIDC)
+    target_compile_definitions(lonejson_tests PRIVATE LONEJSON_WITH_OIDC)
   endif()
   lonejson_configure_c_target(lonejson_tests)
   add_dependencies(lonejson_tests lonejson_generate_fixtures)
@@ -529,6 +542,18 @@ if(LONEJSON_BUILD_TESTS)
         LONEJSON_WITH_CURL)
       lonejson_target_include_curl(lonejson_lua_target_core)
       target_link_libraries(lonejson_lua_target_core PRIVATE CURL::libcurl)
+    endif()
+    if(LONEJSON_BUILD_WITH_OPENSSL)
+      target_compile_definitions(lonejson_lua_target_core PRIVATE
+        LONEJSON_WITH_OPENSSL)
+    endif()
+    if(LONEJSON_BUILD_WITH_JWT)
+      target_compile_definitions(lonejson_lua_target_core PRIVATE
+        LONEJSON_WITH_JWT)
+    endif()
+    if(LONEJSON_BUILD_WITH_OIDC)
+      target_compile_definitions(lonejson_lua_target_core PRIVATE
+        LONEJSON_WITH_OIDC)
     endif()
     lonejson_configure_lua_c_target(lonejson_lua_target_core)
 
@@ -1070,9 +1095,14 @@ if(LONEJSON_BUILD_FUZZERS)
   target_include_directories(lonejson_fuzz_jwt PRIVATE
     "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_link_libraries(lonejson_fuzz_jwt PRIVATE lonejson)
+  if(LONEJSON_BUILD_WITH_CURL)
+    lonejson_target_include_curl(lonejson_fuzz_jwt)
+  endif()
   target_compile_definitions(lonejson_fuzz_jwt PRIVATE
+    LONEJSON_WITH_CURL
     LONEJSON_WITH_OPENSSL
-    LONEJSON_WITH_JWT)
+    LONEJSON_WITH_JWT
+    LONEJSON_WITH_OIDC)
   target_compile_options(lonejson_fuzz_jwt PRIVATE
     -fsanitize=fuzzer-no-link,address,undefined
     -fno-omit-frame-pointer)
@@ -1218,6 +1248,7 @@ add_custom_target(package-archive
     -DLONEJSON_BUILD_WITH_CURL=${LONEJSON_BUILD_WITH_CURL}
     -DLONEJSON_BUILD_WITH_OPENSSL=${LONEJSON_BUILD_WITH_OPENSSL}
     -DLONEJSON_BUILD_WITH_JWT=${LONEJSON_BUILD_WITH_JWT}
+    -DLONEJSON_BUILD_WITH_OIDC=${LONEJSON_BUILD_WITH_OIDC}
     -DLONEJSON_STRIP=${CMAKE_STRIP}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_archive.cmake
   DEPENDS lonejson_shared lonejson_static

@@ -55,7 +55,11 @@ for symbol in \
     lonejson_jwt_decode_compact \
     lonejson_jwt_validate_claims \
     lonejson_jwt_header_cleanup \
-    lonejson_jwt_claims_cleanup; do
+    lonejson_jwt_claims_cleanup \
+    lonejson_oidc_discovery_url \
+    lonejson_oidc_discovery_parse_json \
+    lonejson_oidc_discovery_validate_issuer \
+    lonejson_oidc_discovery_cleanup; do
   symbol_regex="(^|[[:space:]])${symbol_prefix}${symbol}$"
   if ! printf '%s\n' "$shared_symbols" | grep -Eq "$symbol_regex"; then
     printf 'missing lonejson_jwt_* ABI symbol in shared library for %s: %s\n' "$context" "$symbol" >&2

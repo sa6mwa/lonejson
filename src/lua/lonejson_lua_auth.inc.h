@@ -72,6 +72,20 @@ static void ljlua_auth_push_claims(lua_State *L,
   }
 }
 
+#ifdef LONEJSON_WITH_OIDC
+static void
+ljlua_auth_push_oidc_discovery(lua_State *L,
+                               const lonejson_oidc_discovery *discovery) {
+  lua_createtable(L, 0, 4);
+  ljlua_auth_push_optional_string(L, discovery->issuer, "issuer");
+  ljlua_auth_push_optional_string(L, discovery->authorization_endpoint,
+                                  "authorization_endpoint");
+  ljlua_auth_push_optional_string(L, discovery->token_endpoint,
+                                  "token_endpoint");
+  ljlua_auth_push_optional_string(L, discovery->jwks_uri, "jwks_uri");
+}
+#endif
+
 static lonejson *ljlua_auth_runtime_arg(lua_State *L, int *arg,
                                         lonejson **owned_runtime,
                                         lonejson_error *error) {
@@ -88,7 +102,7 @@ static lonejson *ljlua_auth_runtime_arg(lua_State *L, int *arg,
 
 static int ljlua_auth_read_string_list(lua_State *L, int table_index,
                                        const char *field,
-                                       const char ***out_items,
+                                       const char *const **out_items,
                                        size_t *out_count, int required) {
   size_t i;
   size_t count;
@@ -366,6 +380,65 @@ static int ljlua_jwks_select_json(lua_State *L) {
   lonejson_jwks_cleanup(&jwks);
   return 1;
 }
+
+#ifdef LONEJSON_WITH_OIDC
+static int ljlua_oidc_discovery_url(lua_State *L) {
+  lonejson_owned_buffer out;
+  lonejson_error error;
+  lonejson_status status;
+  const char *issuer;
+
+  issuer = luaL_checkstring(L, 1);
+  lonejson_error_init(&error);
+  lonejson_owned_buffer_init(&out);
+  status = lonejson_oidc_discovery_url(issuer, &out, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_owned_buffer_free(&out);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushlstring(L, out.data, out.len);
+  lonejson_owned_buffer_free(&out);
+  return 1;
+}
+
+static int ljlua_oidc_discovery_parse_json(lua_State *L) {
+  lonejson *runtime;
+  lonejson *owned_runtime;
+  lonejson_oidc_discovery discovery;
+  lonejson_error error;
+  lonejson_status status;
+  const char *json;
+  const char *expected_issuer;
+  size_t len;
+  int arg;
+
+  runtime = ljlua_auth_runtime_arg(L, &arg, &owned_runtime, &error);
+  if (runtime == NULL) {
+    return ljlua_push_status_result(L, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                    &error);
+  }
+  json = luaL_checklstring(L, arg, &len);
+  expected_issuer =
+      lua_isnoneornil(L, arg + 1) ? NULL : luaL_checkstring(L, arg + 1);
+  lonejson_oidc_discovery_init(&discovery);
+  status = lonejson_oidc_discovery_parse_json(runtime, json, len, &discovery,
+                                              &error);
+  if (status == LONEJSON_STATUS_OK && expected_issuer != NULL) {
+    status = lonejson_oidc_discovery_validate_issuer(&discovery,
+                                                     expected_issuer, &error);
+  }
+  if (owned_runtime != NULL) {
+    lonejson_free(owned_runtime);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oidc_discovery_cleanup(&discovery);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_push_oidc_discovery(L, &discovery);
+  lonejson_oidc_discovery_cleanup(&discovery);
+  return 1;
+}
+#endif
 
 static int ljlua_jwt_decode_compact(lua_State *L) {
   lonejson *runtime;

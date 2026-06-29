@@ -36,15 +36,14 @@ static void test_jwt_base64url_decode_vectors(void) {
                                    &error) == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(lonejson_base64url_decode("AA", 2u, NULL, 1u, &needed, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
-  EXPECT(lonejson_base64url_decode("AA", 2u, out, sizeof(out), NULL,
-                                   &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_base64url_decode("AA", 2u, out, sizeof(out), NULL, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
 }
 
 static void test_jwt_compact_parse_segments(void) {
-  static const char token[] =
-      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIn0."
-      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIn0."
-      "c2ln";
+  static const char token[] = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIn0."
+                              "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIn0."
+                              "c2ln";
   lonejson_jwt_compact jwt;
   lonejson_error error;
 
@@ -61,8 +60,7 @@ static void test_jwt_compact_parse_segments(void) {
   EXPECT(jwt.signing_input.len == 71u);
 
   memset(&jwt, 0, sizeof(jwt));
-  EXPECT(lj_jwt_parse_compact("AA.AA.", 6u, &jwt, &error) ==
-         LJ_STATUS_OK);
+  EXPECT(lj_jwt_parse_compact("AA.AA.", 6u, &jwt, &error) == LJ_STATUS_OK);
   EXPECT(jwt.header.len == 2u);
   EXPECT(jwt.payload.len == 2u);
   EXPECT(jwt.signature.len == 0u);
@@ -112,8 +110,8 @@ static void test_jwk_parse_json_shapes(void) {
 
   lonejson_error_init(&error);
   lonejson_jwk_init(&jwk);
-  EXPECT(lonejson_jwk_parse_json(test_default_runtime(), rsa, strlen(rsa),
-                                 &jwk, &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_jwk_parse_json(test_default_runtime(), rsa, strlen(rsa), &jwk,
+                                 &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(jwk.kty, "RSA") == 0);
   EXPECT(strcmp(jwk.kid, "rsa1") == 0);
   EXPECT(strcmp(jwk.alg, "RS256") == 0);
@@ -130,8 +128,8 @@ static void test_jwk_parse_json_shapes(void) {
   EXPECT(strcmp(jwk.y, "AwQF") == 0);
   lj_jwk_cleanup(&jwk);
 
-  EXPECT(lonejson_jwk_parse_json(test_default_runtime(), oct, strlen(oct),
-                                 &jwk, &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_jwk_parse_json(test_default_runtime(), oct, strlen(oct), &jwk,
+                                 &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(jwk.kty, "oct") == 0);
   EXPECT(strcmp(jwk.k, "c2VjcmV0") == 0);
   lonejson_jwk_cleanup(&jwk);
@@ -142,7 +140,8 @@ static void test_jwks_parse_and_select(void) {
       "{\"keys\":["
       "{\"kty\":\"RSA\",\"kid\":\"first\",\"use\":\"sig\",\"alg\":\"RS256\","
       "\"n\":\"AQIDBA\",\"e\":\"AQAB\"},"
-      "{\"kty\":\"RSA\",\"kid\":\"second\",\"use\":\"enc\",\"alg\":\"RSA-OAEP\","
+      "{\"kty\":\"RSA\",\"kid\":\"second\",\"use\":\"enc\",\"alg\":\"RSA-"
+      "OAEP\","
       "\"n\":\"BQYH\",\"e\":\"AQAB\"},"
       "{\"kty\":\"EC\",\"kid\":\"ec\",\"use\":\"sig\",\"alg\":\"ES256\","
       "\"crv\":\"P-256\",\"x\":\"AAEC\",\"y\":\"AwQF\"}"
@@ -198,8 +197,8 @@ static void test_jwk_parse_failures(void) {
   {
     const char *json = "{\"kid\":\"x\"}";
     EXPECT(lonejson_jwk_parse_json(test_default_runtime(), json, strlen(json),
-                                   &jwk,
-                                 &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+                                   &jwk, &error) ==
+           LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
   }
   {
     const char *json = "{\"kty\":\"RSA\",\"n\":\"AQID\"}";
@@ -223,7 +222,8 @@ static void test_jwk_parse_failures(void) {
                                     &error) == LONEJSON_STATUS_INVALID_JSON);
   }
   {
-    const char *json = "{\"keys\":[{\"kty\":\"EC\",\"x\":\"AA\",\"y\":\"AA\"}]}";
+    const char *json =
+        "{\"keys\":[{\"kty\":\"EC\",\"x\":\"AA\",\"y\":\"AA\"}]}";
     EXPECT(lonejson_jwks_parse_json(test_default_runtime(), json, strlen(json),
                                     &jwks,
                                     &error) == LONEJSON_STATUS_INVALID_JSON);
@@ -259,7 +259,8 @@ static lonejson_jwt_claim_policy test_jwt_policy(void) {
 static void test_jwt_decode_and_validate_claims(void) {
   static const char token[] =
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
-      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ."
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJuYmYi"
+      "OjkwMCwiaWF0IjoxMDAwfQ."
       "c2ln";
   static const char aud_array_token[] =
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
@@ -308,7 +309,8 @@ static void test_jwt_decode_and_validate_claims(void) {
 static void test_jwt_claim_validation_failures(void) {
   static const char valid_token[] =
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
-      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ."
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJuYmYi"
+      "OjkwMCwiaWF0IjoxMDAwfQ."
       "c2ln";
   static const char none_token[] =
       "eyJhbGciOiJub25lIn0."
@@ -332,8 +334,7 @@ static void test_jwt_claim_validation_failures(void) {
 
   EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), valid_token,
                                      strlen(valid_token), &policy, &header,
-                                     &claims,
-                                     &error) == LONEJSON_STATUS_OK);
+                                     &claims, &error) == LONEJSON_STATUS_OK);
   policy.accepted_issuers = &bad_issuer;
   EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
@@ -355,8 +356,7 @@ static void test_jwt_claim_validation_failures(void) {
   policy = test_jwt_policy();
   EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), none_token,
                                      strlen(none_token), &policy, &header,
-                                     &claims,
-                                     &error) == LONEJSON_STATUS_OK);
+                                     &claims, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
   lonejson_jwt_header_cleanup(&header);
@@ -365,8 +365,7 @@ static void test_jwt_claim_validation_failures(void) {
   policy = test_jwt_policy();
   EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), expired_token,
                                      strlen(expired_token), &policy, &header,
-                                     &claims,
-                                     &error) == LONEJSON_STATUS_OK);
+                                     &claims, &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
   lonejson_jwt_header_cleanup(&header);
@@ -405,8 +404,8 @@ static void test_jwt_decode_claim_failures(void) {
   policy = test_jwt_policy();
   EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), duplicate_header,
                                      strlen(duplicate_header), &policy, &header,
-                                     &claims,
-                                     &error) == LONEJSON_STATUS_DUPLICATE_FIELD);
+                                     &claims, &error) ==
+         LONEJSON_STATUS_DUPLICATE_FIELD);
   EXPECT(header.alg == NULL);
   EXPECT(claims.iss == NULL);
 
@@ -422,25 +421,143 @@ static void test_jwt_decode_claim_failures(void) {
                                      strlen(negative_exp), &policy, &header,
                                      &claims,
                                      &error) == LONEJSON_STATUS_TYPE_MISMATCH);
-  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), root_array,
-                                     strlen(root_array), &policy, &header,
-                                     &claims,
-                                     &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_jwt_decode_compact(
+             test_default_runtime(), root_array, strlen(root_array), &policy,
+             &header, &claims, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
 
   policy.max_token_bytes = 8u;
-  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), root_array,
-                                     strlen(root_array), &policy, &header,
-                                     &claims,
-                                     &error) == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(lonejson_jwt_decode_compact(
+             test_default_runtime(), root_array, strlen(root_array), &policy,
+             &header, &claims, &error) == LONEJSON_STATUS_OVERFLOW);
   policy = test_jwt_policy();
   policy.max_decoded_claims_bytes = 4u;
-  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), root_array,
-                                     strlen(root_array), &policy, &header,
-                                     &claims,
-                                     &error) == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(lonejson_jwt_decode_compact(
+             test_default_runtime(), root_array, strlen(root_array), &policy,
+             &header, &claims, &error) == LONEJSON_STATUS_OVERFLOW);
   lonejson_jwt_header_cleanup(&header);
   lonejson_jwt_claims_cleanup(&claims);
 }
+
+#ifdef LONEJSON_WITH_OIDC
+static void test_oidc_discovery_url(void) {
+  lonejson_owned_buffer out;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  lonejson_owned_buffer_init(&out);
+  EXPECT(lonejson_oidc_discovery_url("https://id.example", &out, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(out.data,
+                "https://id.example/.well-known/openid-configuration") == 0);
+  lonejson_owned_buffer_free(&out);
+
+  lonejson_owned_buffer_init(&out);
+  EXPECT(lj_oidc_discovery_url("https://id.example/tenant/", &out, &error) ==
+         LJ_STATUS_OK);
+  EXPECT(strcmp(out.data,
+                "https://id.example/.well-known/openid-configuration/tenant") ==
+         0);
+  lonejson_owned_buffer_free(&out);
+
+  lonejson_owned_buffer_init(&out);
+  EXPECT(lonejson_oidc_discovery_url("http://id.example", &out, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_oidc_discovery_url("https://", &out, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_oidc_discovery_url("https://id.example?x=1", &out, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_oidc_discovery_url("https://id.example#frag", &out, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_oidc_discovery_url(NULL, &out, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_oidc_discovery_url("https://id.example", NULL, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  lonejson_owned_buffer_free(&out);
+}
+
+static void test_oidc_discovery_parse_and_validate(void) {
+  static const char json[] =
+      "{\"issuer\":\"https://id.example/tenant\","
+      "\"authorization_endpoint\":\"https://id.example/auth\","
+      "\"token_endpoint\":\"https://id.example/token\","
+      "\"jwks_uri\":\"https://id.example/jwks\"}";
+  lonejson_oidc_discovery discovery;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  lonejson_oidc_discovery_init(&discovery);
+  EXPECT(lonejson_oidc_discovery_parse_json(test_default_runtime(), json,
+                                            strlen(json), &discovery,
+                                            &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(discovery.issuer, "https://id.example/tenant") == 0);
+  EXPECT(strcmp(discovery.authorization_endpoint, "https://id.example/auth") ==
+         0);
+  EXPECT(strcmp(discovery.token_endpoint, "https://id.example/token") == 0);
+  EXPECT(strcmp(discovery.jwks_uri, "https://id.example/jwks") == 0);
+  EXPECT(lonejson_oidc_discovery_validate_issuer(&discovery,
+                                                 "https://id.example/tenant",
+                                                 &error) == LONEJSON_STATUS_OK);
+  EXPECT(lj_oidc_discovery_validate_issuer(&discovery, "https://id.example",
+                                           &error) == LJ_STATUS_TYPE_MISMATCH);
+  lj_oidc_discovery_cleanup(&discovery);
+  EXPECT(discovery.issuer == NULL);
+}
+
+static void test_oidc_discovery_failures(void) {
+  lonejson_oidc_discovery discovery;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  lonejson_oidc_discovery_init(&discovery);
+  {
+    const char *json =
+        "{\"issuer\":\"https://id.example\",\"jwks_uri\":\"https://id.example/"
+        "jwks\"}";
+    EXPECT(lonejson_oidc_discovery_parse_json(
+               test_default_runtime(), json, strlen(json), &discovery,
+               &error) == LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+  }
+  EXPECT(discovery.issuer == NULL);
+
+  {
+    const char *json = "{\"issuer\":\"http://id.example\","
+                       "\"token_endpoint\":\"https://id.example/token\","
+                       "\"jwks_uri\":\"https://id.example/jwks\"}";
+    EXPECT(lonejson_oidc_discovery_parse_json(
+               test_default_runtime(), json, strlen(json), &discovery,
+               &error) == LONEJSON_STATUS_INVALID_JSON);
+  }
+  EXPECT(discovery.issuer == NULL);
+
+  {
+    const char *json = "{\"issuer\":\"https://id.example\","
+                       "\"token_endpoint\":\"https://id.example/token\","
+                       "\"jwks_uri\":\"/jwks\"}";
+    EXPECT(lonejson_oidc_discovery_parse_json(
+               test_default_runtime(), json, strlen(json), &discovery,
+               &error) == LONEJSON_STATUS_INVALID_JSON);
+  }
+  EXPECT(discovery.issuer == NULL);
+
+  EXPECT(lonejson_oidc_discovery_parse_json(test_default_runtime(), "{}", 2u,
+                                            NULL, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_oidc_discovery_parse_json(test_default_runtime(), NULL, 1u,
+                                            &discovery, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_oidc_discovery_validate_issuer(NULL, "https://id.example",
+                                                 &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_oidc_discovery_validate_issuer(&discovery,
+                                                 "http://id.example", &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  lonejson_oidc_discovery_cleanup(&discovery);
+}
+#else
+static void test_oidc_discovery_url(void) {}
+static void test_oidc_discovery_parse_and_validate(void) {}
+static void test_oidc_discovery_failures(void) {}
+#endif
 #else
 static void test_jwt_base64url_decode_vectors(void) {}
 static void test_jwt_compact_parse_segments(void) {}
@@ -451,4 +568,7 @@ static void test_jwk_parse_failures(void) {}
 static void test_jwt_decode_and_validate_claims(void) {}
 static void test_jwt_claim_validation_failures(void) {}
 static void test_jwt_decode_claim_failures(void) {}
+static void test_oidc_discovery_url(void) {}
+static void test_oidc_discovery_parse_and_validate(void) {}
+static void test_oidc_discovery_failures(void) {}
 #endif

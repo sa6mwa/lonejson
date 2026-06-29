@@ -221,6 +221,25 @@ if lonejson.jwt_parse_compact ~= nil then
   assert_eq(selected.kid, "ec1")
   assert_true(missing == nil)
 
+  if lonejson.oidc_discovery_url ~= nil then
+    local discovery_json =
+        '{"issuer":"https://id.example/tenant",' ..
+        '"authorization_endpoint":"https://id.example/auth",' ..
+        '"token_endpoint":"https://id.example/token",' ..
+        '"jwks_uri":"https://id.example/jwks"}'
+    local discovery = lj:oidc_discovery_parse_json(discovery_json, "https://id.example/tenant")
+
+    assert_eq(lonejson.oidc_discovery_url("https://id.example/tenant/"),
+              "https://id.example/.well-known/openid-configuration/tenant")
+    assert_eq(discovery.issuer, "https://id.example/tenant")
+    assert_eq(discovery.token_endpoint, "https://id.example/token")
+    assert_eq(discovery.jwks_uri, "https://id.example/jwks")
+
+    bad, err = lonejson.oidc_discovery_parse_json(discovery_json, "https://id.example")
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+  end
+
   bad, err = lj:jwt_validate_compact_claims(jwt_token, {
     accepted_algs = { "none" },
     accepted_issuers = { "issuer" },

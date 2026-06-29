@@ -13,6 +13,11 @@ if(NOT LONEJSON_BUILD_WITH_JWT)
     "package-archive requires LONEJSON_BUILD_WITH_JWT=ON; binary releases "
     "must include the lonejson_jwt_* ABI")
 endif()
+if(NOT LONEJSON_BUILD_WITH_OIDC)
+  message(FATAL_ERROR
+    "package-archive requires LONEJSON_BUILD_WITH_OIDC=ON; binary releases "
+    "must include the lonejson_oidc_* ABI")
+endif()
 
 set(archive_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}")
 set(package_stage_root "${LONEJSON_BINARY_DIR}/package/archive")

@@ -117,6 +117,19 @@ The first useful flows are:
 - refresh token exchange where the provider supports it,
 - authorization-code with PKCE for CLI or desktop login.
 
+The committed OIDC boundary starts with transport-neutral discovery helpers:
+
+- build the `.well-known/openid-configuration` URL from an HTTPS issuer,
+- parse discovery metadata from caller-provided JSON bytes,
+- validate the parsed issuer against the caller's configured issuer,
+- expose the same helpers through the Lua facade.
+
+Network transfer remains caller-owned at this layer. Applications can fetch
+discovery and JWKS documents with curl using lonejson's existing curl adapter
+callbacks, then pass the received JSON into the OIDC/JWKS parsers. A later
+cache/flow helper may compose those pieces, but it must not hide surprising
+runtime `libcurl` dependencies in normal binary artifacts.
+
 The CLI/desktop browser flow should be expressed as reusable flow control, not
 as a framework-specific server:
 
@@ -191,7 +204,9 @@ The implementation must test and enforce at least these invariants:
 4. Add OpenSSL-backed JWT signature validation.
 5. Add claim validation policy and failure diagnostics.
 6. Add Lua facade for JWT/JWK parse and validation.
-7. Add OIDC discovery and JWKS retrieval/cache over curl.
+7. Add OIDC discovery and JWKS retrieval/cache over curl. Discovery URL
+   construction, discovery JSON parsing, issuer validation, and Lua facade are
+   implemented; JWKS retrieval/cache composition remains.
 8. Add client credentials flow.
 9. Add authorization-code with PKCE flow-control helpers.
 10. Add framework-neutral server-side bearer validation helpers.
