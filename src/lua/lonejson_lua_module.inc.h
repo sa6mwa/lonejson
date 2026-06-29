@@ -133,6 +133,15 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"visit_candidates_path", ljlua_visit_candidates_path},
     {"visit_candidates_file", ljlua_visit_candidates_file},
     {"visit_candidates_fd", ljlua_visit_candidates_fd},
+#ifdef LONEJSON_WITH_JWT
+    {"base64url_decode", ljlua_base64url_decode},
+    {"jwt_parse_compact", ljlua_jwt_parse_compact},
+    {"jwt_decode_compact", ljlua_jwt_decode_compact},
+    {"jwt_validate_compact_claims", ljlua_jwt_validate_compact_claims},
+    {"jwk_parse_json", ljlua_jwk_parse_json},
+    {"jwks_parse_json", ljlua_jwks_parse_json},
+    {"jwks_select_json", ljlua_jwks_select_json},
+#endif
     {NULL, NULL}};
 
 static const luaL_Reg ljlua_schema_methods[] = {
@@ -260,6 +269,15 @@ int luaopen_lonejson_core(lua_State *L) {
       {"visit_candidates_path", ljlua_visit_candidates_path},
       {"visit_candidates_file", ljlua_visit_candidates_file},
       {"visit_candidates_fd", ljlua_visit_candidates_fd},
+#ifdef LONEJSON_WITH_JWT
+      {"base64url_decode", ljlua_base64url_decode},
+      {"jwt_parse_compact", ljlua_jwt_parse_compact},
+      {"jwt_decode_compact", ljlua_jwt_decode_compact},
+      {"jwt_validate_compact_claims", ljlua_jwt_validate_compact_claims},
+      {"jwk_parse_json", ljlua_jwk_parse_json},
+      {"jwks_parse_json", ljlua_jwks_parse_json},
+      {"jwks_select_json", ljlua_jwks_select_json},
+#endif
       {"fixed_string_scratch", ljlua_fixed_string_scratch_new},
       {"json_null", ljlua_json_null},
       {"monotonic_ns", ljlua_monotonic_ns},

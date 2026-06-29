@@ -172,6 +172,71 @@ do
   assert_eq(schema:decode('{"name":"colon"}').name, "colon")
 end
 
+if lonejson.jwt_parse_compact ~= nil then
+  local jwt_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ." ..
+      "c2ln"
+  local aud_array_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOlsiYXBpIiwib3RoZXIiXSwiZXhwIjoyMDAwfQ." ..
+      "c2ln"
+  local policy = {
+    accepted_algs = { "RS256" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api" },
+    required_claims = { "iss", "aud", "exp" },
+    now = 1000,
+    allowed_clock_skew = 30,
+  }
+  local parts = lonejson.jwt_parse_compact(jwt_token)
+  local decoded = lj:jwt_decode_compact(jwt_token)
+  local validated = lj:jwt_validate_compact_claims(jwt_token, policy)
+  local aud_array = lonejson.jwt_validate_compact_claims(aud_array_token, policy)
+  local jwk = lonejson.jwk_parse_json('{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","n":"AQIDBA","e":"AQAB"}')
+  local jwks_json =
+      '{"keys":[{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","n":"AQIDBA","e":"AQAB"},' ..
+      '{"kty":"EC","kid":"ec1","use":"sig","alg":"ES256","crv":"P-256","x":"AAEC","y":"AwQF"}]}'
+  local jwks = lj:jwks_parse_json(jwks_json)
+  local selected = lonejson.jwks_select_json(jwks_json, { kid = "ec1", kty = "EC", use = "sig" })
+  local missing = lonejson.jwks_select_json(jwks_json, { kid = "missing" })
+  local bad, err
+
+  assert_eq(lonejson.base64url_decode("SGVsbG8"), "Hello")
+  assert_eq(parts.signature, "c2ln")
+  assert_eq(parts.signing_input, parts.header .. "." .. parts.payload)
+  assert_eq(decoded.header.alg, "RS256")
+  assert_eq(decoded.header.kid, "k1")
+  assert_eq(decoded.claims.iss, "issuer")
+  assert_eq(decoded.claims.sub, "s")
+  assert_eq(decoded.claims.aud, "api")
+  assert_eq(decoded.claims.exp, 2000)
+  assert_eq(validated.claims.aud, "api")
+  assert_eq(aud_array.claims.aud[1], "api")
+  assert_eq(aud_array.claims.aud[2], "other")
+  assert_eq(jwk.kid, "rsa1")
+  assert_eq(jwk.n, "AQIDBA")
+  assert_eq(#jwks.keys, 2)
+  assert_eq(jwks.keys[2].kid, "ec1")
+  assert_eq(selected.kid, "ec1")
+  assert_true(missing == nil)
+
+  bad, err = lj:jwt_validate_compact_claims(jwt_token, {
+    accepted_algs = { "none" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api" },
+    now = 1000,
+  })
+  assert_true(bad == nil)
+  assert_eq(err.status, "type_mismatch")
+
+  bad, err = lonejson.jwt_decode_compact(
+      "eyJhbGciOiJSUzI1NiIsImFsZyI6IkVTMjU2In0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9.c2ln")
+  assert_true(bad == nil)
+  assert_eq(err.status, "duplicate_field")
+end
+
 do
   local events = {}
   local chunks = {}
