@@ -1535,6 +1535,10 @@ lonejson_status lonejson_oidc_jwks_cache_update_json(
 int lonejson_oidc_jwks_cache_is_fresh(
     const lonejson_oidc_jwks_cache *cache,
     const lonejson_oidc_jwks_cache_policy *policy) {
+  if (lonejson__oidc_jwks_cache_validate_policy(policy, NULL) !=
+      LONEJSON_STATUS_OK) {
+    return 0;
+  }
   return lonejson__oidc_jwks_cache_matches_policy(cache, policy);
 }
 

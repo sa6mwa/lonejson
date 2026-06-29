@@ -8,10 +8,12 @@ trap 'rm -rf "$tmp_dir"' EXIT
 fake_root="$tmp_dir/c.pkt.systems/root"
 fake_toolchain="$tmp_dir/toolchain.cmake"
 fake_modules="$tmp_dir/modules"
+old_openssl_modules="$tmp_dir/old-openssl-modules"
 stale_root="$tmp_dir/stale-curl/root"
 root_build_dir="$tmp_dir/root-build"
 openssl_root_build_dir="$tmp_dir/openssl-root-build"
 module_build_dir="$tmp_dir/module-build"
+old_openssl_build_dir="$tmp_dir/old-openssl-build"
 unsupported_target_build_dir="$tmp_dir/unsupported-target-build"
 missing_root_build_dir="$tmp_dir/missing-root-build"
 missing_config_build_dir="$tmp_dir/missing-config-build"
@@ -34,6 +36,7 @@ EOF
 cat >"$fake_root/lib/cmake/OpenSSL/OpenSSLConfig.cmake" <<'EOF'
 get_filename_component(_fake_openssl_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 set(OpenSSL_FOUND TRUE)
+set(OPENSSL_VERSION "3.6.2")
 set(OPENSSL_INCLUDE_DIR "${_fake_openssl_prefix}/include")
 if(NOT TARGET OpenSSL::SSL)
   add_library(OpenSSL::SSL INTERFACE IMPORTED)
@@ -61,6 +64,7 @@ EOF
 cat >"$stale_root/lib/cmake/OpenSSL/OpenSSLConfig.cmake" <<'EOF'
 get_filename_component(_stale_openssl_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 set(OpenSSL_FOUND TRUE)
+set(OPENSSL_VERSION "3.6.2")
 if(NOT TARGET OpenSSL::SSL)
   add_library(OpenSSL::SSL INTERFACE IMPORTED)
   set_target_properties(OpenSSL::SSL PROPERTIES
@@ -85,6 +89,7 @@ endif()
 EOF
 cat >"$fake_modules/FindOpenSSL.cmake" <<'EOF'
 set(OpenSSL_FOUND TRUE)
+set(OPENSSL_VERSION "3.6.2")
 set(OPENSSL_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/fake-system-openssl/include")
 if(NOT TARGET OpenSSL::SSL)
   add_library(OpenSSL::SSL INTERFACE IMPORTED)
@@ -99,6 +104,23 @@ endif()
 EOF
 mkdir -p "$fake_modules/fake-system-curl/include"
 mkdir -p "$fake_modules/fake-system-openssl/include"
+
+mkdir -p "$old_openssl_modules/fake-system-openssl/include"
+cat >"$old_openssl_modules/FindOpenSSL.cmake" <<'EOF'
+set(OpenSSL_FOUND TRUE)
+set(OPENSSL_VERSION "1.1.1w")
+set(OPENSSL_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/fake-system-openssl/include")
+if(NOT TARGET OpenSSL::SSL)
+  add_library(OpenSSL::SSL INTERFACE IMPORTED)
+  set_target_properties(OpenSSL::SSL PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/fake-system-openssl/include")
+endif()
+if(NOT TARGET OpenSSL::Crypto)
+  add_library(OpenSSL::Crypto INTERFACE IMPORTED)
+  set_target_properties(OpenSSL::Crypto PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/fake-system-openssl/include")
+endif()
+EOF
 
 cat >"$fake_toolchain" <<EOF
 set(CMAKE_SYSTEM_NAME Linux)
@@ -155,6 +177,19 @@ cmake -S "$repo_root" -B "$module_build_dir" \
   -D LONEJSON_BUILD_TESTS=OFF \
   -D LONEJSON_BUILD_EXAMPLES=OFF \
   >"$tmp_dir/module-configure.log" 2>&1
+
+if cmake -S "$repo_root" -B "$old_openssl_build_dir" \
+  -G Ninja \
+  -D CMAKE_MODULE_PATH="$old_openssl_modules" \
+  -D LONEJSON_BUILD_WITH_OPENSSL=ON \
+  -D LONEJSON_BUILD_TESTS=OFF \
+  -D LONEJSON_BUILD_EXAMPLES=OFF \
+  >"$tmp_dir/old-openssl-configure.log" 2>&1; then
+  printf 'expected OpenSSL 1.1 configure to fail for auth builds\n' >&2
+  exit 1
+fi
+grep -F 'OpenSSL 3.0 or newer is required for OpenSSL-backed auth builds' \
+  "$tmp_dir/old-openssl-configure.log" >/dev/null
 
 cmake -S "$repo_root" -B "$unsupported_target_build_dir" \
   -G Ninja \

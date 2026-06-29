@@ -773,6 +773,17 @@ static void test_oidc_jwks_cache_update_and_select(void) {
   EXPECT(strcmp(cache.issuer, "https://id.example") == 0);
   EXPECT(strcmp(cache.jwks_uri, "https://id.example/jwks") == 0);
   EXPECT(lj_oidc_jwks_cache_is_fresh(&cache, &policy));
+  {
+    lonejson_oidc_jwks_cache_policy invalid_policy;
+    memset(&invalid_policy, 0, sizeof(invalid_policy));
+    EXPECT(!lonejson_oidc_jwks_cache_is_fresh(&cache, &invalid_policy));
+    invalid_policy = test_oidc_jwks_cache_policy();
+    invalid_policy.issuer = NULL;
+    EXPECT(!lonejson_oidc_jwks_cache_is_fresh(&cache, &invalid_policy));
+    invalid_policy = test_oidc_jwks_cache_policy();
+    invalid_policy.jwks_uri = NULL;
+    EXPECT(!lonejson_oidc_jwks_cache_is_fresh(&cache, &invalid_policy));
+  }
 
   memset(&options, 0, sizeof(options));
   options.kid = "rsa-test";

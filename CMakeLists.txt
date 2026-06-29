@@ -235,6 +235,13 @@ function(lonejson_find_openssl)
       "OpenSSL was found but did not provide OpenSSL::SSL and "
       "OpenSSL::Crypto targets.")
   endif()
+  if(NOT DEFINED OPENSSL_VERSION AND DEFINED OpenSSL_VERSION)
+    set(OPENSSL_VERSION "${OpenSSL_VERSION}")
+  endif()
+  if(NOT DEFINED OPENSSL_VERSION OR OPENSSL_VERSION VERSION_LESS 3.0.0)
+    message(FATAL_ERROR
+      "OpenSSL 3.0 or newer is required for OpenSSL-backed auth builds.")
+  endif()
 endfunction()
 
 if(LONEJSON_BUILD_WITH_OPENSSL)
