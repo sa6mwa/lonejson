@@ -1347,6 +1347,45 @@ typedef struct lonejson_oidc_jwks_cache {
   int has_jwks;
   lonejson_jwks jwks;
 } lonejson_oidc_jwks_cache;
+
+/** OAuth2 client-credentials request body options.
+ *
+ * This models the `client_secret_post` token endpoint authentication method.
+ * Network transfer, TLS policy, retries, and credential storage remain
+ * caller-owned.
+ */
+typedef struct lonejson_oauth2_client_credentials {
+  /** OAuth2 client identifier. Required. */
+  const char *client_id;
+  /** OAuth2 client secret. Required. */
+  const char *client_secret;
+  /** Optional OAuth2 scope string. */
+  const char *scope;
+  /** Optional provider-specific audience parameter. */
+  const char *audience;
+  /** Optional RFC 8707 resource indicator. */
+  const char *resource;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oauth2_client_credentials;
+
+/** Parsed successful OAuth2 token endpoint response.
+ *
+ * This object owns all strings. An access token is credential material; callers
+ * are responsible for storage, logging, and lifetime policy.
+ */
+typedef struct lonejson_oauth2_token_response {
+  char *access_token;
+  char *token_type;
+  char *refresh_token;
+  char *scope;
+  char *id_token;
+  char *error;
+  char *error_description;
+  char *error_uri;
+  lonejson_int64 expires_in;
+  int has_expires_in;
+} lonejson_oauth2_token_response;
 #endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
@@ -5818,6 +5857,24 @@ lonejson_status lonejson_oidc_jwks_cache_select(
     const lonejson_oidc_jwks_cache_policy *policy,
     const lonejson_jwk_select_options *options, const lonejson_jwk **out,
     lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` client-credentials body. */
+lonejson_status lonejson_oauth2_client_credentials_body(
+    const lonejson_oauth2_client_credentials *request,
+    lonejson_owned_buffer *out, lonejson_error *error);
+/** Initializes a token response for parsing or cleanup. */
+void lonejson_oauth2_token_response_init(
+    lonejson_oauth2_token_response *response);
+/** Releases all storage owned by a token response. */
+void lonejson_oauth2_token_response_cleanup(
+    lonejson_oauth2_token_response *response);
+/** Parses and validates a bounded successful OAuth2 token endpoint response.
+ *
+ * `max_response_bytes == 0` applies lonejson's default token-response cap.
+ * Provider error responses are rejected with `LONEJSON_STATUS_TYPE_MISMATCH`.
+ */
+lonejson_status lonejson_oauth2_token_response_parse_json(
+    lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lonejson_oauth2_token_response *out, lonejson_error *error);
 #endif
 
 #ifdef LONEJSON_WITH_CURL
@@ -6609,6 +6666,8 @@ typedef lonejson_jwt_claim_policy lj_jwt_claim_policy;
 typedef lonejson_oidc_discovery lj_oidc_discovery;
 typedef lonejson_oidc_jwks_cache_policy lj_oidc_jwks_cache_policy;
 typedef lonejson_oidc_jwks_cache lj_oidc_jwks_cache;
+typedef lonejson_oauth2_client_credentials lj_oauth2_client_credentials;
+typedef lonejson_oauth2_token_response lj_oauth2_token_response;
 #endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
@@ -8617,6 +8676,29 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_jwks_cache_select(
     const lj_jwk_select_options *options, const lj_jwk **out,
     lj_error *error) {
   return lonejson_oidc_jwks_cache_select(cache, policy, options, out, error);
+}
+/** Builds an `application/x-www-form-urlencoded` client-credentials body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_client_credentials_body(
+    const lj_oauth2_client_credentials *request, lj_owned_buffer *out,
+    lj_error *error) {
+  return lonejson_oauth2_client_credentials_body(request, out, error);
+}
+/** Initializes a token response for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oauth2_token_response_init(lj_oauth2_token_response *response) {
+  lonejson_oauth2_token_response_init(response);
+}
+/** Releases all storage owned by a token response. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oauth2_token_response_cleanup(lj_oauth2_token_response *response) {
+  lonejson_oauth2_token_response_cleanup(response);
+}
+/** Parses and validates a bounded successful OAuth2 token endpoint response. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_response_parse_json(
+    lj *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lj_oauth2_token_response *out, lj_error *error) {
+  return lonejson_oauth2_token_response_parse_json(
+      runtime, json, len, max_response_bytes, out, error);
 }
 #endif
 #ifdef LONEJSON_WITH_CURL

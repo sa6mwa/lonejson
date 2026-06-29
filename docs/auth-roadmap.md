@@ -209,7 +209,10 @@ The implementation must test and enforce at least these invariants:
    JWKS cache installation, cache selection, and a curl write/finish adapter are
    implemented. The network fetch remains caller-owned so lonejson does not hide
    retry, timeout, credential, proxy, or event-loop policy.
-8. Add client credentials flow.
+8. Add client credentials flow. A transport-neutral `client_secret_post` form
+   body builder, bounded token response parser, Lua facade, regression tests,
+   ABI/package checks, and fuzz coverage are implemented. HTTP execution,
+   retry, TLS, proxy, and credential storage policy remain caller-owned.
 9. Add authorization-code with PKCE flow-control helpers.
 10. Add framework-neutral server-side bearer validation helpers.
 

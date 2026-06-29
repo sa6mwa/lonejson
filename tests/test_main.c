@@ -34,6 +34,9 @@ int main(void) {
   test_oidc_jwks_cache_update_and_select();
   test_oidc_jwks_cache_failure_modes();
   test_oidc_jwks_cache_curl_adapter();
+  test_oauth2_client_credentials_body();
+  test_oauth2_token_response_parse();
+  test_oauth2_token_response_failures();
   test_parse_implicit_destination_reset();
   test_dynamic_allocation_cleanup_balance();
   test_dynamic_allocation_reset_reparse_balance();

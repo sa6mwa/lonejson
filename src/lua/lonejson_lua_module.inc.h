@@ -142,6 +142,9 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"jwks_parse_json", ljlua_jwks_parse_json},
     {"jwks_select_json", ljlua_jwks_select_json},
 #ifdef LONEJSON_WITH_OIDC
+    {"oauth2_client_credentials_body", ljlua_oauth2_client_credentials_body},
+    {"oauth2_token_response_parse_json",
+     ljlua_oauth2_token_response_parse_json},
     {"oidc_discovery_url", ljlua_oidc_discovery_url},
     {"oidc_discovery_parse_json", ljlua_oidc_discovery_parse_json},
     {"oidc_jwks_cache_select_json", ljlua_oidc_jwks_cache_select_json},
@@ -284,6 +287,9 @@ int luaopen_lonejson_core(lua_State *L) {
       {"jwks_parse_json", ljlua_jwks_parse_json},
       {"jwks_select_json", ljlua_jwks_select_json},
 #ifdef LONEJSON_WITH_OIDC
+      {"oauth2_client_credentials_body", ljlua_oauth2_client_credentials_body},
+      {"oauth2_token_response_parse_json",
+       ljlua_oauth2_token_response_parse_json},
       {"oidc_discovery_url", ljlua_oidc_discovery_url},
       {"oidc_discovery_parse_json", ljlua_oidc_discovery_parse_json},
       {"oidc_jwks_cache_select_json", ljlua_oidc_jwks_cache_select_json},

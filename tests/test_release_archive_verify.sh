@@ -76,6 +76,10 @@ void lonejson_oidc_jwks_cache_parse_init(void);
 void lonejson_oidc_jwks_cache_write_callback(void);
 void lonejson_oidc_jwks_cache_parse_finish(void);
 void lonejson_oidc_jwks_cache_parse_cleanup(void);
+void lonejson_oauth2_client_credentials_body(void);
+void lonejson_oauth2_token_response_init(void);
+void lonejson_oauth2_token_response_cleanup(void);
+void lonejson_oauth2_token_response_parse_json(void);
 
 #endif
 EOF
@@ -185,6 +189,18 @@ void lonejson_oidc_jwks_cache_parse_finish(void) {
 }
 
 void lonejson_oidc_jwks_cache_parse_cleanup(void) {
+}
+
+void lonejson_oauth2_client_credentials_body(void) {
+}
+
+void lonejson_oauth2_token_response_init(void) {
+}
+
+void lonejson_oauth2_token_response_cleanup(void) {
+}
+
+void lonejson_oauth2_token_response_parse_json(void) {
 }
 EOF
 

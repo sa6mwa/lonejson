@@ -62,8 +62,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_oidc_jwks_cache cache;
   lonejson_oidc_jwks_cache_parse cache_parse;
   lonejson_oidc_jwks_cache_policy cache_policy;
+  lonejson_oauth2_client_credentials credentials;
+  lonejson_oauth2_token_response token_response;
   lonejson_oidc_discovery discovery;
   lonejson_owned_buffer discovery_url;
+  lonejson_owned_buffer form_body;
   lonejson_error error;
   lonejson *runtime;
   char *text;
@@ -220,6 +223,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       }
       lonejson_oidc_jwks_cache_cleanup(&cache);
     }
+
+    memset(&credentials, 0, sizeof(credentials));
+    credentials.client_id = size > 0u ? text : "client";
+    credentials.client_secret = "secret";
+    credentials.scope = "read write";
+    credentials.audience = size > 4u ? text + (size / 2u) : NULL;
+    credentials.max_body_bytes = 4096u;
+    lonejson_owned_buffer_init(&form_body);
+    (void)lonejson_oauth2_client_credentials_body(&credentials, &form_body,
+                                                  &error);
+    lonejson_owned_buffer_free(&form_body);
+
+    lonejson_oauth2_token_response_init(&token_response);
+    (void)lonejson_oauth2_token_response_parse_json(
+        runtime, text, size, 4096u, &token_response, &error);
+    lonejson_oauth2_token_response_cleanup(&token_response);
 
     lonejson_owned_buffer_init(&discovery_url);
     (void)lonejson_oidc_discovery_url(text, &discovery_url, &error);

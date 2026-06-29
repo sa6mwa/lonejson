@@ -868,6 +868,110 @@ static void test_oidc_jwks_cache_curl_adapter(void) {
   lonejson_oidc_jwks_cache_parse_cleanup(&parse);
   lonejson_oidc_jwks_cache_cleanup(&cache);
 }
+
+static void test_oauth2_client_credentials_body(void) {
+  lonejson_oauth2_client_credentials request;
+  lonejson_owned_buffer out;
+  lonejson_error error;
+
+  memset(&request, 0, sizeof(request));
+  lonejson_owned_buffer_init(&out);
+  lonejson_error_init(&error);
+  request.client_id = "client id";
+  request.client_secret = "s+e&c=r%t";
+  request.scope = "read write";
+  request.audience = "https://api.example/a?b=c";
+  request.resource = "urn:example:resource";
+  EXPECT(lonejson_oauth2_client_credentials_body(&request, &out, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(out.data,
+                "grant_type=client_credentials&client_id=client+id&"
+                "client_secret=s%2Be%26c%3Dr%25t&scope=read+write&"
+                "audience=https%3A%2F%2Fapi.example%2Fa%3Fb%3Dc&"
+                "resource=urn%3Aexample%3Aresource") == 0);
+  lonejson_owned_buffer_free(&out);
+
+  request.max_body_bytes = 8u;
+  EXPECT(lj_oauth2_client_credentials_body(&request, &out, &error) ==
+         LJ_STATUS_OVERFLOW);
+  EXPECT(out.data == NULL);
+
+  request.max_body_bytes = 0u;
+  request.client_secret = "";
+  EXPECT(lonejson_oauth2_client_credentials_body(&request, &out, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  request.client_secret = "secret";
+  request.client_id = NULL;
+  EXPECT(lonejson_oauth2_client_credentials_body(&request, &out, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  lonejson_owned_buffer_free(&out);
+}
+
+static void test_oauth2_token_response_parse(void) {
+  static const char response_json[] =
+      "{\"access_token\":\"token\",\"token_type\":\"bearer\","
+      "\"expires_in\":3600,\"scope\":\"read write\","
+      "\"refresh_token\":\"refresh\",\"id_token\":\"id.jwt\"}";
+  lonejson_oauth2_token_response response;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  lonejson_oauth2_token_response_init(&response);
+  EXPECT(lonejson_oauth2_token_response_parse_json(
+             test_default_runtime(), response_json, strlen(response_json), 0u,
+             &response, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(response.access_token, "token") == 0);
+  EXPECT(strcmp(response.token_type, "bearer") == 0);
+  EXPECT(response.has_expires_in);
+  EXPECT(response.expires_in == 3600);
+  EXPECT(strcmp(response.scope, "read write") == 0);
+  EXPECT(strcmp(response.refresh_token, "refresh") == 0);
+  EXPECT(strcmp(response.id_token, "id.jwt") == 0);
+  lonejson_oauth2_token_response_cleanup(&response);
+  EXPECT(response.access_token == NULL);
+}
+
+static void test_oauth2_token_response_failures(void) {
+  lonejson_oauth2_token_response response;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  lonejson_oauth2_token_response_init(&response);
+  EXPECT(lonejson_oauth2_token_response_parse_json(
+             test_default_runtime(), "{\"error\":\"invalid_client\"}",
+             strlen("{\"error\":\"invalid_client\"}"), 0u, &response,
+             &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(response.error == NULL);
+
+  EXPECT(lonejson_oauth2_token_response_parse_json(
+             test_default_runtime(), "{\"access_token\":\"token\"}",
+             strlen("{\"access_token\":\"token\"}"), 0u, &response, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(response.access_token == NULL);
+
+  EXPECT(lonejson_oauth2_token_response_parse_json(
+             test_default_runtime(),
+             "{\"access_token\":\"token\",\"token_type\":\"mac\"}",
+             strlen("{\"access_token\":\"token\",\"token_type\":\"mac\"}"), 0u,
+             &response, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(response.access_token == NULL);
+
+  EXPECT(lonejson_oauth2_token_response_parse_json(
+             test_default_runtime(),
+             "{\"access_token\":\"token\",\"token_type\":\"Bearer\","
+             "\"expires_in\":-1}",
+             strlen("{\"access_token\":\"token\",\"token_type\":\"Bearer\","
+                    "\"expires_in\":-1}"),
+             0u, &response, &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(response.access_token == NULL);
+
+  EXPECT(lonejson_oauth2_token_response_parse_json(
+             test_default_runtime(),
+             "{\"access_token\":\"token\",\"token_type\":\"Bearer\"}",
+             strlen("{\"access_token\":\"token\",\"token_type\":\"Bearer\"}"),
+             8u, &response, &error) == LONEJSON_STATUS_OVERFLOW);
+  lonejson_oauth2_token_response_cleanup(&response);
+}
 #else
 static void test_oidc_discovery_url(void) {}
 static void test_oidc_discovery_parse_and_validate(void) {}
@@ -875,6 +979,9 @@ static void test_oidc_discovery_failures(void) {}
 static void test_oidc_jwks_cache_update_and_select(void) {}
 static void test_oidc_jwks_cache_failure_modes(void) {}
 static void test_oidc_jwks_cache_curl_adapter(void) {}
+static void test_oauth2_client_credentials_body(void) {}
+static void test_oauth2_token_response_parse(void) {}
+static void test_oauth2_token_response_failures(void) {}
 #endif
 #else
 static void test_jwt_base64url_decode_vectors(void) {}
@@ -894,4 +1001,7 @@ static void test_oidc_discovery_failures(void) {}
 static void test_oidc_jwks_cache_update_and_select(void) {}
 static void test_oidc_jwks_cache_failure_modes(void) {}
 static void test_oidc_jwks_cache_curl_adapter(void) {}
+static void test_oauth2_client_credentials_body(void) {}
+static void test_oauth2_token_response_parse(void) {}
+static void test_oauth2_token_response_failures(void) {}
 #endif

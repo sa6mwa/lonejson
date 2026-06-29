@@ -248,6 +248,15 @@ if lonejson.jwt_parse_compact ~= nil then
         jwks_json, cache_policy, { kid = "rsa1", kty = "RSA", alg = "RS256", use = "sig" })
     local cache_missing = lonejson.oidc_jwks_cache_select_json(
         jwks_json, cache_policy, { kid = "missing" })
+    local token_body = lj:oauth2_client_credentials_body({
+      client_id = "client id",
+      client_secret = "s+e&c=r%t",
+      scope = "read write",
+      audience = "https://api.example/a?b=c",
+      resource = "urn:example:resource",
+    })
+    local token_response = lonejson.oauth2_token_response_parse_json(
+        '{"access_token":"token","token_type":"Bearer","expires_in":3600,"scope":"read write"}')
 
     assert_eq(lonejson.oidc_discovery_url("https://id.example/tenant/"),
               "https://id.example/.well-known/openid-configuration/tenant")
@@ -256,8 +265,33 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(discovery.jwks_uri, "https://id.example/jwks")
     assert_eq(cache_selected.kid, "rsa1")
     assert_true(cache_missing == nil)
+    assert_eq(token_body,
+              "grant_type=client_credentials&client_id=client+id&" ..
+              "client_secret=s%2Be%26c%3Dr%25t&scope=read+write&" ..
+              "audience=https%3A%2F%2Fapi.example%2Fa%3Fb%3Dc&" ..
+              "resource=urn%3Aexample%3Aresource")
+    assert_eq(token_response.access_token, "token")
+    assert_eq(token_response.token_type, "Bearer")
+    assert_eq(token_response.expires_in, 3600)
 
     bad, err = lonejson.oidc_discovery_parse_json(discovery_json, "https://id.example")
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = lonejson.oauth2_client_credentials_body({
+      client_id = "client",
+      client_secret = "secret",
+      max_body_bytes = 8,
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "overflow")
+
+    bad, err = lj:oauth2_token_response_parse_json(
+        '{"access_token":"token","token_type":"mac"}')
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = lj:oauth2_token_response_parse_json('{"error":"invalid_client"}')
     assert_true(bad == nil)
     assert_eq(err.status, "type_mismatch")
 

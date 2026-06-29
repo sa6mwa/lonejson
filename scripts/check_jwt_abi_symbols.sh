@@ -110,7 +110,11 @@ for symbol in \
     lonejson_oidc_jwks_cache_parse_init \
     lonejson_oidc_jwks_cache_write_callback \
     lonejson_oidc_jwks_cache_parse_finish \
-    lonejson_oidc_jwks_cache_parse_cleanup; do
+    lonejson_oidc_jwks_cache_parse_cleanup \
+    lonejson_oauth2_client_credentials_body \
+    lonejson_oauth2_token_response_init \
+    lonejson_oauth2_token_response_cleanup \
+    lonejson_oauth2_token_response_parse_json; do
   if ! symbol_present "$shared_symbols" "$symbol" "$symbol_prefix_optional"; then
     printf 'missing lonejson_jwt_* ABI symbol in shared library for %s: %s\n' "$context" "$symbol" >&2
     exit 1
