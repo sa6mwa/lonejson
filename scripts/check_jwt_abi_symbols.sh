@@ -122,7 +122,12 @@ for symbol in \
     lonejson_oidc_authorization_url \
     lonejson_oidc_authorization_callback_init \
     lonejson_oidc_authorization_callback_cleanup \
-    lonejson_oidc_authorization_callback_parse_query; do
+    lonejson_oidc_authorization_callback_parse_query \
+    lonejson_auth_failure_string \
+    lonejson_oidc_bearer_validation_init \
+    lonejson_oidc_bearer_validation_cleanup \
+    lonejson_oidc_authorization_bearer_token \
+    lonejson_oidc_validate_bearer_token; do
   if ! symbol_present "$shared_symbols" "$symbol" "$symbol_prefix_optional"; then
     printf 'missing lonejson_jwt_* ABI symbol in shared library for %s: %s\n' "$context" "$symbol" >&2
     exit 1

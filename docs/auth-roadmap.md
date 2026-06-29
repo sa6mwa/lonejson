@@ -219,7 +219,12 @@ The implementation must test and enforce at least these invariants:
    regression tests, ABI/package checks, and fuzz coverage are implemented.
    Browser launching, localhost listener lifetime, and token exchange HTTP
    execution remain caller-owned.
-10. Add framework-neutral server-side bearer validation helpers.
+10. Add framework-neutral server-side bearer validation helpers. Bearer
+    Authorization header extraction, fresh JWKS cache selection, compact JWT
+    decode, signature validation, claim-policy validation, structured failure
+    classification, Lua facade, regression tests, ABI/package checks, and fuzz
+    coverage are implemented. Request routing, response writing, cache refresh,
+    and framework lifetime remain caller-owned.
 
 Each slice should include C tests, Lua tests when surfaced in Lua, negative
 regression cases, and fuzzing for attacker-controlled inputs.

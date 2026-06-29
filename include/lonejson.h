@@ -1415,6 +1415,48 @@ typedef struct lonejson_oidc_authorization_callback {
   char *error_description;
   char *error_uri;
 } lonejson_oidc_authorization_callback;
+
+/** Framework-neutral bearer-token authentication failure class. */
+typedef enum lonejson_auth_failure {
+  LONEJSON_AUTH_FAILURE_NONE = 0,
+  LONEJSON_AUTH_FAILURE_MISSING_CREDENTIALS,
+  LONEJSON_AUTH_FAILURE_MALFORMED_TOKEN,
+  LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE,
+  LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND,
+  LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE,
+  LONEJSON_AUTH_FAILURE_EXPIRED_TOKEN,
+  LONEJSON_AUTH_FAILURE_NOT_YET_VALID,
+  LONEJSON_AUTH_FAILURE_ISSUER_MISMATCH,
+  LONEJSON_AUTH_FAILURE_AUDIENCE_MISMATCH,
+  LONEJSON_AUTH_FAILURE_CLAIMS_INVALID
+} lonejson_auth_failure;
+
+/** Server-side bearer-token validation inputs.
+ *
+ * This helper does not fetch keys, write responses, route requests, or depend
+ * on any framework. Callers supply the HTTP Authorization header value, a
+ * fresh JWKS cache policy, a JWKS cache previously filled by caller-owned
+ * network code, and an explicit JWT claim policy.
+ */
+typedef struct lonejson_oidc_bearer_validation_request {
+  const char *authorization_header;
+  const lonejson_oidc_jwks_cache *jwks_cache;
+  const lonejson_oidc_jwks_cache_policy *jwks_policy;
+  const lonejson_jwt_claim_policy *claim_policy;
+} lonejson_oidc_bearer_validation_request;
+
+/** Server-side bearer-token validation result.
+ *
+ * On success, `header` and `claims` contain validated JWT data and `jwk`
+ * points into the caller-owned JWKS cache. On failure, `failure` classifies the
+ * denial and the remaining fields are cleared.
+ */
+typedef struct lonejson_oidc_bearer_validation {
+  lonejson_auth_failure failure;
+  lonejson_jwt_header header;
+  lonejson_jwt_claims claims;
+  const lonejson_jwk *jwk;
+} lonejson_oidc_bearer_validation;
 #endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
@@ -5939,6 +5981,24 @@ lonejson_status lonejson_oidc_authorization_callback_parse_query(
     const char *query, size_t len, const char *expected_state,
     size_t max_query_bytes, lonejson_oidc_authorization_callback *out,
     lonejson_error *error);
+/** Returns a stable string for one bearer-token authentication failure class. */
+const char *lonejson_auth_failure_string(lonejson_auth_failure failure);
+/** Initializes bearer validation output storage. */
+void lonejson_oidc_bearer_validation_init(
+    lonejson_oidc_bearer_validation *validation);
+/** Releases storage owned by a bearer validation result. */
+void lonejson_oidc_bearer_validation_cleanup(
+    lonejson_oidc_bearer_validation *validation);
+/** Extracts the compact JWT from an HTTP Authorization Bearer header value. */
+lonejson_status lonejson_oidc_authorization_bearer_token(
+    const char *authorization_header, lonejson_jwt_segment *out,
+    lonejson_error *error);
+/** Validates one Authorization Bearer JWT against a fresh JWKS cache and claim
+ * policy.
+ */
+lonejson_status lonejson_oidc_validate_bearer_token(
+    lonejson *runtime, const lonejson_oidc_bearer_validation_request *request,
+    lonejson_oidc_bearer_validation *out, lonejson_error *error);
 #endif
 
 #ifdef LONEJSON_WITH_CURL
@@ -6735,6 +6795,10 @@ typedef lonejson_oauth2_token_response lj_oauth2_token_response;
 typedef lonejson_oidc_pkce lj_oidc_pkce;
 typedef lonejson_oidc_authorization_request lj_oidc_authorization_request;
 typedef lonejson_oidc_authorization_callback lj_oidc_authorization_callback;
+typedef lonejson_auth_failure lj_auth_failure;
+typedef lonejson_oidc_bearer_validation_request
+    lj_oidc_bearer_validation_request;
+typedef lonejson_oidc_bearer_validation lj_oidc_bearer_validation;
 #endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
@@ -8811,6 +8875,33 @@ lj_oidc_authorization_callback_parse_query(
     lj_error *error) {
   return lonejson_oidc_authorization_callback_parse_query(
       query, len, expected_state, max_query_bytes, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE const char *
+lj_auth_failure_string(lj_auth_failure failure) {
+  return lonejson_auth_failure_string(failure);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_bearer_validation_init(lj_oidc_bearer_validation *validation) {
+  lonejson_oidc_bearer_validation_init(validation);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_bearer_validation_cleanup(lj_oidc_bearer_validation *validation) {
+  lonejson_oidc_bearer_validation_cleanup(validation);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_authorization_bearer_token(
+    const char *authorization_header, lj_jwt_segment *out, lj_error *error) {
+  return lonejson_oidc_authorization_bearer_token(authorization_header, out,
+                                                 error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_validate_bearer_token(
+    lj *runtime, const lj_oidc_bearer_validation_request *request,
+    lj_oidc_bearer_validation *out, lj_error *error) {
+  return lonejson_oidc_validate_bearer_token(runtime, request, out, error);
 }
 #endif
 #ifdef LONEJSON_WITH_CURL

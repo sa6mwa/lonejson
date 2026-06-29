@@ -88,6 +88,11 @@ void lonejson_oidc_authorization_url(void);
 void lonejson_oidc_authorization_callback_init(void);
 void lonejson_oidc_authorization_callback_cleanup(void);
 void lonejson_oidc_authorization_callback_parse_query(void);
+void lonejson_auth_failure_string(void);
+void lonejson_oidc_bearer_validation_init(void);
+void lonejson_oidc_bearer_validation_cleanup(void);
+void lonejson_oidc_authorization_bearer_token(void);
+void lonejson_oidc_validate_bearer_token(void);
 
 #endif
 EOF
@@ -233,6 +238,21 @@ void lonejson_oidc_authorization_callback_cleanup(void) {
 }
 
 void lonejson_oidc_authorization_callback_parse_query(void) {
+}
+
+void lonejson_auth_failure_string(void) {
+}
+
+void lonejson_oidc_bearer_validation_init(void) {
+}
+
+void lonejson_oidc_bearer_validation_cleanup(void) {
+}
+
+void lonejson_oidc_authorization_bearer_token(void) {
+}
+
+void lonejson_oidc_validate_bearer_token(void) {
 }
 EOF
 

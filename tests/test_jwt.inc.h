@@ -276,6 +276,28 @@ static const char test_jwt_rs256_jwk_json[] =
     "YoQ\","
     "\"e\":\"AQAB\"}";
 
+static const char test_jwt_rs256_jwks_json[] =
+    "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"rsa-test\",\"use\":\"sig\","
+    "\"alg\":\"RS256\","
+    "\"n\":\"nGFfcf9mkkjv4XoIzgmENq-A3pTE4uT7gzmYMDB4_xwXvHaTogDTrduaIKcd-"
+    "oziNa6mM1HXGk-4q8084Wvvz44ZTyRlaVKm2eRHPqjJ1hmxB80nG7iWEkORAKazobRfB8"
+    "g7fGXZWhL0JsWqd51igefciKMefuvjs-2_JvusIF6uXu3jSCVRsqXkoZGnYsauGUq4Gcsp"
+    "GtCHe5M4oie5kJrfbwcZgajJp4HS-ZUd4m1q12BPSuUSqi5Vb3wS6fLdVsQjxZXVqyk1O"
+    "gnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWy"
+    "YoQ\","
+    "\"e\":\"AQAB\"}]}";
+
+static const char test_jwt_rs256_other_kid_jwks_json[] =
+    "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"other-key\",\"use\":\"sig\","
+    "\"alg\":\"RS256\","
+    "\"n\":\"nGFfcf9mkkjv4XoIzgmENq-A3pTE4uT7gzmYMDB4_xwXvHaTogDTrduaIKcd-"
+    "oziNa6mM1HXGk-4q8084Wvvz44ZTyRlaVKm2eRHPqjJ1hmxB80nG7iWEkORAKazobRfB8"
+    "g7fGXZWhL0JsWqd51igefciKMefuvjs-2_JvusIF6uXu3jSCVRsqXkoZGnYsauGUq4Gcsp"
+    "GtCHe5M4oie5kJrfbwcZgajJp4HS-ZUd4m1q12BPSuUSqi5Vb3wS6fLdVsQjxZXVqyk1O"
+    "gnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWy"
+    "YoQ\","
+    "\"e\":\"AQAB\"}]}";
+
 static void test_jwt_decode_and_validate_claims(void) {
   static const char token[] =
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
@@ -1076,6 +1098,180 @@ static void test_oidc_authorization_callback_parse(void) {
              8u, &callback, &error) == LONEJSON_STATUS_OVERFLOW);
   lonejson_oidc_authorization_callback_cleanup(&callback);
 }
+
+static void test_oidc_authorization_bearer_token(void) {
+  lonejson_jwt_segment token;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  EXPECT(lonejson_oidc_authorization_bearer_token("  bEaReR \t abc.def.sig  ",
+                                                  &token, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(token.len == strlen("abc.def.sig"));
+  EXPECT(memcmp(token.data, "abc.def.sig", token.len) == 0);
+  EXPECT(lj_oidc_authorization_bearer_token("Bearer abc", &token, &error) ==
+         LJ_STATUS_OK);
+  EXPECT(token.len == 3u);
+  EXPECT(lonejson_oidc_authorization_bearer_token(NULL, &token, &error) ==
+         LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+  EXPECT(lonejson_oidc_authorization_bearer_token("Basic abc", &token,
+                                                  &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_oidc_authorization_bearer_token("Bearer ", &token, &error) ==
+         LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+  EXPECT(lonejson_oidc_authorization_bearer_token("Bearer abc def", &token,
+                                                  &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_oidc_authorization_bearer_token("Bearer abc", NULL,
+                                                  &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+}
+
+static void test_oidc_validate_bearer_token(void) {
+  char header[1024];
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_policy cache_policy;
+  lonejson_jwt_claim_policy claim_policy;
+  lonejson_oidc_bearer_validation_request request;
+  lonejson_oidc_bearer_validation validation;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  lonejson_oidc_jwks_cache_init(&cache);
+  lonejson_oidc_bearer_validation_init(&validation);
+  cache_policy = test_oidc_jwks_cache_policy();
+  claim_policy = test_jwt_policy();
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &cache_policy,
+             test_jwt_rs256_jwks_json, strlen(test_jwt_rs256_jwks_json),
+             &error) == LONEJSON_STATUS_OK);
+  snprintf(header, sizeof(header), "Bearer %s", test_jwt_rs256_token);
+  memset(&request, 0, sizeof(request));
+  request.authorization_header = header;
+  request.jwks_cache = &cache;
+  request.jwks_policy = &cache_policy;
+  request.claim_policy = &claim_policy;
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_NONE);
+  EXPECT(strcmp(lonejson_auth_failure_string(validation.failure), "none") ==
+         0);
+  EXPECT(validation.jwk != NULL);
+  EXPECT(strcmp(validation.header.kid, "rsa-test") == 0);
+  EXPECT(strcmp(validation.claims.iss, "issuer") == 0);
+  EXPECT(lj_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                       &validation, &error) == LJ_STATUS_OK);
+  lj_oidc_bearer_validation_cleanup(&validation);
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+}
+
+static void test_oidc_validate_bearer_token_failures(void) {
+  char header[1024];
+  char tampered[sizeof(test_jwt_rs256_token)];
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_policy cache_policy;
+  lonejson_jwt_claim_policy claim_policy;
+  lonejson_oidc_bearer_validation_request request;
+  lonejson_oidc_bearer_validation validation;
+  lonejson_error error;
+  const char *bad_issuer = "other";
+  const char *bad_audience = "other";
+
+  lonejson_error_init(&error);
+  lonejson_oidc_jwks_cache_init(&cache);
+  lonejson_oidc_bearer_validation_init(&validation);
+  cache_policy = test_oidc_jwks_cache_policy();
+  claim_policy = test_jwt_policy();
+  memset(&request, 0, sizeof(request));
+  request.jwks_cache = &cache;
+  request.jwks_policy = &cache_policy;
+  request.claim_policy = &claim_policy;
+
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &cache_policy,
+             test_jwt_rs256_jwks_json, strlen(test_jwt_rs256_jwks_json),
+             &error) == LONEJSON_STATUS_OK);
+
+  request.authorization_header = NULL;
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_MISSING_CREDENTIALS);
+
+  request.authorization_header = "Bearer not-a-jwt";
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_MALFORMED_TOKEN);
+
+  snprintf(header, sizeof(header), "Bearer %s", test_jwt_rs256_token);
+  request.authorization_header = header;
+  cache_policy.now = 2000;
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE);
+  cache_policy = test_oidc_jwks_cache_policy();
+  request.jwks_policy = &cache_policy;
+
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+  lonejson_oidc_jwks_cache_init(&cache);
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &cache_policy,
+             test_jwt_rs256_other_kid_jwks_json,
+             strlen(test_jwt_rs256_other_kid_jwks_json), &error) ==
+         LONEJSON_STATUS_OK);
+  request.jwks_cache = &cache;
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND);
+
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+  lonejson_oidc_jwks_cache_init(&cache);
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &cache_policy,
+             test_jwt_rs256_jwks_json, strlen(test_jwt_rs256_jwks_json),
+             &error) == LONEJSON_STATUS_OK);
+  request.jwks_cache = &cache;
+  memcpy(tampered, test_jwt_rs256_token, sizeof(tampered));
+  tampered[sizeof(tampered) - 2u] =
+      tampered[sizeof(tampered) - 2u] == 'A' ? 'B' : 'A';
+  snprintf(header, sizeof(header), "Bearer %s", tampered);
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+
+  snprintf(header, sizeof(header), "Bearer %s", test_jwt_rs256_token);
+  claim_policy = test_jwt_policy();
+  claim_policy.now = 3000;
+  request.claim_policy = &claim_policy;
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_EXPIRED_TOKEN);
+
+  claim_policy = test_jwt_policy();
+  claim_policy.accepted_issuers = &bad_issuer;
+  request.claim_policy = &claim_policy;
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_ISSUER_MISMATCH);
+
+  claim_policy = test_jwt_policy();
+  claim_policy.accepted_audiences = &bad_audience;
+  request.claim_policy = &claim_policy;
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_AUDIENCE_MISMATCH);
+
+  lonejson_oidc_bearer_validation_cleanup(&validation);
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+}
 #else
 static void test_oidc_discovery_url(void) {}
 static void test_oidc_discovery_parse_and_validate(void) {}
@@ -1089,6 +1285,9 @@ static void test_oauth2_token_response_failures(void) {}
 static void test_oidc_pkce_challenge_and_generate(void) {}
 static void test_oidc_authorization_url(void) {}
 static void test_oidc_authorization_callback_parse(void) {}
+static void test_oidc_authorization_bearer_token(void) {}
+static void test_oidc_validate_bearer_token(void) {}
+static void test_oidc_validate_bearer_token_failures(void) {}
 #endif
 #else
 static void test_jwt_base64url_decode_vectors(void) {}
@@ -1114,4 +1313,7 @@ static void test_oauth2_token_response_failures(void) {}
 static void test_oidc_pkce_challenge_and_generate(void) {}
 static void test_oidc_authorization_url(void) {}
 static void test_oidc_authorization_callback_parse(void) {}
+static void test_oidc_authorization_bearer_token(void) {}
+static void test_oidc_validate_bearer_token(void) {}
+static void test_oidc_validate_bearer_token_failures(void) {}
 #endif

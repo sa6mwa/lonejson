@@ -202,6 +202,7 @@ if lonejson.jwt_parse_compact ~= nil then
       '{"kty":"RSA","kid":"rsa-test","use":"sig","alg":"RS256",' ..
       '"n":"nGFfcf9mkkjv4XoIzgmENq-A3pTE4uT7gzmYMDB4_xwXvHaTogDTrduaIKcd-oziNa6mM1HXGk-4q8084Wvvz44ZTyRlaVKm2eRHPqjJ1hmxB80nG7iWEkORAKazobRfB8g7fGXZWhL0JsWqd51igefciKMefuvjs-2_JvusIF6uXu3jSCVRsqXkoZGnYsauGUq4GcspGtCHe5M4oie5kJrfbwcZgajJp4HS-ZUd4m1q12BPSuUSqi5Vb3wS6fLdVsQjxZXVqyk1OgnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWyYoQ",' ..
       '"e":"AQAB"}'
+  local signed_jwks_json = '{"keys":[' .. signed_jwk_json .. ']}'
   local jwks_json =
       '{"keys":[{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","n":"AQIDBA","e":"AQAB"},' ..
       '{"kty":"EC","kid":"ec1","use":"sig","alg":"ES256","crv":"P-256","x":"AAEC","y":"AwQF"}]}'
@@ -271,6 +272,8 @@ if lonejson.jwt_parse_compact ~= nil then
     })
     local callback = lonejson.oidc_authorization_callback_parse_query(
         "?code=abc%2B123&state=state+123", "state 123")
+    local bearer = lj:oidc_validate_bearer_token(
+        "Bearer " .. signed_token, signed_jwks_json, cache_policy, policy)
 
     assert_eq(lonejson.oidc_discovery_url("https://id.example/tenant/"),
               "https://id.example/.well-known/openid-configuration/tenant")
@@ -298,6 +301,11 @@ if lonejson.jwt_parse_compact ~= nil then
               "code_challenge=challenge&code_challenge_method=S256")
     assert_eq(callback.code, "abc+123")
     assert_eq(callback.state, "state 123")
+    assert_true(bearer.authorized)
+    assert_eq(bearer.failure, "none")
+    assert_eq(bearer.header.kid, "rsa-test")
+    assert_eq(bearer.claims.iss, "issuer")
+    assert_eq(bearer.jwk.kid, "rsa-test")
 
     bad, err = lonejson.oidc_discovery_parse_json(discovery_json, "https://id.example")
     assert_true(bad == nil)
@@ -347,6 +355,25 @@ if lonejson.jwt_parse_compact ~= nil then
     }, { kid = "rsa1" })
     assert_true(bad == nil)
     assert_eq(err.status, "overflow")
+
+    local failure
+    bad, err, failure = lj:oidc_validate_bearer_token(
+        "Bearer not-a-jwt", signed_jwks_json, cache_policy, policy)
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_json")
+    assert_eq(failure, "malformed_token")
+
+    bad, err, failure = lj:oidc_validate_bearer_token(
+        "Bearer " .. signed_token, signed_jwks_json, cache_policy, {
+          accepted_algs = { "RS256" },
+          accepted_issuers = { "other" },
+          accepted_audiences = { "api" },
+          required_claims = { "iss", "aud", "exp" },
+          now = 1000,
+        })
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+    assert_eq(failure, "issuer_mismatch")
   end
 
   bad, err = lj:jwt_validate_compact_claims(jwt_token, {

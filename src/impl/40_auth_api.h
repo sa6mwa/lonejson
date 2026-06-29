@@ -2639,4 +2639,280 @@ lonejson_status lonejson_jwt_validate_signature(
   }
   return lonejson__jwt_validate_rs256_signature(jwt, jwk, error);
 }
+
+#ifdef LONEJSON_WITH_OIDC
+const char *lonejson_auth_failure_string(lonejson_auth_failure failure) {
+  switch (failure) {
+  case LONEJSON_AUTH_FAILURE_NONE:
+    return "none";
+  case LONEJSON_AUTH_FAILURE_MISSING_CREDENTIALS:
+    return "missing_credentials";
+  case LONEJSON_AUTH_FAILURE_MALFORMED_TOKEN:
+    return "malformed_token";
+  case LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE:
+    return "cache_unavailable";
+  case LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND:
+    return "key_not_found";
+  case LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE:
+    return "invalid_signature";
+  case LONEJSON_AUTH_FAILURE_EXPIRED_TOKEN:
+    return "expired_token";
+  case LONEJSON_AUTH_FAILURE_NOT_YET_VALID:
+    return "not_yet_valid";
+  case LONEJSON_AUTH_FAILURE_ISSUER_MISMATCH:
+    return "issuer_mismatch";
+  case LONEJSON_AUTH_FAILURE_AUDIENCE_MISMATCH:
+    return "audience_mismatch";
+  case LONEJSON_AUTH_FAILURE_CLAIMS_INVALID:
+    return "claims_invalid";
+  }
+  return "unknown";
+}
+
+void lonejson_oidc_bearer_validation_init(
+    lonejson_oidc_bearer_validation *validation) {
+  if (validation == NULL) {
+    return;
+  }
+  memset(validation, 0, sizeof(*validation));
+  lonejson_jwt_header_init(&validation->header);
+  lonejson_jwt_claims_init(&validation->claims);
+}
+
+void lonejson_oidc_bearer_validation_cleanup(
+    lonejson_oidc_bearer_validation *validation) {
+  if (validation == NULL) {
+    return;
+  }
+  lonejson_jwt_header_cleanup(&validation->header);
+  lonejson_jwt_claims_cleanup(&validation->claims);
+  validation->failure = LONEJSON_AUTH_FAILURE_NONE;
+  validation->jwk = NULL;
+}
+
+static int lonejson__oidc_http_ows(char ch) {
+  return ch == ' ' || ch == '\t';
+}
+
+static int lonejson__oidc_ascii_prefix_case_equal(const char *a,
+                                                  const char *b,
+                                                  size_t len) {
+  size_t i;
+  unsigned char ca;
+  unsigned char cb;
+
+  for (i = 0u; i < len; ++i) {
+    ca = (unsigned char)a[i];
+    cb = (unsigned char)b[i];
+    if (ca >= (unsigned char)'A' && ca <= (unsigned char)'Z') {
+      ca = (unsigned char)(ca - (unsigned char)'A' + (unsigned char)'a');
+    }
+    if (cb >= (unsigned char)'A' && cb <= (unsigned char)'Z') {
+      cb = (unsigned char)(cb - (unsigned char)'A' + (unsigned char)'a');
+    }
+    if (ca != cb) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+lonejson_status lonejson_oidc_authorization_bearer_token(
+    const char *authorization_header, lonejson_jwt_segment *out,
+    lonejson_error *error) {
+  const char *cursor;
+  const char *token_begin;
+  const char *token_end;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "bearer token output is required");
+  }
+  out->data = NULL;
+  out->len = 0u;
+  if (authorization_header == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
+                               0u, 0u, 0u,
+                               "Authorization bearer credential is required");
+  }
+  cursor = authorization_header;
+  while (lonejson__oidc_http_ows(*cursor)) {
+    ++cursor;
+  }
+  if (*cursor == '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
+                               0u, 0u, 0u,
+                               "Authorization bearer credential is required");
+  }
+  if (strlen(cursor) < 7u ||
+      !lonejson__oidc_ascii_prefix_case_equal(cursor, "Bearer", 6u) ||
+      !lonejson__oidc_http_ows(cursor[6])) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "Authorization header is not a Bearer token");
+  }
+  cursor += 7u;
+  while (lonejson__oidc_http_ows(*cursor)) {
+    ++cursor;
+  }
+  token_begin = cursor;
+  while (*cursor != '\0' && !lonejson__oidc_http_ows(*cursor)) {
+    ++cursor;
+  }
+  token_end = cursor;
+  while (lonejson__oidc_http_ows(*cursor)) {
+    ++cursor;
+  }
+  if (token_end == token_begin) {
+    return lonejson__set_error(error, LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
+                               0u, 0u, 0u,
+                               "Authorization bearer token is required");
+  }
+  if (*cursor != '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "Authorization bearer token has trailing data");
+  }
+  out->data = token_begin;
+  out->len = (size_t)(token_end - token_begin);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__oidc_bearer_fail(
+    lonejson_oidc_bearer_validation *out, lonejson_auth_failure failure,
+    lonejson_status status, lonejson_error *error, const char *message) {
+  lonejson_oidc_bearer_validation_cleanup(out);
+  out->failure = failure;
+  if (error != NULL && error->code == LONEJSON_STATUS_OK) {
+    (void)lonejson__set_error(error, status, 0u, 0u, 0u, "%s", message);
+  }
+  return status;
+}
+
+static lonejson_auth_failure lonejson__oidc_bearer_classify_claim_failure(
+    const lonejson_jwt_header *header, const lonejson_jwt_claims *claims,
+    const lonejson_jwt_claim_policy *policy) {
+  lonejson_int64 skew;
+
+  if (header == NULL || claims == NULL || policy == NULL ||
+      policy->accepted_algs == NULL || policy->accepted_alg_count == 0u ||
+      policy->accepted_issuers == NULL || policy->accepted_issuer_count == 0u ||
+      policy->accepted_audiences == NULL ||
+      policy->accepted_audience_count == 0u || policy->allowed_clock_skew < 0) {
+    return LONEJSON_AUTH_FAILURE_CLAIMS_INVALID;
+  }
+  if (!lonejson__jwt_string_in_list(claims->iss, policy->accepted_issuers,
+                                    policy->accepted_issuer_count)) {
+    return LONEJSON_AUTH_FAILURE_ISSUER_MISMATCH;
+  }
+  if (!lonejson__jwt_any_audience_accepted(claims, policy)) {
+    return LONEJSON_AUTH_FAILURE_AUDIENCE_MISMATCH;
+  }
+  skew = policy->allowed_clock_skew;
+  if (claims->has_exp && policy->now >= claims->exp &&
+      policy->now - claims->exp >= skew) {
+    return LONEJSON_AUTH_FAILURE_EXPIRED_TOKEN;
+  }
+  if ((claims->has_nbf && policy->now < claims->nbf &&
+       claims->nbf - policy->now > skew) ||
+      (claims->has_iat && policy->now < claims->iat &&
+       claims->iat - policy->now > skew)) {
+    return LONEJSON_AUTH_FAILURE_NOT_YET_VALID;
+  }
+  return LONEJSON_AUTH_FAILURE_CLAIMS_INVALID;
+}
+
+lonejson_status lonejson_oidc_validate_bearer_token(
+    lonejson *runtime, const lonejson_oidc_bearer_validation_request *request,
+    lonejson_oidc_bearer_validation *out, lonejson_error *error) {
+  lonejson_jwt_segment token;
+  lonejson_jwt_compact compact;
+  lonejson_jwk_select_options select_options;
+  const lonejson_jwk *selected = NULL;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (runtime == NULL || request == NULL || out == NULL ||
+      request->jwks_cache == NULL || request->jwks_policy == NULL ||
+      request->claim_policy == NULL) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "runtime, bearer request, JWKS cache, JWKS policy, and claim policy "
+        "are required");
+  }
+  lonejson_oidc_bearer_validation_cleanup(out);
+
+  status = lonejson_oidc_authorization_bearer_token(
+      request->authorization_header, &token, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return lonejson__oidc_bearer_fail(
+        out,
+        status == LONEJSON_STATUS_MISSING_REQUIRED_FIELD
+            ? LONEJSON_AUTH_FAILURE_MISSING_CREDENTIALS
+            : LONEJSON_AUTH_FAILURE_MALFORMED_TOKEN,
+        status, error, "Authorization bearer token is invalid");
+  }
+
+  status = lonejson_jwt_parse_compact(token.data, token.len, &compact, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_jwt_decode_compact(runtime, token.data, token.len,
+                                         request->claim_policy, &out->header,
+                                         &out->claims, error);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    return lonejson__oidc_bearer_fail(out,
+                                      LONEJSON_AUTH_FAILURE_MALFORMED_TOKEN,
+                                      status, error,
+                                      "Authorization bearer JWT is malformed");
+  }
+  if (out->header.kid == NULL || out->header.kid[0] == '\0') {
+    return lonejson__oidc_bearer_fail(
+        out, LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND,
+        LONEJSON_STATUS_TYPE_MISMATCH, error,
+        "JWT kid is required for JWKS bearer validation");
+  }
+
+  memset(&select_options, 0, sizeof(select_options));
+  select_options.kid = out->header.kid;
+  select_options.alg = out->header.alg;
+  select_options.kty =
+      lonejson__auth_streq(out->header.alg, "RS256") ? "RSA" : NULL;
+  select_options.use = "sig";
+  status = lonejson_oidc_jwks_cache_select(
+      request->jwks_cache, request->jwks_policy, &select_options, &selected,
+      error);
+  if (status != LONEJSON_STATUS_OK) {
+    return lonejson__oidc_bearer_fail(
+        out, LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE, status, error,
+        "OIDC JWKS cache is unavailable for bearer validation");
+  }
+  if (selected == NULL) {
+    return lonejson__oidc_bearer_fail(
+        out, LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND,
+        LONEJSON_STATUS_TYPE_MISMATCH, error,
+        "no JWKS key matches bearer JWT header");
+  }
+
+  status = lonejson_jwt_validate_signature(&compact, &out->header, selected,
+                                           error);
+  if (status != LONEJSON_STATUS_OK) {
+    return lonejson__oidc_bearer_fail(
+        out, LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE, status, error,
+        "bearer JWT signature validation failed");
+  }
+
+  status = lonejson_jwt_validate_claims(&out->header, &out->claims,
+                                        request->claim_policy, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return lonejson__oidc_bearer_fail(
+        out,
+        lonejson__oidc_bearer_classify_claim_failure(
+            &out->header, &out->claims, request->claim_policy),
+        status, error, "bearer JWT claims validation failed");
+  }
+
+  out->failure = LONEJSON_AUTH_FAILURE_NONE;
+  out->jwk = selected;
+  return LONEJSON_STATUS_OK;
+}
+#endif
 #endif

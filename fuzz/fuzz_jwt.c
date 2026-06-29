@@ -27,6 +27,16 @@ static const char lonejson_fuzz_rs256_jwk_json[] =
     "gnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWy"
     "YoQ\",\"e\":\"AQAB\"}";
 
+static const char lonejson_fuzz_rs256_jwks_json[] =
+    "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"rsa-test\",\"use\":\"sig\","
+    "\"alg\":\"RS256\","
+    "\"n\":\"nGFfcf9mkkjv4XoIzgmENq-A3pTE4uT7gzmYMDB4_xwXvHaTogDTrduaIKcd-"
+    "oziNa6mM1HXGk-4q8084Wvvz44ZTyRlaVKm2eRHPqjJ1hmxB80nG7iWEkORAKazobRfB8"
+    "g7fGXZWhL0JsWqd51igefciKMefuvjs-2_JvusIF6uXu3jSCVRsqXkoZGnYsauGUq4Gcsp"
+    "GtCHe5M4oie5kJrfbwcZgajJp4HS-ZUd4m1q12BPSuUSqi5Vb3wS6fLdVsQjxZXVqyk1O"
+    "gnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWy"
+    "YoQ\",\"e\":\"AQAB\"}]}";
+
 static void fuzz_decode_segment(const char *data, size_t len) {
   lonejson_error error;
   unsigned char stack_buf[128];
@@ -67,6 +77,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_oidc_pkce pkce;
   lonejson_oidc_authorization_request authorization_request;
   lonejson_oidc_authorization_callback authorization_callback;
+  lonejson_oidc_bearer_validation_request bearer_request;
+  lonejson_oidc_bearer_validation bearer_validation;
   lonejson_oidc_discovery discovery;
   lonejson_owned_buffer discovery_url;
   lonejson_owned_buffer form_body;
@@ -273,6 +285,37 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     (void)lonejson_oidc_authorization_callback_parse_query(
         text, size, "state", 4096u, &authorization_callback, &error);
     lonejson_oidc_authorization_callback_cleanup(&authorization_callback);
+
+    (void)lonejson_oidc_authorization_bearer_token(text, &jwt.header, &error);
+    lonejson_oidc_jwks_cache_init(&cache);
+    lonejson_oidc_bearer_validation_init(&bearer_validation);
+    if (lonejson_oidc_jwks_cache_update_json(
+            runtime, &cache, &cache_policy, lonejson_fuzz_rs256_jwks_json,
+            strlen(lonejson_fuzz_rs256_jwks_json), &error) ==
+        LONEJSON_STATUS_OK) {
+      memset(&bearer_request, 0, sizeof(bearer_request));
+      bearer_request.authorization_header = text;
+      bearer_request.jwks_cache = &cache;
+      bearer_request.jwks_policy = &cache_policy;
+      bearer_request.claim_policy = &policy;
+      (void)lonejson_oidc_validate_bearer_token(runtime, &bearer_request,
+                                                &bearer_validation, &error);
+      bearer_request.authorization_header =
+          "Bearer "
+          "eyJhbGciOiJSUzI1NiIsImtpZCI6InJzYS10ZXN0IiwidHlwIjoiSldUIn0."
+          "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAw"
+          "LCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ."
+          "PoouvDAoloqvsfTQxadOTpQGXKyeHq0lx6WQEPv0qvg59KMuy8lD-XBTBPCF_MpQGo"
+          "e3DS84CSg27iktG7z12Qv6TX1gqbJUO2wkwhuW4dIWFPY9tDhI3e05W5yz8D70wAR"
+          "x7CL9tHKWsOpLwHRWf5ugfrq1PuofcC9atB7D-QUfrmmJ01NXbQl4aq6DJ02M7azHT"
+          "Lq-15X3TuE2CHN5P_zo_zkaJT8V0QhoQ3MUhUE_pBxMtAByRIUOEW32RbWjYgkwZ_"
+          "zxaVkbhXv1CYznQCzikX2wXn9OQ_1z0TCH7bT5Ao3EXEQeiK7Fhuq8lyPFbkhDc_y"
+          "CjxFRjm7ufSFZbg";
+      (void)lonejson_oidc_validate_bearer_token(runtime, &bearer_request,
+                                                &bearer_validation, &error);
+    }
+    lonejson_oidc_bearer_validation_cleanup(&bearer_validation);
+    lonejson_oidc_jwks_cache_cleanup(&cache);
 
     lonejson_owned_buffer_init(&discovery_url);
     (void)lonejson_oidc_discovery_url(text, &discovery_url, &error);

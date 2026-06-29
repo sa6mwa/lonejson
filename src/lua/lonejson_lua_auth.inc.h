@@ -113,6 +113,23 @@ static void ljlua_auth_push_oidc_callback(
   ljlua_auth_push_optional_string(L, callback->state, "state");
 }
 
+static void ljlua_auth_push_bearer_validation(
+    lua_State *L, const lonejson_oidc_bearer_validation *validation) {
+  lua_createtable(L, 0, 5);
+  lua_pushboolean(L, validation->failure == LONEJSON_AUTH_FAILURE_NONE);
+  lua_setfield(L, -2, "authorized");
+  lua_pushstring(L, lonejson_auth_failure_string(validation->failure));
+  lua_setfield(L, -2, "failure");
+  ljlua_auth_push_header(L, &validation->header);
+  lua_setfield(L, -2, "header");
+  ljlua_auth_push_claims(L, &validation->claims);
+  lua_setfield(L, -2, "claims");
+  if (validation->jwk != NULL) {
+    ljlua_auth_push_jwk(L, validation->jwk);
+    lua_setfield(L, -2, "jwk");
+  }
+}
+
 static const char *ljlua_auth_optional_table_string(lua_State *L, int index,
                                                     const char *field) {
   const char *value;
@@ -761,6 +778,65 @@ static int ljlua_oidc_authorization_callback_parse_query(lua_State *L) {
   }
   ljlua_auth_push_oidc_callback(L, &callback);
   lonejson_oidc_authorization_callback_cleanup(&callback);
+  return 1;
+}
+
+static int ljlua_oidc_validate_bearer_token(lua_State *L) {
+  lonejson *runtime;
+  lonejson *owned_runtime;
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_policy cache_policy;
+  lonejson_jwt_claim_policy claim_policy;
+  lonejson_oidc_bearer_validation_request request;
+  lonejson_oidc_bearer_validation validation;
+  lonejson_error error;
+  lonejson_status status;
+  const char *authorization_header;
+  const char *jwks_json;
+  const char *failure;
+  size_t jwks_len;
+  int arg;
+
+  runtime = ljlua_auth_runtime_arg(L, &arg, &owned_runtime, &error);
+  if (runtime == NULL) {
+    return ljlua_push_status_result(L, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                    &error);
+  }
+  authorization_header = luaL_checkstring(L, arg);
+  jwks_json = luaL_checklstring(L, arg + 1, &jwks_len);
+  ljlua_auth_read_jwks_cache_policy(L, arg + 2, &cache_policy);
+  ljlua_auth_read_policy(L, arg + 3, &claim_policy, 1);
+
+  lonejson_oidc_jwks_cache_init(&cache);
+  lonejson_oidc_bearer_validation_init(&validation);
+  status = lonejson_oidc_jwks_cache_update_json(
+      runtime, &cache, &cache_policy, jwks_json, jwks_len, &error);
+  if (status == LONEJSON_STATUS_OK) {
+    memset(&request, 0, sizeof(request));
+    request.authorization_header = authorization_header;
+    request.jwks_cache = &cache;
+    request.jwks_policy = &cache_policy;
+    request.claim_policy = &claim_policy;
+    status =
+        lonejson_oidc_validate_bearer_token(runtime, &request, &validation,
+                                            &error);
+  }
+  if (owned_runtime != NULL) {
+    lonejson_free(owned_runtime);
+  }
+  ljlua_auth_free_policy(&claim_policy);
+  if (status != LONEJSON_STATUS_OK) {
+    failure = lonejson_auth_failure_string(validation.failure);
+    lonejson_oidc_bearer_validation_cleanup(&validation);
+    lonejson_oidc_jwks_cache_cleanup(&cache);
+    lua_pushnil(L);
+    ljlua_push_error(L, &error);
+    lua_pushstring(L, failure);
+    return 3;
+  }
+  ljlua_auth_push_bearer_validation(L, &validation);
+  lonejson_oidc_bearer_validation_cleanup(&validation);
+  lonejson_oidc_jwks_cache_cleanup(&cache);
   return 1;
 }
 #endif
