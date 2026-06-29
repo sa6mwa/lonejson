@@ -2873,10 +2873,8 @@ lonejson_status lonejson_oidc_validate_bearer_token(
 
   memset(&select_options, 0, sizeof(select_options));
   select_options.kid = out->header.kid;
-  select_options.alg = out->header.alg;
   select_options.kty =
       lonejson__auth_streq(out->header.alg, "RS256") ? "RSA" : NULL;
-  select_options.use = "sig";
   status = lonejson_oidc_jwks_cache_select(
       request->jwks_cache, request->jwks_policy, &select_options, &selected,
       error);

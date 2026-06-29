@@ -645,6 +645,11 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_sanitizer_conflicts.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_cmake_fuzz_auth_optional_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_auth_optional.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_release_werror_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_werror.sh"
@@ -1097,24 +1102,25 @@ if(LONEJSON_BUILD_FUZZERS)
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_parser_boundaries)
 
-  add_executable(lonejson_fuzz_jwt fuzz/fuzz_jwt.c)
-  target_include_directories(lonejson_fuzz_jwt PRIVATE
-    "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_jwt PRIVATE lonejson)
-  if(LONEJSON_BUILD_WITH_CURL)
+  if(LONEJSON_BUILD_WITH_CURL AND LONEJSON_BUILD_WITH_OPENSSL AND
+      LONEJSON_BUILD_WITH_JWT AND LONEJSON_BUILD_WITH_OIDC)
+    add_executable(lonejson_fuzz_jwt fuzz/fuzz_jwt.c)
+    target_include_directories(lonejson_fuzz_jwt PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+    target_link_libraries(lonejson_fuzz_jwt PRIVATE lonejson)
     lonejson_target_include_curl(lonejson_fuzz_jwt)
+    target_compile_definitions(lonejson_fuzz_jwt PRIVATE
+      LONEJSON_WITH_CURL
+      LONEJSON_WITH_OPENSSL
+      LONEJSON_WITH_JWT
+      LONEJSON_WITH_OIDC)
+    target_compile_options(lonejson_fuzz_jwt PRIVATE
+      -fsanitize=fuzzer-no-link,address,undefined
+      -fno-omit-frame-pointer)
+    target_link_options(lonejson_fuzz_jwt PRIVATE
+      -fsanitize=fuzzer,address,undefined)
+    lonejson_configure_c_target(lonejson_fuzz_jwt)
   endif()
-  target_compile_definitions(lonejson_fuzz_jwt PRIVATE
-    LONEJSON_WITH_CURL
-    LONEJSON_WITH_OPENSSL
-    LONEJSON_WITH_JWT
-    LONEJSON_WITH_OIDC)
-  target_compile_options(lonejson_fuzz_jwt PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_jwt PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_jwt)
 endif()
 
 if(CLANG_FORMAT_BIN)

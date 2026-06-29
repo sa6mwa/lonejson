@@ -298,6 +298,16 @@ static const char test_jwt_rs256_other_kid_jwks_json[] =
     "YoQ\","
     "\"e\":\"AQAB\"}]}";
 
+static const char test_jwt_rs256_minimal_jwks_json[] =
+    "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"rsa-test\","
+    "\"n\":\"nGFfcf9mkkjv4XoIzgmENq-A3pTE4uT7gzmYMDB4_xwXvHaTogDTrduaIKcd-"
+    "oziNa6mM1HXGk-4q8084Wvvz44ZTyRlaVKm2eRHPqjJ1hmxB80nG7iWEkORAKazobRfB8"
+    "g7fGXZWhL0JsWqd51igefciKMefuvjs-2_JvusIF6uXu3jSCVRsqXkoZGnYsauGUq4Gcsp"
+    "GtCHe5M4oie5kJrfbwcZgajJp4HS-ZUd4m1q12BPSuUSqi5Vb3wS6fLdVsQjxZXVqyk1O"
+    "gnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWy"
+    "YoQ\","
+    "\"e\":\"AQAB\"}]}";
+
 static void test_jwt_decode_and_validate_claims(void) {
   static const char token[] =
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
@@ -1162,6 +1172,24 @@ static void test_oidc_validate_bearer_token(void) {
   EXPECT(strcmp(validation.claims.iss, "issuer") == 0);
   EXPECT(lj_oidc_validate_bearer_token(test_default_runtime(), &request,
                                        &validation, &error) == LJ_STATUS_OK);
+  lonejson_oidc_bearer_validation_cleanup(&validation);
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+
+  lonejson_oidc_jwks_cache_init(&cache);
+  lonejson_oidc_bearer_validation_init(&validation);
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &cache_policy,
+             test_jwt_rs256_minimal_jwks_json,
+             strlen(test_jwt_rs256_minimal_jwks_json), &error) ==
+         LONEJSON_STATUS_OK);
+  request.jwks_cache = &cache;
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_NONE);
+  EXPECT(validation.jwk != NULL);
+  EXPECT(validation.jwk->alg == NULL);
+  EXPECT(validation.jwk->use == NULL);
   lj_oidc_bearer_validation_cleanup(&validation);
   lonejson_oidc_jwks_cache_cleanup(&cache);
 }
