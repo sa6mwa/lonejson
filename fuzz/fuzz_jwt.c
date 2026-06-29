@@ -33,7 +33,10 @@ static void fuzz_decode_segment(const char *data, size_t len) {
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_jwt_compact jwt;
+  lonejson_jwk jwk;
+  lonejson_jwks jwks;
   lonejson_error error;
+  lonejson *runtime;
   char *text;
 
   if (size > 65536u) {
@@ -55,6 +58,33 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     fuzz_decode_segment(jwt.payload.data, jwt.payload.len);
     fuzz_decode_segment(jwt.signature.data, jwt.signature.len);
     fuzz_decode_segment(jwt.signing_input.data, jwt.signing_input.len);
+  }
+  runtime = lonejson_new(NULL, &error);
+  if (runtime != NULL) {
+    lonejson_jwk_init(&jwk);
+    if (lonejson_jwk_parse_json(runtime, text, size, &jwk, &error) ==
+        LONEJSON_STATUS_OK) {
+      (void)jwk.kty;
+    }
+    lonejson_jwk_cleanup(&jwk);
+    lonejson_jwks_init(&jwks);
+    if (lonejson_jwks_parse_json(runtime, text, size, &jwks, &error) ==
+        LONEJSON_STATUS_OK) {
+      lonejson_jwk_select_options options;
+      const lonejson_jwk *selected;
+      memset(&options, 0, sizeof(options));
+      (void)lonejson_jwks_select(&jwks, &options, &selected, &error);
+      if (jwks.keys.count != 0u) {
+        const lonejson_jwk *first = (const lonejson_jwk *)jwks.keys.items;
+        options.kid = first->kid;
+        options.kty = first->kty;
+        options.alg = first->alg;
+        options.use = first->use;
+        (void)lonejson_jwks_select(&jwks, &options, &selected, &error);
+      }
+    }
+    lonejson_jwks_cleanup(&jwks);
+    lonejson_free(runtime);
   }
   free(text);
   return 0;

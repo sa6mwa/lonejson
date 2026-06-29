@@ -38,18 +38,27 @@ fi
 if [[ "$target_id" == *apple-darwin ]]; then
   shared_symbols="$("$NM" -gU "$shared_lib")"
   static_symbols="$("$NM" -gU "$static_lib")"
-  symbol_regex='(^|[[:space:]])_?lonejson_jwt_parse_compact$'
+  symbol_prefix='_?'
 else
   shared_symbols="$("$NM" -D --defined-only "$shared_lib")"
   static_symbols="$("$NM" -g --defined-only "$static_lib")"
-  symbol_regex='(^|[[:space:]])lonejson_jwt_parse_compact$'
+  symbol_prefix=''
 fi
 
-if ! printf '%s\n' "$shared_symbols" | grep -Eq "$symbol_regex"; then
-  printf 'missing lonejson_jwt_* ABI symbol in shared library for %s\n' "$context" >&2
-  exit 1
-fi
-if ! printf '%s\n' "$static_symbols" | grep -Eq "$symbol_regex"; then
-  printf 'missing lonejson_jwt_* ABI symbol in static library for %s\n' "$context" >&2
-  exit 1
-fi
+for symbol in \
+    lonejson_jwt_parse_compact \
+    lonejson_jwk_parse_json \
+    lonejson_jwks_parse_json \
+    lonejson_jwks_select \
+    lonejson_jwk_cleanup \
+    lonejson_jwks_cleanup; do
+  symbol_regex="(^|[[:space:]])${symbol_prefix}${symbol}$"
+  if ! printf '%s\n' "$shared_symbols" | grep -Eq "$symbol_regex"; then
+    printf 'missing lonejson_jwt_* ABI symbol in shared library for %s: %s\n' "$context" "$symbol" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$static_symbols" | grep -Eq "$symbol_regex"; then
+    printf 'missing lonejson_jwt_* ABI symbol in static library for %s: %s\n' "$context" "$symbol" >&2
+    exit 1
+  fi
+done

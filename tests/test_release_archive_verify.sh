@@ -53,6 +53,11 @@ void lonejson_free(lonejson *runtime);
 lonejson_status lonejson_validate_cstr(lonejson *runtime, const char *json, lonejson_error *error);
 void lonejson_curl_parse_init(void);
 void lonejson_jwt_parse_compact(void);
+void lonejson_jwk_parse_json(void);
+void lonejson_jwks_parse_json(void);
+void lonejson_jwks_select(void);
+void lonejson_jwk_cleanup(void);
+void lonejson_jwks_cleanup(void);
 
 #endif
 EOF
@@ -93,6 +98,21 @@ void lonejson_curl_parse_init(void) {
 }
 
 void lonejson_jwt_parse_compact(void) {
+}
+
+void lonejson_jwk_parse_json(void) {
+}
+
+void lonejson_jwks_parse_json(void) {
+}
+
+void lonejson_jwks_select(void) {
+}
+
+void lonejson_jwk_cleanup(void) {
+}
+
+void lonejson_jwks_cleanup(void) {
 }
 EOF
 

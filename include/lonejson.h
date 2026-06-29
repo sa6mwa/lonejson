@@ -505,7 +505,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 19
+#define LONEJSON_ABI_VERSION 20
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -1187,6 +1187,45 @@ typedef struct lonejson_jwt_compact {
   /** Header, separator, and payload bytes covered by a JWS signature. */
   lonejson_jwt_segment signing_input;
 } lonejson_jwt_compact;
+
+/** Parsed JSON Web Key with lonejson-owned string fields. Parsing only checks
+ * JWK shape and base64url syntax; it does not establish trust.
+ */
+typedef struct lonejson_jwk {
+  /** Key type such as `RSA`, `EC`, or `oct`. Required. */
+  char *kty;
+  /** Optional key identifier. */
+  char *kid;
+  /** Optional intended algorithm. */
+  char *alg;
+  /** Optional public key use such as `sig`. */
+  char *use;
+  /** Optional curve name for EC keys. */
+  char *crv;
+  /** RSA modulus, base64url encoded. */
+  char *n;
+  /** RSA exponent, base64url encoded. */
+  char *e;
+  /** EC public x coordinate, base64url encoded. */
+  char *x;
+  /** EC public y coordinate, base64url encoded. */
+  char *y;
+  /** Symmetric key bytes, base64url encoded. */
+  char *k;
+} lonejson_jwk;
+
+/** Parsed JWK Set. `keys.items` contains `lonejson_jwk` elements. */
+typedef struct lonejson_jwks {
+  lonejson_object_array keys;
+} lonejson_jwks;
+
+/** Optional JWK selection filters. NULL filter members are ignored. */
+typedef struct lonejson_jwk_select_options {
+  const char *kid;
+  const char *kty;
+  const char *alg;
+  const char *use;
+} lonejson_jwk_select_options;
 #endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
@@ -5522,6 +5561,34 @@ lonejson_status lonejson_base64url_decode(const char *data, size_t len,
 lonejson_status lonejson_jwt_parse_compact(const char *token, size_t len,
                                            lonejson_jwt_compact *out,
                                            lonejson_error *error);
+/** Initializes a JWK object for parsing or cleanup. */
+void lonejson_jwk_init(lonejson_jwk *jwk);
+/** Releases storage owned by a JWK object and resets it to empty. */
+void lonejson_jwk_cleanup(lonejson_jwk *jwk);
+/** Initializes a JWKS object for parsing or cleanup. */
+void lonejson_jwks_init(lonejson_jwks *jwks);
+/** Releases storage owned by a JWKS object and resets it to empty. */
+void lonejson_jwks_cleanup(lonejson_jwks *jwks);
+/** Parses one JWK JSON object into `out`.
+ *
+ * This validates required key material for supported `kty` values and checks
+ * base64url member syntax only. It does not validate signatures or trust.
+ */
+lonejson_status lonejson_jwk_parse_json(lonejson *runtime, const char *json,
+                                        size_t len, lonejson_jwk *out,
+                                        lonejson_error *error);
+/** Parses one JWKS JSON object with a required `keys` array. */
+lonejson_status lonejson_jwks_parse_json(lonejson *runtime, const char *json,
+                                         size_t len, lonejson_jwks *out,
+                                         lonejson_error *error);
+/** Selects the first JWK matching all non-NULL filters.
+ *
+ * Returns `LONEJSON_STATUS_OK` and sets `*out` to NULL when no key matches.
+ */
+lonejson_status lonejson_jwks_select(const lonejson_jwks *jwks,
+                                     const lonejson_jwk_select_options *options,
+                                     const lonejson_jwk **out,
+                                     lonejson_error *error);
 #endif
 
 #ifdef LONEJSON_WITH_CURL
@@ -6258,6 +6325,12 @@ typedef lonejson_candidate_stream_options lj_candidate_stream_options;
 typedef lonejson_jwt_segment lj_jwt_segment;
 /** Parsed JWT compact serialization. */
 typedef lonejson_jwt_compact lj_jwt_compact;
+/** Parsed JSON Web Key. */
+typedef lonejson_jwk lj_jwk;
+/** Parsed JSON Web Key Set. */
+typedef lonejson_jwks lj_jwks;
+/** Optional JWK selection filters. */
+typedef lonejson_jwk_select_options lj_jwk_select_options;
 #endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
@@ -8135,6 +8208,38 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_jwt_parse_compact(const char *token, size_t len, lj_jwt_compact *out,
                      lj_error *error) {
   return lonejson_jwt_parse_compact(token, len, out, error);
+}
+/** Initializes a JWK object for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwk_init(lj_jwk *jwk) {
+  lonejson_jwk_init(jwk);
+}
+/** Releases storage owned by a JWK object and resets it to empty. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwk_cleanup(lj_jwk *jwk) {
+  lonejson_jwk_cleanup(jwk);
+}
+/** Initializes a JWKS object for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwks_init(lj_jwks *jwks) {
+  lonejson_jwks_init(jwks);
+}
+/** Releases storage owned by a JWKS object and resets it to empty. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwks_cleanup(lj_jwks *jwks) {
+  lonejson_jwks_cleanup(jwks);
+}
+/** Parses one JWK JSON object into `out`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwk_parse_json(
+    lj *runtime, const char *json, size_t len, lj_jwk *out, lj_error *error) {
+  return lonejson_jwk_parse_json(runtime, json, len, out, error);
+}
+/** Parses one JWKS JSON object with a required `keys` array. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwks_parse_json(
+    lj *runtime, const char *json, size_t len, lj_jwks *out, lj_error *error) {
+  return lonejson_jwks_parse_json(runtime, json, len, out, error);
+}
+/** Selects the first JWK matching all non-NULL filters. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwks_select(
+    const lj_jwks *jwks, const lj_jwk_select_options *options,
+    const lj_jwk **out, lj_error *error) {
+  return lonejson_jwks_select(jwks, options, out, error);
 }
 #endif
 #ifdef LONEJSON_WITH_CURL

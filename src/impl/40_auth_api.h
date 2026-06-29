@@ -18,6 +18,24 @@ static int lonejson__base64url_value(unsigned char ch) {
   return -1;
 }
 
+static const lonejson_field lonejson__jwk_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC_REQ(lonejson_jwk, kty, "kty"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, kid, "kid"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, alg, "alg"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, use, "use"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, crv, "crv"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, n, "n"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, e, "e"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, x, "x"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, y, "y"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, k, "k")};
+LONEJSON_MAP_DEFINE(lonejson__jwk_map, lonejson_jwk, lonejson__jwk_fields);
+
+static const lonejson_field lonejson__jwks_fields[] = {
+    LONEJSON_FIELD_OBJECT_ARRAY(lonejson_jwks, keys, "keys", lonejson_jwk,
+                                &lonejson__jwk_map, LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(lonejson__jwks_map, lonejson_jwks, lonejson__jwks_fields);
+
 static lonejson_status
 lonejson__base64url_check(const char *data, size_t len, size_t *out_len,
                           lonejson_error *error) {
@@ -217,6 +235,236 @@ lonejson_status lonejson_jwt_parse_compact(const char *token, size_t len,
   out->signature.len = len - second_dot - 1u;
   out->signing_input.data = token;
   out->signing_input.len = second_dot;
+  return LONEJSON_STATUS_OK;
+}
+
+static int lonejson__auth_streq(const char *a, const char *b) {
+  if (a == NULL || b == NULL) {
+    return 0;
+  }
+  return strcmp(a, b) == 0;
+}
+
+static lonejson_status lonejson__jwk_require_member(
+    const lonejson_jwk *jwk, const char *value, const char *member,
+    lonejson_error *error) {
+  (void)jwk;
+  if (value == NULL || value[0] == '\0') {
+    char message[160];
+    (void)snprintf(message, sizeof(message), "JWK %s member is required",
+                   member);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               message);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__jwk_check_base64url_member(
+    const char *value, const char *member, int required, lonejson_error *error) {
+  size_t decoded_len;
+  lonejson_status status;
+
+  if (value == NULL) {
+    if (!required) {
+      return LONEJSON_STATUS_OK;
+    }
+    return lonejson__jwk_require_member(NULL, value, member, error);
+  }
+  if (required && value[0] == '\0') {
+    return lonejson__jwk_require_member(NULL, value, member, error);
+  }
+  status = lonejson__base64url_check(value, strlen(value), &decoded_len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    if (error != NULL) {
+      (void)snprintf(error->message, sizeof(error->message),
+                     "invalid base64url in JWK %s member", member);
+    }
+    return status;
+  }
+  (void)decoded_len;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__jwk_validate(lonejson_jwk *jwk,
+                                              lonejson_error *error) {
+  lonejson_status status;
+
+  if (jwk == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JWK object is required");
+  }
+  if (jwk->kty == NULL || jwk->kty[0] == '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "JWK kty member is required");
+  }
+  if (lonejson__auth_streq(jwk->kty, "RSA")) {
+    status = lonejson__jwk_check_base64url_member(jwk->n, "n", 1, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    status = lonejson__jwk_check_base64url_member(jwk->e, "e", 1, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  } else if (lonejson__auth_streq(jwk->kty, "EC")) {
+    status = lonejson__jwk_require_member(jwk, jwk->crv, "crv", error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    status = lonejson__jwk_check_base64url_member(jwk->x, "x", 1, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    status = lonejson__jwk_check_base64url_member(jwk->y, "y", 1, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  } else if (lonejson__auth_streq(jwk->kty, "oct")) {
+    status = lonejson__jwk_check_base64url_member(jwk->k, "k", 1, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  status = lonejson__jwk_check_base64url_member(jwk->n, "n", 0, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__jwk_check_base64url_member(jwk->e, "e", 0, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__jwk_check_base64url_member(jwk->x, "x", 0, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__jwk_check_base64url_member(jwk->y, "y", 0, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return lonejson__jwk_check_base64url_member(jwk->k, "k", 0, error);
+}
+
+void lonejson_jwk_init(lonejson_jwk *jwk) {
+  if (jwk != NULL) {
+    memset(jwk, 0, sizeof(*jwk));
+  }
+}
+
+void lonejson_jwk_cleanup(lonejson_jwk *jwk) {
+  if (jwk != NULL) {
+    lonejson_cleanup(&lonejson__jwk_map, jwk);
+    memset(jwk, 0, sizeof(*jwk));
+  }
+}
+
+void lonejson_jwks_init(lonejson_jwks *jwks) {
+  if (jwks != NULL) {
+    memset(jwks, 0, sizeof(*jwks));
+  }
+}
+
+void lonejson_jwks_cleanup(lonejson_jwks *jwks) {
+  if (jwks != NULL) {
+    lonejson_cleanup(&lonejson__jwks_map, jwks);
+    memset(jwks, 0, sizeof(*jwks));
+  }
+}
+
+lonejson_status lonejson_jwk_parse_json(lonejson *runtime, const char *json,
+                                        size_t len, lonejson_jwk *out,
+                                        lonejson_error *error) {
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JWK output is required");
+  }
+  if (json == NULL && len != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JWK JSON input is required");
+  }
+  status = lonejson_parse_buffer(runtime, &lonejson__jwk_map, out, json, len,
+                                 error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_jwk_cleanup(out);
+    return status;
+  }
+  status = lonejson__jwk_validate(out, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_jwk_cleanup(out);
+  }
+  return status;
+}
+
+lonejson_status lonejson_jwks_parse_json(lonejson *runtime, const char *json,
+                                         size_t len, lonejson_jwks *out,
+                                         lonejson_error *error) {
+  lonejson_status status;
+  size_t i;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JWKS output is required");
+  }
+  if (json == NULL && len != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JWKS JSON input is required");
+  }
+  status = lonejson_parse_buffer(runtime, &lonejson__jwks_map, out, json, len,
+                                 error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_jwks_cleanup(out);
+    return status;
+  }
+  if (out->keys.count == 0u) {
+    lonejson_jwks_cleanup(out);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "JWKS keys array must not be empty");
+  }
+  for (i = 0u; i < out->keys.count; ++i) {
+    lonejson_jwk *jwk = &((lonejson_jwk *)out->keys.items)[i];
+    status = lonejson__jwk_validate(jwk, error);
+    if (status != LONEJSON_STATUS_OK) {
+      lonejson_jwks_cleanup(out);
+      return status;
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static int lonejson__jwk_match_filter(const char *value, const char *filter) {
+  if (filter == NULL) {
+    return 1;
+  }
+  return value != NULL && strcmp(value, filter) == 0;
+}
+
+lonejson_status lonejson_jwks_select(const lonejson_jwks *jwks,
+                                     const lonejson_jwk_select_options *options,
+                                     const lonejson_jwk **out,
+                                     lonejson_error *error) {
+  size_t i;
+
+  lonejson__clear_error(error);
+  if (jwks == NULL || out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JWKS and output pointer are required");
+  }
+  *out = NULL;
+  for (i = 0u; i < jwks->keys.count; ++i) {
+    const lonejson_jwk *jwk = &((const lonejson_jwk *)jwks->keys.items)[i];
+    if (options != NULL &&
+        (!lonejson__jwk_match_filter(jwk->kid, options->kid) ||
+         !lonejson__jwk_match_filter(jwk->kty, options->kty) ||
+         !lonejson__jwk_match_filter(jwk->alg, options->alg) ||
+         !lonejson__jwk_match_filter(jwk->use, options->use))) {
+      continue;
+    }
+    *out = jwk;
+    return LONEJSON_STATUS_OK;
+  }
   return LONEJSON_STATUS_OK;
 }
 #endif
