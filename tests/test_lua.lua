@@ -194,6 +194,14 @@ if lonejson.jwt_parse_compact ~= nil then
   local validated = lj:jwt_validate_compact_claims(jwt_token, policy)
   local aud_array = lonejson.jwt_validate_compact_claims(aud_array_token, policy)
   local jwk = lonejson.jwk_parse_json('{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","n":"AQIDBA","e":"AQAB"}')
+  local signed_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6InJzYS10ZXN0IiwidHlwIjoiSldUIn0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ." ..
+      "PoouvDAoloqvsfTQxadOTpQGXKyeHq0lx6WQEPv0qvg59KMuy8lD-XBTBPCF_MpQGoe3DS84CSg27iktG7z12Qv6TX1gqbJUO2wkwhuW4dIWFPY9tDhI3e05W5yz8D70wARx7CL9tHKWsOpLwHRWf5ugfrq1PuofcC9atB7D-QUfrmmJ01NXbQl4aq6DJ02M7azHTLq-15X3TuE2CHN5P_zo_zkaJT8V0QhoQ3MUhUE_pBxMtAByRIUOEW32RbWjYgkwZ_zxaVkbhXv1CYznQCzikX2wXn9OQ_1z0TCH7bT5Ao3EXEQeiK7Fhuq8lyPFbkhDc_yCjxFRjm7ufSFZbg"
+  local signed_jwk_json =
+      '{"kty":"RSA","kid":"rsa-test","use":"sig","alg":"RS256",' ..
+      '"n":"nGFfcf9mkkjv4XoIzgmENq-A3pTE4uT7gzmYMDB4_xwXvHaTogDTrduaIKcd-oziNa6mM1HXGk-4q8084Wvvz44ZTyRlaVKm2eRHPqjJ1hmxB80nG7iWEkORAKazobRfB8g7fGXZWhL0JsWqd51igefciKMefuvjs-2_JvusIF6uXu3jSCVRsqXkoZGnYsauGUq4GcspGtCHe5M4oie5kJrfbwcZgajJp4HS-ZUd4m1q12BPSuUSqi5Vb3wS6fLdVsQjxZXVqyk1OgnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWyYoQ",' ..
+      '"e":"AQAB"}'
   local jwks_json =
       '{"keys":[{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","n":"AQIDBA","e":"AQAB"},' ..
       '{"kty":"EC","kid":"ec1","use":"sig","alg":"ES256","crv":"P-256","x":"AAEC","y":"AwQF"}]}'
@@ -216,6 +224,7 @@ if lonejson.jwt_parse_compact ~= nil then
   assert_eq(aud_array.claims.aud[2], "other")
   assert_eq(jwk.kid, "rsa1")
   assert_eq(jwk.n, "AQIDBA")
+  assert_true(lj:jwt_validate_compact_signature(signed_token, signed_jwk_json))
   assert_eq(#jwks.keys, 2)
   assert_eq(jwks.keys[2].kid, "ec1")
   assert_eq(selected.kid, "ec1")
@@ -246,6 +255,12 @@ if lonejson.jwt_parse_compact ~= nil then
     accepted_audiences = { "api" },
     now = 1000,
   })
+  assert_true(bad == nil)
+  assert_eq(err.status, "type_mismatch")
+
+  bad, err = lonejson.jwt_validate_compact_signature(
+      signed_token:sub(1, -2) .. (signed_token:sub(-1) == "A" and "B" or "A"),
+      signed_jwk_json)
   assert_true(bad == nil)
   assert_eq(err.status, "type_mismatch")
 

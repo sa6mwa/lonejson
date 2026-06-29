@@ -5720,6 +5720,16 @@ lonejson_jwt_decode_compact(lonejson *runtime, const char *token, size_t len,
 lonejson_status lonejson_jwt_validate_claims(
     const lonejson_jwt_header *header, const lonejson_jwt_claims *claims,
     const lonejson_jwt_claim_policy *policy, lonejson_error *error);
+/** Validates a compact JWT signature against a selected JWK.
+ *
+ * This is a trust decision for the JWS signature only. The caller must still
+ * validate claims with `lonejson_jwt_validate_claims()`. The decoded header is
+ * supplied explicitly so algorithm and key constraints are checked against the
+ * same parsed header the caller will use for claim policy.
+ */
+lonejson_status lonejson_jwt_validate_signature(
+    const lonejson_jwt_compact *jwt, const lonejson_jwt_header *header,
+    const lonejson_jwk *jwk, lonejson_error *error);
 #endif
 #ifdef LONEJSON_WITH_OIDC
 /** Initializes OIDC discovery metadata storage. */
@@ -8438,6 +8448,12 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_jwt_validate_claims(const lj_jwt_header *header, const lj_jwt_claims *claims,
                        const lj_jwt_claim_policy *policy, lj_error *error) {
   return lonejson_jwt_validate_claims(header, claims, policy, error);
+}
+/** Validates a compact JWT signature against a selected JWK. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_validate_signature(
+    const lj_jwt_compact *jwt, const lj_jwt_header *header, const lj_jwk *jwk,
+    lj_error *error) {
+  return lonejson_jwt_validate_signature(jwt, header, jwk, error);
 }
 #endif
 #ifdef LONEJSON_WITH_OIDC

@@ -518,4 +518,57 @@ static int ljlua_jwt_validate_compact_claims(lua_State *L) {
   lonejson_jwt_claims_cleanup(&claims);
   return 1;
 }
+
+static int ljlua_jwt_validate_compact_signature(lua_State *L) {
+  lonejson *runtime;
+  lonejson *owned_runtime;
+  lonejson_jwt_compact compact;
+  lonejson_jwt_header header;
+  lonejson_jwt_claims claims;
+  lonejson_jwt_claim_policy limits;
+  lonejson_jwk jwk;
+  lonejson_error error;
+  lonejson_status status;
+  const char *token;
+  const char *jwk_json;
+  size_t token_len;
+  size_t jwk_len;
+  int arg;
+
+  runtime = ljlua_auth_runtime_arg(L, &arg, &owned_runtime, &error);
+  if (runtime == NULL) {
+    return ljlua_push_status_result(L, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                    &error);
+  }
+  token = luaL_checklstring(L, arg, &token_len);
+  jwk_json = luaL_checklstring(L, arg + 1, &jwk_len);
+  ljlua_auth_read_policy(L, arg + 2, &limits, 0);
+  lonejson_jwt_header_init(&header);
+  lonejson_jwt_claims_init(&claims);
+  lonejson_jwk_init(&jwk);
+  status = lonejson_jwt_parse_compact(token, token_len, &compact, &error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_jwt_decode_compact(runtime, token, token_len, &limits,
+                                         &header, &claims, &error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status =
+        lonejson_jwk_parse_json(runtime, jwk_json, jwk_len, &jwk, &error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_jwt_validate_signature(&compact, &header, &jwk, &error);
+  }
+  if (owned_runtime != NULL) {
+    lonejson_free(owned_runtime);
+  }
+  ljlua_auth_free_policy(&limits);
+  lonejson_jwk_cleanup(&jwk);
+  lonejson_jwt_header_cleanup(&header);
+  lonejson_jwt_claims_cleanup(&claims);
+  if (status != LONEJSON_STATUS_OK) {
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushboolean(L, 1);
+  return 1;
+}
 #endif

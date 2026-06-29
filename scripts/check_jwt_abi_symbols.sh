@@ -38,11 +38,52 @@ fi
 if [[ "$target_id" == *apple-darwin ]]; then
   shared_symbols="$("$NM" -gU "$shared_lib")"
   static_symbols="$("$NM" -gU "$static_lib")"
-  symbol_prefix='_?'
+  symbol_prefix_optional=1
 else
   shared_symbols="$("$NM" -D --defined-only "$shared_lib")"
   static_symbols="$("$NM" -g --defined-only "$static_lib")"
-  symbol_prefix=''
+  symbol_prefix_optional=0
+fi
+
+symbol_present() {
+  local symbols=$1
+  local symbol=$2
+  local prefix_optional=$3
+  awk -v symbol="$symbol" -v prefix_optional="$prefix_optional" '
+    {
+      actual = $NF
+      if (actual == symbol || (prefix_optional == 1 && actual == "_" symbol)) {
+        found = 1
+      }
+    }
+    END { exit found ? 0 : 1 }
+  ' <<<"$symbols"
+}
+
+forbidden_openssl_export_present() {
+  local symbols=$1
+  awk '
+    {
+      actual = $NF
+      sub(/^_/, "", actual)
+      if (actual ~ /^(OPENSSL_|OpenSSL_|EVP_|RSA_|BN_|ASN1_|AES_|X509_|OSSL_|CRYPTO_)/) {
+        found = actual
+        exit
+      }
+    }
+    END {
+      if (found != "") {
+        print found
+        exit 0
+      }
+      exit 1
+    }
+  ' <<<"$symbols"
+}
+
+if leaked_symbol="$(forbidden_openssl_export_present "$shared_symbols")"; then
+  printf 'forbidden OpenSSL ABI symbol exported by shared library for %s: %s\n' "$context" "$leaked_symbol" >&2
+  exit 1
 fi
 
 for symbol in \
@@ -54,18 +95,18 @@ for symbol in \
     lonejson_jwks_cleanup \
     lonejson_jwt_decode_compact \
     lonejson_jwt_validate_claims \
+    lonejson_jwt_validate_signature \
     lonejson_jwt_header_cleanup \
     lonejson_jwt_claims_cleanup \
     lonejson_oidc_discovery_url \
     lonejson_oidc_discovery_parse_json \
     lonejson_oidc_discovery_validate_issuer \
     lonejson_oidc_discovery_cleanup; do
-  symbol_regex="(^|[[:space:]])${symbol_prefix}${symbol}$"
-  if ! printf '%s\n' "$shared_symbols" | grep -Eq "$symbol_regex"; then
+  if ! symbol_present "$shared_symbols" "$symbol" "$symbol_prefix_optional"; then
     printf 'missing lonejson_jwt_* ABI symbol in shared library for %s: %s\n' "$context" "$symbol" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$static_symbols" | grep -Eq "$symbol_regex"; then
+  if ! symbol_present "$static_symbols" "$symbol" "$symbol_prefix_optional"; then
     printf 'missing lonejson_jwt_* ABI symbol in static library for %s: %s\n' "$context" "$symbol" >&2
     exit 1
   fi

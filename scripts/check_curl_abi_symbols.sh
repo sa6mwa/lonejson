@@ -38,19 +38,34 @@ fi
 if [[ "$target_id" == *apple-darwin ]]; then
   shared_symbols="$("$NM" -gU "$shared_lib")"
   static_symbols="$("$NM" -gU "$static_lib")"
-  symbol_regex='(^|[[:space:]])_?lonejson_curl_parse_init$'
+  symbol_prefix_optional=1
 else
   shared_symbols="$("$NM" -D --defined-only "$shared_lib")"
   static_symbols="$("$NM" -g --defined-only "$static_lib")"
-  symbol_regex='(^|[[:space:]])lonejson_curl_parse_init$'
+  symbol_prefix_optional=0
 fi
 
-if ! printf '%s\n' "$shared_symbols" | grep -Eq "$symbol_regex"; then
+symbol_present() {
+  local symbols=$1
+  local symbol=$2
+  local prefix_optional=$3
+  awk -v symbol="$symbol" -v prefix_optional="$prefix_optional" '
+    {
+      actual = $NF
+      if (actual == symbol || (prefix_optional == 1 && actual == "_" symbol)) {
+        found = 1
+      }
+    }
+    END { exit found ? 0 : 1 }
+  ' <<<"$symbols"
+}
+
+if ! symbol_present "$shared_symbols" lonejson_curl_parse_init "$symbol_prefix_optional"; then
   printf 'missing lonejson_curl_* ABI symbol in shared library for %s\n' "$context" >&2
   exit 1
 fi
 
-if ! printf '%s\n' "$static_symbols" | grep -Eq "$symbol_regex"; then
+if ! symbol_present "$static_symbols" lonejson_curl_parse_init "$symbol_prefix_optional"; then
   printf 'missing lonejson_curl_* ABI symbol in static library for %s\n' "$context" >&2
   exit 1
 fi
