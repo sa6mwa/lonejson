@@ -422,6 +422,41 @@ require_curl_symbol() {
   rm -rf "$tmp_dir"
 }
 
+require_jwt_symbol() {
+  local archive=$1
+  local target_id=$2
+  local preset=$3
+  local tmp_dir package_root shared_lib static_lib
+
+  tmp_dir="$(mktemp -d)"
+  package_root="$(extract_archive "$archive" "$tmp_dir")"
+
+  if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
+    shared_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson*.dylib' | sort | head -n 1)"
+  else
+    shared_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson.so*' ! -type l | sort | head -n 1)"
+  fi
+  if [[ -z "$shared_lib" ]]; then
+    printf 'missing packaged shared library in %s\n' "$archive" >&2
+    exit 1
+  fi
+  static_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson.a' | sort | head -n 1)"
+  if [[ -z "$static_lib" ]]; then
+    printf 'missing packaged static library in %s\n' "$archive" >&2
+    exit 1
+  fi
+
+  "$repo_root/scripts/check_jwt_abi_symbols.sh" \
+    "$repo_root" \
+    "$build_root/$preset" \
+    "$target_id" \
+    "$shared_lib" \
+    "$static_lib" \
+    "$archive"
+
+  rm -rf "$tmp_dir"
+}
+
 require_command cmake
 require_command pkg-config
 require_command tar
@@ -438,6 +473,7 @@ while read -r _hash artifact; do
   preset="$(target_preset "$target_id")"
   require_archive_contract "$archive" "$target_id" "$preset"
   require_curl_symbol "$archive" "$target_id" "$preset"
+  require_jwt_symbol "$archive" "$target_id" "$preset"
   require_archive_consumer_metadata "$archive" "$target_id" "$preset"
   verified=$((verified + 1))
 done <"$checksums"

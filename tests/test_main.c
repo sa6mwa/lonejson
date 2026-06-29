@@ -13,9 +13,13 @@
 #include "test_writer.inc.h"
 #include "test_value_rewrite.inc.h"
 #include "test_curl_misc.inc.h"
+#include "test_jwt.inc.h"
 /* clang-format on */
 
 int main(void) {
+  test_jwt_base64url_decode_vectors();
+  test_jwt_compact_parse_segments();
+  test_jwt_compact_parse_failures();
   test_parse_implicit_destination_reset();
   test_dynamic_allocation_cleanup_balance();
   test_dynamic_allocation_reset_reparse_balance();

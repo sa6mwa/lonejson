@@ -52,6 +52,7 @@ lonejson *lonejson_new(const void *config, lonejson_error *error);
 void lonejson_free(lonejson *runtime);
 lonejson_status lonejson_validate_cstr(lonejson *runtime, const char *json, lonejson_error *error);
 void lonejson_curl_parse_init(void);
+void lonejson_jwt_parse_compact(void);
 
 #endif
 EOF
@@ -89,6 +90,9 @@ lonejson_status lonejson_validate_cstr(lonejson *runtime_arg, const char *json, 
 }
 
 void lonejson_curl_parse_init(void) {
+}
+
+void lonejson_jwt_parse_compact(void) {
 }
 EOF
 
@@ -271,3 +275,66 @@ if "$repo_root/scripts/verify_release_archives.sh" \
   exit 1
 fi
 grep -F 'missing lonejson_curl_* ABI symbol in static library' "$broken_log" >/dev/null
+
+jwt_broken_dist_dir="$tmp_dir/jwt-broken-dist"
+jwt_broken_package_dir="$tmp_dir/jwt-broken-package"
+jwt_broken_package_root="$jwt_broken_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$jwt_broken_dist_dir"
+cp -R "$tmp_dir/package" "$jwt_broken_package_dir"
+
+cat >"$tmp_dir/lonejson_static_without_jwt.c" <<'EOF'
+#include <lonejson.h>
+
+struct lonejson {
+  int unused;
+};
+
+static lonejson runtime;
+
+void lonejson_error_init(lonejson_error *error) {
+  if (error != 0) {
+    error->code = 0;
+  }
+}
+
+lonejson *lonejson_new(const void *config, lonejson_error *error) {
+  (void)config;
+  lonejson_error_init(error);
+  return &runtime;
+}
+
+void lonejson_free(lonejson *runtime_arg) {
+  (void)runtime_arg;
+}
+
+lonejson_status lonejson_validate_cstr(lonejson *runtime_arg, const char *json, lonejson_error *error) {
+  (void)runtime_arg;
+  (void)json;
+  lonejson_error_init(error);
+  return LONEJSON_STATUS_OK;
+}
+
+void lonejson_curl_parse_init(void) {
+}
+EOF
+
+cc -c -I"$jwt_broken_package_root/include" "$tmp_dir/lonejson_static_without_jwt.c" \
+  -o "$tmp_dir/lonejson_static_without_jwt.o"
+rm -f "$jwt_broken_package_root/lib/liblonejson.a"
+ar rcs "$jwt_broken_package_root/lib/liblonejson.a" \
+  "$tmp_dir/lonejson_static_without_jwt.o"
+
+tar -C "$jwt_broken_package_dir" -czf \
+  "$jwt_broken_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$jwt_broken_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+
+jwt_broken_log="$tmp_dir/jwt-broken.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$jwt_broken_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$jwt_broken_log" 2>&1; then
+  printf 'expected archive verification to fail when static library lacks JWT ABI\n' >&2
+  exit 1
+fi
+grep -F 'missing lonejson_jwt_* ABI symbol in static library' "$jwt_broken_log" >/dev/null

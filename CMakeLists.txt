@@ -35,6 +35,7 @@ option(LONEJSON_ENABLE_MSAN "Enable MemorySanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
 option(LONEJSON_BUILD_WITH_OPENSSL "Build lonejson with OpenSSL-backed auth/crypto support enabled." OFF)
+option(LONEJSON_BUILD_WITH_JWT "Build lonejson with JWT/JWK auth APIs enabled." OFF)
 set(LONEJSON_ABI_VERSION "19" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
@@ -239,6 +240,10 @@ if(LONEJSON_BUILD_WITH_OPENSSL)
   lonejson_find_openssl()
 endif()
 
+if(LONEJSON_BUILD_WITH_JWT AND NOT LONEJSON_BUILD_WITH_OPENSSL)
+  message(FATAL_ERROR "LONEJSON_BUILD_WITH_JWT requires LONEJSON_BUILD_WITH_OPENSSL=ON.")
+endif()
+
 function(lonejson_target_include_curl target)
   if(CURL_INCLUDE_DIRS)
     target_include_directories(${target} SYSTEM PRIVATE ${CURL_INCLUDE_DIRS})
@@ -330,6 +335,12 @@ foreach(target lonejson_shared lonejson_static)
     target_compile_definitions(${target} PRIVATE LONEJSON_WITH_CURL)
     lonejson_target_include_curl(${target})
   endif()
+  if(LONEJSON_BUILD_WITH_OPENSSL)
+    target_compile_definitions(${target} PRIVATE LONEJSON_WITH_OPENSSL)
+  endif()
+  if(LONEJSON_BUILD_WITH_JWT)
+    target_compile_definitions(${target} PRIVATE LONEJSON_WITH_JWT)
+  endif()
 endforeach()
 
 if(LONEJSON_BUILD_FUZZERS)
@@ -377,6 +388,20 @@ if(LONEJSON_BUILD_TESTS)
       LABELS "packaging;smoke;local"
       TIMEOUT 20)
   endif()
+  if(LONEJSON_BUILD_WITH_JWT AND LONEJSON_TARGET_ID IN_LIST LONEJSON_RELEASE_TARGET_IDS)
+    add_test(NAME lonejson_build_tree_jwt_abi_tests
+      COMMAND bash
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_jwt_abi_symbols.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        "${LONEJSON_TARGET_ID}"
+        "$<TARGET_FILE:lonejson_shared>"
+        "$<TARGET_FILE:lonejson_static>"
+        "build tree ${LONEJSON_TARGET_ID}")
+    set_tests_properties(lonejson_build_tree_jwt_abi_tests PROPERTIES
+      LABELS "packaging;smoke;local"
+      TIMEOUT 20)
+  endif()
 
   add_executable(lonejson_tests tests/test_main.c)
   target_include_directories(lonejson_tests PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
@@ -387,6 +412,12 @@ if(LONEJSON_BUILD_TESTS)
   if(LONEJSON_BUILD_WITH_CURL)
     target_compile_definitions(lonejson_tests PRIVATE LONEJSON_WITH_CURL)
     target_link_libraries(lonejson_tests PRIVATE CURL::libcurl)
+  endif()
+  if(LONEJSON_BUILD_WITH_OPENSSL)
+    target_compile_definitions(lonejson_tests PRIVATE LONEJSON_WITH_OPENSSL)
+  endif()
+  if(LONEJSON_BUILD_WITH_JWT)
+    target_compile_definitions(lonejson_tests PRIVATE LONEJSON_WITH_JWT)
   endif()
   lonejson_configure_c_target(lonejson_tests)
   add_dependencies(lonejson_tests lonejson_generate_fixtures)
@@ -1034,6 +1065,20 @@ if(LONEJSON_BUILD_FUZZERS)
   target_link_options(lonejson_fuzz_parser_boundaries PRIVATE
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_parser_boundaries)
+
+  add_executable(lonejson_fuzz_jwt fuzz/fuzz_jwt.c)
+  target_include_directories(lonejson_fuzz_jwt PRIVATE
+    "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_jwt PRIVATE lonejson)
+  target_compile_definitions(lonejson_fuzz_jwt PRIVATE
+    LONEJSON_WITH_OPENSSL
+    LONEJSON_WITH_JWT)
+  target_compile_options(lonejson_fuzz_jwt PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_jwt PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_jwt)
 endif()
 
 if(CLANG_FORMAT_BIN)
@@ -1064,6 +1109,9 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/35_json_pull_impl.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/38_writer_api.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_value_rewrite_api.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/40_auth_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/bench/lonejson_bench.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_module.inc.h"
@@ -1089,6 +1137,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_fixed_string_paths.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_alloc_ceiling.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_parser_boundaries.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_jwt.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_visitor.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_rewrite.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_stream.inc.h"
@@ -1096,6 +1145,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixtures_public.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generator_omit.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_json_value_sources.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_jwt.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_main.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_parse_serialize.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_protocol_framing.inc.h"
@@ -1166,6 +1216,7 @@ add_custom_target(package-archive
     -DLONEJSON_SHARED_SONAME=$<TARGET_SONAME_FILE_NAME:lonejson_shared>
     -DLONEJSON_BUILD_WITH_CURL=${LONEJSON_BUILD_WITH_CURL}
     -DLONEJSON_BUILD_WITH_OPENSSL=${LONEJSON_BUILD_WITH_OPENSSL}
+    -DLONEJSON_BUILD_WITH_JWT=${LONEJSON_BUILD_WITH_JWT}
     -DLONEJSON_STRIP=${CMAKE_STRIP}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_archive.cmake
   DEPENDS lonejson_shared lonejson_static
@@ -1259,6 +1310,7 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/38_writer_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_value_rewrite_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/40_auth_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_single_header.cmake
   VERBATIM
 )

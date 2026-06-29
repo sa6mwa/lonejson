@@ -8,6 +8,11 @@ if(NOT LONEJSON_BUILD_WITH_OPENSSL)
     "package-archive requires LONEJSON_BUILD_WITH_OPENSSL=ON; binary "
     "releases must prove the c.pkt.systems OpenSSL dependency route")
 endif()
+if(NOT LONEJSON_BUILD_WITH_JWT)
+  message(FATAL_ERROR
+    "package-archive requires LONEJSON_BUILD_WITH_JWT=ON; binary releases "
+    "must include the lonejson_jwt_* ABI")
+endif()
 
 set(archive_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}")
 set(package_stage_root "${LONEJSON_BINARY_DIR}/package/archive")

@@ -40,6 +40,15 @@
 #if defined(LJ_WITH_CURL) && !defined(LONEJSON_WITH_CURL)
 #define LONEJSON_WITH_CURL
 #endif
+#if defined(LJ_WITH_OPENSSL) && !defined(LONEJSON_WITH_OPENSSL)
+#define LONEJSON_WITH_OPENSSL
+#endif
+#if defined(LJ_WITH_JWT) && !defined(LONEJSON_WITH_JWT)
+#define LONEJSON_WITH_JWT
+#endif
+#if defined(LONEJSON_WITH_JWT) && !defined(LONEJSON_WITH_OPENSSL)
+#error "LONEJSON_WITH_JWT requires LONEJSON_WITH_OPENSSL"
+#endif
 #if defined(LJ_MALLOC) && !defined(LONEJSON_MALLOC)
 #define LONEJSON_MALLOC LJ_MALLOC
 #endif
@@ -1156,6 +1165,29 @@ typedef struct lonejson_stream lonejson_stream;
 /** Selected-array item stream cursor. */
 typedef struct lonejson_array_stream lonejson_array_stream;
 struct lonejson_array_stream_string_handler;
+#ifdef LONEJSON_WITH_JWT
+/** Caller-owned JWT compact-serialization segment. */
+typedef struct lonejson_jwt_segment {
+  /** Pointer into the original token or caller-provided segment buffer. */
+  const char *data;
+  /** Number of bytes in `data`. */
+  size_t len;
+} lonejson_jwt_segment;
+
+/** Parsed JWT compact serialization. Parsing only splits and checks syntax; it
+ * does not validate trust, claims, signatures, issuers, or algorithms.
+ */
+typedef struct lonejson_jwt_compact {
+  /** Base64url-encoded JOSE header segment. */
+  lonejson_jwt_segment header;
+  /** Base64url-encoded claims payload segment. */
+  lonejson_jwt_segment payload;
+  /** Base64url-encoded signature segment, which may be empty. */
+  lonejson_jwt_segment signature;
+  /** Header, separator, and payload bytes covered by a JWS signature. */
+  lonejson_jwt_segment signing_input;
+} lonejson_jwt_compact;
+#endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
  * so callers that need to retain an item must copy it here.
@@ -5463,6 +5495,35 @@ void *lonejson_record_object_array_append_slot(
     const lonejson_field *field, lonejson_object_array *array,
     lonejson_error *error);
 
+#ifdef LONEJSON_WITH_JWT
+/** Computes the decoded byte length of one unpadded base64url segment.
+ *
+ * This accepts only the JWT/JWS base64url alphabet (`A-Z`, `a-z`, `0-9`, `-`,
+ * `_`) and rejects `=` padding. `out_len` is set on success.
+ */
+lonejson_status lonejson_base64url_decoded_len(const char *data, size_t len,
+                                               size_t *out_len,
+                                               lonejson_error *error);
+/** Decodes one unpadded base64url segment into caller-provided storage.
+ *
+ * `needed` is set to the required decoded size on success or truncation. If
+ * `capacity` is too small, no bytes are written and
+ * `LONEJSON_STATUS_TRUNCATED` is returned.
+ */
+lonejson_status lonejson_base64url_decode(const char *data, size_t len,
+                                          unsigned char *out, size_t capacity,
+                                          size_t *needed,
+                                          lonejson_error *error);
+/** Parses one JWT compact serialization into caller-owned segment slices.
+ *
+ * This checks compact serialization and base64url segment syntax only. It does
+ * not decode JSON, validate signatures, validate claims, or establish trust.
+ */
+lonejson_status lonejson_jwt_parse_compact(const char *token, size_t len,
+                                           lonejson_jwt_compact *out,
+                                           lonejson_error *error);
+#endif
+
 #ifdef LONEJSON_WITH_CURL
 #include <curl/curl.h>
 
@@ -6192,6 +6253,12 @@ typedef lonejson_candidate_info lj_candidate_info;
 typedef lonejson_candidate_event_fn lj_candidate_event_fn;
 /** Options for arbitrary JSON candidate streams. */
 typedef lonejson_candidate_stream_options lj_candidate_stream_options;
+#ifdef LONEJSON_WITH_JWT
+/** Caller-owned JWT compact-serialization segment. */
+typedef lonejson_jwt_segment lj_jwt_segment;
+/** Parsed JWT compact serialization. */
+typedef lonejson_jwt_compact lj_jwt_compact;
+#endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
  * per item. `end` is called only after the string item is complete; the JSON
@@ -8050,6 +8117,26 @@ LONEJSON_SHORT_ALIAS_INLINE void lj_reset(lonejson *runtime, const lj_map *map,
                                           void *value) {
   lonejson_reset(runtime, map, value);
 }
+#ifdef LONEJSON_WITH_JWT
+/** Computes the decoded byte length of one unpadded base64url segment. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_base64url_decoded_len(const char *data, size_t len, size_t *out_len,
+                         lj_error *error) {
+  return lonejson_base64url_decoded_len(data, len, out_len, error);
+}
+/** Decodes one unpadded base64url segment into caller-provided storage. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_base64url_decode(
+    const char *data, size_t len, unsigned char *out, size_t capacity,
+    size_t *needed, lj_error *error) {
+  return lonejson_base64url_decode(data, len, out, capacity, needed, error);
+}
+/** Parses one JWT compact serialization into caller-owned segment slices. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_jwt_parse_compact(const char *token, size_t len, lj_jwt_compact *out,
+                     lj_error *error) {
+  return lonejson_jwt_parse_compact(token, len, out, error);
+}
+#endif
 #ifdef LONEJSON_WITH_CURL
 /** Curl response parse adapter state for incremental `CURLOPT_WRITEFUNCTION`
  * parsing. */

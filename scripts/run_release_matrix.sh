@@ -35,6 +35,7 @@ configure_release_target() {
     cmake --preset "$preset" \
         -D LONEJSON_BUILD_WITH_CURL=ON \
         -D LONEJSON_BUILD_WITH_OPENSSL=ON \
+        -D LONEJSON_BUILD_WITH_JWT=ON \
         -D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"
 }
 
