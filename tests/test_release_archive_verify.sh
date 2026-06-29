@@ -58,6 +58,10 @@ void lonejson_jwks_parse_json(void);
 void lonejson_jwks_select(void);
 void lonejson_jwk_cleanup(void);
 void lonejson_jwks_cleanup(void);
+void lonejson_jwt_decode_compact(void);
+void lonejson_jwt_validate_claims(void);
+void lonejson_jwt_header_cleanup(void);
+void lonejson_jwt_claims_cleanup(void);
 
 #endif
 EOF
@@ -113,6 +117,18 @@ void lonejson_jwk_cleanup(void) {
 }
 
 void lonejson_jwks_cleanup(void) {
+}
+
+void lonejson_jwt_decode_compact(void) {
+}
+
+void lonejson_jwt_validate_claims(void) {
+}
+
+void lonejson_jwt_header_cleanup(void) {
+}
+
+void lonejson_jwt_claims_cleanup(void) {
 }
 EOF
 

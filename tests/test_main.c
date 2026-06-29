@@ -23,6 +23,9 @@ int main(void) {
   test_jwk_parse_json_shapes();
   test_jwks_parse_and_select();
   test_jwk_parse_failures();
+  test_jwt_decode_and_validate_claims();
+  test_jwt_claim_validation_failures();
+  test_jwt_decode_claim_failures();
   test_parse_implicit_destination_reset();
   test_dynamic_allocation_cleanup_balance();
   test_dynamic_allocation_reset_reparse_balance();

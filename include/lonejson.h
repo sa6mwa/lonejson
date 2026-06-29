@@ -1226,6 +1226,67 @@ typedef struct lonejson_jwk_select_options {
   const char *alg;
   const char *use;
 } lonejson_jwk_select_options;
+
+/** Decoded JWT JOSE header fields retained by lonejson. */
+typedef struct lonejson_jwt_header {
+  /** JOSE algorithm. Required for validation. */
+  char *alg;
+  /** Optional key identifier. */
+  char *kid;
+  /** Optional token type. */
+  char *typ;
+} lonejson_jwt_header;
+
+/** Decoded JWT claims retained by lonejson.
+ *
+ * This struct is parse output only. Values are not trusted until validated
+ * with an explicit `lonejson_jwt_claim_policy`.
+ */
+typedef struct lonejson_jwt_claims {
+  /** Issuer claim. */
+  char *iss;
+  /** Subject claim. */
+  char *sub;
+  /** String audience claim when `aud` is encoded as a JSON string. */
+  char *aud;
+  /** Audience array when `aud` is encoded as a JSON array of strings. */
+  lonejson_string_array aud_array;
+  /** Expiration time seconds since Unix epoch, present when `has_exp != 0`. */
+  lonejson_int64 exp;
+  /** Not-before time seconds since Unix epoch, present when `has_nbf != 0`. */
+  lonejson_int64 nbf;
+  /** Issued-at time seconds since Unix epoch, present when `has_iat != 0`. */
+  lonejson_int64 iat;
+  int has_exp;
+  int has_nbf;
+  int has_iat;
+} lonejson_jwt_claims;
+
+/** Explicit trust policy for validating parsed JWT header and claims. */
+typedef struct lonejson_jwt_claim_policy {
+  /** Accepted JOSE algorithms. Required and must not include `none`. */
+  const char *const *accepted_algs;
+  size_t accepted_alg_count;
+  /** Accepted issuer values. Required. */
+  const char *const *accepted_issuers;
+  size_t accepted_issuer_count;
+  /** Accepted audience values. Required. */
+  const char *const *accepted_audiences;
+  size_t accepted_audience_count;
+  /** Required claim names such as `sub` or `iat`. */
+  const char *const *required_claims;
+  size_t required_claim_count;
+  /** Current time in seconds since Unix epoch. */
+  lonejson_int64 now;
+  /** Allowed clock skew in seconds. Negative values are invalid. */
+  lonejson_int64 allowed_clock_skew;
+  /** Maximum compact token size accepted by `lonejson_jwt_decode_compact`. */
+  size_t max_token_bytes;
+  /** Maximum decoded JOSE header JSON size. Zero means the default limit. */
+  size_t max_decoded_header_bytes;
+  /** Maximum decoded claims JSON size. Zero means the default limit. */
+  size_t max_decoded_claims_bytes;
+} lonejson_jwt_claim_policy;
 #endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
@@ -5589,6 +5650,32 @@ lonejson_status lonejson_jwks_select(const lonejson_jwks *jwks,
                                      const lonejson_jwk_select_options *options,
                                      const lonejson_jwk **out,
                                      lonejson_error *error);
+/** Initializes decoded JWT header storage. */
+void lonejson_jwt_header_init(lonejson_jwt_header *header);
+/** Releases storage owned by decoded JWT header storage. */
+void lonejson_jwt_header_cleanup(lonejson_jwt_header *header);
+/** Initializes decoded JWT claims storage. */
+void lonejson_jwt_claims_init(lonejson_jwt_claims *claims);
+/** Releases storage owned by decoded JWT claims storage. */
+void lonejson_jwt_claims_cleanup(lonejson_jwt_claims *claims);
+/** Decodes and parses the header and claims payload from one compact JWT.
+ *
+ * This validates compact serialization, base64url syntax, decoded-size limits,
+ * JSON syntax, duplicate registered claims, and registered claim types. It
+ * does not validate signatures or trust.
+ */
+lonejson_status lonejson_jwt_decode_compact(
+    lonejson *runtime, const char *token, size_t len,
+    const lonejson_jwt_claim_policy *limits, lonejson_jwt_header *header,
+    lonejson_jwt_claims *claims, lonejson_error *error);
+/** Validates decoded JWT header and claims against an explicit policy.
+ *
+ * This is a trust decision for claims only. Signature validation must be
+ * composed separately once a verified signature result is available.
+ */
+lonejson_status lonejson_jwt_validate_claims(
+    const lonejson_jwt_header *header, const lonejson_jwt_claims *claims,
+    const lonejson_jwt_claim_policy *policy, lonejson_error *error);
 #endif
 
 #ifdef LONEJSON_WITH_CURL
@@ -6331,6 +6418,12 @@ typedef lonejson_jwk lj_jwk;
 typedef lonejson_jwks lj_jwks;
 /** Optional JWK selection filters. */
 typedef lonejson_jwk_select_options lj_jwk_select_options;
+/** Decoded JWT JOSE header fields retained by lonejson. */
+typedef lonejson_jwt_header lj_jwt_header;
+/** Decoded JWT claims retained by lonejson. */
+typedef lonejson_jwt_claims lj_jwt_claims;
+/** Explicit trust policy for validating parsed JWT header and claims. */
+typedef lonejson_jwt_claim_policy lj_jwt_claim_policy;
 #endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
@@ -8240,6 +8333,36 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwks_select(
     const lj_jwks *jwks, const lj_jwk_select_options *options,
     const lj_jwk **out, lj_error *error) {
   return lonejson_jwks_select(jwks, options, out, error);
+}
+/** Initializes decoded JWT header storage. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwt_header_init(lj_jwt_header *header) {
+  lonejson_jwt_header_init(header);
+}
+/** Releases storage owned by decoded JWT header storage. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwt_header_cleanup(lj_jwt_header *header) {
+  lonejson_jwt_header_cleanup(header);
+}
+/** Initializes decoded JWT claims storage. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwt_claims_init(lj_jwt_claims *claims) {
+  lonejson_jwt_claims_init(claims);
+}
+/** Releases storage owned by decoded JWT claims storage. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwt_claims_cleanup(lj_jwt_claims *claims) {
+  lonejson_jwt_claims_cleanup(claims);
+}
+/** Decodes and parses the header and claims payload from one compact JWT. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_decode_compact(
+    lj *runtime, const char *token, size_t len,
+    const lj_jwt_claim_policy *limits, lj_jwt_header *header,
+    lj_jwt_claims *claims, lj_error *error) {
+  return lonejson_jwt_decode_compact(runtime, token, len, limits, header,
+                                     claims, error);
+}
+/** Validates decoded JWT header and claims against an explicit policy. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_validate_claims(
+    const lj_jwt_header *header, const lj_jwt_claims *claims,
+    const lj_jwt_claim_policy *policy, lj_error *error) {
+  return lonejson_jwt_validate_claims(header, claims, policy, error);
 }
 #endif
 #ifdef LONEJSON_WITH_CURL
