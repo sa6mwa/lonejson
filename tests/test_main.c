@@ -37,6 +37,9 @@ int main(void) {
   test_oauth2_client_credentials_body();
   test_oauth2_token_response_parse();
   test_oauth2_token_response_failures();
+  test_oidc_pkce_challenge_and_generate();
+  test_oidc_authorization_url();
+  test_oidc_authorization_callback_parse();
   test_parse_implicit_destination_reset();
   test_dynamic_allocation_cleanup_balance();
   test_dynamic_allocation_reset_reparse_balance();

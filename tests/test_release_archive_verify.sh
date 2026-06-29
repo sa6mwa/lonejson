@@ -80,6 +80,14 @@ void lonejson_oauth2_client_credentials_body(void);
 void lonejson_oauth2_token_response_init(void);
 void lonejson_oauth2_token_response_cleanup(void);
 void lonejson_oauth2_token_response_parse_json(void);
+void lonejson_oidc_pkce_init(void);
+void lonejson_oidc_pkce_cleanup(void);
+void lonejson_oidc_pkce_challenge(void);
+void lonejson_oidc_pkce_generate(void);
+void lonejson_oidc_authorization_url(void);
+void lonejson_oidc_authorization_callback_init(void);
+void lonejson_oidc_authorization_callback_cleanup(void);
+void lonejson_oidc_authorization_callback_parse_query(void);
 
 #endif
 EOF
@@ -201,6 +209,30 @@ void lonejson_oauth2_token_response_cleanup(void) {
 }
 
 void lonejson_oauth2_token_response_parse_json(void) {
+}
+
+void lonejson_oidc_pkce_init(void) {
+}
+
+void lonejson_oidc_pkce_cleanup(void) {
+}
+
+void lonejson_oidc_pkce_challenge(void) {
+}
+
+void lonejson_oidc_pkce_generate(void) {
+}
+
+void lonejson_oidc_authorization_url(void) {
+}
+
+void lonejson_oidc_authorization_callback_init(void) {
+}
+
+void lonejson_oidc_authorization_callback_cleanup(void) {
+}
+
+void lonejson_oidc_authorization_callback_parse_query(void) {
 }
 EOF
 

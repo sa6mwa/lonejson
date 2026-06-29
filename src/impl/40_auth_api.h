@@ -4,6 +4,7 @@
 #include <openssl/evp.h>
 #include <openssl/param_build.h>
 #include <openssl/params.h>
+#include <openssl/rand.h>
 #include <openssl/rsa.h>
 
 static int lonejson__base64url_value(unsigned char ch) {
@@ -83,6 +84,11 @@ LONEJSON_MAP_DEFINE(lonejson__oauth2_token_response_map,
 #define LONEJSON__OIDC_DEFAULT_MAX_JWKS_BYTES (1024u * 1024u)
 #define LONEJSON__OAUTH2_DEFAULT_MAX_FORM_BODY_BYTES (64u * 1024u)
 #define LONEJSON__OAUTH2_DEFAULT_MAX_TOKEN_RESPONSE_BYTES (1024u * 1024u)
+#define LONEJSON__OIDC_DEFAULT_MAX_AUTH_URL_BYTES (16u * 1024u)
+#define LONEJSON__OIDC_DEFAULT_MAX_CALLBACK_QUERY_BYTES (16u * 1024u)
+#define LONEJSON__OIDC_PKCE_DEFAULT_VERIFIER_BYTES 32u
+#define LONEJSON__OIDC_PKCE_MIN_VERIFIER_CHARS 43u
+#define LONEJSON__OIDC_PKCE_MAX_VERIFIER_CHARS 128u
 
 typedef enum lonejson__jwt_claim_field {
   LONEJSON__JWT_FIELD_NONE = 0,
@@ -959,6 +965,184 @@ void lonejson_oauth2_token_response_cleanup(
   }
 }
 
+static size_t lonejson__base64url_encoded_len(size_t len) {
+  size_t full = len / 3u;
+  size_t rem = len % 3u;
+  return full * 4u + (rem == 0u ? 0u : rem + 1u);
+}
+
+static char *lonejson__base64url_encode_alloc(const unsigned char *data,
+                                              size_t len,
+                                              lonejson_error *error) {
+  static const char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  size_t out_len;
+  size_t i = 0u;
+  size_t o = 0u;
+  char *out;
+  unsigned int n;
+
+  if (len > (SIZE_MAX / 4u) * 3u) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                              "base64url output size overflows");
+    return NULL;
+  }
+  out_len = lonejson__base64url_encoded_len(len);
+  out = (char *)lonejson__owned_malloc(NULL, out_len + 1u);
+  if (out == NULL) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                              0u, "failed to allocate base64url output");
+    return NULL;
+  }
+  while (i + 3u <= len) {
+    n = ((unsigned int)data[i] << 16u) | ((unsigned int)data[i + 1u] << 8u) |
+        (unsigned int)data[i + 2u];
+    out[o++] = alphabet[(n >> 18u) & 63u];
+    out[o++] = alphabet[(n >> 12u) & 63u];
+    out[o++] = alphabet[(n >> 6u) & 63u];
+    out[o++] = alphabet[n & 63u];
+    i += 3u;
+  }
+  if (i < len) {
+    n = (unsigned int)data[i] << 16u;
+    out[o++] = alphabet[(n >> 18u) & 63u];
+    if (i + 1u < len) {
+      n |= (unsigned int)data[i + 1u] << 8u;
+      out[o++] = alphabet[(n >> 12u) & 63u];
+      out[o++] = alphabet[(n >> 6u) & 63u];
+    } else {
+      out[o++] = alphabet[(n >> 12u) & 63u];
+    }
+  }
+  out[o] = '\0';
+  return out;
+}
+
+static int lonejson__oidc_pkce_verifier_char(unsigned char ch) {
+  return lonejson__oauth2_form_is_unreserved(ch);
+}
+
+static lonejson_status
+lonejson__oidc_pkce_validate_verifier(const char *code_verifier,
+                                      lonejson_error *error) {
+  size_t len;
+  const unsigned char *p;
+
+  if (code_verifier == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "PKCE code_verifier is required");
+  }
+  len = strlen(code_verifier);
+  if (len < LONEJSON__OIDC_PKCE_MIN_VERIFIER_CHARS ||
+      len > LONEJSON__OIDC_PKCE_MAX_VERIFIER_CHARS) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "PKCE code_verifier length is invalid");
+  }
+  for (p = (const unsigned char *)code_verifier; *p != '\0'; ++p) {
+    if (!lonejson__oidc_pkce_verifier_char(*p)) {
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                 0u, 0u,
+                                 "PKCE code_verifier contains invalid chars");
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+void lonejson_oidc_pkce_init(lonejson_oidc_pkce *pkce) {
+  if (pkce != NULL) {
+    memset(pkce, 0, sizeof(*pkce));
+  }
+}
+
+void lonejson_oidc_pkce_cleanup(lonejson_oidc_pkce *pkce) {
+  if (pkce != NULL) {
+    lonejson__owned_free(pkce->code_verifier);
+    lonejson__owned_free(pkce->code_challenge);
+    memset(pkce, 0, sizeof(*pkce));
+  }
+}
+
+lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
+                                             lonejson_owned_buffer *out,
+                                             lonejson_error *error) {
+  unsigned char digest[EVP_MAX_MD_SIZE];
+  unsigned int digest_len = 0u;
+  char *encoded;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "PKCE challenge output is required");
+  }
+  status = lonejson__oidc_pkce_validate_verifier(code_verifier, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  lonejson_owned_buffer_free(out);
+  if (EVP_Digest(code_verifier, strlen(code_verifier), digest, &digest_len,
+                 EVP_sha256(), NULL) != 1) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
+                               0u, "failed to compute PKCE challenge");
+  }
+  encoded = lonejson__base64url_encode_alloc(digest, (size_t)digest_len, error);
+  if (encoded == NULL) {
+    return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  status = lonejson_owned_buffer_sink(out, encoded, strlen(encoded), error);
+  lonejson__owned_free(encoded);
+  return status;
+}
+
+lonejson_status lonejson_oidc_pkce_generate(size_t verifier_bytes,
+                                            lonejson_oidc_pkce *out,
+                                            lonejson_error *error) {
+  unsigned char random_bytes[96];
+  lonejson_owned_buffer challenge;
+  size_t bytes;
+  char *verifier;
+  char *challenge_copy;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "PKCE output is required");
+  }
+  bytes = verifier_bytes == 0u ? LONEJSON__OIDC_PKCE_DEFAULT_VERIFIER_BYTES
+                               : verifier_bytes;
+  if (bytes < 32u || bytes > sizeof(random_bytes)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "PKCE verifier entropy bytes must be 32..96");
+  }
+  if (RAND_bytes(random_bytes, (int)bytes) != 1) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
+                               0u, "failed to generate PKCE verifier");
+  }
+  verifier = lonejson__base64url_encode_alloc(random_bytes, bytes, error);
+  if (verifier == NULL) {
+    return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  lonejson_owned_buffer_init(&challenge);
+  status = lonejson_oidc_pkce_challenge(verifier, &challenge, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__owned_free(verifier);
+    return status;
+  }
+  challenge_copy = lonejson__owned_strdup(NULL, challenge.data);
+  lonejson_owned_buffer_free(&challenge);
+  if (challenge_copy == NULL) {
+    lonejson__owned_free(verifier);
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to allocate PKCE challenge");
+  }
+  lonejson_oidc_pkce_cleanup(out);
+  out->code_verifier = verifier;
+  out->code_challenge = challenge_copy;
+  return LONEJSON_STATUS_OK;
+}
+
 lonejson_status lonejson_oauth2_token_response_parse_json(
     lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
     lonejson_oauth2_token_response *out, lonejson_error *error) {
@@ -1007,6 +1191,288 @@ lonejson_status lonejson_oauth2_token_response_parse_json(
     lonejson_oauth2_token_response_cleanup(out);
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
                                "OAuth2 token response expires_in is negative");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__oidc_authorization_append_pair(
+    lonejson_owned_buffer *out, const char *key, const char *value,
+    int *has_pair, size_t max_bytes, lonejson_error *error) {
+  return lonejson__oauth2_form_append_pair(out, key, value, has_pair, max_bytes,
+                                           error);
+}
+
+lonejson_status lonejson_oidc_authorization_url(
+    const lonejson_oidc_authorization_request *request,
+    lonejson_owned_buffer *out, lonejson_error *error) {
+  size_t max_bytes;
+  lonejson_status status;
+  int has_query;
+  int has_pair = 0;
+
+  lonejson__clear_error(error);
+  if (request == NULL || out == NULL || request->authorization_endpoint == NULL ||
+      request->client_id == NULL || request->redirect_uri == NULL ||
+      request->state == NULL || request->nonce == NULL ||
+      request->code_challenge == NULL) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "authorization endpoint, client_id, redirect_uri, state, nonce, and "
+        "code_challenge are required");
+  }
+  status = lonejson__oidc_require_https_url(
+      request->authorization_endpoint, "authorization_endpoint", 1, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  max_bytes = request->max_url_bytes == 0u
+                  ? LONEJSON__OIDC_DEFAULT_MAX_AUTH_URL_BYTES
+                  : request->max_url_bytes;
+  lonejson_owned_buffer_free(out);
+  status = lonejson__oauth2_form_append_raw(
+      out, request->authorization_endpoint, strlen(request->authorization_endpoint),
+      max_bytes, error);
+  has_query = strchr(request->authorization_endpoint, '?') != NULL;
+  if (status == LONEJSON_STATUS_OK) {
+    status =
+        lonejson__oauth2_form_append_raw(out, has_query ? "&" : "?", 1u,
+                                         max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "response_type", "code", &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "client_id", request->client_id, &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "redirect_uri", request->redirect_uri, &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK && request->scope != NULL) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "scope", request->scope, &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "state", request->state, &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "nonce", request->nonce, &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "code_challenge", request->code_challenge, &has_pair, max_bytes,
+        error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "code_challenge_method", "S256", &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK && request->audience != NULL) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "audience", request->audience, &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK && request->resource != NULL) {
+    status = lonejson__oidc_authorization_append_pair(
+        out, "resource", request->resource, &has_pair, max_bytes, error);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_owned_buffer_free(out);
+  }
+  return status;
+}
+
+void lonejson_oidc_authorization_callback_init(
+    lonejson_oidc_authorization_callback *callback) {
+  if (callback != NULL) {
+    memset(callback, 0, sizeof(*callback));
+  }
+}
+
+void lonejson_oidc_authorization_callback_cleanup(
+    lonejson_oidc_authorization_callback *callback) {
+  if (callback != NULL) {
+    lonejson__owned_free(callback->code);
+    lonejson__owned_free(callback->state);
+    lonejson__owned_free(callback->error);
+    lonejson__owned_free(callback->error_description);
+    lonejson__owned_free(callback->error_uri);
+    memset(callback, 0, sizeof(*callback));
+  }
+}
+
+static int lonejson__oauth2_hex_value(char ch) {
+  if (ch >= '0' && ch <= '9') {
+    return ch - '0';
+  }
+  if (ch >= 'A' && ch <= 'F') {
+    return ch - 'A' + 10;
+  }
+  if (ch >= 'a' && ch <= 'f') {
+    return ch - 'a' + 10;
+  }
+  return -1;
+}
+
+static lonejson_status lonejson__oauth2_percent_decode(
+    const char *data, size_t len, lonejson_owned_buffer *out,
+    lonejson_error *error) {
+  size_t i;
+  int hi;
+  int lo;
+  char ch;
+
+  lonejson_owned_buffer_free(out);
+  for (i = 0u; i < len; ++i) {
+    ch = data[i];
+    if (ch == '+') {
+      ch = ' ';
+    } else if (ch == '%') {
+      if (i + 2u >= len) {
+        return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, i, 0u,
+                                   0u, "callback query has bad percent escape");
+      }
+      hi = lonejson__oauth2_hex_value(data[i + 1u]);
+      lo = lonejson__oauth2_hex_value(data[i + 2u]);
+      if (hi < 0 || lo < 0) {
+        return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, i, 0u,
+                                   0u, "callback query has bad percent escape");
+      }
+      ch = (char)((hi << 4) | lo);
+      i += 2u;
+    }
+    if (lonejson_owned_buffer_sink(out, &ch, 1u, error) !=
+        LONEJSON_STATUS_OK) {
+      return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__oidc_callback_assign(
+    char **dst, const char *value, lonejson_error *error) {
+  if (*dst != NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_DUPLICATE_FIELD, 0u, 0u,
+                               0u, "duplicate callback query parameter");
+  }
+  *dst = lonejson__owned_strdup(NULL, value);
+  if (*dst == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to allocate callback parameter");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_oidc_authorization_callback_parse_query(
+    const char *query, size_t len, const char *expected_state,
+    size_t max_query_bytes, lonejson_oidc_authorization_callback *out,
+    lonejson_error *error) {
+  size_t max_bytes;
+  size_t pos = 0u;
+  size_t key_begin;
+  size_t key_len;
+  size_t value_begin;
+  size_t value_len;
+  lonejson_owned_buffer key;
+  lonejson_owned_buffer value;
+  lonejson_status status = LONEJSON_STATUS_OK;
+
+  lonejson__clear_error(error);
+  if (out == NULL || expected_state == NULL || expected_state[0] == '\0' ||
+      (query == NULL && len != 0u)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "callback query, expected_state, and output are "
+                               "required");
+  }
+  max_bytes = max_query_bytes == 0u
+                  ? LONEJSON__OIDC_DEFAULT_MAX_CALLBACK_QUERY_BYTES
+                  : max_query_bytes;
+  if (len > max_bytes) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, len, 0u, 0u,
+                               "callback query exceeds configured limit");
+  }
+  lonejson_oidc_authorization_callback_cleanup(out);
+  lonejson_owned_buffer_init(&key);
+  lonejson_owned_buffer_init(&value);
+  if (len != 0u && query[0] == '?') {
+    pos = 1u;
+  }
+  while (status == LONEJSON_STATUS_OK && pos <= len) {
+    key_begin = pos;
+    while (pos < len && query[pos] != '=' && query[pos] != '&') {
+      ++pos;
+    }
+    key_len = pos - key_begin;
+    value_begin = pos;
+    value_len = 0u;
+    if (pos < len && query[pos] == '=') {
+      ++pos;
+      value_begin = pos;
+      while (pos < len && query[pos] != '&') {
+        ++pos;
+      }
+      value_len = pos - value_begin;
+    }
+    if (pos < len && query[pos] == '&') {
+      ++pos;
+    } else if (pos == len) {
+      ++pos;
+    }
+    if (key_len == 0u) {
+      continue;
+    }
+    status =
+        lonejson__oauth2_percent_decode(query + key_begin, key_len, &key, error);
+    if (status == LONEJSON_STATUS_OK) {
+      status = lonejson__oauth2_percent_decode(query + value_begin, value_len,
+                                               &value, error);
+    }
+    if (status != LONEJSON_STATUS_OK) {
+      break;
+    }
+    if (strcmp(key.data, "code") == 0) {
+      status = lonejson__oidc_callback_assign(
+          &out->code, value.data != NULL ? value.data : "", error);
+    } else if (strcmp(key.data, "state") == 0) {
+      status = lonejson__oidc_callback_assign(
+          &out->state, value.data != NULL ? value.data : "", error);
+    } else if (strcmp(key.data, "error") == 0) {
+      status = lonejson__oidc_callback_assign(
+          &out->error, value.data != NULL ? value.data : "", error);
+    } else if (strcmp(key.data, "error_description") == 0) {
+      status = lonejson__oidc_callback_assign(&out->error_description,
+                                              value.data != NULL ? value.data
+                                                                 : "",
+                                              error);
+    } else if (strcmp(key.data, "error_uri") == 0) {
+      status = lonejson__oidc_callback_assign(
+          &out->error_uri, value.data != NULL ? value.data : "", error);
+    }
+  }
+  lonejson_owned_buffer_free(&key);
+  lonejson_owned_buffer_free(&value);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oidc_authorization_callback_cleanup(out);
+    return status;
+  }
+  if (out->error != NULL) {
+    lonejson_oidc_authorization_callback_cleanup(out);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "authorization callback returned an error");
+  }
+  if (out->state == NULL || strcmp(out->state, expected_state) != 0) {
+    lonejson_oidc_authorization_callback_cleanup(out);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "authorization callback state mismatch");
+  }
+  if (out->code == NULL || out->code[0] == '\0') {
+    lonejson_oidc_authorization_callback_cleanup(out);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "authorization callback code is required");
   }
   return LONEJSON_STATUS_OK;
 }

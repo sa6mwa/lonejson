@@ -213,7 +213,12 @@ The implementation must test and enforce at least these invariants:
    body builder, bounded token response parser, Lua facade, regression tests,
    ABI/package checks, and fuzz coverage are implemented. HTTP execution,
    retry, TLS, proxy, and credential storage policy remain caller-owned.
-9. Add authorization-code with PKCE flow-control helpers.
+9. Add authorization-code with PKCE flow-control helpers. PKCE S256 challenge
+   derivation, random verifier/challenge generation, authorization URL
+   construction, callback query parsing/state validation, Lua facade,
+   regression tests, ABI/package checks, and fuzz coverage are implemented.
+   Browser launching, localhost listener lifetime, and token exchange HTTP
+   execution remain caller-owned.
 10. Add framework-neutral server-side bearer validation helpers.
 
 Each slice should include C tests, Lua tests when surfaced in Lua, negative

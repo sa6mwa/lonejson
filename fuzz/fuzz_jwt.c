@@ -64,9 +64,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_oidc_jwks_cache_policy cache_policy;
   lonejson_oauth2_client_credentials credentials;
   lonejson_oauth2_token_response token_response;
+  lonejson_oidc_pkce pkce;
+  lonejson_oidc_authorization_request authorization_request;
+  lonejson_oidc_authorization_callback authorization_callback;
   lonejson_oidc_discovery discovery;
   lonejson_owned_buffer discovery_url;
   lonejson_owned_buffer form_body;
+  lonejson_owned_buffer pkce_challenge;
+  lonejson_owned_buffer authorization_url;
   lonejson_error error;
   lonejson *runtime;
   char *text;
@@ -239,6 +244,35 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     (void)lonejson_oauth2_token_response_parse_json(
         runtime, text, size, 4096u, &token_response, &error);
     lonejson_oauth2_token_response_cleanup(&token_response);
+
+    lonejson_owned_buffer_init(&pkce_challenge);
+    if (size >= 43u && size <= 128u) {
+      (void)lonejson_oidc_pkce_challenge(text, &pkce_challenge, &error);
+    }
+    lonejson_owned_buffer_free(&pkce_challenge);
+
+    lonejson_oidc_pkce_init(&pkce);
+    (void)lonejson_oidc_pkce_generate(32u, &pkce, &error);
+    lonejson_oidc_pkce_cleanup(&pkce);
+
+    memset(&authorization_request, 0, sizeof(authorization_request));
+    authorization_request.authorization_endpoint = "https://issuer.example/auth";
+    authorization_request.client_id = "client";
+    authorization_request.redirect_uri = "http://127.0.0.1/callback";
+    authorization_request.scope = "openid profile";
+    authorization_request.state = "state";
+    authorization_request.nonce = "nonce";
+    authorization_request.code_challenge = "challenge";
+    authorization_request.max_url_bytes = 4096u;
+    lonejson_owned_buffer_init(&authorization_url);
+    (void)lonejson_oidc_authorization_url(&authorization_request,
+                                          &authorization_url, &error);
+    lonejson_owned_buffer_free(&authorization_url);
+
+    lonejson_oidc_authorization_callback_init(&authorization_callback);
+    (void)lonejson_oidc_authorization_callback_parse_query(
+        text, size, "state", 4096u, &authorization_callback, &error);
+    lonejson_oidc_authorization_callback_cleanup(&authorization_callback);
 
     lonejson_owned_buffer_init(&discovery_url);
     (void)lonejson_oidc_discovery_url(text, &discovery_url, &error);

@@ -1386,6 +1386,35 @@ typedef struct lonejson_oauth2_token_response {
   lonejson_int64 expires_in;
   int has_expires_in;
 } lonejson_oauth2_token_response;
+
+/** Generated OIDC/OAuth2 PKCE verifier and S256 challenge pair. */
+typedef struct lonejson_oidc_pkce {
+  char *code_verifier;
+  char *code_challenge;
+} lonejson_oidc_pkce;
+
+/** OIDC/OAuth2 authorization-code request URL inputs. */
+typedef struct lonejson_oidc_authorization_request {
+  const char *authorization_endpoint;
+  const char *client_id;
+  const char *redirect_uri;
+  const char *scope;
+  const char *state;
+  const char *nonce;
+  const char *code_challenge;
+  const char *audience;
+  const char *resource;
+  size_t max_url_bytes;
+} lonejson_oidc_authorization_request;
+
+/** Parsed authorization-code callback query. */
+typedef struct lonejson_oidc_authorization_callback {
+  char *code;
+  char *state;
+  char *error;
+  char *error_description;
+  char *error_uri;
+} lonejson_oidc_authorization_callback;
 #endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
@@ -5875,6 +5904,41 @@ void lonejson_oauth2_token_response_cleanup(
 lonejson_status lonejson_oauth2_token_response_parse_json(
     lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
     lonejson_oauth2_token_response *out, lonejson_error *error);
+/** Initializes a PKCE pair for generation or cleanup. */
+void lonejson_oidc_pkce_init(lonejson_oidc_pkce *pkce);
+/** Releases all storage owned by a PKCE pair. */
+void lonejson_oidc_pkce_cleanup(lonejson_oidc_pkce *pkce);
+/** Computes a base64url S256 PKCE challenge for a caller-provided verifier. */
+lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
+                                             lonejson_owned_buffer *out,
+                                             lonejson_error *error);
+/** Generates a random PKCE verifier and matching S256 challenge.
+ *
+ * `verifier_bytes == 0` uses the default 32 random bytes. Valid non-zero
+ * values are 32..96, producing RFC 7636 verifier lengths of 43..128 chars.
+ */
+lonejson_status lonejson_oidc_pkce_generate(size_t verifier_bytes,
+                                            lonejson_oidc_pkce *out,
+                                            lonejson_error *error);
+/** Builds an authorization-code URL with PKCE S256 parameters. */
+lonejson_status lonejson_oidc_authorization_url(
+    const lonejson_oidc_authorization_request *request,
+    lonejson_owned_buffer *out, lonejson_error *error);
+/** Initializes a parsed authorization callback for parsing or cleanup. */
+void lonejson_oidc_authorization_callback_init(
+    lonejson_oidc_authorization_callback *callback);
+/** Releases all storage owned by a parsed authorization callback. */
+void lonejson_oidc_authorization_callback_cleanup(
+    lonejson_oidc_authorization_callback *callback);
+/** Parses and validates an authorization-code callback query string.
+ *
+ * `query` may start with `?`. Provider error callbacks are rejected with
+ * `LONEJSON_STATUS_TYPE_MISMATCH`. `expected_state` is required.
+ */
+lonejson_status lonejson_oidc_authorization_callback_parse_query(
+    const char *query, size_t len, const char *expected_state,
+    size_t max_query_bytes, lonejson_oidc_authorization_callback *out,
+    lonejson_error *error);
 #endif
 
 #ifdef LONEJSON_WITH_CURL
@@ -6668,6 +6732,9 @@ typedef lonejson_oidc_jwks_cache_policy lj_oidc_jwks_cache_policy;
 typedef lonejson_oidc_jwks_cache lj_oidc_jwks_cache;
 typedef lonejson_oauth2_client_credentials lj_oauth2_client_credentials;
 typedef lonejson_oauth2_token_response lj_oauth2_token_response;
+typedef lonejson_oidc_pkce lj_oidc_pkce;
+typedef lonejson_oidc_authorization_request lj_oidc_authorization_request;
+typedef lonejson_oidc_authorization_callback lj_oidc_authorization_callback;
 #endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
@@ -8699,6 +8766,51 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_response_parse_json(
     lj_oauth2_token_response *out, lj_error *error) {
   return lonejson_oauth2_token_response_parse_json(
       runtime, json, len, max_response_bytes, out, error);
+}
+/** Initializes a PKCE pair for generation or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oidc_pkce_init(lj_oidc_pkce *pkce) {
+  lonejson_oidc_pkce_init(pkce);
+}
+/** Releases all storage owned by a PKCE pair. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oidc_pkce_cleanup(lj_oidc_pkce *pkce) {
+  lonejson_oidc_pkce_cleanup(pkce);
+}
+/** Computes a base64url S256 PKCE challenge for a verifier. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_pkce_challenge(const char *code_verifier, lj_owned_buffer *out,
+                       lj_error *error) {
+  return lonejson_oidc_pkce_challenge(code_verifier, out, error);
+}
+/** Generates a random PKCE verifier and matching S256 challenge. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_pkce_generate(size_t verifier_bytes, lj_oidc_pkce *out,
+                      lj_error *error) {
+  return lonejson_oidc_pkce_generate(verifier_bytes, out, error);
+}
+/** Builds an authorization-code URL with PKCE S256 parameters. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_authorization_url(
+    const lj_oidc_authorization_request *request, lj_owned_buffer *out,
+    lj_error *error) {
+  return lonejson_oidc_authorization_url(request, out, error);
+}
+/** Initializes a parsed authorization callback for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oidc_authorization_callback_init(
+    lj_oidc_authorization_callback *callback) {
+  lonejson_oidc_authorization_callback_init(callback);
+}
+/** Releases all storage owned by a parsed authorization callback. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oidc_authorization_callback_cleanup(
+    lj_oidc_authorization_callback *callback) {
+  lonejson_oidc_authorization_callback_cleanup(callback);
+}
+/** Parses and validates an authorization-code callback query string. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_authorization_callback_parse_query(
+    const char *query, size_t len, const char *expected_state,
+    size_t max_query_bytes, lj_oidc_authorization_callback *out,
+    lj_error *error) {
+  return lonejson_oidc_authorization_callback_parse_query(
+      query, len, expected_state, max_query_bytes, out, error);
 }
 #endif
 #ifdef LONEJSON_WITH_CURL

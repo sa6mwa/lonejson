@@ -114,7 +114,15 @@ for symbol in \
     lonejson_oauth2_client_credentials_body \
     lonejson_oauth2_token_response_init \
     lonejson_oauth2_token_response_cleanup \
-    lonejson_oauth2_token_response_parse_json; do
+    lonejson_oauth2_token_response_parse_json \
+    lonejson_oidc_pkce_init \
+    lonejson_oidc_pkce_cleanup \
+    lonejson_oidc_pkce_challenge \
+    lonejson_oidc_pkce_generate \
+    lonejson_oidc_authorization_url \
+    lonejson_oidc_authorization_callback_init \
+    lonejson_oidc_authorization_callback_cleanup \
+    lonejson_oidc_authorization_callback_parse_query; do
   if ! symbol_present "$shared_symbols" "$symbol" "$symbol_prefix_optional"; then
     printf 'missing lonejson_jwt_* ABI symbol in shared library for %s: %s\n' "$context" "$symbol" >&2
     exit 1

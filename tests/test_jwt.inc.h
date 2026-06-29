@@ -972,6 +972,110 @@ static void test_oauth2_token_response_failures(void) {
              8u, &response, &error) == LONEJSON_STATUS_OVERFLOW);
   lonejson_oauth2_token_response_cleanup(&response);
 }
+
+static void test_oidc_pkce_challenge_and_generate(void) {
+  static const char verifier[] =
+      "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+  lonejson_owned_buffer challenge;
+  lonejson_oidc_pkce pkce;
+  lonejson_error error;
+  size_t i;
+
+  lonejson_error_init(&error);
+  lonejson_owned_buffer_init(&challenge);
+  EXPECT(lonejson_oidc_pkce_challenge(verifier, &challenge, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(challenge.data,
+                "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM") == 0);
+  lonejson_owned_buffer_free(&challenge);
+
+  lonejson_oidc_pkce_init(&pkce);
+  EXPECT(lj_oidc_pkce_generate(0u, &pkce, &error) == LJ_STATUS_OK);
+  EXPECT(strlen(pkce.code_verifier) == 43u);
+  EXPECT(strlen(pkce.code_challenge) == 43u);
+  for (i = 0u; pkce.code_verifier[i] != '\0'; ++i) {
+    EXPECT(pkce.code_verifier[i] != '+');
+    EXPECT(pkce.code_verifier[i] != '/');
+    EXPECT(pkce.code_verifier[i] != '=');
+  }
+  lonejson_oidc_pkce_cleanup(&pkce);
+
+  EXPECT(lonejson_oidc_pkce_challenge("too-short", &challenge, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_oidc_pkce_generate(31u, &pkce, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+}
+
+static void test_oidc_authorization_url(void) {
+  lonejson_oidc_authorization_request request;
+  lonejson_owned_buffer url;
+  lonejson_error error;
+
+  memset(&request, 0, sizeof(request));
+  lonejson_owned_buffer_init(&url);
+  lonejson_error_init(&error);
+  request.authorization_endpoint = "https://id.example/auth";
+  request.client_id = "client id";
+  request.redirect_uri = "http://127.0.0.1:1234/cb";
+  request.scope = "openid profile";
+  request.state = "state-123";
+  request.nonce = "nonce-456";
+  request.code_challenge = "challenge";
+  request.audience = "https://api.example";
+  EXPECT(lonejson_oidc_authorization_url(&request, &url, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(url.data,
+                "https://id.example/auth?response_type=code&"
+                "client_id=client+id&"
+                "redirect_uri=http%3A%2F%2F127.0.0.1%3A1234%2Fcb&"
+                "scope=openid+profile&state=state-123&nonce=nonce-456&"
+                "code_challenge=challenge&code_challenge_method=S256&"
+                "audience=https%3A%2F%2Fapi.example") == 0);
+  lonejson_owned_buffer_free(&url);
+
+  request.max_url_bytes = 16u;
+  EXPECT(lonejson_oidc_authorization_url(&request, &url, &error) ==
+         LONEJSON_STATUS_OVERFLOW);
+  EXPECT(url.data == NULL);
+  request.max_url_bytes = 0u;
+  request.authorization_endpoint = "http://id.example/auth";
+  EXPECT(lonejson_oidc_authorization_url(&request, &url, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+}
+
+static void test_oidc_authorization_callback_parse(void) {
+  lonejson_oidc_authorization_callback callback;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  lonejson_oidc_authorization_callback_init(&callback);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "?code=abc%2B123&state=state+123", strlen("?code=abc%2B123&state=state+123"),
+             "state 123", 0u, &callback, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(callback.code, "abc+123") == 0);
+  EXPECT(strcmp(callback.state, "state 123") == 0);
+  lonejson_oidc_authorization_callback_cleanup(&callback);
+
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "code=abc&state=wrong", strlen("code=abc&state=wrong"),
+             "state", 0u, &callback, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(callback.code == NULL);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "error=access_denied&state=state",
+             strlen("error=access_denied&state=state"), "state", 0u,
+             &callback, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "code=abc&code=def&state=state",
+             strlen("code=abc&code=def&state=state"), "state", 0u,
+             &callback, &error) == LONEJSON_STATUS_DUPLICATE_FIELD);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "code=abc&state=%zz", strlen("code=abc&state=%zz"), "state", 0u,
+             &callback, &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "code=abc&state=state", strlen("code=abc&state=state"), "state",
+             8u, &callback, &error) == LONEJSON_STATUS_OVERFLOW);
+  lonejson_oidc_authorization_callback_cleanup(&callback);
+}
 #else
 static void test_oidc_discovery_url(void) {}
 static void test_oidc_discovery_parse_and_validate(void) {}
@@ -982,6 +1086,9 @@ static void test_oidc_jwks_cache_curl_adapter(void) {}
 static void test_oauth2_client_credentials_body(void) {}
 static void test_oauth2_token_response_parse(void) {}
 static void test_oauth2_token_response_failures(void) {}
+static void test_oidc_pkce_challenge_and_generate(void) {}
+static void test_oidc_authorization_url(void) {}
+static void test_oidc_authorization_callback_parse(void) {}
 #endif
 #else
 static void test_jwt_base64url_decode_vectors(void) {}
@@ -1004,4 +1111,7 @@ static void test_oidc_jwks_cache_curl_adapter(void) {}
 static void test_oauth2_client_credentials_body(void) {}
 static void test_oauth2_token_response_parse(void) {}
 static void test_oauth2_token_response_failures(void) {}
+static void test_oidc_pkce_challenge_and_generate(void) {}
+static void test_oidc_authorization_url(void) {}
+static void test_oidc_authorization_callback_parse(void) {}
 #endif

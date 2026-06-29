@@ -257,6 +257,20 @@ if lonejson.jwt_parse_compact ~= nil then
     })
     local token_response = lonejson.oauth2_token_response_parse_json(
         '{"access_token":"token","token_type":"Bearer","expires_in":3600,"scope":"read write"}')
+    local pkce_challenge = lonejson.oidc_pkce_challenge(
+        "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+    local pkce = lonejson.oidc_pkce_generate()
+    local auth_url = lonejson.oidc_authorization_url({
+      authorization_endpoint = "https://id.example/auth",
+      client_id = "client id",
+      redirect_uri = "http://127.0.0.1:1234/cb",
+      scope = "openid profile",
+      state = "state-123",
+      nonce = "nonce-456",
+      code_challenge = "challenge",
+    })
+    local callback = lonejson.oidc_authorization_callback_parse_query(
+        "?code=abc%2B123&state=state+123", "state 123")
 
     assert_eq(lonejson.oidc_discovery_url("https://id.example/tenant/"),
               "https://id.example/.well-known/openid-configuration/tenant")
@@ -273,6 +287,17 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(token_response.access_token, "token")
     assert_eq(token_response.token_type, "Bearer")
     assert_eq(token_response.expires_in, 3600)
+    assert_eq(pkce_challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
+    assert_eq(#pkce.code_verifier, 43)
+    assert_eq(#pkce.code_challenge, 43)
+    assert_eq(auth_url,
+              "https://id.example/auth?response_type=code&" ..
+              "client_id=client+id&" ..
+              "redirect_uri=http%3A%2F%2F127.0.0.1%3A1234%2Fcb&" ..
+              "scope=openid+profile&state=state-123&nonce=nonce-456&" ..
+              "code_challenge=challenge&code_challenge_method=S256")
+    assert_eq(callback.code, "abc+123")
+    assert_eq(callback.state, "state 123")
 
     bad, err = lonejson.oidc_discovery_parse_json(discovery_json, "https://id.example")
     assert_true(bad == nil)
@@ -292,6 +317,15 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(err.status, "type_mismatch")
 
     bad, err = lj:oauth2_token_response_parse_json('{"error":"invalid_client"}')
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = lonejson.oidc_pkce_challenge("too-short")
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
+
+    bad, err = lonejson.oidc_authorization_callback_parse_query(
+        "code=abc&state=wrong", "state")
     assert_true(bad == nil)
     assert_eq(err.status, "type_mismatch")
 
