@@ -797,13 +797,18 @@ containing the auth implementation.
 The following are deliberate gaps or future work, not hidden behavior.
 
 - No built-in HTTP transport; caller-owned providers perform network I/O.
-- No retry, timeout, proxy, redirect, or TLS policy helper.
-- No built-in credential persistence, locking, or encryption helper. The m2m
-  helpers generate store-ready JSON records and verify caller-owned JSON store
-  bytes, but applications still own durable storage and concurrent updates.
-- No e2e signup web-handler fixture yet. Signup flow behavior is covered by C
-  and Lua regression tests; the current M2M e2e fixture covers Basic and Bearer
-  credential verification from a non-lonejson client.
+- No complete token-flow state helper yet. Current token endpoint helpers can
+  build or perform one request, but they do not yet retain token state,
+  transparently refresh expired access tokens, or apply helper-owned retry
+  policy. That is now roadmap work, with opt-out controls required.
+- No timeout, proxy, redirect, or TLS policy helper; those remain provider-owned.
+- No built-in credential persistence, locking, or encryption helper. The M2M
+  helpers generate store-ready JSON records, verify caller-owned JSON store
+  bytes, and complete signup seeds into generated credentials. Applications
+  still own durable storage and concurrent updates.
+- M2M e2e now covers Basic credentials, Bearer API keys, missing/wrong
+  credentials, signup seed completion, consumed signup rejection, and use of
+  signup-generated Basic and Bearer credentials from `curl`.
 - No complete browser-launch helper.
 - No localhost HTTP listener.
 - No random callback-path session object.
@@ -824,7 +829,6 @@ The following are deliberate gaps or future work, not hidden behavior.
 - No full OAuth2/OIDC provider abstraction.
 - No token introspection endpoint support.
 - No revocation endpoint support.
-- No device authorization flow.
 - No userinfo endpoint helper.
 - No encrypted JWT/JWE support.
 
@@ -832,6 +836,11 @@ Most of these omissions are intentional because lonejson is not meant to own
 application flow control. The core value is bounded parsing, explicit
 validation, structured failure classification, and facades that are easy for
 framework-specific code to compose.
+
+OAuth2 device authorization is a specific grant type for browser-constrained
+devices. It is distinct from the planned token-flow state helper that tracks
+where a supported OAuth2/OIDC flow is and decides whether to refresh, retry, or
+return a clear "cannot continue" state.
 
 ## Recommended Composition Patterns
 

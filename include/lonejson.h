@@ -1413,8 +1413,9 @@ typedef struct lonejson_oidc_jwks_cache {
 /** OAuth2 client-credentials request body options.
  *
  * This models the `client_secret_post` token endpoint authentication method.
- * Network transfer, TLS policy, retries, and credential storage remain
- * caller-owned.
+ * Network transfer, TLS policy, and durable credential storage remain
+ * caller-owned. Higher-level token-flow helpers may layer bounded retry and
+ * refresh behavior over these request-body primitives.
  */
 typedef struct lonejson_oauth2_client_credentials {
   /** OAuth2 client identifier. Required. */
@@ -2431,6 +2432,9 @@ struct lonejson_http_response {
  * embedding application's HTTP client. In curl-enabled builds, curl remains an
  * application-owned transport: configure libcurl in your callback and set a
  * product-specific `user_agent` so identity providers can diagnose traffic.
+ * Token-flow helpers may call this provider more than once for bounded retries
+ * or refresh; provider callbacks should therefore be idempotent at the HTTP
+ * request boundary and enforce their own TLS/proxy/redirect policy.
  */
 struct lonejson_http_provider {
   void *user_data;
@@ -2481,7 +2485,9 @@ typedef struct lonejson_m2m_credential_request {
  * The expected shape is an object with optional `credentials[]` and `signups[]`
  * arrays containing records returned by lonejson generation helpers. To revoke
  * or rotate, update this caller-owned JSON store: remove a record, set its
- * `revoked` field, or insert a replacement generated credential.
+ * `revoked` field, or insert a replacement generated credential. The helper
+ * output is deliberately store-ready JSON so applications can implement those
+ * mutations with their own file, database, lock, and audit model.
  */
 typedef struct lonejson_m2m_store {
   const char *json;
@@ -2581,7 +2587,9 @@ typedef struct lonejson_m2m_signup_completion {
  * frameworks such as Kore or Vectis pass each inbound Authorization header to
  * `lonejson_oidc_validate_bearer_token()` from their request handler. lonejson
  * intentionally does not own framework routing, response writing, TLS policy,
- * retries, or credential storage.
+ * proxy/redirect policy, or durable credential storage. Higher-level
+ * token-flow helpers may add bounded retry/refresh behavior while still using
+ * this provider boundary for the actual transfer.
  */
 struct lonejson_http_provider_config {
   void *user_data;

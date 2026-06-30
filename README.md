@@ -320,31 +320,32 @@ local complete = lj:m2m_signup_complete({
 ```
 
 Remaining auth DX gaps are explicit. lonejson does not provide a built-in HTTP
-server, browser launcher, localhost callback listener, refresh scheduler,
-credential-store persistence/locking, retry policy, proxy policy, redirect
-policy, or Kore/Vectis-specific handler wrapper. Those are application
-lifecycle concerns.
-Potential future simplifications would be an examples-level curl HTTP provider
-callback, an examples-level Kore/Vectis adapter, and a higher-level
-cache-refresh scheduler. Those should start as examples or application helpers
-because putting `curl_easy_*` calls directly in `liblonejson.so` would change
-the current binary dependency boundary.
+server, browser launcher, localhost callback listener, credential-store
+persistence/locking, proxy policy, redirect policy, TLS policy, or
+Kore/Vectis-specific handler wrapper. Those are application lifecycle concerns.
+The planned exception is token-flow state: helpers that own an OAuth2/OIDC
+client flow should transparently refresh expired access tokens and apply
+bounded retry defaults when the next step is protocol-obvious, while still
+letting callers opt out or override those policies. Potential future
+simplifications would be an examples-level curl HTTP provider callback, an
+examples-level Kore/Vectis adapter, and the token-flow helper described in
+`docs/auth-roadmap.md`. Those should preserve the current binary dependency
+boundary; putting `curl_easy_*` calls directly in `liblonejson.so` would not.
 
 The local Docker/nerdctl development rig includes a mock OIDC/OAuth2 provider
 and API fixture. `make test-oidc-e2e` starts the compose stack, obtains a token
 from the mock provider using `curl` rather than lonejson, starts the
 lonejson-backed fixture server, and verifies discovery, JWKS refresh, bearer
 rejection, and bearer acceptance against the live endpoints. Compose commands
-prefer `nerdctl compose` and fall back to `docker compose`. The mock provider
-does not issue refresh tokens for the client-credentials flow, so this e2e
-checks refresh-token exchange only when a provider returns one; refresh request
-construction remains covered by the auth unit tests.
+prefer `nerdctl compose` and fall back to `docker compose`. The e2e also
+exercises refresh-token grant exchange against the mock provider and requires a
+returned access token.
 
 `make test-m2m-e2e` starts a tiny lonejson-backed API fixture and uses `curl`
 as the non-lonejson client to verify Basic client credentials, Bearer API keys,
-missing credentials, and wrong-secret rejection. Signup seed generation and
-completion are covered by C regression tests; a full signup web-handler e2e
-fixture is still future work.
+missing credentials, wrong-secret rejection, signup completion with email
+metadata, consumed-signup rejection, and use of signup-generated Basic and
+Bearer credentials.
 
 Short aliases are enabled by default. Disable them if they collide with another
 project:

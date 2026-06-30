@@ -20,8 +20,11 @@ glue.
 - The shared `liblonejson` must not require libcurl, libssl, or libcrypto for
   auth parsing/orchestration alone. Optional providers and adapters own those
   dependencies.
-- HTTP transfer, retry, proxy, redirect, TLS policy, event-loop integration,
-  and telemetry remain caller-owned.
+- HTTP transfer, proxy, redirect, TLS policy, event-loop integration, and
+  telemetry remain caller-owned.
+- Helpers that perform provider-backed token or key fetching should apply
+  bounded retry and refresh behavior by default where the next step is
+  protocol-obvious. Callers must be able to opt out or override the policy.
 - Durable credential storage, locking, encryption, rotation, auditing, and
   application authorization remain caller-owned.
 - Core lonejson must not add Kore- or Vectis-specific public APIs.
@@ -52,25 +55,30 @@ The current branch already implements the planned C baseline for:
 - Lua facades for JWT/JWK/JWKS, OIDC/OAuth2, M2M credential verification, and
   signup helpers,
 - C runtime/free-function/short-alias surfaces, ABI/package checks, fuzz gates,
-  and targeted e2e fixtures for OIDC bearer and M2M Basic/Bearer verification.
+  and targeted e2e fixtures for OIDC bearer and M2M Basic/Bearer/signup
+  verification.
 
 For exact API behavior and known implementation gaps, use
 `docs/auth-implementation.md`.
 
 ## Remaining Work
 
-### Signup E2E Fixture
+### Token Flow State Helpers
 
-Add a small signup web-handler fixture that exercises the seed flow end to end:
+Add narrowly scoped helpers for token-bearing client flows:
 
-- admin-generated signup seed and public query/URL,
-- recipient-provided email metadata,
-- signup completion into generated credential material,
-- caller-owned removal of the consumed signup seed,
-- successful use of the generated API key or client credentials from a
-  non-lonejson client.
+- represent the current access token, optional refresh token, expiry time, and
+  flow state without taking over durable storage,
+- transparently refresh an expired access token when a refresh token and token
+  endpoint inputs are available,
+- use bounded retry defaults for transient provider/network failures,
+- expose opt-out/override controls for refresh and retry behavior,
+- return explicit flow-state/failure values when interaction is required or the
+  flow cannot continue.
 
-This should remain a fixture, not a general HTTP server abstraction.
+The server-side bearer validation helper should continue to fail closed for an
+expired presented token; a resource server cannot refresh a caller's bearer
+token unless the application has separately chosen to own that client flow.
 
 ### Examples And Integration DX
 
@@ -78,7 +86,8 @@ Add examples-level helpers or documentation for common embedding patterns:
 
 - curl-backed HTTP provider callback using caller-owned curl policy,
 - Kore/Vectis-style request-handler composition for bearer validation,
-- server-local M2M credential store update pattern with caller-owned locking,
+- server-local M2M credential store update, rotation, revocation, and
+  consumed-signup removal patterns with caller-owned locking,
 - admin CLI pattern for signup seed generation.
 
 These should start as examples or integration-layer code, not dependencies in
@@ -91,13 +100,17 @@ justifies a narrowly scoped helper:
 
 - browser launcher,
 - localhost callback listener,
-- refresh scheduler,
-- retry/proxy/redirect/TLS policy abstraction,
-- credential-store persistence, encryption, rotation, and audit helpers,
+- background refresh scheduler,
+- proxy/redirect/TLS policy abstraction,
+- credential-store persistence, encryption, and audit helpers,
 - token introspection endpoint,
 - revocation endpoint,
-- device authorization flow,
 - userinfo endpoint helper.
+
+OAuth2 device authorization is not the same as a generic "helper knows where in
+the flow you are" state machine. A generic flow-state helper belongs in the
+token-flow work above; the device authorization grant itself should be added
+only when we intentionally support that grant type.
 
 ### Crypto And JOSE Gaps
 

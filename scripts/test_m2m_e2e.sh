@@ -44,7 +44,7 @@ fi
 
 rm -f "$secrets_file"
 "$repo_root/build/host-curl/lonejson_m2m_fixture_server" \
-  "$server_port" "$secrets_file" 5 >"$repo_root/build/host-curl/m2m-fixture-server.log" 2>&1 &
+  "$server_port" "$secrets_file" 11 >"$repo_root/build/host-curl/m2m-fixture-server.log" 2>&1 &
 server_pid=$!
 
 for _ in $(seq 1 90); do
@@ -61,6 +61,7 @@ fi
 client_id="$(json_field client_id <"$secrets_file")"
 client_secret="$(json_field client_secret <"$secrets_file")"
 api_key="$(json_field api_key <"$secrets_file")"
+signup_url="$(json_field signup_url <"$secrets_file")"
 
 if curl -fsS --max-time 5 "http://127.0.0.1:$server_port/protected" >/dev/null 2>&1; then
   printf 'protected endpoint accepted missing credentials\n' >&2
@@ -94,7 +95,61 @@ if curl -fsS --max-time 5 -u "$client_id:wrong-secret" \
   exit 1
 fi
 
+if curl -fsS --max-time 5 "${signup_url}&email=user@example.com&signup_secret=wrong" \
+  >/dev/null 2>&1; then
+  printf 'signup endpoint accepted wrong signup secret\n' >&2
+  exit 1
+fi
+
+if curl -fsS --max-time 5 "$signup_url" >/dev/null 2>&1; then
+  printf 'signup endpoint accepted missing email\n' >&2
+  exit 1
+fi
+
+signup_json="$(
+  curl -fsS --max-time 5 "${signup_url}&email=user@example.com"
+)"
+signup_client_id="$(printf '%s' "$signup_json" | json_field client_id)"
+signup_client_secret="$(printf '%s' "$signup_json" | json_field client_secret)"
+signup_api_key="$(printf '%s' "$signup_json" | json_field api_key)"
+
+printf '%s' "$signup_json" | python3 -c '
+import json
+import sys
+value = json.load(sys.stdin)
+if value.get("ok") is not True or value.get("signed_up") is not True:
+    raise SystemExit("signup completion did not succeed")
+if value.get("email") != "user@example.com":
+    raise SystemExit("signup completion did not preserve email")
+'
+
+if curl -fsS --max-time 5 "${signup_url}&email=user@example.com" >/dev/null 2>&1; then
+  printf 'signup endpoint accepted consumed signup seed\n' >&2
+  exit 1
+fi
+
+curl -fsS --max-time 5 \
+  -H "Authorization: Bearer $signup_api_key" \
+  "http://127.0.0.1:$server_port/protected" \
+  | python3 -c '
+import json
+import sys
+value = json.load(sys.stdin)
+if value.get("ok") is not True or value.get("authorized") is not True:
+    raise SystemExit("signup Bearer API key was not authorized")
+'
+
+curl -fsS --max-time 5 -u "$signup_client_id:$signup_client_secret" \
+  "http://127.0.0.1:$server_port/protected" \
+  | python3 -c '
+import json
+import sys
+value = json.load(sys.stdin)
+if value.get("ok") is not True or value.get("authorized") is not True:
+    raise SystemExit("signup Basic credentials were not authorized")
+'
+
 wait "$server_pid"
 server_pid=
 
-printf '%s\n' 'M2M credential e2e passed'
+printf '%s\n' 'M2M credential and signup e2e passed'
