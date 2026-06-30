@@ -69,11 +69,11 @@ The current branch already implements the planned C baseline for:
 For exact API behavior and known implementation gaps, use
 `docs/auth-implementation.md`.
 
-## Remaining Work
+## Current Completion Status
 
-The remaining auth target for this branch is near-complete OAuth2/OIDC client
-and resource-server support plus JWT/JWK/JWKS compliance. JWE is intentionally
-not part of this target.
+The in-scope auth target for this branch is implemented: near-complete
+OAuth2/OIDC client and resource-server support plus JWT/JWK/JWKS compliance.
+JWE is intentionally not part of this target.
 
 ### JOSE/JWK Compliance Completion
 
@@ -101,7 +101,8 @@ keys whose declared operations do not allow verification.
 
 ### Examples And Integration DX
 
-Add examples-level helpers or documentation for common embedding patterns:
+README and `docs/auth-implementation.md` document the common embedding
+patterns that should stay outside core lonejson:
 
 - curl-backed HTTP provider callback using caller-owned curl policy,
 - Kore/Vectis-style request-handler composition for bearer validation,
@@ -109,8 +110,8 @@ Add examples-level helpers or documentation for common embedding patterns:
   consumed-signup removal patterns with caller-owned locking,
 - admin CLI pattern for signup seed generation.
 
-These should start as examples or integration-layer code, not dependencies in
-`liblonejson.so`.
+Any future executable examples for those patterns should remain examples or
+integration-layer code, not dependencies in `liblonejson.so`.
 
 Token-flow state is intentionally not durable storage. Applications still own
 credential persistence, locking, browser interaction, and user-facing
