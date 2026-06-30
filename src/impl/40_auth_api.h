@@ -2561,13 +2561,15 @@ lonejson_status lonejson_jwt_decode_compact(
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson_base64url_decoded_len(
-      compact.header.data, compact.header.len, &header_len, error);
+  status =
+      lonejson_base64_decoded_len(compact.header.data, compact.header.len,
+                                  LONEJSON_BASE64_URL_RAW, &header_len, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson_base64url_decoded_len(
-      compact.payload.data, compact.payload.len, &claims_len, error);
+  status =
+      lonejson_base64_decoded_len(compact.payload.data, compact.payload.len,
+                                  LONEJSON_BASE64_URL_RAW, &claims_len, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -2589,14 +2591,14 @@ lonejson_status lonejson_jwt_decode_compact(
     return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
                                0u, "failed to allocate decoded JWT JSON");
   }
-  status = lonejson_base64url_decode(compact.header.data, compact.header.len,
-                                     (unsigned char *)header_json, header_len,
-                                     &needed, error);
+  status = lonejson_base64_decode(
+      compact.header.data, compact.header.len, LONEJSON_BASE64_URL_RAW,
+      (unsigned char *)header_json, header_len, &needed, error);
   if (status == LONEJSON_STATUS_OK) {
     header_json[header_len] = '\0';
-    status = lonejson_base64url_decode(
-        compact.payload.data, compact.payload.len, (unsigned char *)claims_json,
-        claims_len, &needed, error);
+    status = lonejson_base64_decode(
+        compact.payload.data, compact.payload.len, LONEJSON_BASE64_URL_RAW,
+        (unsigned char *)claims_json, claims_len, &needed, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     claims_json[claims_len] = '\0';
@@ -2763,7 +2765,8 @@ lonejson__jwt_decode_base64url_alloc(const char *data, size_t len,
   size_t needed;
   lonejson_status status;
 
-  status = lonejson_base64url_decoded_len(data, len, &decoded_len, error);
+  status = lonejson_base64_decoded_len(data, len, LONEJSON_BASE64_URL_RAW,
+                                       &decoded_len, error);
   if (status != LONEJSON_STATUS_OK) {
     return NULL;
   }
@@ -2774,8 +2777,8 @@ lonejson__jwt_decode_base64url_alloc(const char *data, size_t len,
                               0u, "failed to allocate decoded JWT %s", what);
     return NULL;
   }
-  status =
-      lonejson_base64url_decode(data, len, out, decoded_len, &needed, error);
+  status = lonejson_base64_decode(data, len, LONEJSON_BASE64_URL_RAW, out,
+                                  decoded_len, &needed, error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson__owned_free(out);
     return NULL;
@@ -3817,8 +3820,9 @@ lonejson__m2m_hash_secret(const lonejson_runtime *runtime_state,
                                0u, "salt, secret, and hash output required");
   }
   *out_hash = NULL;
-  status = lonejson_base64url_decode(salt, strlen(salt), salt_bytes,
-                                     sizeof(salt_bytes), &needed, error);
+  status =
+      lonejson_base64_decode(salt, strlen(salt), LONEJSON_BASE64_URL_RAW,
+                             salt_bytes, sizeof(salt_bytes), &needed, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }

@@ -124,8 +124,9 @@ static void test_base64_sink_equivalence_and_aliases(void) {
   EXPECT(memcmp(decoded_sink.bytes, bytes, sizeof(bytes)) == 0);
 
   memset(decoded, 0, sizeof(decoded));
-  EXPECT(lonejson_base64url_decode(encoded, needed, decoded, sizeof(decoded),
-                                   &needed, &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_base64_decode(encoded, needed, LONEJSON_BASE64_URL_RAW,
+                                decoded, sizeof(decoded), &needed,
+                                &error) == LONEJSON_STATUS_OK);
   EXPECT(needed == sizeof(bytes));
   EXPECT(memcmp(decoded, bytes, sizeof(bytes)) == 0);
 }

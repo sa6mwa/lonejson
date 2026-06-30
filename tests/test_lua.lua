@@ -233,7 +233,6 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_true(lj:set_openssl_auth_provider())
   end
 
-  assert_eq(lonejson.base64url_decode("SGVsbG8"), "Hello")
   assert_eq(parts.signature, "c2ln")
   assert_eq(parts.signing_input, parts.header .. "." .. parts.payload)
   assert_eq(decoded.header.alg, "RS256")

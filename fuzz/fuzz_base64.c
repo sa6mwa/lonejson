@@ -108,10 +108,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     lonejson_error error;
 
     lonejson_error_init(&error);
-    (void)lonejson_base64url_decoded_len((const char *)data, size, &needed,
-                                         &error);
-    (void)lonejson_base64url_decode((const char *)data, size, out, sizeof(out),
-                                    &needed, &error);
+    (void)lonejson_base64_decoded_len((const char *)data, size,
+                                      LONEJSON_BASE64_URL_RAW, &needed, &error);
+    (void)lonejson_base64_decode((const char *)data, size,
+                                 LONEJSON_BASE64_URL_RAW, out, sizeof(out),
+                                 &needed, &error);
   }
   return 0;
 }

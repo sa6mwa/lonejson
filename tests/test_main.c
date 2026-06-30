@@ -21,7 +21,7 @@ int main(void) {
   test_base64_encode_decode_variants();
   test_base64_padding_and_failure_modes();
   test_base64_sink_equivalence_and_aliases();
-  test_jwt_base64url_decode_vectors();
+  test_base64_url_raw_decode_vectors();
   test_jwt_compact_parse_segments();
   test_jwt_compact_parse_failures();
   test_jwk_parse_json_shapes();

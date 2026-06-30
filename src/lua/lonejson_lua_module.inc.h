@@ -140,7 +140,6 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"visit_candidates_file", ljlua_visit_candidates_file},
     {"visit_candidates_fd", ljlua_visit_candidates_fd},
 #ifdef LONEJSON_WITH_JWT
-    {"base64url_decode", ljlua_base64url_decode},
     {"jwt_parse_compact", ljlua_jwt_parse_compact},
     {"jwt_decode_compact", ljlua_jwt_decode_compact},
     {"jwt_validate_compact_claims", ljlua_jwt_validate_compact_claims},
@@ -305,7 +304,6 @@ int luaopen_lonejson_core(lua_State *L) {
       {"visit_candidates_file", ljlua_visit_candidates_file},
       {"visit_candidates_fd", ljlua_visit_candidates_fd},
 #ifdef LONEJSON_WITH_JWT
-      {"base64url_decode", ljlua_base64url_decode},
       {"jwt_parse_compact", ljlua_jwt_parse_compact},
       {"jwt_decode_compact", ljlua_jwt_decode_compact},
       {"jwt_validate_compact_claims", ljlua_jwt_validate_compact_claims},

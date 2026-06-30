@@ -109,10 +109,15 @@ rejects configured over-size inputs.
 
 Implemented public APIs:
 
-- `lonejson_base64url_decoded_len`
-- `lonejson_base64url_decode`
+- `lonejson_base64_encoded_len`
+- `lonejson_base64_encode`
+- `lonejson_base64_encode_sink`
+- `lonejson_base64_decoded_len`
+- `lonejson_base64_decode`
+- `lonejson_base64_decode_sink`
+- `LONEJSON_BASE64_URL_RAW` for unpadded JWT/JWS base64url segments
 - `lonejson_jwt_parse_compact`
-- short aliases `lj_base64url_decoded_len`, `lj_base64url_decode`,
+- short aliases `lj_base64_*`, `LJ_BASE64_URL_RAW`, and
   `lj_jwt_parse_compact`
 
 `lonejson_jwt_parse_compact` validates compact serialization shape only:
@@ -629,7 +634,6 @@ It does not implement independent Lua crypto or protocol logic.
 
 JWT/JWK/JWKS Lua facade:
 
-- `base64url_decode`
 - `jwt_parse_compact`
 - `jwt_decode_compact`
 - `jwt_validate_compact_claims`

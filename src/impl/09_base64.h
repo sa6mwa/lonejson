@@ -426,18 +426,3 @@ lonejson_status lonejson_base64_decode(const char *data, size_t len,
   return lonejson_base64_decode_sink(
       data, len, variant, lonejson__base64_write_decode_buffer, &sink, error);
 }
-
-lonejson_status lonejson_base64url_decoded_len(const char *data, size_t len,
-                                               size_t *out_len,
-                                               lonejson_error *error) {
-  return lonejson_base64_decoded_len(data, len, LONEJSON_BASE64_URL_RAW,
-                                     out_len, error);
-}
-
-lonejson_status lonejson_base64url_decode(const char *data, size_t len,
-                                          unsigned char *out, size_t capacity,
-                                          size_t *needed,
-                                          lonejson_error *error) {
-  return lonejson_base64_decode(data, len, LONEJSON_BASE64_URL_RAW, out,
-                                capacity, needed, error);
-}

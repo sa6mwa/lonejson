@@ -79,17 +79,17 @@ static void fuzz_decode_segment(const char *data, size_t len) {
 
   lonejson_error_init(&error);
   decoded_len = 0u;
-  if (lonejson_base64url_decoded_len(data, len, &decoded_len, &error) !=
-      LONEJSON_STATUS_OK) {
+  if (lonejson_base64_decoded_len(data, len, LONEJSON_BASE64_URL_RAW,
+                                  &decoded_len, &error) != LONEJSON_STATUS_OK) {
     decoded_len = 0u;
   }
-  (void)lonejson_base64url_decode(data, len, stack_buf, sizeof(stack_buf),
-                                  &needed, &error);
+  (void)lonejson_base64_decode(data, len, LONEJSON_BASE64_URL_RAW, stack_buf,
+                               sizeof(stack_buf), &needed, &error);
   if (decoded_len <= 4096u) {
     heap_buf = (unsigned char *)malloc(decoded_len == 0u ? 1u : decoded_len);
     if (heap_buf != NULL) {
-      (void)lonejson_base64url_decode(data, len, heap_buf, decoded_len, &needed,
-                                      &error);
+      (void)lonejson_base64_decode(data, len, LONEJSON_BASE64_URL_RAW, heap_buf,
+                                   decoded_len, &needed, &error);
       free(heap_buf);
     }
   }
@@ -176,10 +176,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
     http_state.body = text;
     http_state.len = size;
-    if (lonejson_http_provider_init_simple(&http_provider, &http_state,
-                                           "lonejson-fuzz/1",
-                                           lonejson_fuzz_http_request,
-                                           &error) == LONEJSON_STATUS_OK) {
+    if (lonejson_http_provider_init_simple(
+            &http_provider, &http_state, "lonejson-fuzz/1",
+            lonejson_fuzz_http_request, &error) == LONEJSON_STATUS_OK) {
       (void)runtime->set_http_provider(runtime, &http_provider, &error);
     }
 
@@ -198,8 +197,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       lonejson_jwt_header_init(&header);
       lonejson_jwt_claims_init(&claims);
       if (runtime->jwt_decode_compact(runtime, mode_text, mode_size, &policy,
-                                      &header, &claims, &error) ==
-          LONEJSON_STATUS_OK) {
+                                      &header, &claims,
+                                      &error) == LONEJSON_STATUS_OK) {
         lonejson_jwk_init(&jwk);
         if (runtime->jwk_parse_json(runtime, lonejson_fuzz_rs256_jwk_json,
                                     strlen(lonejson_fuzz_rs256_jwk_json), &jwk,
@@ -228,8 +227,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
           lonejson_jwt_claims_init(&claims);
           if (runtime->jwt_decode_compact(runtime, lonejson_fuzz_rs256_token,
                                           strlen(lonejson_fuzz_rs256_token),
-                                          &policy, &header, &claims, &error) ==
-              LONEJSON_STATUS_OK) {
+                                          &policy, &header, &claims,
+                                          &error) == LONEJSON_STATUS_OK) {
             (void)runtime->jwt_validate_signature_with_runtime(
                 runtime, &jwt, &header, &jwk, &error);
           }
@@ -266,8 +265,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     cache_policy.ttl_seconds = 60;
     lonejson_oidc_jwks_cache_init(&cache);
     if (runtime->oidc_jwks_cache_update_json(runtime, &cache, &cache_policy,
-                                             text, size, &error) ==
-        LONEJSON_STATUS_OK) {
+                                             text, size,
+                                             &error) == LONEJSON_STATUS_OK) {
       lonejson_jwk_select_options options;
       const lonejson_jwk *selected;
       memset(&options, 0, sizeof(options));
@@ -362,7 +361,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     lonejson_oidc_pkce_cleanup(&pkce);
 
     memset(&authorization_request, 0, sizeof(authorization_request));
-    authorization_request.authorization_endpoint = "https://issuer.example/auth";
+    authorization_request.authorization_endpoint =
+        "https://issuer.example/auth";
     authorization_request.client_id = "client";
     authorization_request.redirect_uri = "http://127.0.0.1/callback";
     authorization_request.scope = "openid profile";
@@ -385,8 +385,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     lonejson_oidc_bearer_validation_init(&bearer_validation);
     if (runtime->oidc_jwks_cache_update_json(
             runtime, &cache, &cache_policy, lonejson_fuzz_rs256_jwks_json,
-            strlen(lonejson_fuzz_rs256_jwks_json), &error) ==
-        LONEJSON_STATUS_OK) {
+            strlen(lonejson_fuzz_rs256_jwks_json),
+            &error) == LONEJSON_STATUS_OK) {
       memset(&bearer_request, 0, sizeof(bearer_request));
       bearer_request.authorization_header = text;
       bearer_request.jwks_cache = &cache;

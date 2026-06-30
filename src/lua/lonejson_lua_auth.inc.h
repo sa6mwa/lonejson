@@ -197,8 +197,9 @@ static void ljlua_auth_read_client_credentials(
   lua_pop(L, 1);
 }
 
-static void ljlua_auth_read_refresh_token(
-    lua_State *L, int index, lonejson_oauth2_refresh_token *request) {
+static void
+ljlua_auth_read_refresh_token(lua_State *L, int index,
+                              lonejson_oauth2_refresh_token *request) {
   lua_Integer max_body_bytes;
 
   memset(request, 0, sizeof(*request));
@@ -290,8 +291,9 @@ static void ljlua_auth_read_authorization_request(
   lua_pop(L, 1);
 }
 
-static void ljlua_auth_read_jwks_cache_policy(
-    lua_State *L, int index, lonejson_oidc_jwks_cache_policy *policy) {
+static void
+ljlua_auth_read_jwks_cache_policy(lua_State *L, int index,
+                                  lonejson_oidc_jwks_cache_policy *policy) {
   memset(policy, 0, sizeof(*policy));
   luaL_checktype(L, index, LUA_TTABLE);
   index = lua_absindex(L, index);
@@ -335,11 +337,11 @@ static int ljlua_set_openssl_auth_provider(lua_State *L) {
   lonejson_status status;
 
   lonejson_error_init(&error);
-  status = lonejson_auth_provider_init_openssl(&ud->auth_provider, NULL,
-                                               &error);
+  status =
+      lonejson_auth_provider_init_openssl(&ud->auth_provider, NULL, &error);
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson_set_auth_provider(ud->runtime, &ud->auth_provider,
-                                        &error);
+    status =
+        lonejson_set_auth_provider(ud->runtime, &ud->auth_provider, &error);
   }
   if (status != LONEJSON_STATUS_OK) {
     return ljlua_push_status_result(L, status, &error);
@@ -385,11 +387,9 @@ static void ljlua_auth_clear_http_provider(lua_State *L, ljlua_runtime_ud *ud) {
   memset(&ud->http_provider, 0, sizeof(ud->http_provider));
 }
 
-static lonejson_status
-ljlua_auth_http_provider_request(void *user_data,
-                                 const lonejson_http_request *request,
-                                 lonejson_http_response *response,
-                                 lonejson_error *error) {
+static lonejson_status ljlua_auth_http_provider_request(
+    void *user_data, const lonejson_http_request *request,
+    lonejson_http_response *response, lonejson_error *error) {
   ljlua_runtime_ud *ud = (ljlua_runtime_ud *)user_data;
   lua_State *L;
   int base;
@@ -508,9 +508,9 @@ static int ljlua_set_http_provider(lua_State *L) {
   lua_pushvalue(L, 2);
   callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
   lonejson_error_init(&error);
-  status = lonejson_http_provider_init_simple(
-      &provider, ud, owned_user_agent, ljlua_auth_http_provider_request,
-      &error);
+  status = lonejson_http_provider_init_simple(&provider, ud, owned_user_agent,
+                                              ljlua_auth_http_provider_request,
+                                              &error);
   if (status != LONEJSON_STATUS_OK) {
     luaL_unref(L, LUA_REGISTRYINDEX, callback_ref);
     free(owned_user_agent);
@@ -612,8 +612,7 @@ static int ljlua_auth_read_policy(lua_State *L, int index,
                                 &policy->accepted_audiences,
                                 &policy->accepted_audience_count, 1);
     lua_getfield(L, index, "expected_nonce");
-    policy->expected_nonce =
-        lua_isnil(L, -1) ? NULL : luaL_checkstring(L, -1);
+    policy->expected_nonce = lua_isnil(L, -1) ? NULL : luaL_checkstring(L, -1);
     lua_pop(L, 1);
     ljlua_auth_read_string_list(L, index, "required_claims",
                                 &policy->required_claims,
@@ -677,33 +676,6 @@ static int ljlua_jwt_parse_compact(lua_State *L) {
   lua_setfield(L, -2, "signature");
   lua_pushlstring(L, jwt.signing_input.data, jwt.signing_input.len);
   lua_setfield(L, -2, "signing_input");
-  return 1;
-}
-
-static int ljlua_base64url_decode(lua_State *L) {
-  const char *data;
-  size_t len;
-  size_t needed;
-  unsigned char *out;
-  lonejson_error error;
-  lonejson_status status;
-
-  data = luaL_checklstring(L, 1, &len);
-  status = lonejson_base64url_decoded_len(data, len, &needed, &error);
-  if (status != LONEJSON_STATUS_OK) {
-    return ljlua_push_status_result(L, status, &error);
-  }
-  out = (unsigned char *)malloc(needed == 0u ? 1u : needed);
-  if (out == NULL) {
-    return luaL_error(L, "failed to allocate base64url output");
-  }
-  status = lonejson_base64url_decode(data, len, out, needed, &needed, &error);
-  if (status != LONEJSON_STATUS_OK) {
-    free(out);
-    return ljlua_push_status_result(L, status, &error);
-  }
-  lua_pushlstring(L, (const char *)out, needed);
-  free(out);
   return 1;
 }
 
@@ -944,9 +916,8 @@ static int ljlua_oidc_fetch_discovery(lua_State *L) {
       ljlua_auth_optional_max(L, 3, "max_response_bytes must be non-negative");
   lonejson_oidc_discovery_init(&discovery);
   lonejson_error_init(&error);
-  status = lonejson_oidc_fetch_discovery(ud->runtime, issuer,
-                                         max_response_bytes, &discovery,
-                                         &error);
+  status = lonejson_oidc_fetch_discovery(
+      ud->runtime, issuer, max_response_bytes, &discovery, &error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson_oidc_discovery_cleanup(&discovery);
     return ljlua_push_status_result(L, status, &error);
@@ -967,8 +938,8 @@ static int ljlua_oidc_jwks_cache_refresh(lua_State *L) {
   ljlua_auth_read_jwks_cache_policy(L, 2, &policy);
   lonejson_oidc_jwks_cache_init(&cache);
   lonejson_error_init(&error);
-  status = lonejson_oidc_jwks_cache_refresh(ud->runtime, &cache, &policy,
-                                            &error);
+  status =
+      lonejson_oidc_jwks_cache_refresh(ud->runtime, &cache, &policy, &error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson_oidc_jwks_cache_cleanup(&cache);
     return ljlua_push_status_result(L, status, &error);
@@ -1091,9 +1062,9 @@ static int ljlua_oauth2_refresh_token_request(lua_State *L) {
       ljlua_auth_optional_max(L, 4, "max_response_bytes must be non-negative");
   lonejson_oauth2_token_response_init(&response);
   lonejson_error_init(&error);
-  status = lonejson_oauth2_refresh_token_request(
-      ud->runtime, token_endpoint, &request, max_response_bytes, &response,
-      &error);
+  status = lonejson_oauth2_refresh_token_request(ud->runtime, token_endpoint,
+                                                 &request, max_response_bytes,
+                                                 &response, &error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson_oauth2_token_response_cleanup(&response);
     return ljlua_push_status_result(L, status, &error);
@@ -1202,8 +1173,7 @@ static int ljlua_oidc_pkce_generate(lua_State *L) {
   }
   lonejson_oidc_pkce_init(&pkce);
   lonejson_error_init(&error);
-  status =
-      lonejson_oidc_pkce_generate((size_t)verifier_bytes, &pkce, &error);
+  status = lonejson_oidc_pkce_generate((size_t)verifier_bytes, &pkce, &error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson_oidc_pkce_cleanup(&pkce);
     return ljlua_push_status_result(L, status, &error);
@@ -1291,17 +1261,16 @@ static int ljlua_oidc_validate_bearer_token(lua_State *L) {
 
   lonejson_oidc_jwks_cache_init(&cache);
   lonejson_oidc_bearer_validation_init(&validation);
-  status = lonejson_oidc_jwks_cache_update_json(
-      runtime, &cache, &cache_policy, jwks_json, jwks_len, &error);
+  status = lonejson_oidc_jwks_cache_update_json(runtime, &cache, &cache_policy,
+                                                jwks_json, jwks_len, &error);
   if (status == LONEJSON_STATUS_OK) {
     memset(&request, 0, sizeof(request));
     request.authorization_header = authorization_header;
     request.jwks_cache = &cache;
     request.jwks_policy = &cache_policy;
     request.claim_policy = &claim_policy;
-    status =
-        lonejson_oidc_validate_bearer_token(runtime, &request, &validation,
-                                            &error);
+    status = lonejson_oidc_validate_bearer_token(runtime, &request, &validation,
+                                                 &error);
   }
   if (owned_runtime != NULL) {
     lonejson_free(owned_runtime);
@@ -1435,15 +1404,14 @@ static int ljlua_jwt_validate_compact_signature(lua_State *L) {
                                          &header, &claims, &error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status =
-        lonejson_jwk_parse_json(runtime, jwk_json, jwk_len, &jwk, &error);
+    status = lonejson_jwk_parse_json(runtime, jwk_json, jwk_len, &jwk, &error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = owned_runtime == NULL
-                 ? lonejson_jwt_validate_signature_with_runtime(
-                       runtime, &compact, &header, &jwk, &error)
-                 : lonejson_jwt_validate_signature(&compact, &header, &jwk,
-                                                   &error);
+    status =
+        owned_runtime == NULL
+            ? lonejson_jwt_validate_signature_with_runtime(
+                  runtime, &compact, &header, &jwk, &error)
+            : lonejson_jwt_validate_signature(&compact, &header, &jwk, &error);
   }
   if (owned_runtime != NULL) {
     lonejson_free(owned_runtime);

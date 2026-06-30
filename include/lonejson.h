@@ -6173,23 +6173,6 @@ lonejson_status lonejson_base64_decode_sink(const char *data, size_t len,
                                             lonejson_base64_variant variant,
                                             lonejson_sink_fn sink, void *user,
                                             lonejson_error *error);
-/** Computes the decoded byte length of one unpadded base64url segment.
- *
- * Compatibility wrapper for `lonejson_base64_decoded_len()` with
- * `LONEJSON_BASE64_URL_RAW`.
- */
-lonejson_status lonejson_base64url_decoded_len(const char *data, size_t len,
-                                               size_t *out_len,
-                                               lonejson_error *error);
-/** Decodes one unpadded base64url segment into caller-provided storage.
- *
- * Compatibility wrapper for `lonejson_base64_decode()` with
- * `LONEJSON_BASE64_URL_RAW`.
- */
-lonejson_status lonejson_base64url_decode(const char *data, size_t len,
-                                          unsigned char *out, size_t capacity,
-                                          size_t *needed,
-                                          lonejson_error *error);
 
 #ifdef LONEJSON_WITH_JWT
 /** Installs or clears the runtime auth provider. */
@@ -9235,17 +9218,6 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_base64_decode_sink(const char *data, size_t len, lj_base64_variant variant,
                       lj_sink_fn sink, void *user, lj_error *error) {
   return lonejson_base64_decode_sink(data, len, variant, sink, user, error);
-}
-/** Computes the decoded byte length of one unpadded base64url segment. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_base64url_decoded_len(
-    const char *data, size_t len, size_t *out_len, lj_error *error) {
-  return lonejson_base64url_decoded_len(data, len, out_len, error);
-}
-/** Decodes one unpadded base64url segment into caller-provided storage. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_base64url_decode(const char *data, size_t len, unsigned char *out,
-                    size_t capacity, size_t *needed, lj_error *error) {
-  return lonejson_base64url_decode(data, len, out, capacity, needed, error);
 }
 #ifdef LONEJSON_WITH_JWT
 /** Installs or clears the runtime auth provider. */
