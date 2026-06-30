@@ -211,6 +211,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	compose-logs \
 	curl-examples \
 	test-curl-e2e \
+	test-oidc-e2e \
 	clean \
 	clean-dist
 
@@ -283,11 +284,12 @@ help:
 		'make dev-down               Alias for make compose-down.' \
 		'make dev-reset              Stop the local compose stack and remove generated local service state.' \
 		'make dev-logs               Alias for make compose-logs.' \
-		'make compose-up             Start the local nginx + sink HTTP/HTTPS test rig.' \
+		'make compose-up             Start the local nginx, sink, API fixture, and OIDC/OAuth2 test rig.' \
 		'make compose-down           Stop and remove the local compose stack.' \
 		'make compose-logs           Tail logs from the local compose stack.' \
 		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
 		'make test-curl-e2e          Build and run the curl examples against the local HTTPS rig.' \
+		'make test-oidc-e2e          Build and run OIDC/OAuth2/JWKS e2e against the local compose rig.' \
 		'make release-source-artifact Build the source-only release tarball in dist/.' \
 		'make clean                  Remove build/, dist/, .deps/, examples/bin/, and generated Lua module artifacts.' \
 		'make clean-dist             Remove dist/ release artifacts only.'
@@ -751,7 +753,7 @@ compose-up:
 	$(MAKE) certs
 	./scripts/ensure_large_fixtures.sh "$(LUA)" "./scripts/generate_large_fixtures.lua" "$(GENERATED_FIXTURE_DIR)"
 	$(LUA) ./scripts/generate_large_fixtures.lua ./docker/nginx/generated/variants
-	$(COMPOSE) -f docker-compose.yml up -d --build
+	$(COMPOSE) -f docker-compose.yml up -d --build --force-recreate
 
 compose-down:
 	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
@@ -766,6 +768,11 @@ curl-examples: deps-host
 
 test-curl-e2e: curl-examples
 	./scripts/test_curl_e2e.sh
+
+test-oidc-e2e: compose-up deps-host
+	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
+	cmake --build --preset host-curl --target lonejson_oidc_fixture_server
+	./scripts/test_oidc_e2e.sh
 
 clean:
 	./scripts/clean.sh

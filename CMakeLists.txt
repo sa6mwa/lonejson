@@ -445,6 +445,24 @@ if(LONEJSON_BUILD_TESTS)
   add_test(NAME lonejson_tests COMMAND lonejson_tests)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_tests)
 
+  if(LONEJSON_BUILD_WITH_CURL AND LONEJSON_BUILD_WITH_OPENSSL AND
+      LONEJSON_BUILD_WITH_JWT AND LONEJSON_BUILD_WITH_OIDC)
+    add_executable(lonejson_oidc_fixture_server
+      tests/oidc_fixture_server.c)
+    target_include_directories(lonejson_oidc_fixture_server PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+    target_compile_definitions(lonejson_oidc_fixture_server PRIVATE
+      LONEJSON_WITH_CURL
+      LONEJSON_WITH_OPENSSL
+      LONEJSON_WITH_JWT
+      LONEJSON_WITH_OIDC)
+    target_link_libraries(lonejson_oidc_fixture_server PRIVATE
+      lonejson
+      CURL::libcurl
+      OpenSSL::Crypto)
+    lonejson_configure_c_target(lonejson_oidc_fixture_server)
+  endif()
+
   add_executable(lonejson_map_cache_no_tls_tests
     tests/test_map_cache_no_tls.c)
   target_include_directories(lonejson_map_cache_no_tls_tests PRIVATE
@@ -1192,6 +1210,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_json_value_sources.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_jwt.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_main.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/oidc_fixture_server.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_parse_serialize.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_protocol_framing.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_support.inc.h"

@@ -1,0 +1,33 @@
+{
+  "interactiveLogin": false,
+  "rotateRefreshToken": true,
+  "tokenCallbacks": [
+    {
+      "issuerId": "default",
+      "requestMappings": [
+        {
+          "requestParam": "grant_type",
+          "match": "client_credentials",
+          "claims": {
+            "sub": "${client_id}",
+            "aud": [
+              "lonejson-api"
+            ],
+            "scope": "openid profile"
+          }
+        },
+        {
+          "requestParam": "grant_type",
+          "match": "refresh_token",
+          "claims": {
+            "sub": "${client_id}",
+            "aud": [
+              "lonejson-api"
+            ],
+            "scope": "openid profile"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -206,6 +206,16 @@ cache-refresh scheduler. Those should start as examples or application helpers
 because putting `curl_easy_*` calls directly in `liblonejson.so` would change
 the current binary dependency boundary.
 
+The local Docker/nerdctl development rig includes a mock OIDC/OAuth2 provider
+and API fixture. `make test-oidc-e2e` starts the compose stack, obtains a token
+from the mock provider using `curl` rather than lonejson, starts the
+lonejson-backed fixture server, and verifies discovery, JWKS refresh, bearer
+rejection, and bearer acceptance against the live endpoints. Compose commands
+prefer `nerdctl compose` and fall back to `docker compose`. The mock provider
+does not issue refresh tokens for the client-credentials flow, so this e2e
+checks refresh-token exchange only when a provider returns one; refresh request
+construction remains covered by the auth unit tests.
+
 Short aliases are enabled by default. Disable them if they collide with another
 project:
 

@@ -1,4 +1,34 @@
 services:
+  oauth2:
+    image: ghcr.io/navikt/mock-oauth2-server:5.0.1
+    environment:
+      JSON_CONFIG_PATH: /config/config.json
+    volumes:
+      - ./docker/oauth2/config.json:/config/config.json:ro
+    ports:
+      - "8090:8080"
+
+  oauth2-tls:
+    image: python:3.12-alpine
+    working_dir: /app
+    depends_on:
+      - oauth2
+    volumes:
+      - ./docker/oauth2-tls:/app:ro
+      - ./docker/nginx/certs:/certs:ro
+    command: ["python", "app.py"]
+    ports:
+      - "18443:9443"
+
+  api-fixture:
+    image: python:3.12-alpine
+    working_dir: /app
+    volumes:
+      - ./docker/api-fixture:/app:ro
+    command: ["python", "app.py"]
+    ports:
+      - "18080:9001"
+
   sink:
     image: python:3.12-alpine
     working_dir: /app
