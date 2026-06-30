@@ -36,6 +36,7 @@ int main(void) {
   test_oidc_jwks_cache_update_and_select();
   test_oidc_jwks_cache_failure_modes();
   test_oidc_jwks_cache_curl_adapter();
+  test_oidc_http_provider_helpers();
   test_oauth2_client_credentials_body();
   test_oauth2_token_response_parse();
   test_oauth2_token_response_failures();

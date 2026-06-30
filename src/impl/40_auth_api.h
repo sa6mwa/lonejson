@@ -85,6 +85,7 @@ LONEJSON_MAP_DEFINE(lonejson__oauth2_token_response_map,
 #define LONEJSON__JWT_DEFAULT_MAX_HEADER_BYTES (16u * 1024u)
 #define LONEJSON__JWT_DEFAULT_MAX_CLAIMS_BYTES (256u * 1024u)
 #define LONEJSON__JWT_MAX_RSA_COMPONENT_BYTES (8u * 1024u)
+#define LONEJSON__OIDC_DEFAULT_MAX_DISCOVERY_BYTES (256u * 1024u)
 #define LONEJSON__OIDC_DEFAULT_MAX_JWKS_BYTES (1024u * 1024u)
 #define LONEJSON__OAUTH2_DEFAULT_MAX_FORM_BODY_BYTES (64u * 1024u)
 #define LONEJSON__OAUTH2_DEFAULT_MAX_TOKEN_RESPONSE_BYTES (1024u * 1024u)
@@ -93,6 +94,106 @@ LONEJSON_MAP_DEFINE(lonejson__oauth2_token_response_map,
 #define LONEJSON__OIDC_PKCE_DEFAULT_VERIFIER_BYTES 32u
 #define LONEJSON__OIDC_PKCE_MIN_VERIFIER_CHARS 43u
 #define LONEJSON__OIDC_PKCE_MAX_VERIFIER_CHARS 128u
+
+#ifdef LONEJSON_WITH_OIDC
+void lonejson_http_response_init(lonejson_http_response *response) {
+  if (response != NULL) {
+    memset(response, 0, sizeof(*response));
+    lonejson_owned_buffer_init(&response->body);
+  }
+}
+
+void lonejson_http_response_cleanup(lonejson_http_response *response) {
+  if (response == NULL) {
+    return;
+  }
+  lonejson__owned_free(response->content_type);
+  lonejson_owned_buffer_free(&response->body);
+  lonejson_http_response_init(response);
+}
+
+lonejson_status lonejson_http_provider_init(
+    lonejson_http_provider *provider,
+    const lonejson_http_provider_config *config, lonejson_error *error) {
+  lonejson__clear_error(error);
+  if (provider == NULL || config == NULL || config->request == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "HTTP provider config and request callback "
+                                   "are required");
+  }
+  memset(provider, 0, sizeof(*provider));
+  provider->user_data = config->user_data;
+  provider->user_agent = config->user_agent;
+  provider->request = config->request;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__http_request_validate(
+    const lonejson_http_request *request, lonejson_error *error) {
+  if (request == NULL || request->method == NULL || request->url == NULL ||
+      request->method[0] == '\0' || request->url[0] == '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "HTTP method and URL are required");
+  }
+  if (request->body == NULL && request->body_len != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "HTTP request body is required");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__http_provider_request(
+    lonejson *runtime, const lonejson_http_request *request,
+    lonejson_http_response *response, lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  lonejson_http_request local_request;
+  lonejson_status status;
+
+  if (response == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "HTTP response output is required");
+  }
+  lonejson_http_response_cleanup(response);
+  status = lonejson__http_request_validate(request, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (!runtime_state->has_http_provider ||
+      runtime_state->http_provider.request == NULL) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "runtime HTTP provider is not configured");
+  }
+  local_request = *request;
+  if (local_request.user_agent == NULL) {
+    local_request.user_agent = runtime_state->http_provider.user_agent;
+  }
+  status = runtime_state->http_provider.request(
+      runtime_state->http_provider.user_data, &local_request, response, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
+}
+
+static lonejson_status
+lonejson__http_require_success(const lonejson_http_response *response,
+                               const char *what, lonejson_error *error) {
+  if (response == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "HTTP response is required");
+  }
+  if (response->status_code < 200 || response->status_code >= 300) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "%s returned HTTP status %ld", what,
+                               response->status_code);
+  }
+  return LONEJSON_STATUS_OK;
+}
+#endif
 
 typedef enum lonejson__jwt_claim_field {
   LONEJSON__JWT_FIELD_NONE = 0,
@@ -755,6 +856,55 @@ lonejson_status lonejson_oidc_discovery_validate_issuer(
   return LONEJSON_STATUS_OK;
 }
 
+lonejson_status lonejson_oidc_fetch_discovery(lonejson *runtime,
+                                              const char *issuer,
+                                              size_t max_response_bytes,
+                                              lonejson_oidc_discovery *out,
+                                              lonejson_error *error) {
+  lonejson_owned_buffer url;
+  lonejson_http_request request;
+  lonejson_http_response response;
+  size_t max_bytes;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OIDC discovery output is required");
+  }
+  max_bytes = max_response_bytes == 0u
+                  ? LONEJSON__OIDC_DEFAULT_MAX_DISCOVERY_BYTES
+                  : max_response_bytes;
+  lonejson_owned_buffer_init(&url);
+  lonejson_http_response_init(&response);
+  status = lonejson_oidc_discovery_url(issuer, &url, error);
+  if (status == LONEJSON_STATUS_OK) {
+    memset(&request, 0, sizeof(request));
+    request.method = "GET";
+    request.url = url.data;
+    request.max_response_bytes = max_bytes;
+    status = lonejson__http_provider_request(runtime, &request, &response,
+                                             error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__http_require_success(&response, "OIDC discovery",
+                                            error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_oidc_discovery_parse_json(
+        runtime, response.body.data, response.body.len, out, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_oidc_discovery_validate_issuer(out, issuer, error);
+    if (status != LONEJSON_STATUS_OK) {
+      lonejson_oidc_discovery_cleanup(out);
+    }
+  }
+  lonejson_http_response_cleanup(&response);
+  lonejson_owned_buffer_free(&url);
+  return status;
+}
+
 static lonejson_status lonejson__oidc_jwks_cache_validate_policy(
     const lonejson_oidc_jwks_cache_policy *policy, lonejson_error *error) {
   lonejson_int64 max_i64 = (lonejson_int64)(LONEJSON_UINT64_MAX >> 1);
@@ -1224,6 +1374,58 @@ lonejson_status lonejson_oauth2_token_response_parse_json(
   return LONEJSON_STATUS_OK;
 }
 
+lonejson_status lonejson_oauth2_client_credentials_request(
+    lonejson *runtime, const char *token_endpoint,
+    const lonejson_oauth2_client_credentials *request_options,
+    size_t max_response_bytes, lonejson_oauth2_token_response *out,
+    lonejson_error *error) {
+  lonejson_owned_buffer body;
+  lonejson_http_request request;
+  lonejson_http_response response;
+  size_t max_bytes;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OAuth2 token response output is required");
+  }
+  status = lonejson__oidc_require_https_url(token_endpoint, "token_endpoint", 1,
+                                            error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  max_bytes = max_response_bytes == 0u
+                  ? LONEJSON__OAUTH2_DEFAULT_MAX_TOKEN_RESPONSE_BYTES
+                  : max_response_bytes;
+  lonejson_owned_buffer_init(&body);
+  lonejson_http_response_init(&response);
+  status = lonejson_oauth2_client_credentials_body(request_options, &body,
+                                                   error);
+  if (status == LONEJSON_STATUS_OK) {
+    memset(&request, 0, sizeof(request));
+    request.method = "POST";
+    request.url = token_endpoint;
+    request.content_type = "application/x-www-form-urlencoded";
+    request.body = body.data;
+    request.body_len = body.len;
+    request.max_response_bytes = max_bytes;
+    status = lonejson__http_provider_request(runtime, &request, &response,
+                                             error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__http_require_success(&response, "OAuth2 token endpoint",
+                                            error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_oauth2_token_response_parse_json(
+        runtime, response.body.data, response.body.len, max_bytes, out, error);
+  }
+  lonejson_http_response_cleanup(&response);
+  lonejson_owned_buffer_free(&body);
+  return status;
+}
+
 static lonejson_status lonejson__oidc_authorization_append_pair(
     lonejson_owned_buffer *out, const char *key, const char *value,
     int *has_pair, size_t max_bytes, lonejson_error *error) {
@@ -1559,6 +1761,39 @@ lonejson_status lonejson_oidc_jwks_cache_update_json(
   cache->has_jwks = 1;
   cache->jwks = next_jwks;
   return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_oidc_jwks_cache_refresh(
+    lonejson *runtime, lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy, lonejson_error *error) {
+  lonejson_http_request request;
+  lonejson_http_response response;
+  size_t max_bytes;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  status = lonejson__oidc_jwks_cache_validate_policy(policy, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  max_bytes = policy->max_jwks_bytes == 0u
+                  ? LONEJSON__OIDC_DEFAULT_MAX_JWKS_BYTES
+                  : policy->max_jwks_bytes;
+  lonejson_http_response_init(&response);
+  memset(&request, 0, sizeof(request));
+  request.method = "GET";
+  request.url = policy->jwks_uri;
+  request.max_response_bytes = max_bytes;
+  status = lonejson__http_provider_request(runtime, &request, &response, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__http_require_success(&response, "OIDC JWKS", error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_oidc_jwks_cache_update_json(
+        runtime, cache, policy, response.body.data, response.body.len, error);
+  }
+  lonejson_http_response_cleanup(&response);
+  return status;
 }
 
 int lonejson_oidc_jwks_cache_is_fresh(

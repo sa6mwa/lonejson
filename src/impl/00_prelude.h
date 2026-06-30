@@ -390,6 +390,10 @@ struct lonejson_runtime {
   lonejson_auth_provider auth_provider;
   int has_auth_provider;
 #endif
+#ifdef LONEJSON_WITH_OIDC
+  lonejson_http_provider http_provider;
+  int has_http_provider;
+#endif
 };
 
 struct lonejson__runtime_handle {

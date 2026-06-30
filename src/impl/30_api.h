@@ -89,6 +89,9 @@ lonejson_config lonejson_default_config(void) {
 #ifdef LONEJSON_WITH_JWT
   config.auth_provider = NULL;
 #endif
+#ifdef LONEJSON_WITH_OIDC
+  config.http_provider = NULL;
+#endif
   config._config_cookie = LONEJSON__CONFIG_COOKIE;
   return config;
 }
@@ -525,6 +528,10 @@ static lonejson_status lonejson__runtime_snapshot_init(
   snapshot->auth_provider = runtime->auth_provider;
   snapshot->has_auth_provider = runtime->has_auth_provider;
 #endif
+#ifdef LONEJSON_WITH_OIDC
+  snapshot->http_provider = runtime->http_provider;
+  snapshot->has_http_provider = runtime->has_http_provider;
+#endif
   snapshot->config.allocator = &snapshot->allocator_storage;
   snapshot->parse_options = runtime->parse_options;
   snapshot->value_limits = runtime->value_limits;
@@ -673,6 +680,14 @@ static void lonejson__runtime_apply_config(lonejson_runtime *runtime) {
     runtime->auth_provider = *runtime->config.auth_provider;
   } else {
     memset(&runtime->auth_provider, 0, sizeof(runtime->auth_provider));
+  }
+#endif
+#ifdef LONEJSON_WITH_OIDC
+  runtime->has_http_provider = runtime->config.http_provider != NULL;
+  if (runtime->has_http_provider) {
+    runtime->http_provider = *runtime->config.http_provider;
+  } else {
+    memset(&runtime->http_provider, 0, sizeof(runtime->http_provider));
   }
 #endif
 }
@@ -910,6 +925,12 @@ lonejson__runtime_set_auth_provider(lonejson *runtime,
                                     const lonejson_auth_provider *provider,
                                     lonejson_error *error);
 #endif
+#ifdef LONEJSON_WITH_OIDC
+static lonejson_status
+lonejson__runtime_set_http_provider(lonejson *runtime,
+                                    const lonejson_http_provider *provider,
+                                    lonejson_error *error);
+#endif
 #ifdef LONEJSON_WITH_CURL
 static lonejson_status
 lonejson__runtime_curl_parse_init(lonejson *runtime, lonejson_curl_parse *ctx,
@@ -1120,6 +1141,9 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
 #ifdef LONEJSON_WITH_JWT
   runtime->set_auth_provider = lonejson__runtime_set_auth_provider;
 #endif
+#ifdef LONEJSON_WITH_OIDC
+  runtime->set_http_provider = lonejson__runtime_set_http_provider;
+#endif
 #ifdef LONEJSON_WITH_CURL
   runtime->curl_parse_init = lonejson__runtime_curl_parse_init;
   runtime->curl_array_parse_init = lonejson__runtime_curl_array_parse_init;
@@ -1221,6 +1245,42 @@ lonejson_set_auth_provider(lonejson *runtime,
     memset(&runtime_state->auth_provider, 0,
            sizeof(runtime_state->auth_provider));
     runtime_state->has_auth_provider = 0;
+  }
+  return LONEJSON_STATUS_OK;
+}
+#endif
+
+#ifdef LONEJSON_WITH_OIDC
+static lonejson_status
+lonejson__runtime_set_http_provider(lonejson *runtime,
+                                    const lonejson_http_provider *provider,
+                                    lonejson_error *error) {
+  return lonejson_set_http_provider(runtime, provider, error);
+}
+
+lonejson_status
+lonejson_set_http_provider(lonejson *runtime,
+                           const lonejson_http_provider *provider,
+                           lonejson_error *error) {
+  lonejson_runtime *runtime_state;
+
+  lonejson__clear_error(error);
+  runtime_state = lonejson__runtime_mut(runtime);
+  if (runtime_state == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "runtime is required");
+  }
+  if (provider != NULL && provider->request == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "HTTP provider request method is required");
+  }
+  if (provider != NULL) {
+    runtime_state->http_provider = *provider;
+    runtime_state->has_http_provider = 1;
+  } else {
+    memset(&runtime_state->http_provider, 0,
+           sizeof(runtime_state->http_provider));
+    runtime_state->has_http_provider = 0;
   }
   return LONEJSON_STATUS_OK;
 }

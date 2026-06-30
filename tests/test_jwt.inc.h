@@ -1070,6 +1070,177 @@ static void test_oidc_jwks_cache_curl_adapter(void) {
 #endif
 }
 
+typedef struct test_oidc_http_provider_state {
+  int fail_callback;
+  int requests;
+} test_oidc_http_provider_state;
+
+static lonejson_status test_oidc_http_provider_respond(
+    lonejson_http_response *response, const char *body, size_t max_bytes,
+    lonejson_error *error) {
+  size_t len = strlen(body);
+  lonejson_http_response_cleanup(response);
+  if (max_bytes != 0u && len > max_bytes) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "test response exceeds configured limit");
+  }
+  response->status_code = 200;
+  return lonejson_owned_buffer_sink(&response->body, body, len, error);
+}
+
+static lonejson_status test_oidc_http_provider_request(
+    void *user_data, const lonejson_http_request *request,
+    lonejson_http_response *response, lonejson_error *error) {
+  static const char discovery_json[] =
+      "{\"issuer\":\"https://issuer.example\","
+      "\"authorization_endpoint\":\"https://issuer.example/auth\","
+      "\"token_endpoint\":\"https://issuer.example/token\","
+      "\"jwks_uri\":\"https://issuer.example/jwks\"}";
+  static const char token_json[] =
+      "{\"access_token\":\"abc.def.sig\",\"token_type\":\"Bearer\","
+      "\"expires_in\":60}";
+  test_oidc_http_provider_state *state =
+      (test_oidc_http_provider_state *)user_data;
+
+  EXPECT(state != NULL);
+  EXPECT(request != NULL);
+  EXPECT(response != NULL);
+  ++state->requests;
+  if (state->fail_callback) {
+    return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
+                               0u, "test HTTP provider failed");
+  }
+  if (strcmp(request->url,
+             "https://issuer.example/.well-known/openid-configuration") == 0) {
+    EXPECT(strcmp(request->method, "GET") == 0);
+    EXPECT(request->user_agent != NULL);
+    EXPECT(strcmp(request->user_agent, "lonejson-test/1") == 0);
+    EXPECT(request->body == NULL);
+    EXPECT(request->body_len == 0u);
+    return test_oidc_http_provider_respond(
+        response, discovery_json, request->max_response_bytes, error);
+  }
+  if (strcmp(request->url, "https://issuer.example/jwks") == 0) {
+    EXPECT(strcmp(request->method, "GET") == 0);
+    EXPECT(request->user_agent != NULL);
+    EXPECT(strcmp(request->user_agent, "lonejson-test/1") == 0);
+    EXPECT(request->body == NULL);
+    EXPECT(request->body_len == 0u);
+    return test_oidc_http_provider_respond(
+        response, test_jwt_rs256_jwks_json, request->max_response_bytes, error);
+  }
+  if (strcmp(request->url, "https://issuer.example/token") == 0) {
+    EXPECT(strcmp(request->method, "POST") == 0);
+    EXPECT(request->user_agent != NULL);
+    EXPECT(strcmp(request->user_agent, "lonejson-test/1") == 0);
+    EXPECT(request->content_type != NULL);
+    EXPECT(strcmp(request->content_type,
+                  "application/x-www-form-urlencoded") == 0);
+    EXPECT(request->body != NULL);
+    EXPECT(request->body_len != 0u);
+    EXPECT(strstr((const char *)request->body,
+                  "grant_type=client_credentials") != NULL);
+    EXPECT(strstr((const char *)request->body, "client_id=client") != NULL);
+    EXPECT(strstr((const char *)request->body, "client_secret=secret") != NULL);
+    return test_oidc_http_provider_respond(
+        response, token_json, request->max_response_bytes, error);
+  }
+  lonejson_http_response_cleanup(response);
+  response->status_code = 404;
+  return lonejson_owned_buffer_sink(&response->body, "not found", 9u, error);
+}
+
+static void test_oidc_http_provider_helpers(void) {
+  lonejson *runtime;
+  lonejson_error error;
+  lonejson_http_provider provider;
+  lonejson_http_provider_config provider_config;
+  test_oidc_http_provider_state state;
+  lonejson_oidc_discovery discovery;
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_policy policy;
+  lonejson_oauth2_client_credentials token_request;
+  lonejson_oauth2_token_response token_response;
+
+  lonejson_error_init(&error);
+  memset(&provider, 0, sizeof(provider));
+  memset(&provider_config, 0, sizeof(provider_config));
+  memset(&state, 0, sizeof(state));
+  runtime = lonejson_new(NULL, &error);
+  EXPECT(runtime != NULL);
+
+  EXPECT(lonejson_set_http_provider(runtime, &provider, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_oidc_fetch_discovery(runtime, "https://issuer.example",
+                                       4096u, &discovery, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+
+  provider_config.user_data = &state;
+  provider_config.user_agent = "lonejson-test/1";
+  provider_config.request = test_oidc_http_provider_request;
+  EXPECT(lonejson_http_provider_init(&provider, &provider_config, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(provider.user_data == &state);
+  EXPECT(provider.user_agent == provider_config.user_agent);
+  EXPECT(provider.request == test_oidc_http_provider_request);
+  EXPECT(runtime->set_http_provider(runtime, &provider, &error) ==
+         LONEJSON_STATUS_OK);
+
+  lonejson_oidc_discovery_init(&discovery);
+  EXPECT(lonejson_oidc_fetch_discovery(runtime, "https://issuer.example",
+                                       4096u, &discovery, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(discovery.issuer, "https://issuer.example") == 0);
+  EXPECT(strcmp(discovery.jwks_uri, "https://issuer.example/jwks") == 0);
+  lonejson_oidc_discovery_cleanup(&discovery);
+
+  lonejson_oidc_jwks_cache_init(&cache);
+  policy = test_oidc_jwks_cache_policy();
+  policy.issuer = "https://issuer.example";
+  policy.jwks_uri = "https://issuer.example/jwks";
+  EXPECT(lonejson_oidc_jwks_cache_refresh(runtime, &cache, &policy, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_oidc_jwks_cache_is_fresh(&cache, &policy));
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+
+  memset(&token_request, 0, sizeof(token_request));
+  token_request.client_id = "client";
+  token_request.client_secret = "secret";
+  lonejson_oauth2_token_response_init(&token_response);
+  EXPECT(lonejson_oauth2_client_credentials_request(
+             runtime, "https://issuer.example/token", &token_request, 4096u,
+             &token_response, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(token_response.access_token, "abc.def.sig") == 0);
+  EXPECT(token_response.has_expires_in);
+  EXPECT(token_response.expires_in == 60);
+  lonejson_oauth2_token_response_cleanup(&token_response);
+
+  EXPECT(lonejson_oauth2_client_credentials_request(
+             runtime, "https://issuer.example/token", &token_request, 8u,
+             &token_response, &error) == LONEJSON_STATUS_OVERFLOW);
+  EXPECT(state.requests >= 4);
+
+  state.fail_callback = 1;
+  EXPECT(lonejson_oidc_fetch_discovery(runtime, "https://issuer.example",
+                                       4096u, &discovery, &error) ==
+         LONEJSON_STATUS_CALLBACK_FAILED);
+  state.fail_callback = 0;
+
+  EXPECT(lonejson_set_http_provider(runtime, NULL, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_oidc_fetch_discovery(runtime, "https://issuer.example",
+                                       4096u, &discovery, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+
+  EXPECT(lonejson_http_provider_init(&provider, NULL, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  provider_config.request = NULL;
+  EXPECT(lonejson_http_provider_init(&provider, &provider_config, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  lonejson_free(runtime);
+}
+
 static void test_oauth2_client_credentials_body(void) {
   lonejson_oauth2_client_credentials request;
   lonejson_owned_buffer out;
@@ -1512,6 +1683,7 @@ static void test_oidc_discovery_failures(void) {}
 static void test_oidc_jwks_cache_update_and_select(void) {}
 static void test_oidc_jwks_cache_failure_modes(void) {}
 static void test_oidc_jwks_cache_curl_adapter(void) {}
+static void test_oidc_http_provider_helpers(void) {}
 static void test_oauth2_client_credentials_body(void) {}
 static void test_oauth2_token_response_parse(void) {}
 static void test_oauth2_token_response_failures(void) {}
@@ -1542,6 +1714,7 @@ static void test_oidc_discovery_failures(void) {}
 static void test_oidc_jwks_cache_update_and_select(void) {}
 static void test_oidc_jwks_cache_failure_modes(void) {}
 static void test_oidc_jwks_cache_curl_adapter(void) {}
+static void test_oidc_http_provider_helpers(void) {}
 static void test_oauth2_client_credentials_body(void) {}
 static void test_oauth2_token_response_parse(void) {}
 static void test_oauth2_token_response_failures(void) {}

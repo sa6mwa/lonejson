@@ -315,6 +315,7 @@ Implemented public APIs:
 - `lonejson_oidc_discovery_url`
 - `lonejson_oidc_discovery_parse_json`
 - `lonejson_oidc_discovery_validate_issuer`
+- `lonejson_oidc_fetch_discovery`
 - short aliases `lj_oidc_discovery_*`
 
 Implemented discovery fields:
@@ -331,10 +332,26 @@ Path-based issuers follow OpenID Connect discovery placement:
 https://host/path -> https://host/.well-known/openid-configuration/path
 ```
 
-Discovery parsing validates required metadata shape and HTTPS URL fields. It
-does not fetch discovery, fetch JWKS, validate tokens, or establish issuer
-trust. The caller must pass parsed discovery metadata to
-`lonejson_oidc_discovery_validate_issuer` before use.
+Discovery parsing validates required metadata shape and HTTPS URL fields.
+`lonejson_oidc_fetch_discovery` composes discovery URL construction, the
+runtime HTTP provider, HTTP 2xx checking, bounded JSON parsing, and issuer
+validation. The helper establishes metadata integrity for the expected issuer;
+it does not fetch JWKS or validate tokens.
+
+The runtime HTTP provider is installed with `lonejson_set_http_provider` or the
+runtime `set_http_provider` method. Providers receive a bounded
+`lonejson_http_request` and fill a materialized `lonejson_http_response`.
+`lonejson_http_provider_init` initializes a provider from caller-owned callback
+config:
+
+- `user_data`,
+- `user_agent`,
+- `request` callback.
+
+The helper layer copies the provider's `user_agent` into each request unless a
+request already has one. Core lonejson does not embed curl, OpenSSL transport,
+event-loop, proxy, retry, TLS, or telemetry policy in the shared library;
+applications provide that behavior through the provider callback.
 
 ## OIDC JWKS Cache
 
@@ -343,6 +360,7 @@ Implemented public APIs:
 - `lonejson_oidc_jwks_cache_init`
 - `lonejson_oidc_jwks_cache_cleanup`
 - `lonejson_oidc_jwks_cache_update_json`
+- `lonejson_oidc_jwks_cache_refresh`
 - `lonejson_oidc_jwks_cache_is_fresh`
 - `lonejson_oidc_jwks_cache_select`
 - `lonejson_oidc_jwks_cache_parse_init`
@@ -375,17 +393,20 @@ Cache selection:
 - requires the cache to be unexpired at `policy->now`,
 - selects a JWK using the normal JWK selection filters.
 
-The cache never performs network I/O. Callers may fetch bytes through their own
-HTTP code and call `lonejson_oidc_jwks_cache_update_json`, or use
-`lonejson_oidc_jwks_cache_parse_*` as a curl write-callback adapter. Retry,
-timeouts, TLS policy, proxy policy, and event-loop integration remain
-caller-owned.
+`lonejson_oidc_jwks_cache_refresh` performs a provider-backed GET of
+`policy->jwks_uri`, requires HTTP 2xx, then installs the bounded JWKS JSON with
+`lonejson_oidc_jwks_cache_update_json`. Callers may still fetch bytes through
+their own HTTP code and call `lonejson_oidc_jwks_cache_update_json`, or use the
+lower-level `lonejson_oidc_jwks_cache_parse_*` curl write-callback adapter.
+Retry, TLS policy, proxy policy, and event-loop integration remain provider or
+application policy.
 
 ## OAuth2 Client Credentials
 
 Implemented public APIs:
 
 - `lonejson_oauth2_client_credentials_body`
+- `lonejson_oauth2_client_credentials_request`
 - `lonejson_oauth2_token_response_init`
 - `lonejson_oauth2_token_response_cleanup`
 - `lonejson_oauth2_token_response_parse_json`
@@ -415,6 +436,10 @@ Then it appends configured fields with form encoding and enforces
 
 `lonejson_oauth2_token_response_parse_json` parses a bounded successful token
 endpoint response.
+
+`lonejson_oauth2_client_credentials_request` composes form-body construction,
+a provider-backed HTTPS POST, HTTP 2xx checking, and bounded token response
+parsing.
 
 Implemented response fields:
 
