@@ -148,6 +148,9 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"jwk_parse_json", ljlua_jwk_parse_json},
     {"jwks_parse_json", ljlua_jwks_parse_json},
     {"jwks_select_json", ljlua_jwks_select_json},
+#ifdef LONEJSON_WITH_OPENSSL
+    {"set_openssl_auth_provider", ljlua_set_openssl_auth_provider},
+#endif
 #ifdef LONEJSON_WITH_OIDC
     {"set_http_provider", ljlua_set_http_provider},
     {"oauth2_client_credentials_body", ljlua_oauth2_client_credentials_body},

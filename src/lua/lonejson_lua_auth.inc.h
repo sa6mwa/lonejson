@@ -328,6 +328,27 @@ static lonejson *ljlua_auth_runtime_arg(lua_State *L, int *arg,
   return ljlua_ensure_visit_runtime(L, runtime, owned_runtime, error);
 }
 
+#if defined(LONEJSON_WITH_OPENSSL)
+static int ljlua_set_openssl_auth_provider(lua_State *L) {
+  ljlua_runtime_ud *ud = ljlua_check_runtime(L, 1);
+  lonejson_error error;
+  lonejson_status status;
+
+  lonejson_error_init(&error);
+  status = lonejson_auth_provider_init_openssl(&ud->auth_provider, NULL,
+                                               &error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_set_auth_provider(ud->runtime, &ud->auth_provider,
+                                        &error);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushboolean(L, 1);
+  return 1;
+}
+#endif
+
 #ifdef LONEJSON_WITH_OIDC
 static char *ljlua_auth_strdup(const char *value) {
   size_t len;
@@ -1418,7 +1439,11 @@ static int ljlua_jwt_validate_compact_signature(lua_State *L) {
         lonejson_jwk_parse_json(runtime, jwk_json, jwk_len, &jwk, &error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson_jwt_validate_signature(&compact, &header, &jwk, &error);
+    status = owned_runtime == NULL
+                 ? lonejson_jwt_validate_signature_with_runtime(
+                       runtime, &compact, &header, &jwk, &error)
+                 : lonejson_jwt_validate_signature(&compact, &header, &jwk,
+                                                   &error);
   }
   if (owned_runtime != NULL) {
     lonejson_free(owned_runtime);

@@ -57,6 +57,12 @@ The provider vtable is receiver-style and narrow: verify one JWS, produce
 random bytes, and compute SHA-256. Downstream projects that already own
 OpenSSL can use the OpenSSL initializer. Projects using another crypto stack can
 provide equivalent callbacks without exposing that stack through `lonejson.h`.
+Runtime userdata also exposes method pointers for runtime-backed auth helpers,
+including JWT decode/signature verification, JWK/JWKS parsing, OIDC discovery
+fetch/parse, JWKS cache update/refresh, OAuth2 token response parsing and
+provider-backed token exchanges, and bearer-token validation. These method
+pointers are wired to the same implementation as the free functions; there is
+no separate runtime code path.
 
 OpenSSL-enabled builds link OpenSSL Crypto only for the optional OpenSSL auth
 adapter. The dependency is private to the implementation from the public ABI
@@ -631,6 +637,7 @@ JWT/JWK/JWKS Lua facade:
 - `jwk_parse_json`
 - `jwks_parse_json`
 - `jwks_select_json`
+- `set_openssl_auth_provider` on runtime userdata when compiled with OpenSSL
 
 OIDC/OAuth2 Lua facade:
 
@@ -654,10 +661,14 @@ OIDC/OAuth2 Lua facade:
 
 The functions are registered both on the module table and runtime userdata
 where applicable. Provider-backed helpers are runtime-only because they require
-the runtime's installed HTTP provider. Lua runtimes install that provider with
-`runtime:set_http_provider(callback, user_agent)`. The callback receives a
-bounded request table containing `method`, `url`, optional `content_type`,
-optional `user_agent`, optional `body`, `body_len`, and
+the runtime's installed provider. Lua runtimes install the built-in OpenSSL auth
+provider with `runtime:set_openssl_auth_provider()` when the OpenSSL adapter is
+compiled. Runtime-form `runtime:jwt_validate_compact_signature(...)` uses that
+runtime auth provider; module-form `lonejson.jwt_validate_compact_signature`
+keeps the compatibility free-function behavior. Lua runtimes install the HTTP
+provider with `runtime:set_http_provider(callback, user_agent)`. The callback
+receives a bounded request table containing `method`, `url`, optional
+`content_type`, optional `user_agent`, optional `body`, `body_len`, and
 `max_response_bytes`, and returns a response table with `status_code` and
 optional `body`. The Lua binding does not implement HTTP transfer itself; the
 callback is the caller-owned transport boundary while C still performs URL/body

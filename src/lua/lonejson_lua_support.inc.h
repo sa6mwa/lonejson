@@ -76,6 +76,9 @@ typedef struct ljlua_runtime_ud {
   int write_pretty;
   size_t write_max_output_bytes;
   int fixed_string_scratch_ref;
+#if defined(LONEJSON_WITH_JWT) && defined(LONEJSON_WITH_OPENSSL)
+  lonejson_auth_provider auth_provider;
+#endif
 #if defined(LONEJSON_WITH_OIDC)
   int http_provider_ref;
   char *http_user_agent;

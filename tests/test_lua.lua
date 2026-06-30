@@ -225,6 +225,14 @@ if lonejson.jwt_parse_compact ~= nil then
   local missing = lonejson.jwks_select_json(jwks_json, { kid = "missing" })
   local bad, err
 
+  if lj.set_openssl_auth_provider ~= nil then
+    local no_provider_lj = new_runtime()
+    bad, err = no_provider_lj:jwt_validate_compact_signature(signed_token, signed_jwk_json)
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+    assert_true(lj:set_openssl_auth_provider())
+  end
+
   assert_eq(lonejson.base64url_decode("SGVsbG8"), "Hello")
   assert_eq(parts.signature, "c2ln")
   assert_eq(parts.signing_input, parts.header .. "." .. parts.payload)

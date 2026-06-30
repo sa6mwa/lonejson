@@ -1139,9 +1139,27 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
   runtime->serialize_jsonl_filep = lonejson_serialize_jsonl_filep;
   runtime->serialize_jsonl_path = lonejson_serialize_jsonl_path;
 #ifdef LONEJSON_WITH_JWT
+  runtime->jwk_parse_json = lonejson_jwk_parse_json;
+  runtime->jwks_parse_json = lonejson_jwks_parse_json;
+  runtime->jwt_decode_compact = lonejson_jwt_decode_compact;
+  runtime->jwt_validate_signature_with_runtime =
+      lonejson_jwt_validate_signature_with_runtime;
   runtime->set_auth_provider = lonejson__runtime_set_auth_provider;
 #endif
 #ifdef LONEJSON_WITH_OIDC
+  runtime->oidc_discovery_parse_json = lonejson_oidc_discovery_parse_json;
+  runtime->oidc_fetch_discovery = lonejson_oidc_fetch_discovery;
+  runtime->oidc_jwks_cache_update_json = lonejson_oidc_jwks_cache_update_json;
+  runtime->oidc_jwks_cache_refresh = lonejson_oidc_jwks_cache_refresh;
+  runtime->oauth2_token_response_parse_json =
+      lonejson_oauth2_token_response_parse_json;
+  runtime->oauth2_client_credentials_request =
+      lonejson_oauth2_client_credentials_request;
+  runtime->oauth2_refresh_token_request =
+      lonejson_oauth2_refresh_token_request;
+  runtime->oidc_authorization_code_token_request =
+      lonejson_oidc_authorization_code_token_request;
+  runtime->oidc_validate_bearer_token = lonejson_oidc_validate_bearer_token;
   runtime->set_http_provider = lonejson__runtime_set_http_provider;
 #endif
 #ifdef LONEJSON_WITH_CURL

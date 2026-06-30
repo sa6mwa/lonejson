@@ -2827,10 +2827,80 @@ struct lonejson {
                                           const void *items, size_t count,
                                           size_t stride, const char *path,
                                           lonejson_error *error);
+#ifdef LONEJSON_WITH_JWT
+  /** Parses one JWK JSON object into `out`. */
+  lonejson_status (*jwk_parse_json)(lonejson *runtime, const char *json,
+                                    size_t len, lonejson_jwk *out,
+                                    lonejson_error *error);
+  /** Parses one JWKS JSON object with a required `keys` array. */
+  lonejson_status (*jwks_parse_json)(lonejson *runtime, const char *json,
+                                     size_t len, lonejson_jwks *out,
+                                     lonejson_error *error);
+  /** Decodes and parses one compact JWT header and claims payload. */
+  lonejson_status (*jwt_decode_compact)(
+      lonejson *runtime, const char *token, size_t len,
+      const lonejson_jwt_claim_policy *limits, lonejson_jwt_header *header,
+      lonejson_jwt_claims *claims, lonejson_error *error);
+  /** Validates a compact JWT signature through this runtime's auth provider. */
+  lonejson_status (*jwt_validate_signature_with_runtime)(
+      lonejson *runtime, const lonejson_jwt_compact *jwt,
+      const lonejson_jwt_header *header, const lonejson_jwk *jwk,
+      lonejson_error *error);
+#endif
   /** Installs or clears the runtime auth provider. */
   lonejson_status (*set_auth_provider)(lonejson *runtime,
                                        const lonejson_auth_provider *provider,
                                        lonejson_error *error);
+#ifdef LONEJSON_WITH_OIDC
+  /** Parses one OIDC discovery JSON object into `out`. */
+  lonejson_status (*oidc_discovery_parse_json)(
+      lonejson *runtime, const char *json, size_t len,
+      lonejson_oidc_discovery *out, lonejson_error *error);
+  /** Fetches, parses, and validates discovery metadata through HTTP provider. */
+  lonejson_status (*oidc_fetch_discovery)(lonejson *runtime,
+                                          const char *issuer,
+                                          size_t max_response_bytes,
+                                          lonejson_oidc_discovery *out,
+                                          lonejson_error *error);
+  /** Installs caller-provided JWKS JSON into a bounded cache. */
+  lonejson_status (*oidc_jwks_cache_update_json)(
+      lonejson *runtime, lonejson_oidc_jwks_cache *cache,
+      const lonejson_oidc_jwks_cache_policy *policy, const char *json,
+      size_t len, lonejson_error *error);
+  /** Refreshes a JWKS cache through this runtime's HTTP provider. */
+  lonejson_status (*oidc_jwks_cache_refresh)(
+      lonejson *runtime, lonejson_oidc_jwks_cache *cache,
+      const lonejson_oidc_jwks_cache_policy *policy, lonejson_error *error);
+  /** Parses and validates a bounded OAuth2 token response. */
+  lonejson_status (*oauth2_token_response_parse_json)(
+      lonejson *runtime, const char *json, size_t len,
+      size_t max_response_bytes, lonejson_oauth2_token_response *out,
+      lonejson_error *error);
+  /** Exchanges OAuth2 client credentials through this runtime's HTTP provider.
+   */
+  lonejson_status (*oauth2_client_credentials_request)(
+      lonejson *runtime, const char *token_endpoint,
+      const lonejson_oauth2_client_credentials *request,
+      size_t max_response_bytes, lonejson_oauth2_token_response *out,
+      lonejson_error *error);
+  /** Exchanges an OAuth2 refresh token through this runtime's HTTP provider. */
+  lonejson_status (*oauth2_refresh_token_request)(
+      lonejson *runtime, const char *token_endpoint,
+      const lonejson_oauth2_refresh_token *request,
+      size_t max_response_bytes, lonejson_oauth2_token_response *out,
+      lonejson_error *error);
+  /** Exchanges an authorization code through this runtime's HTTP provider. */
+  lonejson_status (*oidc_authorization_code_token_request)(
+      lonejson *runtime, const char *token_endpoint,
+      const lonejson_oidc_authorization_code_token *request,
+      size_t max_response_bytes, lonejson_oauth2_token_response *out,
+      lonejson_error *error);
+  /** Validates one Authorization Bearer JWT against cache and claim policy. */
+  lonejson_status (*oidc_validate_bearer_token)(
+      lonejson *runtime,
+      const lonejson_oidc_bearer_validation_request *request,
+      lonejson_oidc_bearer_validation *out, lonejson_error *error);
+#endif
   /** Installs or clears the runtime auth HTTP provider. */
   lonejson_status (*set_http_provider)(lonejson *runtime,
                                        const lonejson_http_provider *provider,

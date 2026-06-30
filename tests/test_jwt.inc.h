@@ -533,16 +533,18 @@ static void test_jwt_auth_provider_runtime_boundary(void) {
   EXPECT(lonejson_jwt_parse_compact(test_jwt_rs256_token,
                                     strlen(test_jwt_rs256_token), &compact,
                                     &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_jwt_decode_compact(runtime, test_jwt_rs256_token,
+  EXPECT(runtime->jwt_decode_compact != NULL);
+  EXPECT(runtime->jwk_parse_json != NULL);
+  EXPECT(runtime->jwt_validate_signature_with_runtime != NULL);
+  EXPECT(runtime->jwt_decode_compact(runtime, test_jwt_rs256_token,
                                      strlen(test_jwt_rs256_token), NULL,
-                                     &header, &claims,
-                                     &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_jwk_parse_json(runtime, test_jwt_rs256_jwk_json,
+                                     &header, &claims, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(runtime->jwk_parse_json(runtime, test_jwt_rs256_jwk_json,
                                  strlen(test_jwt_rs256_jwk_json), &jwk,
                                  &error) == LONEJSON_STATUS_OK);
-  EXPECT(lonejson_jwt_validate_signature_with_runtime(runtime, &compact,
-                                                      &header, &jwk,
-                                                      &error) ==
+  EXPECT(runtime->jwt_validate_signature_with_runtime(runtime, &compact,
+                                                      &header, &jwk, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
   EXPECT(lonejson_set_auth_provider(runtime, NULL, &error) ==
          LONEJSON_STATUS_OK);
@@ -552,6 +554,9 @@ static void test_jwt_auth_provider_runtime_boundary(void) {
   EXPECT(lonejson_auth_provider_init_openssl(&provider, NULL, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lj_set_auth_provider(runtime, &provider, &error) == LJ_STATUS_OK);
+  EXPECT(runtime->jwt_validate_signature_with_runtime(runtime, &compact,
+                                                      &header, &jwk, &error) ==
+         LONEJSON_STATUS_OK);
   EXPECT(lj_jwt_validate_signature_with_runtime(runtime, &compact, &header,
                                                 &jwk, &error) == LJ_STATUS_OK);
 #endif
@@ -1188,6 +1193,11 @@ static void test_oidc_http_provider_helpers(void) {
   lonejson_oauth2_refresh_token refresh_request;
   lonejson_oidc_authorization_code_token code_request;
   lonejson_oauth2_token_response token_response;
+  static const char discovery_json[] =
+      "{\"issuer\":\"https://issuer.example\","
+      "\"authorization_endpoint\":\"https://issuer.example/auth\","
+      "\"token_endpoint\":\"https://issuer.example/token\","
+      "\"jwks_uri\":\"https://issuer.example/jwks\"}";
 
   lonejson_error_init(&error);
   memset(&provider, 0, sizeof(provider));
@@ -1221,7 +1231,23 @@ static void test_oidc_http_provider_helpers(void) {
          LONEJSON_STATUS_OK);
 
   lonejson_oidc_discovery_init(&discovery);
-  EXPECT(lonejson_oidc_fetch_discovery(runtime, "https://issuer.example",
+  EXPECT(runtime->oidc_discovery_parse_json != NULL);
+  EXPECT(runtime->oidc_fetch_discovery != NULL);
+  EXPECT(runtime->oidc_jwks_cache_update_json != NULL);
+  EXPECT(runtime->oidc_jwks_cache_refresh != NULL);
+  EXPECT(runtime->oauth2_token_response_parse_json != NULL);
+  EXPECT(runtime->oauth2_client_credentials_request != NULL);
+  EXPECT(runtime->oauth2_refresh_token_request != NULL);
+  EXPECT(runtime->oidc_authorization_code_token_request != NULL);
+  EXPECT(runtime->oidc_validate_bearer_token != NULL);
+  EXPECT(runtime->oidc_discovery_parse_json(
+             runtime, discovery_json, strlen(discovery_json), &discovery,
+             &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(discovery.issuer, "https://issuer.example") == 0);
+  lonejson_oidc_discovery_cleanup(&discovery);
+
+  lonejson_oidc_discovery_init(&discovery);
+  EXPECT(runtime->oidc_fetch_discovery(runtime, "https://issuer.example",
                                        4096u, &discovery, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(strcmp(discovery.issuer, "https://issuer.example") == 0);
@@ -1232,7 +1258,14 @@ static void test_oidc_http_provider_helpers(void) {
   policy = test_oidc_jwks_cache_policy();
   policy.issuer = "https://issuer.example";
   policy.jwks_uri = "https://issuer.example/jwks";
-  EXPECT(lonejson_oidc_jwks_cache_refresh(runtime, &cache, &policy, &error) ==
+  EXPECT(runtime->oidc_jwks_cache_update_json(
+             runtime, &cache, &policy, test_jwt_rs256_jwks_json,
+             strlen(test_jwt_rs256_jwks_json), &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_oidc_jwks_cache_is_fresh(&cache, &policy));
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+
+  lonejson_oidc_jwks_cache_init(&cache);
+  EXPECT(runtime->oidc_jwks_cache_refresh(runtime, &cache, &policy, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lonejson_oidc_jwks_cache_is_fresh(&cache, &policy));
   lonejson_oidc_jwks_cache_cleanup(&cache);
@@ -1241,7 +1274,17 @@ static void test_oidc_http_provider_helpers(void) {
   token_request.client_id = "client";
   token_request.client_secret = "secret";
   lonejson_oauth2_token_response_init(&token_response);
-  EXPECT(lonejson_oauth2_client_credentials_request(
+  EXPECT(runtime->oauth2_token_response_parse_json(
+             runtime,
+             "{\"access_token\":\"parsed\",\"token_type\":\"Bearer\","
+             "\"expires_in\":1}",
+             strlen("{\"access_token\":\"parsed\",\"token_type\":\"Bearer\","
+                    "\"expires_in\":1}"),
+             4096u, &token_response, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(token_response.access_token, "parsed") == 0);
+  lonejson_oauth2_token_response_cleanup(&token_response);
+
+  EXPECT(runtime->oauth2_client_credentials_request(
              runtime, "https://issuer.example/token", &token_request, 4096u,
              &token_response, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(token_response.access_token, "abc.def.sig") == 0);
@@ -1253,7 +1296,7 @@ static void test_oidc_http_provider_helpers(void) {
   refresh_request.refresh_token = "refresh token";
   refresh_request.client_id = "client";
   refresh_request.client_secret = "secret";
-  EXPECT(lonejson_oauth2_refresh_token_request(
+  EXPECT(runtime->oauth2_refresh_token_request(
              runtime, "https://issuer.example/token", &refresh_request, 4096u,
              &token_response, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(token_response.access_token, "abc.def.sig") == 0);
@@ -1265,19 +1308,19 @@ static void test_oidc_http_provider_helpers(void) {
   code_request.redirect_uri = "http://127.0.0.1/cb";
   code_request.code_verifier =
       "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
-  EXPECT(lonejson_oidc_authorization_code_token_request(
+  EXPECT(runtime->oidc_authorization_code_token_request(
              runtime, "https://issuer.example/token", &code_request, 4096u,
              &token_response, &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(token_response.token_type, "Bearer") == 0);
   lonejson_oauth2_token_response_cleanup(&token_response);
 
-  EXPECT(lonejson_oauth2_client_credentials_request(
+  EXPECT(runtime->oauth2_client_credentials_request(
              runtime, "https://issuer.example/token", &token_request, 8u,
              &token_response, &error) == LONEJSON_STATUS_OVERFLOW);
   EXPECT(state.requests >= 6);
 
   state.fail_callback = 1;
-  EXPECT(lonejson_oidc_fetch_discovery(runtime, "https://issuer.example",
+  EXPECT(runtime->oidc_fetch_discovery(runtime, "https://issuer.example",
                                        4096u, &discovery, &error) ==
          LONEJSON_STATUS_CALLBACK_FAILED);
   state.fail_callback = 0;
@@ -1632,6 +1675,13 @@ static void test_oidc_validate_bearer_token(void) {
   EXPECT(validation.jwk != NULL);
   EXPECT(strcmp(validation.header.kid, "rsa-test") == 0);
   EXPECT(strcmp(validation.claims.iss, "issuer") == 0);
+  lonejson_oidc_bearer_validation_cleanup(&validation);
+  lonejson_oidc_bearer_validation_init(&validation);
+  EXPECT(test_default_runtime()->oidc_validate_bearer_token != NULL);
+  EXPECT(test_default_runtime()->oidc_validate_bearer_token(
+             test_default_runtime(), &request, &validation, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_NONE);
   EXPECT(lj_oidc_validate_bearer_token(test_default_runtime(), &request,
                                        &validation, &error) == LJ_STATUS_OK);
 #else
