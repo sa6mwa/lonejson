@@ -662,6 +662,10 @@ if lonejson.jwt_parse_compact ~= nil then
         "code=abc&state=wrong", "state")
     assert_true(bad == nil)
     assert_eq(err.status, "type_mismatch")
+    bad, err = lonejson.oidc_authorization_callback_parse_query(
+        "code=abc&state=state%00extra", "state")
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_json")
 
     bad, err = lj:oidc_jwks_cache_select_json(jwks_json, {
       issuer = "https://id.example/tenant",

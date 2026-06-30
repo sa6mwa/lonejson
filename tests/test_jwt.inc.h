@@ -2448,6 +2448,26 @@ static void test_oidc_authorization_callback_parse(void) {
              "code=abc&state=%zz", strlen("code=abc&state=%zz"), "state", 0u,
              &callback, &error) == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "code=abc&state=state%00extra",
+             strlen("code=abc&state=state%00extra"), "state", 0u, &callback,
+             &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(callback.code == NULL);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "code=abc%00extra&state=state",
+             strlen("code=abc%00extra&state=state"), "state", 0u, &callback,
+             &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(callback.code == NULL);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "code%00extra=abc&state=state",
+             strlen("code%00extra=abc&state=state"), "state", 0u, &callback,
+             &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(callback.code == NULL);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "error=access_denied&error_description=bad%00extra&state=state",
+             strlen("error=access_denied&error_description=bad%00extra&state="
+                    "state"),
+             "state", 0u, &callback, &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
              "code=abc&state=state", strlen("code=abc&state=state"), "state",
              8u, &callback, &error) == LONEJSON_STATUS_OVERFLOW);
   lonejson_oidc_authorization_callback_cleanup(&callback);

@@ -2482,18 +2482,32 @@ lonejson__oauth2_percent_decode(const char *data, size_t len,
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status lonejson__oidc_callback_reject_nul(
+    const char *value, size_t len, const char *kind, lonejson_error *error) {
+  if (len != 0u && memchr(value, '\0', len) != NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "%s contains a NUL byte", kind);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status lonejson__oidc_callback_assign(char **dst,
                                                       const char *value,
+                                                      size_t len,
                                                       lonejson_error *error) {
   if (*dst != NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_DUPLICATE_FIELD, 0u, 0u,
                                0u, "duplicate callback query parameter");
   }
-  *dst = lonejson__owned_strdup(NULL, value);
+  *dst = (char *)lonejson__owned_malloc(NULL, len + 1u);
   if (*dst == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
                                0u, "failed to allocate callback parameter");
   }
+  if (len != 0u) {
+    memcpy(*dst, value, len);
+  }
+  (*dst)[len] = '\0';
   return LONEJSON_STATUS_OK;
 }
 
@@ -2565,21 +2579,42 @@ lonejson_status lonejson_oidc_authorization_callback_parse_query(
     if (status != LONEJSON_STATUS_OK) {
       break;
     }
+    status = lonejson__oidc_callback_reject_nul(
+        key.data != NULL ? key.data : "", key.len, "callback query parameter",
+        error);
+    if (status == LONEJSON_STATUS_OK) {
+      status = lonejson__oidc_callback_reject_nul(
+          value.data != NULL ? value.data : "", value.len,
+          "callback query parameter value", error);
+    }
+    if (status != LONEJSON_STATUS_OK) {
+      break;
+    }
     if (strcmp(key.data, "code") == 0) {
-      status = lonejson__oidc_callback_assign(
-          &out->code, value.data != NULL ? value.data : "", error);
+      status = lonejson__oidc_callback_assign(&out->code,
+                                              value.data != NULL ? value.data
+                                                                 : "",
+                                              value.len, error);
     } else if (strcmp(key.data, "state") == 0) {
-      status = lonejson__oidc_callback_assign(
-          &out->state, value.data != NULL ? value.data : "", error);
+      status = lonejson__oidc_callback_assign(&out->state,
+                                              value.data != NULL ? value.data
+                                                                 : "",
+                                              value.len, error);
     } else if (strcmp(key.data, "error") == 0) {
-      status = lonejson__oidc_callback_assign(
-          &out->error, value.data != NULL ? value.data : "", error);
+      status = lonejson__oidc_callback_assign(&out->error,
+                                              value.data != NULL ? value.data
+                                                                 : "",
+                                              value.len, error);
     } else if (strcmp(key.data, "error_description") == 0) {
-      status = lonejson__oidc_callback_assign(
-          &out->error_description, value.data != NULL ? value.data : "", error);
+      status = lonejson__oidc_callback_assign(&out->error_description,
+                                              value.data != NULL ? value.data
+                                                                 : "",
+                                              value.len, error);
     } else if (strcmp(key.data, "error_uri") == 0) {
-      status = lonejson__oidc_callback_assign(
-          &out->error_uri, value.data != NULL ? value.data : "", error);
+      status = lonejson__oidc_callback_assign(&out->error_uri,
+                                              value.data != NULL ? value.data
+                                                                 : "",
+                                              value.len, error);
     }
   }
   lonejson_owned_buffer_free(&key);
