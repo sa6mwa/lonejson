@@ -965,6 +965,16 @@ if(LONEJSON_BUILD_BENCHMARKS)
 endif()
 
 if(LONEJSON_BUILD_FUZZERS)
+  add_executable(lonejson_fuzz_base64 fuzz/fuzz_base64.c)
+  target_include_directories(lonejson_fuzz_base64 PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+  target_link_libraries(lonejson_fuzz_base64 PRIVATE lonejson)
+  target_compile_options(lonejson_fuzz_base64 PRIVATE
+    -fsanitize=fuzzer-no-link,address,undefined
+    -fno-omit-frame-pointer)
+  target_link_options(lonejson_fuzz_base64 PRIVATE
+    -fsanitize=fuzzer,address,undefined)
+  lonejson_configure_c_target(lonejson_fuzz_base64)
+
   add_executable(lonejson_fuzz_validate fuzz/fuzz_validate.c)
   target_include_directories(lonejson_fuzz_validate PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_link_libraries(lonejson_fuzz_validate PRIVATE lonejson)
@@ -1164,6 +1174,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson_impl.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson_internal.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/00_prelude.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/09_base64.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/10_source_runtime.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/11_json_value_io.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/12_json_value_parse.h"
@@ -1199,6 +1210,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_visitor_facade.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_embedded_runner.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_validate.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_base64.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_mapped_parse.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_array_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
@@ -1217,6 +1229,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_visitor.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_rewrite.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_stream.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_base64.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_curl_misc.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixtures_public.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generator_omit.inc.h"
@@ -1367,6 +1380,7 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/lonejson.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson_impl.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/00_prelude.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/09_base64.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/10_source_runtime.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/11_json_value_io.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/12_json_value_parse.h

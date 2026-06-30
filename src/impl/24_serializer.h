@@ -298,18 +298,8 @@ static lonejson_status lonejson__emit_base64_bytes(lonejson_sink_fn sink,
                                                    lonejson_error *error,
                                                    const unsigned char *data,
                                                    size_t len) {
-  static const char alphabet[] =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  char out[4];
-
-  out[0] = alphabet[(data[0] >> 2u) & 0x3Fu];
-  out[1] =
-      alphabet[((data[0] & 0x03u) << 4u) | (((len > 1u) ? data[1] : 0u) >> 4u)];
-  out[2] = (len > 1u) ? alphabet[((data[1] & 0x0Fu) << 2u) |
-                                 (((len > 2u) ? data[2] : 0u) >> 6u)]
-                      : '=';
-  out[3] = (len > 2u) ? alphabet[data[2] & 0x3Fu] : '=';
-  return lonejson__emit(sink, user, error, out, sizeof(out));
+  return lonejson_base64_encode_sink(data, len, LONEJSON_BASE64_STANDARD, sink,
+                                     user, error);
 }
 
 static lonejson_status

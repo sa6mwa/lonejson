@@ -1,6 +1,7 @@
 #define LONEJSON_TEST_RUNTIME_BORROW_HOOK 1
 #include "test_support.inc.h"
 /* clang-format off */
+#include "test_base64.inc.h"
 #include "test_protocol_framing.inc.h"
 #include "test_parse_serialize.inc.h"
 #include "test_array_stream.inc.h"
@@ -17,6 +18,9 @@
 /* clang-format on */
 
 int main(void) {
+  test_base64_encode_decode_variants();
+  test_base64_padding_and_failure_modes();
+  test_base64_sink_equivalence_and_aliases();
   test_jwt_base64url_decode_vectors();
   test_jwt_compact_parse_segments();
   test_jwt_compact_parse_failures();

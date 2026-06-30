@@ -11,25 +11,6 @@
 #include <openssl/rsa.h>
 #endif
 
-static int lonejson__base64url_value(unsigned char ch) {
-  if (ch >= (unsigned char)'A' && ch <= (unsigned char)'Z') {
-    return (int)(ch - (unsigned char)'A');
-  }
-  if (ch >= (unsigned char)'a' && ch <= (unsigned char)'z') {
-    return (int)(ch - (unsigned char)'a') + 26;
-  }
-  if (ch >= (unsigned char)'0' && ch <= (unsigned char)'9') {
-    return (int)(ch - (unsigned char)'0') + 52;
-  }
-  if (ch == (unsigned char)'-') {
-    return 62;
-  }
-  if (ch == (unsigned char)'_') {
-    return 63;
-  }
-  return -1;
-}
-
 static const lonejson_field lonejson__jwk_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC_REQ(lonejson_jwk, kty, "kty"),
     LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, kid, "kid"),
@@ -112,14 +93,16 @@ void lonejson_http_response_cleanup(lonejson_http_response *response) {
   lonejson_http_response_init(response);
 }
 
-lonejson_status lonejson_http_provider_init(
-    lonejson_http_provider *provider,
-    const lonejson_http_provider_config *config, lonejson_error *error) {
+lonejson_status
+lonejson_http_provider_init(lonejson_http_provider *provider,
+                            const lonejson_http_provider_config *config,
+                            lonejson_error *error) {
   lonejson__clear_error(error);
   if (provider == NULL || config == NULL || config->request == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "HTTP provider config and request callback "
-                                   "are required");
+                               0u,
+                               "HTTP provider config and request callback "
+                               "are required");
   }
   memset(provider, 0, sizeof(*provider));
   provider->user_data = config->user_data;
@@ -144,8 +127,9 @@ lonejson_status lonejson_http_provider_init_simple(
   return lonejson_http_provider_init(provider, &config, error);
 }
 
-static lonejson_status lonejson__http_request_validate(
-    const lonejson_http_request *request, lonejson_error *error) {
+static lonejson_status
+lonejson__http_request_validate(const lonejson_http_request *request,
+                                lonejson_error *error) {
   if (request == NULL || request->method == NULL || request->url == NULL ||
       request->method[0] == '\0' || request->url[0] == '\0') {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -247,119 +231,6 @@ typedef struct lonejson__jwt_claim_visit {
   int seen_iat;
 } lonejson__jwt_claim_visit;
 
-static lonejson_status lonejson__base64url_check(const char *data, size_t len,
-                                                 size_t *out_len,
-                                                 lonejson_error *error) {
-  size_t i;
-  size_t rem;
-  size_t decoded_len;
-
-  if (data == NULL && len != 0u) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "base64url input is required");
-  }
-  if (out_len == NULL) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u,
-                               "base64url decoded length output is required");
-  }
-  for (i = 0u; i < len; ++i) {
-    if (lonejson__base64url_value((unsigned char)data[i]) < 0) {
-      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, i, 0u, 0u,
-                                 "invalid base64url character");
-    }
-  }
-  rem = len & 3u;
-  if (rem == 1u) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, len, 0u, 0u,
-                               "invalid base64url segment length");
-  }
-  decoded_len = (len / 4u) * 3u;
-  if (rem == 2u) {
-    decoded_len += 1u;
-  } else if (rem == 3u) {
-    decoded_len += 2u;
-  }
-  *out_len = decoded_len;
-  return LONEJSON_STATUS_OK;
-}
-
-lonejson_status lonejson_base64url_decoded_len(const char *data, size_t len,
-                                               size_t *out_len,
-                                               lonejson_error *error) {
-  lonejson__clear_error(error);
-  return lonejson__base64url_check(data, len, out_len, error);
-}
-
-lonejson_status lonejson_base64url_decode(const char *data, size_t len,
-                                          unsigned char *out, size_t capacity,
-                                          size_t *needed,
-                                          lonejson_error *error) {
-  size_t decoded_len;
-  size_t in_pos;
-  size_t out_pos;
-  lonejson_status status;
-
-  lonejson__clear_error(error);
-  if (needed == NULL) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "base64url needed output is required");
-  }
-  status = lonejson__base64url_check(data, len, &decoded_len, error);
-  if (status != LONEJSON_STATUS_OK) {
-    *needed = 0u;
-    return status;
-  }
-  *needed = decoded_len;
-  if (decoded_len > capacity) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TRUNCATED, 0u, 0u, 0u,
-                               "base64url output buffer is too small");
-  }
-  if (decoded_len != 0u && out == NULL) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "base64url output buffer is required");
-  }
-
-  in_pos = 0u;
-  out_pos = 0u;
-  while (in_pos < len) {
-    int values[4];
-    size_t group_len;
-    unsigned int bits;
-
-    group_len = len - in_pos;
-    if (group_len > 4u) {
-      group_len = 4u;
-    }
-    values[0] = lonejson__base64url_value((unsigned char)data[in_pos]);
-    values[1] =
-        (group_len > 1u)
-            ? lonejson__base64url_value((unsigned char)data[in_pos + 1u])
-            : 0;
-    values[2] =
-        (group_len > 2u)
-            ? lonejson__base64url_value((unsigned char)data[in_pos + 2u])
-            : 0;
-    values[3] =
-        (group_len > 3u)
-            ? lonejson__base64url_value((unsigned char)data[in_pos + 3u])
-            : 0;
-    bits = ((unsigned int)values[0] << 18) | ((unsigned int)values[1] << 12) |
-           ((unsigned int)values[2] << 6) | (unsigned int)values[3];
-    if (group_len >= 2u) {
-      out[out_pos++] = (unsigned char)((bits >> 16) & 0xffu);
-    }
-    if (group_len >= 3u) {
-      out[out_pos++] = (unsigned char)((bits >> 8) & 0xffu);
-    }
-    if (group_len == 4u) {
-      out[out_pos++] = (unsigned char)(bits & 0xffu);
-    }
-    in_pos += group_len;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
 static lonejson_status lonejson__jwt_check_segment(const char *token,
                                                    size_t begin, size_t end,
                                                    int allow_empty,
@@ -375,8 +246,8 @@ static lonejson_status lonejson__jwt_check_segment(const char *token,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, begin, 0u,
                                0u, "JWT compact segment must not be empty");
   }
-  status = lonejson__base64url_check(token + begin, end - begin, &decoded_len,
-                                     error);
+  status = lonejson_base64_decoded_len(
+      token + begin, end - begin, LONEJSON_BASE64_URL_RAW, &decoded_len, error);
   if (status != LONEJSON_STATUS_OK) {
     if (error != NULL) {
       error->offset += begin;
@@ -487,7 +358,8 @@ lonejson__jwk_check_base64url_member(const char *value, const char *member,
   if (required && value[0] == '\0') {
     return lonejson__jwk_require_member(NULL, value, member, error);
   }
-  status = lonejson__base64url_check(value, strlen(value), &decoded_len, error);
+  status = lonejson_base64_decoded_len(
+      value, strlen(value), LONEJSON_BASE64_URL_RAW, &decoded_len, error);
   if (status != LONEJSON_STATUS_OK) {
     if (error != NULL) {
       (void)snprintf(error->message, sizeof(error->message),
@@ -901,16 +773,15 @@ lonejson_status lonejson_oidc_fetch_discovery(lonejson *runtime,
     request.method = "GET";
     request.url = url.data;
     request.max_response_bytes = max_bytes;
-    status = lonejson__http_provider_request(runtime, &request, &response,
-                                             error);
+    status =
+        lonejson__http_provider_request(runtime, &request, &response, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__http_require_success(&response, "OIDC discovery",
-                                            error);
+    status = lonejson__http_require_success(&response, "OIDC discovery", error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson_oidc_discovery_parse_json(
-        runtime, response.body.data, response.body.len, out, error);
+    status = lonejson_oidc_discovery_parse_json(runtime, response.body.data,
+                                                response.body.len, out, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson_oidc_discovery_validate_issuer(out, issuer, error);
@@ -982,9 +853,10 @@ static int lonejson__oauth2_form_is_unreserved(unsigned char ch) {
          ch == (unsigned char)'_' || ch == (unsigned char)'~';
 }
 
-static lonejson_status lonejson__oauth2_form_append_raw(
-    lonejson_owned_buffer *out, const char *data, size_t len, size_t max_bytes,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__oauth2_form_append_raw(lonejson_owned_buffer *out, const char *data,
+                                 size_t len, size_t max_bytes,
+                                 lonejson_error *error) {
   if (out->len > max_bytes || len > max_bytes - out->len) {
     return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                                "OAuth2 form body exceeds configured limit");
@@ -992,9 +864,10 @@ static lonejson_status lonejson__oauth2_form_append_raw(
   return lonejson_owned_buffer_sink(out, data, len, error);
 }
 
-static lonejson_status lonejson__oauth2_form_append_component(
-    lonejson_owned_buffer *out, const char *value, size_t max_bytes,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__oauth2_form_append_component(lonejson_owned_buffer *out,
+                                       const char *value, size_t max_bytes,
+                                       lonejson_error *error) {
   static const char hex[] = "0123456789ABCDEF";
   unsigned char ch;
   char encoded[3];
@@ -1027,9 +900,10 @@ static lonejson_status lonejson__oauth2_form_append_component(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__oauth2_form_append_pair(
-    lonejson_owned_buffer *out, const char *key, const char *value,
-    int *has_pair, size_t max_bytes, lonejson_error *error) {
+static lonejson_status
+lonejson__oauth2_form_append_pair(lonejson_owned_buffer *out, const char *key,
+                                  const char *value, int *has_pair,
+                                  size_t max_bytes, lonejson_error *error) {
   lonejson_status status;
 
   if (value == NULL) {
@@ -1041,8 +915,8 @@ static lonejson_status lonejson__oauth2_form_append_pair(
       return status;
     }
   }
-  status = lonejson__oauth2_form_append_raw(out, key, strlen(key), max_bytes,
-                                            error);
+  status =
+      lonejson__oauth2_form_append_raw(out, key, strlen(key), max_bytes, error);
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__oauth2_form_append_raw(out, "=", 1u, max_bytes, error);
   }
@@ -1114,8 +988,8 @@ lonejson_status lonejson_oauth2_client_credentials_body(
                                                &has_pair, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__oauth2_form_append_pair(
-        out, "scope", request->scope, &has_pair, max_bytes, error);
+    status = lonejson__oauth2_form_append_pair(out, "scope", request->scope,
+                                               &has_pair, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__oauth2_form_append_pair(
@@ -1131,9 +1005,10 @@ lonejson_status lonejson_oauth2_client_credentials_body(
   return status;
 }
 
-lonejson_status lonejson_oauth2_refresh_token_body(
-    const lonejson_oauth2_refresh_token *request, lonejson_owned_buffer *out,
-    lonejson_error *error) {
+lonejson_status
+lonejson_oauth2_refresh_token_body(const lonejson_oauth2_refresh_token *request,
+                                   lonejson_owned_buffer *out,
+                                   lonejson_error *error) {
   size_t max_bytes;
   lonejson_status status;
   int has_pair = 0;
@@ -1158,26 +1033,25 @@ lonejson_status lonejson_oauth2_refresh_token_body(
   max_bytes = request->max_body_bytes == 0u
                   ? LONEJSON__OAUTH2_DEFAULT_MAX_FORM_BODY_BYTES
                   : request->max_body_bytes;
-  status = lonejson__oauth2_form_append_pair(out, "grant_type",
-                                             "refresh_token", &has_pair,
-                                             max_bytes, error);
+  status = lonejson__oauth2_form_append_pair(out, "grant_type", "refresh_token",
+                                             &has_pair, max_bytes, error);
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__oauth2_form_append_pair(
-        out, "refresh_token", request->refresh_token, &has_pair, max_bytes,
-        error);
+    status = lonejson__oauth2_form_append_pair(out, "refresh_token",
+                                               request->refresh_token,
+                                               &has_pair, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__oauth2_form_append_pair(
         out, "client_id", request->client_id, &has_pair, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__oauth2_form_append_pair(
-        out, "client_secret", request->client_secret, &has_pair, max_bytes,
-        error);
+    status = lonejson__oauth2_form_append_pair(out, "client_secret",
+                                               request->client_secret,
+                                               &has_pair, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__oauth2_form_append_pair(
-        out, "scope", request->scope, &has_pair, max_bytes, error);
+    status = lonejson__oauth2_form_append_pair(out, "scope", request->scope,
+                                               &has_pair, max_bytes, error);
   }
   if (status != LONEJSON_STATUS_OK) {
     lonejson_owned_buffer_free(out);
@@ -1214,28 +1088,27 @@ lonejson_status lonejson_oidc_authorization_code_token_body(
   status = lonejson__oauth2_form_append_pair(
       out, "grant_type", "authorization_code", &has_pair, max_bytes, error);
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__oauth2_form_append_pair(out, "client_id",
-                                               request->client_id, &has_pair,
-                                               max_bytes, error);
+    status = lonejson__oauth2_form_append_pair(
+        out, "client_id", request->client_id, &has_pair, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__oauth2_form_append_pair(out, "code", request->code,
                                                &has_pair, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__oauth2_form_append_pair(
-        out, "redirect_uri", request->redirect_uri, &has_pair, max_bytes,
-        error);
+    status = lonejson__oauth2_form_append_pair(out, "redirect_uri",
+                                               request->redirect_uri, &has_pair,
+                                               max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__oauth2_form_append_pair(
-        out, "code_verifier", request->code_verifier, &has_pair, max_bytes,
-        error);
+    status = lonejson__oauth2_form_append_pair(out, "code_verifier",
+                                               request->code_verifier,
+                                               &has_pair, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__oauth2_form_append_pair(
-        out, "client_secret", request->client_secret, &has_pair, max_bytes,
-        error);
+    status = lonejson__oauth2_form_append_pair(out, "client_secret",
+                                               request->client_secret,
+                                               &has_pair, max_bytes, error);
   }
   if (status != LONEJSON_STATUS_OK) {
     lonejson_owned_buffer_free(out);
@@ -1258,56 +1131,32 @@ void lonejson_oauth2_token_response_cleanup(
   }
 }
 
-static size_t lonejson__base64url_encoded_len(size_t len) {
-  size_t full = len / 3u;
-  size_t rem = len % 3u;
-  return full * 4u + (rem == 0u ? 0u : rem + 1u);
-}
-
 static char *lonejson__base64url_encode_alloc(const unsigned char *data,
                                               size_t len,
                                               lonejson_error *error) {
-  static const char alphabet[] =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
   size_t out_len;
-  size_t i = 0u;
-  size_t o = 0u;
   char *out;
-  unsigned int n;
+  size_t needed;
+  lonejson_status status;
 
-  if (len > (SIZE_MAX / 4u) * 3u) {
-    (void)lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                              "base64url output size overflows");
+  status = lonejson_base64_encoded_len(len, LONEJSON_BASE64_URL_RAW, &out_len,
+                                       error);
+  if (status != LONEJSON_STATUS_OK) {
     return NULL;
   }
-  out_len = lonejson__base64url_encoded_len(len);
   out = (char *)lonejson__owned_malloc(NULL, out_len + 1u);
   if (out == NULL) {
     (void)lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
                               0u, "failed to allocate base64url output");
     return NULL;
   }
-  while (i + 3u <= len) {
-    n = ((unsigned int)data[i] << 16u) | ((unsigned int)data[i + 1u] << 8u) |
-        (unsigned int)data[i + 2u];
-    out[o++] = alphabet[(n >> 18u) & 63u];
-    out[o++] = alphabet[(n >> 12u) & 63u];
-    out[o++] = alphabet[(n >> 6u) & 63u];
-    out[o++] = alphabet[n & 63u];
-    i += 3u;
+  status = lonejson_base64_encode(data, len, LONEJSON_BASE64_URL_RAW, out,
+                                  out_len, &needed, error);
+  if (status != LONEJSON_STATUS_OK || needed != out_len) {
+    lonejson__owned_free(out);
+    return NULL;
   }
-  if (i < len) {
-    n = (unsigned int)data[i] << 16u;
-    out[o++] = alphabet[(n >> 18u) & 63u];
-    if (i + 1u < len) {
-      n |= (unsigned int)data[i + 1u] << 8u;
-      out[o++] = alphabet[(n >> 12u) & 63u];
-      out[o++] = alphabet[(n >> 6u) & 63u];
-    } else {
-      out[o++] = alphabet[(n >> 12u) & 63u];
-    }
-  }
-  out[o] = '\0';
+  out[out_len] = '\0';
   return out;
 }
 
@@ -1493,8 +1342,9 @@ lonejson_status lonejson_oauth2_token_response_parse_json(
   }
   if (!lonejson__ascii_case_equal(out->token_type, "Bearer")) {
     lonejson_oauth2_token_response_cleanup(out);
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "OAuth2 token response token_type is not Bearer");
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "OAuth2 token response token_type is not Bearer");
   }
   if (out->has_expires_in && out->expires_in < 0) {
     lonejson_oauth2_token_response_cleanup(out);
@@ -1523,8 +1373,9 @@ static lonejson_status lonejson__oauth2_token_endpoint_post(
   }
   if (body_fn == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "OAuth2 token request body builder is "
-                                   "required");
+                               0u,
+                               "OAuth2 token request body builder is "
+                               "required");
   }
   status = lonejson__oidc_require_https_url(token_endpoint, "token_endpoint", 1,
                                             error);
@@ -1545,8 +1396,8 @@ static lonejson_status lonejson__oauth2_token_endpoint_post(
     request.body = body.data;
     request.body_len = body.len;
     request.max_response_bytes = max_bytes;
-    status = lonejson__http_provider_request(runtime, &request, &response,
-                                             error);
+    status =
+        lonejson__http_provider_request(runtime, &request, &response, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__http_require_success(&response, "OAuth2 token endpoint",
@@ -1628,17 +1479,17 @@ lonejson_status lonejson_oidc_authorization_url(
   int has_pair = 0;
 
   lonejson__clear_error(error);
-  if (request == NULL || out == NULL || request->authorization_endpoint == NULL ||
-      request->client_id == NULL || request->redirect_uri == NULL ||
-      request->state == NULL || request->nonce == NULL ||
-      request->code_challenge == NULL) {
+  if (request == NULL || out == NULL ||
+      request->authorization_endpoint == NULL || request->client_id == NULL ||
+      request->redirect_uri == NULL || request->state == NULL ||
+      request->nonce == NULL || request->code_challenge == NULL) {
     return lonejson__set_error(
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
         "authorization endpoint, client_id, redirect_uri, state, nonce, and "
         "code_challenge are required");
   }
-  status = lonejson__oidc_require_https_url(
-      request->authorization_endpoint, "authorization_endpoint", 1, error);
+  status = lonejson__oidc_require_https_url(request->authorization_endpoint,
+                                            "authorization_endpoint", 1, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -1647,13 +1498,12 @@ lonejson_status lonejson_oidc_authorization_url(
                   : request->max_url_bytes;
   lonejson_owned_buffer_free(out);
   status = lonejson__oauth2_form_append_raw(
-      out, request->authorization_endpoint, strlen(request->authorization_endpoint),
-      max_bytes, error);
+      out, request->authorization_endpoint,
+      strlen(request->authorization_endpoint), max_bytes, error);
   has_query = strchr(request->authorization_endpoint, '?') != NULL;
   if (status == LONEJSON_STATUS_OK) {
-    status =
-        lonejson__oauth2_form_append_raw(out, has_query ? "&" : "?", 1u,
-                                         max_bytes, error);
+    status = lonejson__oauth2_form_append_raw(out, has_query ? "&" : "?", 1u,
+                                              max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__oidc_authorization_append_pair(
@@ -1665,7 +1515,8 @@ lonejson_status lonejson_oidc_authorization_url(
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__oidc_authorization_append_pair(
-        out, "redirect_uri", request->redirect_uri, &has_pair, max_bytes, error);
+        out, "redirect_uri", request->redirect_uri, &has_pair, max_bytes,
+        error);
   }
   if (status == LONEJSON_STATUS_OK && request->scope != NULL) {
     status = lonejson__oidc_authorization_append_pair(
@@ -1734,9 +1585,10 @@ static int lonejson__oauth2_hex_value(char ch) {
   return -1;
 }
 
-static lonejson_status lonejson__oauth2_percent_decode(
-    const char *data, size_t len, lonejson_owned_buffer *out,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__oauth2_percent_decode(const char *data, size_t len,
+                                lonejson_owned_buffer *out,
+                                lonejson_error *error) {
   size_t i;
   int hi;
   int lo;
@@ -1761,16 +1613,16 @@ static lonejson_status lonejson__oauth2_percent_decode(
       ch = (char)((hi << 4) | lo);
       i += 2u;
     }
-    if (lonejson_owned_buffer_sink(out, &ch, 1u, error) !=
-        LONEJSON_STATUS_OK) {
+    if (lonejson_owned_buffer_sink(out, &ch, 1u, error) != LONEJSON_STATUS_OK) {
       return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
     }
   }
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__oidc_callback_assign(
-    char **dst, const char *value, lonejson_error *error) {
+static lonejson_status lonejson__oidc_callback_assign(char **dst,
+                                                      const char *value,
+                                                      lonejson_error *error) {
   if (*dst != NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_DUPLICATE_FIELD, 0u, 0u,
                                0u, "duplicate callback query parameter");
@@ -1842,8 +1694,8 @@ lonejson_status lonejson_oidc_authorization_callback_parse_query(
     if (key_len == 0u) {
       continue;
     }
-    status =
-        lonejson__oauth2_percent_decode(query + key_begin, key_len, &key, error);
+    status = lonejson__oauth2_percent_decode(query + key_begin, key_len, &key,
+                                             error);
     if (status == LONEJSON_STATUS_OK) {
       status = lonejson__oauth2_percent_decode(query + value_begin, value_len,
                                                &value, error);
@@ -1861,10 +1713,8 @@ lonejson_status lonejson_oidc_authorization_callback_parse_query(
       status = lonejson__oidc_callback_assign(
           &out->error, value.data != NULL ? value.data : "", error);
     } else if (strcmp(key.data, "error_description") == 0) {
-      status = lonejson__oidc_callback_assign(&out->error_description,
-                                              value.data != NULL ? value.data
-                                                                 : "",
-                                              error);
+      status = lonejson__oidc_callback_assign(
+          &out->error_description, value.data != NULL ? value.data : "", error);
     } else if (strcmp(key.data, "error_uri") == 0) {
       status = lonejson__oidc_callback_assign(
           &out->error_uri, value.data != NULL ? value.data : "", error);
@@ -1992,11 +1842,12 @@ int lonejson_oidc_jwks_cache_is_fresh(
   return lonejson__oidc_jwks_cache_matches_policy(cache, policy);
 }
 
-lonejson_status lonejson_oidc_jwks_cache_select(
-    const lonejson_oidc_jwks_cache *cache,
-    const lonejson_oidc_jwks_cache_policy *policy,
-    const lonejson_jwk_select_options *options, const lonejson_jwk **out,
-    lonejson_error *error) {
+lonejson_status
+lonejson_oidc_jwks_cache_select(const lonejson_oidc_jwks_cache *cache,
+                                const lonejson_oidc_jwks_cache_policy *policy,
+                                const lonejson_jwk_select_options *options,
+                                const lonejson_jwk **out,
+                                lonejson_error *error) {
   lonejson_status status;
 
   lonejson__clear_error(error);
@@ -2081,16 +1932,14 @@ size_t lonejson_oidc_jwks_cache_write_callback(char *ptr, size_t size,
     return 0u;
   }
   if (ptr == NULL) {
-    (void)lonejson__set_error(&ctx->error, LONEJSON_STATUS_INVALID_ARGUMENT,
-                              0u, 0u, 0u,
-                              "OIDC JWKS response chunk is required");
+    (void)lonejson__set_error(&ctx->error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                              0u, 0u, "OIDC JWKS response chunk is required");
     return 0u;
   }
   max_bytes = ctx->policy.max_jwks_bytes == 0u
                   ? LONEJSON__OIDC_DEFAULT_MAX_JWKS_BYTES
                   : ctx->policy.max_jwks_bytes;
-  if (ctx->response.len > max_bytes ||
-      bytes > max_bytes - ctx->response.len) {
+  if (ctx->response.len > max_bytes || bytes > max_bytes - ctx->response.len) {
     (void)lonejson__set_error(&ctx->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                               "OIDC JWKS response exceeds configured limit");
     return 0u;
@@ -2101,17 +1950,17 @@ size_t lonejson_oidc_jwks_cache_write_callback(char *ptr, size_t size,
              : 0u;
 }
 
-lonejson_status lonejson_oidc_jwks_cache_parse_finish(
-    lonejson_oidc_jwks_cache_parse *ctx) {
+lonejson_status
+lonejson_oidc_jwks_cache_parse_finish(lonejson_oidc_jwks_cache_parse *ctx) {
   if (ctx == NULL || !lonejson__curl_state_is_live(ctx->_reserved_state)) {
     return LONEJSON_STATUS_INVALID_ARGUMENT;
   }
   if (ctx->error.code != LONEJSON_STATUS_OK) {
     return ctx->error.code;
   }
-  return lonejson_oidc_jwks_cache_update_json(
-      ctx->runtime, ctx->cache, &ctx->policy, ctx->response.data,
-      ctx->response.len, &ctx->error);
+  return lonejson_oidc_jwks_cache_update_json(ctx->runtime, ctx->cache,
+                                              &ctx->policy, ctx->response.data,
+                                              ctx->response.len, &ctx->error);
 }
 
 void lonejson_oidc_jwks_cache_parse_cleanup(
@@ -2301,8 +2150,7 @@ lonejson__jwt_claim_string_begin(void *user, const lonejson_value_path *path,
   }
   if (lonejson__jwt_path_is(path, "nonce")) {
     return lonejson__jwt_begin_string_field(state, LONEJSON__JWT_FIELD_NONCE,
-                                            &state->seen_nonce, "nonce",
-                                            error);
+                                            &state->seen_nonce, "nonce", error);
   }
   if (lonejson__jwt_path_is(path, "aud")) {
     return lonejson__jwt_begin_string_field(
@@ -2906,9 +2754,10 @@ lonejson_status lonejson_jwt_validate_claims(
 }
 
 #ifdef LONEJSON_WITH_OPENSSL
-static unsigned char *lonejson__jwt_decode_base64url_alloc(
-    const char *data, size_t len, size_t *out_len, const char *what,
-    lonejson_error *error) {
+static unsigned char *
+lonejson__jwt_decode_base64url_alloc(const char *data, size_t len,
+                                     size_t *out_len, const char *what,
+                                     lonejson_error *error) {
   unsigned char *out;
   size_t decoded_len;
   size_t needed;
@@ -2925,8 +2774,8 @@ static unsigned char *lonejson__jwt_decode_base64url_alloc(
                               0u, "failed to allocate decoded JWT %s", what);
     return NULL;
   }
-  status = lonejson_base64url_decode(data, len, out, decoded_len, &needed,
-                                     error);
+  status =
+      lonejson_base64url_decode(data, len, out, decoded_len, &needed, error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson__owned_free(out);
     return NULL;
@@ -2935,8 +2784,8 @@ static unsigned char *lonejson__jwt_decode_base64url_alloc(
   return out;
 }
 
-static EVP_PKEY *lonejson__jwt_rsa_public_key_from_jwk(
-    const lonejson_jwk *jwk, lonejson_error *error) {
+static EVP_PKEY *lonejson__jwt_rsa_public_key_from_jwk(const lonejson_jwk *jwk,
+                                                       lonejson_error *error) {
   EVP_PKEY_CTX *ctx = NULL;
   EVP_PKEY *pkey = NULL;
   OSSL_PARAM_BLD *builder = NULL;
@@ -3030,9 +2879,10 @@ done:
   return pkey;
 }
 
-static lonejson_status lonejson__jwt_validate_rs256_signature(
-    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk, int pss,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_validate_rs256_signature(const lonejson_jwt_compact *jwt,
+                                       const lonejson_jwk *jwk, int pss,
+                                       lonejson_error *error) {
   EVP_PKEY *pkey = NULL;
   EVP_MD_CTX *md = NULL;
   EVP_PKEY_CTX *pkey_ctx = NULL;
@@ -3048,8 +2898,8 @@ static lonejson_status lonejson__jwt_validate_rs256_signature(
   }
   if (signature_len == 0u) {
     lonejson__owned_free(signature);
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "JWT signature must not be empty");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT signature must not be empty");
   }
   pkey = lonejson__jwt_rsa_public_key_from_jwk(jwk, error);
   if (pkey == NULL) {
@@ -3064,19 +2914,18 @@ static lonejson_status lonejson__jwt_validate_rs256_signature(
                                0u, "failed to allocate JWT verifier");
   }
   if (EVP_DigestVerifyInit(md, &pkey_ctx, EVP_sha256(), NULL, pkey) <= 0 ||
-      EVP_PKEY_CTX_set_rsa_padding(
-          pkey_ctx, pss ? RSA_PKCS1_PSS_PADDING : RSA_PKCS1_PADDING) <= 0 ||
+      EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, pss ? RSA_PKCS1_PSS_PADDING
+                                                 : RSA_PKCS1_PADDING) <= 0 ||
       (pss && EVP_PKEY_CTX_set_rsa_pss_saltlen(pkey_ctx, 32) <= 0)) {
     lonejson__owned_free(signature);
     EVP_MD_CTX_free(md);
     EVP_PKEY_free(pkey);
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "failed to initialize JWT verifier");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "failed to initialize JWT verifier");
   }
-  verify_result =
-      EVP_DigestVerify(md, signature, signature_len,
-                       (const unsigned char *)jwt->signing_input.data,
-                       jwt->signing_input.len);
+  verify_result = EVP_DigestVerify(
+      md, signature, signature_len,
+      (const unsigned char *)jwt->signing_input.data, jwt->signing_input.len);
   lonejson__owned_free(signature);
   EVP_MD_CTX_free(md);
   EVP_PKEY_free(pkey);
@@ -3087,8 +2936,8 @@ static lonejson_status lonejson__jwt_validate_rs256_signature(
                              "JWT signature validation failed");
 }
 
-static EVP_PKEY *lonejson__jwt_ec_public_key_from_jwk(
-    const lonejson_jwk *jwk, lonejson_error *error) {
+static EVP_PKEY *lonejson__jwt_ec_public_key_from_jwk(const lonejson_jwk *jwk,
+                                                      lonejson_error *error) {
   EVP_PKEY_CTX *ctx = NULL;
   EVP_PKEY *pkey = NULL;
   OSSL_PARAM_BLD *builder = NULL;
@@ -3163,9 +3012,10 @@ done:
   return pkey;
 }
 
-static unsigned char *lonejson__jwt_es256_der_signature_alloc(
-    const unsigned char *signature, size_t signature_len, size_t *out_len,
-    lonejson_error *error) {
+static unsigned char *
+lonejson__jwt_es256_der_signature_alloc(const unsigned char *signature,
+                                        size_t signature_len, size_t *out_len,
+                                        lonejson_error *error) {
   ECDSA_SIG *sig = NULL;
   BIGNUM *r = NULL;
   BIGNUM *s = NULL;
@@ -3226,9 +3076,10 @@ static unsigned char *lonejson__jwt_es256_der_signature_alloc(
   return der;
 }
 
-static lonejson_status lonejson__jwt_validate_es256_signature(
-    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_validate_es256_signature(const lonejson_jwt_compact *jwt,
+                                       const lonejson_jwk *jwk,
+                                       lonejson_error *error) {
   EVP_PKEY *pkey = NULL;
   EVP_MD_CTX *md = NULL;
   unsigned char *signature = NULL;
@@ -3265,13 +3116,12 @@ static lonejson_status lonejson__jwt_validate_es256_signature(
     lonejson__owned_free(der_signature);
     EVP_MD_CTX_free(md);
     EVP_PKEY_free(pkey);
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "failed to initialize JWT verifier");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "failed to initialize JWT verifier");
   }
-  verify_result =
-      EVP_DigestVerify(md, der_signature, der_signature_len,
-                       (const unsigned char *)jwt->signing_input.data,
-                       jwt->signing_input.len);
+  verify_result = EVP_DigestVerify(
+      md, der_signature, der_signature_len,
+      (const unsigned char *)jwt->signing_input.data, jwt->signing_input.len);
   lonejson__owned_free(der_signature);
   EVP_MD_CTX_free(md);
   EVP_PKEY_free(pkey);
@@ -3282,9 +3132,10 @@ static lonejson_status lonejson__jwt_validate_es256_signature(
                              "JWT signature validation failed");
 }
 
-static lonejson_status lonejson__jwt_validate_eddsa_signature(
-    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_validate_eddsa_signature(const lonejson_jwt_compact *jwt,
+                                       const lonejson_jwk *jwk,
+                                       lonejson_error *error) {
   EVP_PKEY *pkey = NULL;
   EVP_MD_CTX *md = NULL;
   unsigned char *x = NULL;
@@ -3331,13 +3182,12 @@ static lonejson_status lonejson__jwt_validate_eddsa_signature(
     EVP_MD_CTX_free(md);
     EVP_PKEY_free(pkey);
     lonejson__owned_free(signature);
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                               0u, "failed to initialize JWT verifier");
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "failed to initialize JWT verifier");
   }
-  verify_result =
-      EVP_DigestVerify(md, signature, signature_len,
-                       (const unsigned char *)jwt->signing_input.data,
-                       jwt->signing_input.len);
+  verify_result = EVP_DigestVerify(
+      md, signature, signature_len,
+      (const unsigned char *)jwt->signing_input.data, jwt->signing_input.len);
   EVP_MD_CTX_free(md);
   EVP_PKEY_free(pkey);
   lonejson__owned_free(signature);
@@ -3348,9 +3198,10 @@ static lonejson_status lonejson__jwt_validate_eddsa_signature(
                              "JWT signature validation failed");
 }
 
-static lonejson_status lonejson__openssl_auth_verify_jws(
-    void *user_data, const lonejson_jws_verify_request *request,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__openssl_auth_verify_jws(void *user_data,
+                                  const lonejson_jws_verify_request *request,
+                                  lonejson_error *error) {
   const lonejson_jwt_compact *jwt;
   const lonejson_jwt_header *header;
   const lonejson_jwk *jwk;
@@ -3364,8 +3215,7 @@ static lonejson_status lonejson__openssl_auth_verify_jws(
   jwt = request->jwt;
   header = request->header;
   jwk = request->jwk;
-  if (strcmp(header->alg, "RS256") == 0 ||
-      strcmp(header->alg, "PS256") == 0) {
+  if (strcmp(header->alg, "RS256") == 0 || strcmp(header->alg, "PS256") == 0) {
     if (!lonejson__auth_streq(jwk->kty, "RSA")) {
       return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
                                  0u,
@@ -3396,8 +3246,9 @@ static lonejson_status lonejson__openssl_auth_verify_jws(
   }
 }
 
-static lonejson_status lonejson__openssl_auth_random_bytes(
-    void *user_data, unsigned char *dst, size_t len, lonejson_error *error) {
+static lonejson_status
+lonejson__openssl_auth_random_bytes(void *user_data, unsigned char *dst,
+                                    size_t len, lonejson_error *error) {
   (void)user_data;
   if (dst == NULL && len != 0u) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -3414,9 +3265,9 @@ static lonejson_status lonejson__openssl_auth_random_bytes(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__openssl_auth_sha256(
-    void *user_data, const void *data, size_t len, unsigned char out[32],
-    lonejson_error *error) {
+static lonejson_status
+lonejson__openssl_auth_sha256(void *user_data, const void *data, size_t len,
+                              unsigned char out[32], lonejson_error *error) {
   unsigned int digest_len = 0u;
 
   (void)user_data;
@@ -3601,12 +3452,9 @@ void lonejson_oidc_bearer_validation_cleanup(
   validation->jwk = NULL;
 }
 
-static int lonejson__oidc_http_ows(char ch) {
-  return ch == ' ' || ch == '\t';
-}
+static int lonejson__oidc_http_ows(char ch) { return ch == ' ' || ch == '\t'; }
 
-static int lonejson__oidc_ascii_prefix_case_equal(const char *a,
-                                                  const char *b,
+static int lonejson__oidc_ascii_prefix_case_equal(const char *a, const char *b,
                                                   size_t len) {
   size_t i;
   unsigned char ca;
@@ -3628,9 +3476,10 @@ static int lonejson__oidc_ascii_prefix_case_equal(const char *a,
   return 1;
 }
 
-lonejson_status lonejson_oidc_authorization_bearer_token(
-    const char *authorization_header, lonejson_jwt_segment *out,
-    lonejson_error *error) {
+lonejson_status
+lonejson_oidc_authorization_bearer_token(const char *authorization_header,
+                                         lonejson_jwt_segment *out,
+                                         lonejson_error *error) {
   const char *cursor;
   const char *token_begin;
   const char *token_end;
@@ -3770,16 +3619,14 @@ lonejson_status lonejson_oidc_validate_bearer_token(
                                          &out->claims, error);
   }
   if (status != LONEJSON_STATUS_OK) {
-    return lonejson__oidc_bearer_fail(out,
-                                      LONEJSON_AUTH_FAILURE_MALFORMED_TOKEN,
-                                      status, error,
-                                      "Authorization bearer JWT is malformed");
+    return lonejson__oidc_bearer_fail(
+        out, LONEJSON_AUTH_FAILURE_MALFORMED_TOKEN, status, error,
+        "Authorization bearer JWT is malformed");
   }
   if (out->header.kid == NULL || out->header.kid[0] == '\0') {
     return lonejson__oidc_bearer_fail(
-        out, LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND,
-        LONEJSON_STATUS_TYPE_MISMATCH, error,
-        "JWT kid is required for JWKS bearer validation");
+        out, LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND, LONEJSON_STATUS_TYPE_MISMATCH,
+        error, "JWT kid is required for JWKS bearer validation");
   }
 
   memset(&select_options, 0, sizeof(select_options));
@@ -3791,20 +3638,19 @@ lonejson_status lonejson_oidc_validate_bearer_token(
           : (lonejson__auth_streq(out->header.alg, "ES256")
                  ? "EC"
                  : (lonejson__auth_streq(out->header.alg, "EdDSA") ? "OKP"
-                                                                    : NULL));
-  status = lonejson_oidc_jwks_cache_select(
-      request->jwks_cache, request->jwks_policy, &select_options, &selected,
-      error);
+                                                                   : NULL));
+  status =
+      lonejson_oidc_jwks_cache_select(request->jwks_cache, request->jwks_policy,
+                                      &select_options, &selected, error);
   if (status != LONEJSON_STATUS_OK) {
     return lonejson__oidc_bearer_fail(
         out, LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE, status, error,
         "OIDC JWKS cache is unavailable for bearer validation");
   }
   if (selected == NULL) {
-    return lonejson__oidc_bearer_fail(
-        out, LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND,
-        LONEJSON_STATUS_TYPE_MISMATCH, error,
-        "no JWKS key matches bearer JWT header");
+    return lonejson__oidc_bearer_fail(out, LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND,
+                                      LONEJSON_STATUS_TYPE_MISMATCH, error,
+                                      "no JWKS key matches bearer JWT header");
   }
 
   status = lonejson_jwt_validate_signature_with_runtime(
@@ -3820,8 +3666,8 @@ lonejson_status lonejson_oidc_validate_bearer_token(
   if (status != LONEJSON_STATUS_OK) {
     return lonejson__oidc_bearer_fail(
         out,
-        lonejson__oidc_bearer_classify_claim_failure(
-            &out->header, &out->claims, request->claim_policy),
+        lonejson__oidc_bearer_classify_claim_failure(&out->header, &out->claims,
+                                                     request->claim_policy),
         status, error, "bearer JWT claims validation failed");
   }
 
@@ -3864,21 +3710,12 @@ static const lonejson_field lonejson__m2m_record_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_record, api_key_hash,
                                 "api_key_hash"),
     LONEJSON_FIELD_BOOL(lonejson__m2m_record, revoked, "revoked"),
-    {"claim",
-     LONEJSON__KEY_LEN("claim"),
-     LONEJSON__KEY_FIRST("claim"),
-     LONEJSON__KEY_LAST("claim"),
-     offsetof(lonejson__m2m_record, claim),
-     LONEJSON_FIELD_KIND_JSON_VALUE,
-     LONEJSON_STORAGE_FIXED,
+    {"claim", LONEJSON__KEY_LEN("claim"), LONEJSON__KEY_FIRST("claim"),
+     LONEJSON__KEY_LAST("claim"), offsetof(lonejson__m2m_record, claim),
+     LONEJSON_FIELD_KIND_JSON_VALUE, LONEJSON_STORAGE_FIXED,
      LONEJSON_OVERFLOW_FAIL,
-     LONEJSON_FIELD_REQUIRED | LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE,
-     0u,
-     0u,
-     NULL,
-     NULL,
-     0u,
-     LONEJSON_SPOOL_CLASS_DEFAULT}};
+     LONEJSON_FIELD_REQUIRED | LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE, 0u,
+     0u, NULL, NULL, 0u, LONEJSON_SPOOL_CLASS_DEFAULT}};
 LONEJSON_MAP_DEFINE(lonejson__m2m_record_map, lonejson__m2m_record,
                     lonejson__m2m_record_fields);
 
@@ -3890,30 +3727,21 @@ static const lonejson_field lonejson__m2m_signup_record_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_signup_record, secret_hash,
                                 "secret_hash"),
     LONEJSON_FIELD_BOOL(lonejson__m2m_signup_record, revoked, "revoked"),
-    {"claim",
-     LONEJSON__KEY_LEN("claim"),
-     LONEJSON__KEY_FIRST("claim"),
-     LONEJSON__KEY_LAST("claim"),
-     offsetof(lonejson__m2m_signup_record, claim),
-     LONEJSON_FIELD_KIND_JSON_VALUE,
-     LONEJSON_STORAGE_FIXED,
+    {"claim", LONEJSON__KEY_LEN("claim"), LONEJSON__KEY_FIRST("claim"),
+     LONEJSON__KEY_LAST("claim"), offsetof(lonejson__m2m_signup_record, claim),
+     LONEJSON_FIELD_KIND_JSON_VALUE, LONEJSON_STORAGE_FIXED,
      LONEJSON_OVERFLOW_FAIL,
-     LONEJSON_FIELD_REQUIRED | LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE,
-     0u,
-     0u,
-     NULL,
-     NULL,
-     0u,
-     LONEJSON_SPOOL_CLASS_DEFAULT}};
+     LONEJSON_FIELD_REQUIRED | LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE, 0u,
+     0u, NULL, NULL, 0u, LONEJSON_SPOOL_CLASS_DEFAULT}};
 LONEJSON_MAP_DEFINE(lonejson__m2m_signup_record_map,
                     lonejson__m2m_signup_record,
                     lonejson__m2m_signup_record_fields);
 
 static const lonejson_field lonejson__m2m_store_doc_fields[] = {
-    LONEJSON_FIELD_OBJECT_ARRAY_OMIT_EMPTY(
-        lonejson__m2m_store_doc, credentials, "credentials",
-        lonejson__m2m_record, &lonejson__m2m_record_map,
-        LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_OBJECT_ARRAY_OMIT_EMPTY(lonejson__m2m_store_doc, credentials,
+                                           "credentials", lonejson__m2m_record,
+                                           &lonejson__m2m_record_map,
+                                           LONEJSON_OVERFLOW_FAIL),
     LONEJSON_FIELD_OBJECT_ARRAY_OMIT_EMPTY(
         lonejson__m2m_store_doc, signups, "signups",
         lonejson__m2m_signup_record, &lonejson__m2m_signup_record_map,
@@ -3950,9 +3778,9 @@ static lonejson_status lonejson__m2m_require_crypto(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__m2m_random_token(
-    const lonejson_runtime *runtime_state, size_t bytes, char **out,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__m2m_random_token(const lonejson_runtime *runtime_state, size_t bytes,
+                           char **out, lonejson_error *error) {
   unsigned char random_bytes[32];
 
   if (bytes == 0u || bytes > sizeof(random_bytes) || out == NULL) {
@@ -3972,9 +3800,10 @@ static lonejson_status lonejson__m2m_random_token(
                                        : LONEJSON_STATUS_ALLOCATION_FAILED);
 }
 
-static lonejson_status lonejson__m2m_hash_secret(
-    const lonejson_runtime *runtime_state, const char *salt, const char *secret,
-    char **out_hash, lonejson_error *error) {
+static lonejson_status
+lonejson__m2m_hash_secret(const lonejson_runtime *runtime_state,
+                          const char *salt, const char *secret, char **out_hash,
+                          lonejson_error *error) {
   unsigned char salt_bytes[16];
   unsigned char digest[32];
   unsigned char *input = NULL;
@@ -4017,9 +3846,10 @@ static lonejson_status lonejson__m2m_hash_secret(
   }
   *out_hash = lonejson__base64url_encode_alloc(digest, sizeof(digest), error);
   memset(digest, 0, sizeof(digest));
-  return *out_hash != NULL ? LONEJSON_STATUS_OK
-                           : (error != NULL ? error->code
-                                            : LONEJSON_STATUS_ALLOCATION_FAILED);
+  return *out_hash != NULL
+             ? LONEJSON_STATUS_OK
+             : (error != NULL ? error->code
+                              : LONEJSON_STATUS_ALLOCATION_FAILED);
 }
 
 static int lonejson__m2m_constant_equal(const char *a, const char *b) {
@@ -4066,15 +3896,16 @@ static int lonejson__m2m_ascii_scheme_prefix(const char *value,
   return 1;
 }
 
-static lonejson_status lonejson__m2m_verify_hash(
-    const lonejson_runtime *runtime_state, const char *salt, const char *hash,
-    const char *secret, int *ok, lonejson_error *error) {
+static lonejson_status
+lonejson__m2m_verify_hash(const lonejson_runtime *runtime_state,
+                          const char *salt, const char *hash,
+                          const char *secret, int *ok, lonejson_error *error) {
   char *computed = NULL;
   lonejson_status status;
 
   *ok = 0;
-  status = lonejson__m2m_hash_secret(runtime_state, salt, secret, &computed,
-                                     error);
+  status =
+      lonejson__m2m_hash_secret(runtime_state, salt, secret, &computed, error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson__clear_error(error);
     return LONEJSON_STATUS_OK;
@@ -4084,9 +3915,9 @@ static lonejson_status lonejson__m2m_verify_hash(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__m2m_append_json_string(
-    lonejson_owned_buffer *out, const char *value, size_t max_bytes,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__m2m_append_json_string(lonejson_owned_buffer *out, const char *value,
+                                 size_t max_bytes, lonejson_error *error) {
   static const char hex[] = "0123456789abcdef";
   const unsigned char *p = (const unsigned char *)value;
   char esc[6];
@@ -4100,32 +3931,32 @@ static lonejson_status lonejson__m2m_append_json_string(
     unsigned char ch = *p++;
     switch (ch) {
     case '"':
-      status = lonejson__oauth2_form_append_raw(out, "\\\"", 2u, max_bytes,
-                                                error);
+      status =
+          lonejson__oauth2_form_append_raw(out, "\\\"", 2u, max_bytes, error);
       break;
     case '\\':
-      status = lonejson__oauth2_form_append_raw(out, "\\\\", 2u, max_bytes,
-                                                error);
+      status =
+          lonejson__oauth2_form_append_raw(out, "\\\\", 2u, max_bytes, error);
       break;
     case '\b':
-      status = lonejson__oauth2_form_append_raw(out, "\\b", 2u, max_bytes,
-                                                error);
+      status =
+          lonejson__oauth2_form_append_raw(out, "\\b", 2u, max_bytes, error);
       break;
     case '\f':
-      status = lonejson__oauth2_form_append_raw(out, "\\f", 2u, max_bytes,
-                                                error);
+      status =
+          lonejson__oauth2_form_append_raw(out, "\\f", 2u, max_bytes, error);
       break;
     case '\n':
-      status = lonejson__oauth2_form_append_raw(out, "\\n", 2u, max_bytes,
-                                                error);
+      status =
+          lonejson__oauth2_form_append_raw(out, "\\n", 2u, max_bytes, error);
       break;
     case '\r':
-      status = lonejson__oauth2_form_append_raw(out, "\\r", 2u, max_bytes,
-                                                error);
+      status =
+          lonejson__oauth2_form_append_raw(out, "\\r", 2u, max_bytes, error);
       break;
     case '\t':
-      status = lonejson__oauth2_form_append_raw(out, "\\t", 2u, max_bytes,
-                                                error);
+      status =
+          lonejson__oauth2_form_append_raw(out, "\\t", 2u, max_bytes, error);
       break;
     default:
       if (ch < 0x20u) {
@@ -4135,9 +3966,8 @@ static lonejson_status lonejson__m2m_append_json_string(
         esc[3] = '0';
         esc[4] = hex[(ch >> 4u) & 0x0fu];
         esc[5] = hex[ch & 0x0fu];
-        status =
-            lonejson__oauth2_form_append_raw(out, esc, sizeof(esc), max_bytes,
-                                             error);
+        status = lonejson__oauth2_form_append_raw(out, esc, sizeof(esc),
+                                                  max_bytes, error);
       } else {
         status = lonejson__oauth2_form_append_raw(out, (const char *)&ch, 1u,
                                                   max_bytes, error);
@@ -4151,9 +3981,10 @@ static lonejson_status lonejson__m2m_append_json_string(
   return lonejson__oauth2_form_append_raw(out, "\"", 1u, max_bytes, error);
 }
 
-static lonejson_status lonejson__m2m_append_member_string(
-    lonejson_owned_buffer *out, const char *key, const char *value,
-    int *has_member, size_t max_bytes, lonejson_error *error) {
+static lonejson_status
+lonejson__m2m_append_member_string(lonejson_owned_buffer *out, const char *key,
+                                   const char *value, int *has_member,
+                                   size_t max_bytes, lonejson_error *error) {
   lonejson_status status;
 
   if (value == NULL) {
@@ -4193,12 +4024,12 @@ static lonejson_status lonejson__m2m_build_record_json(
                                                 &has_member, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__m2m_append_member_string(
-        out, "secret_salt", secret_salt, &has_member, max_bytes, error);
+    status = lonejson__m2m_append_member_string(out, "secret_salt", secret_salt,
+                                                &has_member, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__m2m_append_member_string(
-        out, "secret_hash", secret_hash, &has_member, max_bytes, error);
+    status = lonejson__m2m_append_member_string(out, "secret_hash", secret_hash,
+                                                &has_member, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__m2m_append_member_string(
@@ -4209,9 +4040,8 @@ static lonejson_status lonejson__m2m_build_record_json(
         out, "api_key_hash", api_key_hash, &has_member, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status =
-        lonejson__oauth2_form_append_raw(out, ",\"claim\":", 9u, max_bytes,
-                                         error);
+    status = lonejson__oauth2_form_append_raw(out, ",\"claim\":", 9u, max_bytes,
+                                              error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__oauth2_form_append_raw(out, claim_json, claim_len,
@@ -4226,9 +4056,10 @@ static lonejson_status lonejson__m2m_build_record_json(
   return status;
 }
 
-static lonejson_status lonejson__m2m_parse_store(
-    lonejson *runtime, const lonejson_m2m_store *input,
-    lonejson__m2m_store_doc *store, lonejson_error *error) {
+static lonejson_status
+lonejson__m2m_parse_store(lonejson *runtime, const lonejson_m2m_store *input,
+                          lonejson__m2m_store_doc *store,
+                          lonejson_error *error) {
   size_t max_bytes;
   lonejson_status status;
 
@@ -4236,8 +4067,8 @@ static lonejson_status lonejson__m2m_parse_store(
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "M2M credential store JSON is required");
   }
-  max_bytes = input->max_store_bytes == 0u ? 1024u * 1024u
-                                           : input->max_store_bytes;
+  max_bytes =
+      input->max_store_bytes == 0u ? 1024u * 1024u : input->max_store_bytes;
   if (input->len > max_bytes) {
     return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                                "M2M credential store exceeds configured limit");
@@ -4290,8 +4121,8 @@ lonejson_status lonejson_m2m_credential_generate(
   }
   lonejson_m2m_credential_cleanup(out);
   claim_json = request->claim_json;
-  claim_len =
-      request->claim_len == 0u ? strlen(request->claim_json) : request->claim_len;
+  claim_len = request->claim_len == 0u ? strlen(request->claim_json)
+                                       : request->claim_len;
   status = lonejson_validate_buffer(runtime, claim_json, claim_len, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
@@ -4301,12 +4132,13 @@ lonejson_status lonejson_m2m_credential_generate(
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "unsupported M2M auth mode");
   }
-  status = lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
+  status =
+      lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson__m2m_random_token(runtime_state, 16u, &out->client_id,
-                                      error);
+  status =
+      lonejson__m2m_random_token(runtime_state, 16u, &out->client_id, error);
   if (status == LONEJSON_STATUS_OK && (modes & LONEJSON_M2M_AUTH_BASIC) != 0u) {
     status = lonejson__m2m_random_token(runtime_state, 32u, &out->client_secret,
                                         error);
@@ -4317,24 +4149,25 @@ lonejson_status lonejson_m2m_credential_generate(
         lonejson__m2m_random_token(runtime_state, 32u, &out->api_key, error);
   }
   if (status == LONEJSON_STATUS_OK && out->client_secret != NULL) {
-    status = lonejson__m2m_random_token(runtime_state, 16u, &secret_salt,
-                                        error);
+    status =
+        lonejson__m2m_random_token(runtime_state, 16u, &secret_salt, error);
   }
   if (status == LONEJSON_STATUS_OK && out->client_secret != NULL) {
     status = lonejson__m2m_hash_secret(runtime_state, secret_salt,
                                        out->client_secret, &secret_hash, error);
   }
   if (status == LONEJSON_STATUS_OK && out->api_key != NULL) {
-    status = lonejson__m2m_random_token(runtime_state, 16u, &api_key_salt,
-                                        error);
+    status =
+        lonejson__m2m_random_token(runtime_state, 16u, &api_key_salt, error);
   }
   if (status == LONEJSON_STATUS_OK && out->api_key != NULL) {
     status = lonejson__m2m_hash_secret(runtime_state, api_key_salt,
                                        out->api_key, &api_key_hash, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    max_record_bytes =
-        request->max_record_bytes == 0u ? 64u * 1024u : request->max_record_bytes;
+    max_record_bytes = request->max_record_bytes == 0u
+                           ? 64u * 1024u
+                           : request->max_record_bytes;
     status = lonejson__m2m_build_record_json(
         out->client_id, secret_salt, secret_hash, api_key_salt, api_key_hash,
         claim_json, claim_len, max_record_bytes, &out->record_json, error);
@@ -4366,9 +4199,9 @@ void lonejson_m2m_authentication_cleanup(lonejson_m2m_authentication *auth) {
   }
 }
 
-static lonejson_status lonejson__m2m_extract_bearer(
-    const char *authorization_header, const char **token,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__m2m_extract_bearer(const char *authorization_header,
+                             const char **token, lonejson_error *error) {
   const char *p;
   const char *begin;
 
@@ -4407,36 +4240,17 @@ static lonejson_status lonejson__m2m_extract_bearer(
   return LONEJSON_STATUS_OK;
 }
 
-static int lonejson__m2m_base64_value(unsigned char ch) {
-  if (ch >= (unsigned char)'A' && ch <= (unsigned char)'Z') {
-    return (int)(ch - (unsigned char)'A');
-  }
-  if (ch >= (unsigned char)'a' && ch <= (unsigned char)'z') {
-    return (int)(ch - (unsigned char)'a') + 26;
-  }
-  if (ch >= (unsigned char)'0' && ch <= (unsigned char)'9') {
-    return (int)(ch - (unsigned char)'0') + 52;
-  }
-  if (ch == (unsigned char)'+') {
-    return 62;
-  }
-  if (ch == (unsigned char)'/') {
-    return 63;
-  }
-  return -1;
-}
-
-static lonejson_status lonejson__m2m_basic_decode(
-    const char *authorization_header, char **client_id, char **client_secret,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__m2m_basic_decode(const char *authorization_header, char **client_id,
+                           char **client_secret, lonejson_error *error) {
   const char *p;
   const char *encoded;
   size_t len;
   size_t out_cap;
   unsigned char *decoded;
-  size_t i;
-  size_t out_len = 0u;
+  size_t out_len;
   char *colon;
+  lonejson_status status;
 
   *client_id = NULL;
   *client_secret = NULL;
@@ -4468,41 +4282,31 @@ static lonejson_status lonejson__m2m_basic_decode(
   while (*p == ' ' || *p == '\t') {
     ++p;
   }
-  if (len == 0u || *p != '\0' || (len & 3u) != 0u) {
+  if (len == 0u || *p != '\0') {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
                                "Basic credentials are malformed");
   }
-  out_cap = (len / 4u) * 3u + 1u;
-  decoded = (unsigned char *)lonejson__owned_malloc(NULL, out_cap);
+  status = lonejson_base64_decoded_len(encoded, len, LONEJSON_BASE64_STANDARD,
+                                       &out_cap, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "Basic credentials are malformed");
+  }
+  if (out_cap == SIZE_MAX) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "Basic credential length overflows");
+  }
+  decoded = (unsigned char *)lonejson__owned_malloc(NULL, out_cap + 1u);
   if (decoded == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
                                0u, "failed to allocate Basic credentials");
   }
-  for (i = 0u; i < len; i += 4u) {
-    int v0 = lonejson__m2m_base64_value((unsigned char)encoded[i]);
-    int v1 = lonejson__m2m_base64_value((unsigned char)encoded[i + 1u]);
-    int v2 = encoded[i + 2u] == '='
-                 ? 0
-                 : lonejson__m2m_base64_value((unsigned char)encoded[i + 2u]);
-    int v3 = encoded[i + 3u] == '='
-                 ? 0
-                 : lonejson__m2m_base64_value((unsigned char)encoded[i + 3u]);
-    unsigned int bits;
-    if (v0 < 0 || v1 < 0 || v2 < 0 || v3 < 0 ||
-        (encoded[i + 2u] == '=' && encoded[i + 3u] != '=')) {
-      lonejson__owned_free(decoded);
-      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
-                                 0u, "Basic credentials are malformed");
-    }
-    bits = ((unsigned int)v0 << 18) | ((unsigned int)v1 << 12) |
-           ((unsigned int)v2 << 6) | (unsigned int)v3;
-    decoded[out_len++] = (unsigned char)((bits >> 16) & 0xffu);
-    if (encoded[i + 2u] != '=') {
-      decoded[out_len++] = (unsigned char)((bits >> 8) & 0xffu);
-    }
-    if (encoded[i + 3u] != '=') {
-      decoded[out_len++] = (unsigned char)(bits & 0xffu);
-    }
+  status = lonejson_base64_decode(encoded, len, LONEJSON_BASE64_STANDARD,
+                                  decoded, out_cap, &out_len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__owned_free(decoded);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "Basic credentials are malformed");
   }
   decoded[out_len] = '\0';
   colon = strchr((char *)decoded, ':');
@@ -4549,7 +4353,8 @@ lonejson_status lonejson_m2m_verify_authorization(
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "unsupported M2M auth mode");
   }
-  status = lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
+  status =
+      lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
   if (status != LONEJSON_STATUS_OK) {
     out->failure = LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE;
     return status;
@@ -4564,8 +4369,8 @@ lonejson_status lonejson_m2m_verify_authorization(
     char *client_id = NULL;
     char *client_secret = NULL;
     if (lonejson__m2m_basic_decode(request->authorization_header, &client_id,
-                                   &client_secret, NULL) ==
-        LONEJSON_STATUS_OK) {
+                                   &client_secret,
+                                   NULL) == LONEJSON_STATUS_OK) {
       for (i = 0u; i < store.credentials.count; ++i) {
         lonejson__m2m_record *record =
             &((lonejson__m2m_record *)store.credentials.items)[i];
@@ -4666,21 +4471,20 @@ static lonejson_status lonejson__m2m_build_signup_record_json(
   lonejson_owned_buffer_free(out);
   status = lonejson__oauth2_form_append_raw(out, "{", 1u, max_bytes, error);
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__m2m_append_member_string(
-        out, "signup_id", signup_id, &has_member, max_bytes, error);
+    status = lonejson__m2m_append_member_string(out, "signup_id", signup_id,
+                                                &has_member, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__m2m_append_member_string(
-        out, "secret_salt", secret_salt, &has_member, max_bytes, error);
+    status = lonejson__m2m_append_member_string(out, "secret_salt", secret_salt,
+                                                &has_member, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__m2m_append_member_string(
-        out, "secret_hash", secret_hash, &has_member, max_bytes, error);
+    status = lonejson__m2m_append_member_string(out, "secret_hash", secret_hash,
+                                                &has_member, max_bytes, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status =
-        lonejson__oauth2_form_append_raw(out, ",\"claim\":", 9u, max_bytes,
-                                         error);
+    status = lonejson__oauth2_form_append_raw(out, ",\"claim\":", 9u, max_bytes,
+                                              error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__oauth2_form_append_raw(out, claim_json, claim_len,
@@ -4695,9 +4499,10 @@ static lonejson_status lonejson__m2m_build_signup_record_json(
   return status;
 }
 
-lonejson_status lonejson_m2m_signup_generate(
-    lonejson *runtime, const lonejson_m2m_signup_request *request,
-    lonejson_m2m_signup *out, lonejson_error *error) {
+lonejson_status
+lonejson_m2m_signup_generate(lonejson *runtime,
+                             const lonejson_m2m_signup_request *request,
+                             lonejson_m2m_signup *out, lonejson_error *error) {
   lonejson__runtime_borrow borrow;
   const lonejson_runtime *runtime_state;
   const char *claim_json;
@@ -4718,59 +4523,60 @@ lonejson_status lonejson_m2m_signup_generate(
   }
   lonejson_m2m_signup_cleanup(out);
   claim_json = request->claim_json;
-  claim_len =
-      request->claim_len == 0u ? strlen(request->claim_json) : request->claim_len;
+  claim_len = request->claim_len == 0u ? strlen(request->claim_json)
+                                       : request->claim_len;
   status = lonejson_validate_buffer(runtime, claim_json, claim_len, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
+  status =
+      lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
   status =
       lonejson__m2m_random_token(runtime_state, 16u, &out->signup_id, error);
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__m2m_random_token(runtime_state, 32u,
-                                        &out->signup_secret, error);
+    status = lonejson__m2m_random_token(runtime_state, 32u, &out->signup_secret,
+                                        error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__m2m_random_token(runtime_state, 16u, &secret_salt,
-                                        error);
+    status =
+        lonejson__m2m_random_token(runtime_state, 16u, &secret_salt, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__m2m_hash_secret(runtime_state, secret_salt,
                                        out->signup_secret, &secret_hash, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    max_record_bytes =
-        request->max_record_bytes == 0u ? 64u * 1024u : request->max_record_bytes;
+    max_record_bytes = request->max_record_bytes == 0u
+                           ? 64u * 1024u
+                           : request->max_record_bytes;
     status = lonejson__m2m_build_signup_record_json(
         out->signup_id, secret_salt, secret_hash, claim_json, claim_len,
         max_record_bytes, &out->record_json, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    secret_param = request->secret_param != NULL ? request->secret_param
-                                                 : "signup_secret";
+    secret_param =
+        request->secret_param != NULL ? request->secret_param : "signup_secret";
     id_param = request->id_param != NULL ? request->id_param : "signup_id";
     max_url_bytes =
         request->max_url_bytes == 0u ? 4096u : request->max_url_bytes;
     status = lonejson__oauth2_form_append_pair(
         &out->query, id_param, out->signup_id, &has_pair, max_url_bytes, error);
     if (status == LONEJSON_STATUS_OK) {
-      status = lonejson__oauth2_form_append_pair(
-          &out->query, secret_param, out->signup_secret, &has_pair,
-          max_url_bytes, error);
+      status = lonejson__oauth2_form_append_pair(&out->query, secret_param,
+                                                 out->signup_secret, &has_pair,
+                                                 max_url_bytes, error);
     }
     if (status == LONEJSON_STATUS_OK && request->base_url != NULL) {
       const char *join = strchr(request->base_url, '?') == NULL ? "?" : "&";
-      status = lonejson__oauth2_form_append_raw(
-          &out->url, request->base_url, strlen(request->base_url),
-          max_url_bytes, error);
+      status = lonejson__oauth2_form_append_raw(&out->url, request->base_url,
+                                                strlen(request->base_url),
+                                                max_url_bytes, error);
       if (status == LONEJSON_STATUS_OK) {
-        status =
-            lonejson__oauth2_form_append_raw(&out->url, join, 1u,
-                                             max_url_bytes, error);
+        status = lonejson__oauth2_form_append_raw(&out->url, join, 1u,
+                                                  max_url_bytes, error);
       }
       if (status == LONEJSON_STATUS_OK) {
         status = lonejson__oauth2_form_append_raw(
@@ -4825,7 +4631,8 @@ lonejson_status lonejson_m2m_signup_complete(
                                "are required");
   }
   lonejson_m2m_signup_complete_cleanup(out);
-  status = lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
+  status =
+      lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -4847,15 +4654,15 @@ lonejson_status lonejson_m2m_signup_complete(
       continue;
     }
     (void)lonejson__m2m_verify_hash(runtime_state, signup->secret_salt,
-                                    signup->secret_hash,
-                                    request->signup_secret, &ok, NULL);
+                                    signup->secret_hash, request->signup_secret,
+                                    &ok, NULL);
     if (ok) {
       lonejson_m2m_credential_request credential_request;
       claim_copy = (char *)lonejson__owned_malloc(NULL, signup->claim.len + 1u);
       if (claim_copy == NULL) {
-        status = lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
-                                     0u, 0u, 0u,
-                                     "failed to copy signup claim JSON");
+        status =
+            lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                0u, 0u, "failed to copy signup claim JSON");
         lonejson__m2m_store_cleanup(&store);
         lonejson__runtime_borrow_release(&borrow);
         return status;
@@ -4870,8 +4677,8 @@ lonejson_status lonejson_m2m_signup_complete(
       if (out->signup_id == NULL || out->email == NULL) {
         lonejson__owned_free(claim_copy);
         lonejson_m2m_signup_complete_cleanup(out);
-        return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
-                                   0u, 0u, 0u,
+        return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                   0u, 0u,
                                    "failed to copy signup completion data");
       }
       memset(&credential_request, 0, sizeof(credential_request));

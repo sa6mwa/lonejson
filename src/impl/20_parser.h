@@ -465,28 +465,6 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_literal_lex(
                    parser->error.column, "failed to append literal");
 }
 
-static int lonejson__base64_value(int ch) {
-  if (ch >= 'A' && ch <= 'Z') {
-    return ch - 'A';
-  }
-  if (ch >= 'a' && ch <= 'z') {
-    return 26 + (ch - 'a');
-  }
-  if (ch >= '0' && ch <= '9') {
-    return 52 + (ch - '0');
-  }
-  if (ch == '+') {
-    return 62;
-  }
-  if (ch == '/') {
-    return 63;
-  }
-  if (ch == '=') {
-    return -2;
-  }
-  return -1;
-}
-
 static lonejson_status
 lonejson__stream_value_append_decoded(lonejson_parser *parser,
                                       const unsigned char *data, size_t len) {
@@ -515,7 +493,13 @@ lonejson__stream_value_append_base64_char(lonejson_parser *parser,
                                           unsigned char ch) {
   int value;
 
-  value = lonejson__base64_value(ch);
+  value =
+      ch == (unsigned char)'='
+          ? -2
+          : lonejson__base64_value_for_variant(ch, LONEJSON_BASE64_STANDARD);
+  if (value < -1) {
+    value = -2;
+  }
   if (value == -1) {
     return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
                                parser->error.offset, parser->error.line,
@@ -534,37 +518,19 @@ lonejson__stream_value_append_base64_char(lonejson_parser *parser,
   }
   if (parser->stream_base64_quad_len == 4u) {
     unsigned char out[3];
-    int a;
-    int b;
-    int c;
-    int d;
     size_t out_len;
     lonejson_status status;
+    lonejson_error decode_error;
 
-    a = lonejson__base64_value(parser->stream_base64_quad[0]);
-    b = lonejson__base64_value(parser->stream_base64_quad[1]);
-    c = lonejson__base64_value(parser->stream_base64_quad[2]);
-    d = lonejson__base64_value(parser->stream_base64_quad[3]);
-    if (a < 0 || b < 0 || c == -1 || d == -1) {
+    lonejson_error_init(&decode_error);
+    status = lonejson_base64_decode((const char *)parser->stream_base64_quad,
+                                    4u, LONEJSON_BASE64_STANDARD, out,
+                                    sizeof(out), &out_len, &decode_error);
+    if (status != LONEJSON_STATUS_OK) {
       return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
                                  parser->error.offset, parser->error.line,
                                  parser->error.column,
                                  "invalid base64 quartet in streamed field");
-    }
-    out[0] = (unsigned char)((a << 2) | ((b & 0x30) >> 4));
-    out_len = 1u;
-    if (c != -2) {
-      out[1] = (unsigned char)(((b & 0x0Fu) << 4) | ((c & 0x3Cu) >> 2));
-      out_len = 2u;
-      if (d != -2) {
-        out[2] = (unsigned char)(((c & 0x03u) << 6) | d);
-        out_len = 3u;
-      }
-    } else if (d != -2) {
-      return lonejson__set_error(&parser->error, LONEJSON_STATUS_INVALID_JSON,
-                                 parser->error.offset, parser->error.line,
-                                 parser->error.column,
-                                 "invalid base64 padding in streamed field");
     }
     status = lonejson__stream_value_append_decoded(parser, out, out_len);
     parser->stream_base64_quad_len = 0u;

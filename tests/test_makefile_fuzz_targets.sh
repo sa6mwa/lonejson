@@ -20,6 +20,14 @@ require_line() {
 
 require_line 'lonejson_fuzz_path_value_visitor' \
   'make fuzz does not build/run lonejson_fuzz_path_value_visitor'
+require_line 'lonejson_fuzz_base64' \
+  'make fuzz does not build/run lonejson_fuzz_base64'
+require_line 'build/fuzz/corpus/base64' \
+  'make fuzz does not reference the base64 corpus directory'
+require_line 'fuzz/corpus/base64/.' \
+  'make fuzz does not copy the base64 seed corpus'
+require_line 'artifacts/base64' \
+  'make fuzz does not prepare base64 artifacts'
 require_line 'build/fuzz/corpus/path_value_visitor' \
   'make fuzz does not reference the path value visitor corpus directory'
 require_line 'fuzz/corpus/path_value_visitor/.' \

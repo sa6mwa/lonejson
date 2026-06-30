@@ -1,4 +1,5 @@
 #include "impl/00_prelude.h"
+#include "impl/09_base64.h"
 #include "impl/10_source_runtime.h"
 #include "impl/11_json_value_io.h"
 #include "impl/12_json_value_parse.h"
