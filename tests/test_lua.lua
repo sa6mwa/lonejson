@@ -302,6 +302,55 @@ if lonejson.jwt_parse_compact ~= nil then
         "?code=abc%2B123&state=state+123", "state 123")
     local bearer = lj:oidc_validate_bearer_token(
         "Bearer " .. signed_token, signed_jwks_json, cache_policy, policy)
+    local http_requests = {}
+    local provider_lj = new_runtime()
+    local provider_ok = provider_lj:set_http_provider(function(request)
+      http_requests[#http_requests + 1] = request
+      assert_eq(request.user_agent, "lonejson-lua-test/1")
+      if request.url == "https://id.example/.well-known/openid-configuration/tenant" then
+        assert_eq(request.method, "GET")
+        return { status_code = 200, body = discovery_json }
+      end
+      if request.url == "https://id.example/jwks" then
+        assert_eq(request.method, "GET")
+        return { status_code = 200, body = jwks_json }
+      end
+      if request.url == "https://id.example/token" then
+        assert_eq(request.method, "POST")
+        assert_eq(request.content_type, "application/x-www-form-urlencoded")
+        if request.body:find("grant_type=client_credentials", 1, true) ~= nil then
+          return { status_code = 200, body = '{"access_token":"client-token","token_type":"Bearer","expires_in":60}' }
+        end
+        if request.body:find("grant_type=refresh_token", 1, true) ~= nil then
+          return { status_code = 200, body = '{"access_token":"refresh-token","token_type":"Bearer"}' }
+        end
+        if request.body:find("grant_type=authorization_code", 1, true) ~= nil then
+          return { status_code = 200, body = '{"access_token":"code-token","token_type":"Bearer","id_token":"id.jwt"}' }
+        end
+      end
+      return nil, "unexpected request " .. tostring(request.url)
+    end, "lonejson-lua-test/1")
+    local fetched_discovery = provider_lj:oidc_fetch_discovery("https://id.example/tenant", 4096)
+    local refreshed_cache = provider_lj:oidc_jwks_cache_refresh(cache_policy)
+    local requested_client_token = provider_lj:oauth2_client_credentials_request(
+        "https://id.example/token", {
+          client_id = "client id",
+          client_secret = "s+e&c=r%t",
+          scope = "read write",
+        }, 4096)
+    local requested_refresh_token = provider_lj:oauth2_refresh_token_request(
+        "https://id.example/token", {
+          refresh_token = "r+e&f",
+          client_id = "client id",
+          client_secret = "secret",
+        }, 4096)
+    local requested_code_token = provider_lj:oidc_authorization_code_token_request(
+        "https://id.example/token", {
+          client_id = "client id",
+          code = "code+123",
+          redirect_uri = "http://127.0.0.1:1234/cb",
+          code_verifier = "verifier value",
+        }, 4096)
 
     assert_eq(lonejson.oidc_discovery_url("https://id.example/tenant/"),
               "https://id.example/.well-known/openid-configuration/tenant")
@@ -342,6 +391,20 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(bearer.header.kid, "rsa-test")
     assert_eq(bearer.claims.iss, "issuer")
     assert_eq(bearer.jwk.kid, "rsa-test")
+    assert_true(provider_ok)
+    assert_eq(fetched_discovery.issuer, "https://id.example/tenant")
+    assert_eq(fetched_discovery.jwks_uri, "https://id.example/jwks")
+    assert_eq(refreshed_cache.issuer, "https://id.example/tenant")
+    assert_eq(refreshed_cache.jwks_uri, "https://id.example/jwks")
+    assert_true(refreshed_cache.fetched_at == 1000)
+    assert_true(refreshed_cache.expires_at == 1060)
+    assert_eq(refreshed_cache.jwks.keys[1].kid, "rsa1")
+    assert_eq(requested_client_token.access_token, "client-token")
+    assert_eq(requested_client_token.expires_in, 60)
+    assert_eq(requested_refresh_token.access_token, "refresh-token")
+    assert_eq(requested_code_token.access_token, "code-token")
+    assert_eq(requested_code_token.id_token, "id.jwt")
+    assert_eq(#http_requests, 5)
 
     bad, err = lonejson.oidc_discovery_parse_json(discovery_json, "https://id.example")
     assert_true(bad == nil)
@@ -376,6 +439,27 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(err.status, "type_mismatch")
 
     bad, err = lj:oauth2_token_response_parse_json('{"error":"invalid_client"}')
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = provider_lj:oauth2_client_credentials_request(
+        "https://id.example/token", {
+          client_id = "client id",
+          client_secret = "s+e&c=r%t",
+        }, 8)
+    assert_true(bad == nil)
+    assert_eq(err.status, "overflow")
+
+    provider_lj:set_http_provider(function()
+      return nil, "provider boom"
+    end, "lonejson-lua-test/2")
+    bad, err = provider_lj:oidc_fetch_discovery("https://id.example/tenant", 4096)
+    assert_true(bad == nil)
+    assert_eq(err.status, "callback_failed")
+    assert_true(err.message:find("provider boom", 1, true) ~= nil)
+
+    provider_lj:set_http_provider(nil)
+    bad, err = provider_lj:oidc_fetch_discovery("https://id.example/tenant", 4096)
     assert_true(bad == nil)
     assert_eq(err.status, "type_mismatch")
 

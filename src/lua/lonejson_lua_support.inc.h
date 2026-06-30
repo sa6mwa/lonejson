@@ -68,6 +68,7 @@ typedef struct ljlua_json_value_decode_state ljlua_json_value_decode_state;
 
 typedef struct ljlua_runtime_ud {
   unsigned int magic;
+  lua_State *L;
   lonejson *runtime;
   lonejson *capture_runtime;
   int clear_destination;
@@ -75,6 +76,11 @@ typedef struct ljlua_runtime_ud {
   int write_pretty;
   size_t write_max_output_bytes;
   int fixed_string_scratch_ref;
+#if defined(LONEJSON_WITH_OIDC)
+  int http_provider_ref;
+  char *http_user_agent;
+  lonejson_http_provider http_provider;
+#endif
 } ljlua_runtime_ud;
 
 typedef struct ljlua_field_meta {

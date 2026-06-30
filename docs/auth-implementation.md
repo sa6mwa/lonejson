@@ -636,8 +636,15 @@ OIDC/OAuth2 Lua facade:
 
 - `oidc_discovery_url`
 - `oidc_discovery_parse_json`
+- `oidc_fetch_discovery` on runtime userdata
 - `oidc_jwks_cache_select_json`
+- `oidc_jwks_cache_refresh` on runtime userdata
 - `oauth2_client_credentials_body`
+- `oauth2_refresh_token_body`
+- `oidc_authorization_code_token_body`
+- `oauth2_client_credentials_request` on runtime userdata
+- `oauth2_refresh_token_request` on runtime userdata
+- `oidc_authorization_code_token_request` on runtime userdata
 - `oauth2_token_response_parse_json`
 - `oidc_pkce_challenge`
 - `oidc_pkce_generate`
@@ -646,7 +653,15 @@ OIDC/OAuth2 Lua facade:
 - `oidc_validate_bearer_token`
 
 The functions are registered both on the module table and runtime userdata
-where applicable.
+where applicable. Provider-backed helpers are runtime-only because they require
+the runtime's installed HTTP provider. Lua runtimes install that provider with
+`runtime:set_http_provider(callback, user_agent)`. The callback receives a
+bounded request table containing `method`, `url`, optional `content_type`,
+optional `user_agent`, optional `body`, `body_len`, and
+`max_response_bytes`, and returns a response table with `status_code` and
+optional `body`. The Lua binding does not implement HTTP transfer itself; the
+callback is the caller-owned transport boundary while C still performs URL/body
+construction, response-size enforcement, JSON parsing, and validation.
 
 Lua policy tables map directly to the C policy concepts:
 

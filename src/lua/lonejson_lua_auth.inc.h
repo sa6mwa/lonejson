@@ -74,6 +74,23 @@ static void ljlua_auth_push_claims(lua_State *L,
 }
 
 #ifdef LONEJSON_WITH_OIDC
+static void ljlua_auth_push_http_request(lua_State *L,
+                                         const lonejson_http_request *request) {
+  lua_createtable(L, 0, 7);
+  ljlua_auth_push_optional_string(L, request->method, "method");
+  ljlua_auth_push_optional_string(L, request->url, "url");
+  ljlua_auth_push_optional_string(L, request->content_type, "content_type");
+  ljlua_auth_push_optional_string(L, request->user_agent, "user_agent");
+  if (request->body != NULL || request->body_len != 0u) {
+    lua_pushlstring(L, (const char *)request->body, request->body_len);
+    lua_setfield(L, -2, "body");
+  }
+  lua_pushinteger(L, (lua_Integer)request->body_len);
+  lua_setfield(L, -2, "body_len");
+  lua_pushinteger(L, (lua_Integer)request->max_response_bytes);
+  lua_setfield(L, -2, "max_response_bytes");
+}
+
 static void
 ljlua_auth_push_oidc_discovery(lua_State *L,
                                const lonejson_oidc_discovery *discovery) {
@@ -98,6 +115,19 @@ static void ljlua_auth_push_oauth2_token_response(
     lua_pushinteger(L, (lua_Integer)response->expires_in);
     lua_setfield(L, -2, "expires_in");
   }
+}
+
+static void ljlua_auth_push_jwks_cache(lua_State *L,
+                                       const lonejson_oidc_jwks_cache *cache) {
+  lua_createtable(L, 0, 5);
+  ljlua_auth_push_optional_string(L, cache->issuer, "issuer");
+  ljlua_auth_push_optional_string(L, cache->jwks_uri, "jwks_uri");
+  lua_pushinteger(L, (lua_Integer)cache->fetched_at);
+  lua_setfield(L, -2, "fetched_at");
+  lua_pushinteger(L, (lua_Integer)cache->expires_at);
+  lua_setfield(L, -2, "expires_at");
+  ljlua_auth_push_jwks(L, &cache->jwks);
+  lua_setfield(L, -2, "jwks");
 }
 
 static void ljlua_auth_push_oidc_pkce(lua_State *L,
@@ -297,6 +327,199 @@ static lonejson *ljlua_auth_runtime_arg(lua_State *L, int *arg,
   }
   return ljlua_ensure_visit_runtime(L, runtime, owned_runtime, error);
 }
+
+#ifdef LONEJSON_WITH_OIDC
+static char *ljlua_auth_strdup(const char *value) {
+  size_t len;
+  char *copy;
+
+  if (value == NULL) {
+    return NULL;
+  }
+  len = strlen(value);
+  copy = (char *)malloc(len + 1u);
+  if (copy == NULL) {
+    return NULL;
+  }
+  memcpy(copy, value, len + 1u);
+  return copy;
+}
+
+static void ljlua_auth_clear_http_provider(lua_State *L, ljlua_runtime_ud *ud) {
+  lonejson_error error;
+
+  if (ud == NULL) {
+    return;
+  }
+  if (ud->runtime != NULL) {
+    lonejson_error_init(&error);
+    (void)lonejson_set_http_provider(ud->runtime, NULL, &error);
+  }
+  if (ud->http_provider_ref != LUA_NOREF) {
+    luaL_unref(L, LUA_REGISTRYINDEX, ud->http_provider_ref);
+    ud->http_provider_ref = LUA_NOREF;
+  }
+  free(ud->http_user_agent);
+  ud->http_user_agent = NULL;
+  memset(&ud->http_provider, 0, sizeof(ud->http_provider));
+}
+
+static lonejson_status
+ljlua_auth_http_provider_request(void *user_data,
+                                 const lonejson_http_request *request,
+                                 lonejson_http_response *response,
+                                 lonejson_error *error) {
+  ljlua_runtime_ud *ud = (ljlua_runtime_ud *)user_data;
+  lua_State *L;
+  int base;
+  int rc;
+  int result_index;
+  long status_code;
+  size_t body_len;
+  const char *body;
+
+  if (ud == NULL || ud->L == NULL || ud->http_provider_ref == LUA_NOREF) {
+    ljlua_set_callback_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                             "Lua HTTP provider is not configured");
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  L = ud->L;
+  base = lua_gettop(L);
+  lua_rawgeti(L, LUA_REGISTRYINDEX, ud->http_provider_ref);
+  ljlua_auth_push_http_request(L, request);
+  rc = lua_pcall(L, 1, LUA_MULTRET, 0);
+  if (rc != LUA_OK) {
+    const char *message = lua_tostring(L, -1);
+    ljlua_set_callback_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                             message != NULL ? message
+                                             : "Lua HTTP provider failed");
+    lua_settop(L, base);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (lua_gettop(L) <= base || lua_isnil(L, base + 1) ||
+      (lua_isboolean(L, base + 1) && !lua_toboolean(L, base + 1))) {
+    const char *message =
+        lua_gettop(L) >= base + 2 ? lua_tostring(L, base + 2) : NULL;
+    ljlua_set_callback_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                             message != NULL ? message
+                                             : "Lua HTTP provider failed");
+    lua_settop(L, base);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  result_index = base + 1;
+  if (!lua_istable(L, result_index)) {
+    ljlua_set_callback_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                             "Lua HTTP provider response must be a table");
+    lua_settop(L, base);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  lua_getfield(L, result_index, "status_code");
+  if (!lua_isnumber(L, -1)) {
+    lua_pop(L, 1);
+    ljlua_set_callback_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                             "Lua HTTP provider response.status_code is "
+                             "required");
+    lua_settop(L, base);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  status_code = (long)lua_tointeger(L, -1);
+  lua_pop(L, 1);
+  lua_getfield(L, result_index, "body");
+  if (lua_isnil(L, -1)) {
+    body = "";
+    body_len = 0u;
+  } else {
+    body = lua_tolstring(L, -1, &body_len);
+    if (body == NULL) {
+      lua_pop(L, 1);
+      ljlua_set_callback_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                               "Lua HTTP provider response.body must be a "
+                               "string");
+      lua_settop(L, base);
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+  }
+  if (request != NULL && request->max_response_bytes != 0u &&
+      body_len > request->max_response_bytes) {
+    lua_pop(L, 1);
+    ljlua_set_callback_error(error, LONEJSON_STATUS_OVERFLOW,
+                             "Lua HTTP provider response exceeds maximum "
+                             "response size");
+    lua_settop(L, base);
+    return LONEJSON_STATUS_OVERFLOW;
+  }
+  response->status_code = status_code;
+  if (body_len != 0u &&
+      lonejson_owned_buffer_sink(&response->body, body, body_len, error) !=
+          LONEJSON_STATUS_OK) {
+    lua_pop(L, 1);
+    lua_settop(L, base);
+    return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  lua_pop(L, 1);
+  lua_settop(L, base);
+  return LONEJSON_STATUS_OK;
+}
+
+static int ljlua_set_http_provider(lua_State *L) {
+  ljlua_runtime_ud *ud = ljlua_check_runtime(L, 1);
+  lonejson_http_provider provider;
+  lonejson_error error;
+  lonejson_status status;
+  const char *user_agent;
+  char *owned_user_agent;
+  int callback_ref;
+
+  if (lua_isnoneornil(L, 2)) {
+    ljlua_auth_clear_http_provider(L, ud);
+    lua_pushboolean(L, 1);
+    return 1;
+  }
+  luaL_checktype(L, 2, LUA_TFUNCTION);
+  user_agent = lua_isnoneornil(L, 3) ? NULL : luaL_checkstring(L, 3);
+  owned_user_agent = NULL;
+  if (user_agent != NULL) {
+    owned_user_agent = ljlua_auth_strdup(user_agent);
+    if (owned_user_agent == NULL) {
+      return luaL_error(L, "failed to allocate HTTP provider user_agent");
+    }
+  }
+  lua_pushvalue(L, 2);
+  callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+  lonejson_error_init(&error);
+  status = lonejson_http_provider_init_simple(
+      &provider, ud, owned_user_agent, ljlua_auth_http_provider_request,
+      &error);
+  if (status != LONEJSON_STATUS_OK) {
+    luaL_unref(L, LUA_REGISTRYINDEX, callback_ref);
+    free(owned_user_agent);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_clear_http_provider(L, ud);
+  ud->http_provider_ref = callback_ref;
+  ud->http_user_agent = owned_user_agent;
+  ud->http_provider = provider;
+  status = lonejson_set_http_provider(ud->runtime, &ud->http_provider, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    ljlua_auth_clear_http_provider(L, ud);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
+static size_t ljlua_auth_optional_max(lua_State *L, int index,
+                                      const char *name) {
+  lua_Integer value;
+
+  if (lua_isnoneornil(L, index)) {
+    return 0u;
+  }
+  value = luaL_checkinteger(L, index);
+  luaL_argcheck(L, value >= 0, index, name);
+  return (size_t)value;
+}
+#endif
 
 static int ljlua_auth_read_string_list(lua_State *L, int table_index,
                                        const char *field,
@@ -686,6 +909,54 @@ static int ljlua_oidc_jwks_cache_select_json(lua_State *L) {
   return 1;
 }
 
+static int ljlua_oidc_fetch_discovery(lua_State *L) {
+  ljlua_runtime_ud *ud;
+  lonejson_oidc_discovery discovery;
+  lonejson_error error;
+  lonejson_status status;
+  const char *issuer;
+  size_t max_response_bytes;
+
+  ud = ljlua_check_runtime(L, 1);
+  issuer = luaL_checkstring(L, 2);
+  max_response_bytes =
+      ljlua_auth_optional_max(L, 3, "max_response_bytes must be non-negative");
+  lonejson_oidc_discovery_init(&discovery);
+  lonejson_error_init(&error);
+  status = lonejson_oidc_fetch_discovery(ud->runtime, issuer,
+                                         max_response_bytes, &discovery,
+                                         &error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oidc_discovery_cleanup(&discovery);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_push_oidc_discovery(L, &discovery);
+  lonejson_oidc_discovery_cleanup(&discovery);
+  return 1;
+}
+
+static int ljlua_oidc_jwks_cache_refresh(lua_State *L) {
+  ljlua_runtime_ud *ud;
+  lonejson_oidc_jwks_cache cache;
+  lonejson_oidc_jwks_cache_policy policy;
+  lonejson_error error;
+  lonejson_status status;
+
+  ud = ljlua_check_runtime(L, 1);
+  ljlua_auth_read_jwks_cache_policy(L, 2, &policy);
+  lonejson_oidc_jwks_cache_init(&cache);
+  lonejson_error_init(&error);
+  status = lonejson_oidc_jwks_cache_refresh(ud->runtime, &cache, &policy,
+                                            &error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oidc_jwks_cache_cleanup(&cache);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_push_jwks_cache(L, &cache);
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+  return 1;
+}
+
 static int ljlua_oauth2_client_credentials_body(lua_State *L) {
   lonejson_oauth2_client_credentials request;
   lonejson_owned_buffer out;
@@ -752,6 +1023,90 @@ static int ljlua_oidc_authorization_code_token_body(lua_State *L) {
   }
   lua_pushlstring(L, out.data != NULL ? out.data : "", out.len);
   lonejson_owned_buffer_free(&out);
+  return 1;
+}
+
+static int ljlua_oauth2_client_credentials_request(lua_State *L) {
+  ljlua_runtime_ud *ud;
+  lonejson_oauth2_client_credentials request;
+  lonejson_oauth2_token_response response;
+  lonejson_error error;
+  lonejson_status status;
+  const char *token_endpoint;
+  size_t max_response_bytes;
+
+  ud = ljlua_check_runtime(L, 1);
+  token_endpoint = luaL_checkstring(L, 2);
+  ljlua_auth_read_client_credentials(L, 3, &request);
+  max_response_bytes =
+      ljlua_auth_optional_max(L, 4, "max_response_bytes must be non-negative");
+  lonejson_oauth2_token_response_init(&response);
+  lonejson_error_init(&error);
+  status = lonejson_oauth2_client_credentials_request(
+      ud->runtime, token_endpoint, &request, max_response_bytes, &response,
+      &error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oauth2_token_response_cleanup(&response);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_push_oauth2_token_response(L, &response);
+  lonejson_oauth2_token_response_cleanup(&response);
+  return 1;
+}
+
+static int ljlua_oauth2_refresh_token_request(lua_State *L) {
+  ljlua_runtime_ud *ud;
+  lonejson_oauth2_refresh_token request;
+  lonejson_oauth2_token_response response;
+  lonejson_error error;
+  lonejson_status status;
+  const char *token_endpoint;
+  size_t max_response_bytes;
+
+  ud = ljlua_check_runtime(L, 1);
+  token_endpoint = luaL_checkstring(L, 2);
+  ljlua_auth_read_refresh_token(L, 3, &request);
+  max_response_bytes =
+      ljlua_auth_optional_max(L, 4, "max_response_bytes must be non-negative");
+  lonejson_oauth2_token_response_init(&response);
+  lonejson_error_init(&error);
+  status = lonejson_oauth2_refresh_token_request(
+      ud->runtime, token_endpoint, &request, max_response_bytes, &response,
+      &error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oauth2_token_response_cleanup(&response);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_push_oauth2_token_response(L, &response);
+  lonejson_oauth2_token_response_cleanup(&response);
+  return 1;
+}
+
+static int ljlua_oidc_authorization_code_token_request(lua_State *L) {
+  ljlua_runtime_ud *ud;
+  lonejson_oidc_authorization_code_token request;
+  lonejson_oauth2_token_response response;
+  lonejson_error error;
+  lonejson_status status;
+  const char *token_endpoint;
+  size_t max_response_bytes;
+
+  ud = ljlua_check_runtime(L, 1);
+  token_endpoint = luaL_checkstring(L, 2);
+  ljlua_auth_read_authorization_code_token(L, 3, &request);
+  max_response_bytes =
+      ljlua_auth_optional_max(L, 4, "max_response_bytes must be non-negative");
+  lonejson_oauth2_token_response_init(&response);
+  lonejson_error_init(&error);
+  status = lonejson_oidc_authorization_code_token_request(
+      ud->runtime, token_endpoint, &request, max_response_bytes, &response,
+      &error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oauth2_token_response_cleanup(&response);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_push_oauth2_token_response(L, &response);
+  lonejson_oauth2_token_response_cleanup(&response);
   return 1;
 }
 

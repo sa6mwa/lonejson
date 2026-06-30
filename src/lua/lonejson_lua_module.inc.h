@@ -1,6 +1,9 @@
 static int ljlua_runtime_gc(lua_State *L) {
   ljlua_runtime_ud *ud = ljlua_check_runtime(L, 1);
 
+#ifdef LONEJSON_WITH_OIDC
+  ljlua_auth_clear_http_provider(L, ud);
+#endif
   if (ud->runtime != NULL) {
     lonejson_free(ud->runtime);
     ud->runtime = NULL;
@@ -31,7 +34,11 @@ static int ljlua_runtime_new(lua_State *L) {
       ljlua_runtime_config_fixed_string_scratch_ref(L, 1);
   ud = (ljlua_runtime_ud *)ljlua_newuserdata_slots(L, sizeof(*ud), 0);
   memset(ud, 0, sizeof(*ud));
+  ud->L = L;
   ud->fixed_string_scratch_ref = LUA_NOREF;
+#ifdef LONEJSON_WITH_OIDC
+  ud->http_provider_ref = LUA_NOREF;
+#endif
   ud->runtime = lonejson_new(lua_isnoneornil(L, 1) ? NULL : &config, &error);
   if (ud->runtime == NULL) {
     if (fixed_string_scratch_ref != LUA_NOREF) {
@@ -142,10 +149,16 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"jwks_parse_json", ljlua_jwks_parse_json},
     {"jwks_select_json", ljlua_jwks_select_json},
 #ifdef LONEJSON_WITH_OIDC
+    {"set_http_provider", ljlua_set_http_provider},
     {"oauth2_client_credentials_body", ljlua_oauth2_client_credentials_body},
     {"oauth2_refresh_token_body", ljlua_oauth2_refresh_token_body},
     {"oidc_authorization_code_token_body",
      ljlua_oidc_authorization_code_token_body},
+    {"oauth2_client_credentials_request",
+     ljlua_oauth2_client_credentials_request},
+    {"oauth2_refresh_token_request", ljlua_oauth2_refresh_token_request},
+    {"oidc_authorization_code_token_request",
+     ljlua_oidc_authorization_code_token_request},
     {"oauth2_token_response_parse_json",
      ljlua_oauth2_token_response_parse_json},
     {"oidc_pkce_challenge", ljlua_oidc_pkce_challenge},
@@ -156,7 +169,9 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"oidc_validate_bearer_token", ljlua_oidc_validate_bearer_token},
     {"oidc_discovery_url", ljlua_oidc_discovery_url},
     {"oidc_discovery_parse_json", ljlua_oidc_discovery_parse_json},
+    {"oidc_fetch_discovery", ljlua_oidc_fetch_discovery},
     {"oidc_jwks_cache_select_json", ljlua_oidc_jwks_cache_select_json},
+    {"oidc_jwks_cache_refresh", ljlua_oidc_jwks_cache_refresh},
 #endif
 #endif
     {NULL, NULL}};
