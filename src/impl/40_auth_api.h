@@ -218,6 +218,7 @@ typedef enum lonejson__jwt_claim_field {
   LONEJSON__JWT_FIELD_HEADER_TYP,
   LONEJSON__JWT_FIELD_ISS,
   LONEJSON__JWT_FIELD_SUB,
+  LONEJSON__JWT_FIELD_NONCE,
   LONEJSON__JWT_FIELD_AUD_STRING,
   LONEJSON__JWT_FIELD_AUD_ARRAY_ITEM,
   LONEJSON__JWT_FIELD_EXP,
@@ -239,6 +240,7 @@ typedef struct lonejson__jwt_claim_visit {
   int seen_typ;
   int seen_iss;
   int seen_sub;
+  int seen_nonce;
   int seen_aud;
   int seen_exp;
   int seen_nbf;
@@ -2297,6 +2299,11 @@ lonejson__jwt_claim_string_begin(void *user, const lonejson_value_path *path,
     return lonejson__jwt_begin_string_field(state, LONEJSON__JWT_FIELD_SUB,
                                             &state->seen_sub, "sub", error);
   }
+  if (lonejson__jwt_path_is(path, "nonce")) {
+    return lonejson__jwt_begin_string_field(state, LONEJSON__JWT_FIELD_NONCE,
+                                            &state->seen_nonce, "nonce",
+                                            error);
+  }
   if (lonejson__jwt_path_is(path, "aud")) {
     return lonejson__jwt_begin_string_field(
         state, LONEJSON__JWT_FIELD_AUD_STRING, &state->seen_aud, "aud", error);
@@ -2369,6 +2376,13 @@ lonejson__jwt_claim_string_end(void *user, const lonejson_value_path *path,
                                  0u, 0u, "failed to allocate JWT claim value");
     }
     break;
+  case LONEJSON__JWT_FIELD_NONCE:
+    state->claims->nonce = lonejson__jwt_visit_buffer_take(state);
+    if (state->claims->nonce == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to allocate JWT claim value");
+    }
+    break;
   case LONEJSON__JWT_FIELD_AUD_STRING:
     state->claims->aud = lonejson__jwt_visit_buffer_take(state);
     if (state->claims->aud == NULL) {
@@ -2435,6 +2449,7 @@ lonejson__jwt_claim_number_begin(void *user, const lonejson_value_path *path,
   }
   if (lonejson__jwt_path_is(path, "iss") ||
       lonejson__jwt_path_is(path, "sub") ||
+      lonejson__jwt_path_is(path, "nonce") ||
       lonejson__jwt_path_is(path, "aud") ||
       lonejson__jwt_path_is_aud_item(path)) {
     return lonejson__jwt_claim_type_error(error, "registered");
@@ -2514,6 +2529,7 @@ lonejson__jwt_claim_object_begin(void *user, const lonejson_value_path *path,
   }
   if (!state->header_mode && (lonejson__jwt_path_is(path, "iss") ||
                               lonejson__jwt_path_is(path, "sub") ||
+                              lonejson__jwt_path_is(path, "nonce") ||
                               lonejson__jwt_path_is(path, "aud") ||
                               lonejson__jwt_path_is(path, "exp") ||
                               lonejson__jwt_path_is(path, "nbf") ||
@@ -2542,6 +2558,7 @@ lonejson__jwt_claim_array_begin(void *user, const lonejson_value_path *path,
   }
   if (!state->header_mode && (lonejson__jwt_path_is(path, "iss") ||
                               lonejson__jwt_path_is(path, "sub") ||
+                              lonejson__jwt_path_is(path, "nonce") ||
                               lonejson__jwt_path_is(path, "exp") ||
                               lonejson__jwt_path_is(path, "nbf") ||
                               lonejson__jwt_path_is(path, "iat") ||
@@ -2562,6 +2579,7 @@ lonejson__jwt_claim_literal_type(void *user, const lonejson_value_path *path,
   }
   if (!state->header_mode && (lonejson__jwt_path_is(path, "iss") ||
                               lonejson__jwt_path_is(path, "sub") ||
+                              lonejson__jwt_path_is(path, "nonce") ||
                               lonejson__jwt_path_is(path, "aud") ||
                               lonejson__jwt_path_is(path, "exp") ||
                               lonejson__jwt_path_is(path, "nbf") ||
@@ -2622,6 +2640,7 @@ void lonejson_jwt_claims_cleanup(lonejson_jwt_claims *claims) {
   if (claims != NULL) {
     lonejson__owned_free(claims->iss);
     lonejson__owned_free(claims->sub);
+    lonejson__owned_free(claims->nonce);
     lonejson__owned_free(claims->aud);
     for (i = 0u; i < claims->aud_array.count; ++i) {
       lonejson__owned_free(claims->aud_array.items[i]);
@@ -2801,6 +2820,9 @@ static int lonejson__jwt_has_required_claim(const lonejson_jwt_claims *claims,
   if (strcmp(name, "sub") == 0) {
     return claims->sub != NULL;
   }
+  if (strcmp(name, "nonce") == 0) {
+    return claims->nonce != NULL;
+  }
   if (strcmp(name, "aud") == 0) {
     return claims->aud != NULL || claims->aud_array.count != 0u;
   }
@@ -2850,6 +2872,12 @@ lonejson_status lonejson_jwt_validate_claims(
   if (!lonejson__jwt_any_audience_accepted(claims, policy)) {
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                "JWT audience is not accepted");
+  }
+  if (policy->expected_nonce != NULL &&
+      (claims->nonce == NULL ||
+       strcmp(claims->nonce, policy->expected_nonce) != 0)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT nonce is not accepted");
   }
   for (i = 0u; i < policy->required_claim_count; ++i) {
     if (policy->required_claims == NULL || policy->required_claims[i] == NULL ||

@@ -49,6 +49,7 @@ static void ljlua_auth_push_claims(lua_State *L,
   lua_newtable(L);
   ljlua_auth_push_optional_string(L, claims->iss, "iss");
   ljlua_auth_push_optional_string(L, claims->sub, "sub");
+  ljlua_auth_push_optional_string(L, claims->nonce, "nonce");
   ljlua_auth_push_optional_string(L, claims->aud, "aud");
   if (claims->aud_array.count != 0u) {
     lua_createtable(L, (int)claims->aud_array.count, 0);
@@ -366,6 +367,10 @@ static int ljlua_auth_read_policy(lua_State *L, int index,
     ljlua_auth_read_string_list(L, index, "accepted_audiences",
                                 &policy->accepted_audiences,
                                 &policy->accepted_audience_count, 1);
+    lua_getfield(L, index, "expected_nonce");
+    policy->expected_nonce =
+        lua_isnil(L, -1) ? NULL : luaL_checkstring(L, -1);
+    lua_pop(L, 1);
     ljlua_auth_read_string_list(L, index, "required_claims",
                                 &policy->required_claims,
                                 &policy->required_claim_count, 0);

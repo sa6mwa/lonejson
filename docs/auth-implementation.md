@@ -198,6 +198,7 @@ Decoded claim fields:
 
 - `iss`,
 - `sub`,
+- `nonce`,
 - `aud` as string,
 - `aud` as array of strings,
 - `exp`,
@@ -245,6 +246,7 @@ Required trust-policy members:
 
 Optional policy members:
 
+- expected nonce,
 - required claims,
 - maximum token bytes,
 - maximum decoded header bytes,
@@ -256,6 +258,7 @@ Claim validation enforces:
 - `alg: none` is rejected,
 - issuer must match an accepted issuer,
 - string or array audience must include an accepted audience,
+- nonce must match the expected nonce when configured,
 - required claims must be present,
 - expired tokens fail,
 - not-yet-valid tokens fail,
@@ -547,9 +550,11 @@ Callback query parsing:
 - applies `max_query_bytes` or an internal default.
 
 Browser launching, local HTTP listener creation, random callback path
-management, and ID-token nonce validation are not implemented in core lonejson.
-Authorization-code token POST execution is available through the runtime HTTP
-provider helper or through caller-owned HTTP code plus token-response parsing.
+management, and ID-token-specific flow orchestration are not implemented in
+core lonejson. ID-token nonce validation is available through
+`lonejson_jwt_claim_policy.expected_nonce`. Authorization-code token POST
+execution is available through the runtime HTTP provider helper or through
+caller-owned HTTP code plus token-response parsing.
 
 ## Server-Side Bearer Validation
 
@@ -648,6 +653,7 @@ Lua policy tables map directly to the C policy concepts:
 - `accepted_algs`,
 - `accepted_issuers`,
 - `accepted_audiences`,
+- `expected_nonce`,
 - `required_claims`,
 - `now`,
 - `allowed_clock_skew`,
@@ -684,6 +690,7 @@ Implemented and tested invariants include:
   fall back to an arbitrary key.
 - Unknown issuer fails closed.
 - Unknown audience fails closed.
+- OIDC nonce mismatch fails closed when an expected nonce is configured.
 - Expired token fails closed.
 - Not-yet-valid token fails closed.
 - Issued-at in the future fails beyond configured skew.
@@ -734,9 +741,6 @@ The following are deliberate gaps or future work, not hidden behavior.
 - No built-in HTTP transport; caller-owned providers perform network I/O.
 - No retry, timeout, proxy, redirect, or TLS policy helper.
 - No credential storage helper.
-- No refresh-token exchange body builder.
-- No authorization-code token exchange body builder.
-- No ID-token nonce validation helper.
 - No complete browser-launch helper.
 - No localhost HTTP listener.
 - No random callback-path session object.

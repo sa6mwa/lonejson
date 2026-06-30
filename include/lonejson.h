@@ -1270,6 +1270,8 @@ typedef struct lonejson_jwt_claims {
   char *iss;
   /** Subject claim. */
   char *sub;
+  /** OIDC nonce claim, when present. */
+  char *nonce;
   /** String audience claim when `aud` is encoded as a JSON string. */
   char *aud;
   /** Audience array when `aud` is encoded as a JSON array of strings. */
@@ -1296,6 +1298,8 @@ typedef struct lonejson_jwt_claim_policy {
   /** Accepted audience values. Required. */
   const char *const *accepted_audiences;
   size_t accepted_audience_count;
+  /** Optional expected OIDC nonce. When non-NULL, `claims->nonce` must match. */
+  const char *expected_nonce;
   /** Required claim names such as `sub` or `iat`. */
   const char *const *required_claims;
   size_t required_claim_count;

@@ -181,6 +181,11 @@ if lonejson.jwt_parse_compact ~= nil then
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0." ..
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOlsiYXBpIiwib3RoZXIiXSwiZXhwIjoyMDAwfQ." ..
       "c2ln"
+  local nonce_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJu" ..
+      "b25jZSI6Im5vbmNlLTQ1NiJ9." ..
+      "c2ln"
   local policy = {
     accepted_algs = { "RS256" },
     accepted_issuers = { "issuer" },
@@ -193,6 +198,15 @@ if lonejson.jwt_parse_compact ~= nil then
   local decoded = lj:jwt_decode_compact(jwt_token)
   local validated = lj:jwt_validate_compact_claims(jwt_token, policy)
   local aud_array = lonejson.jwt_validate_compact_claims(aud_array_token, policy)
+  local nonce_policy = {
+    accepted_algs = { "RS256" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api" },
+    required_claims = { "iss", "aud", "exp", "nonce" },
+    expected_nonce = "nonce-456",
+    now = 1000,
+  }
+  local nonce_validated = lj:jwt_validate_compact_claims(nonce_token, nonce_policy)
   local jwk = lonejson.jwk_parse_json('{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","n":"AQIDBA","e":"AQAB"}')
   local signed_token =
       "eyJhbGciOiJSUzI1NiIsImtpZCI6InJzYS10ZXN0IiwidHlwIjoiSldUIn0." ..
@@ -223,6 +237,7 @@ if lonejson.jwt_parse_compact ~= nil then
   assert_eq(validated.claims.aud, "api")
   assert_eq(aud_array.claims.aud[1], "api")
   assert_eq(aud_array.claims.aud[2], "other")
+  assert_eq(nonce_validated.claims.nonce, "nonce-456")
   assert_eq(jwk.kid, "rsa1")
   assert_eq(jwk.n, "AQIDBA")
   assert_true(lj:jwt_validate_compact_signature(signed_token, signed_jwk_json))
@@ -418,6 +433,11 @@ if lonejson.jwt_parse_compact ~= nil then
     accepted_audiences = { "api" },
     now = 1000,
   })
+  assert_true(bad == nil)
+  assert_eq(err.status, "type_mismatch")
+
+  nonce_policy.expected_nonce = "other"
+  bad, err = lj:jwt_validate_compact_claims(nonce_token, nonce_policy)
   assert_true(bad == nil)
   assert_eq(err.status, "type_mismatch")
 

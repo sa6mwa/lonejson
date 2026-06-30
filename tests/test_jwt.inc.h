@@ -362,6 +362,11 @@ static void test_jwt_decode_and_validate_claims(void) {
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOlsiYXBpIiwib3RoZXIiXSwiZXhwIjoyMDAwfQ."
       "c2ln";
+  static const char nonce_token[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJu"
+      "b25jZSI6Im5vbmNlLTQ1NiJ9."
+      "c2ln";
   lonejson_jwt_header header;
   lonejson_jwt_claims claims;
   lonejson_jwt_claim_policy policy;
@@ -400,6 +405,21 @@ static void test_jwt_decode_and_validate_claims(void) {
          LJ_STATUS_OK);
   lj_jwt_header_cleanup(&header);
   lj_jwt_claims_cleanup(&claims);
+
+  policy = test_jwt_policy();
+  policy.expected_nonce = "nonce-456";
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nonce_token,
+                                     strlen(nonce_token), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(claims.nonce, "nonce-456") == 0);
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_OK);
+  policy.expected_nonce = "other";
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_jwt_header_cleanup(&header);
+  lonejson_jwt_claims_cleanup(&claims);
 }
 
 static void test_jwt_validate_rs256_signature(void) {
@@ -726,6 +746,10 @@ static void test_jwt_decode_claim_failures(void) {
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOi0xfQ."
       "c2ln";
+  static const char nonce_number[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDAsIm5vbmNlIjoxMjN9."
+      "c2ln";
   static const char root_array[] =
       "W10."
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
@@ -756,6 +780,10 @@ static void test_jwt_decode_claim_failures(void) {
                                      &error) == LONEJSON_STATUS_TYPE_MISMATCH);
   EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), negative_exp,
                                      strlen(negative_exp), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nonce_number,
+                                     strlen(nonce_number), &policy, &header,
                                      &claims,
                                      &error) == LONEJSON_STATUS_TYPE_MISMATCH);
   EXPECT(lonejson_jwt_decode_compact(

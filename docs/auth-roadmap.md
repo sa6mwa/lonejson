@@ -147,7 +147,7 @@ as a framework-specific server:
   path,
 - provide the authorization URL to open in a browser,
 - accept the callback request data from an embedding HTTP server,
-- validate state and nonce,
+- validate callback state and later ID-token nonce through JWT claim policy,
 - exchange code for tokens,
 - validate ID token and issuer through JWKS,
 - return token material and structured diagnostics.
@@ -196,6 +196,7 @@ The implementation must test and enforce at least these invariants:
 - A token signed with one algorithm cannot validate under another algorithm.
 - Missing or mismatched `kid` does not silently fall back to an unsafe key.
 - Unknown issuers and audiences fail closed.
+- Configured OIDC nonce expectations fail closed on mismatch.
 - Expired and not-yet-valid tokens fail by default.
 - Clock skew is bounded and caller-configured.
 - Oversized JWT segments, decoded claims, JWKS documents, and cache entries are
