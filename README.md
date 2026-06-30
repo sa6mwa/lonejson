@@ -111,6 +111,101 @@ public pull-style generator API and feeds libcurl through
 That upload path currently reports `-1` for the total size because lonejson
 does not prebuffer or pre-count the payload.
 
+JWT/OIDC/OAuth2 support is also optional. Build with `LONEJSON_WITH_JWT` for
+JWT, JWK, and JWKS parsing plus explicit claim validation. Build with
+`LONEJSON_WITH_OPENSSL` when you want the built-in OpenSSL auth provider for
+signature validation, PKCE hashing, and random verifier generation. Build with
+`LONEJSON_WITH_OIDC` for discovery, JWKS cache, OAuth2 token exchange helpers,
+PKCE authorization URLs, callback parsing, and bearer-token validation.
+
+The auth design is provider-backed. Parsing a JWT is never a trust decision:
+decode with `lonejson_jwt_decode_compact()`, select a JWK from a trusted JWKS
+cache, validate the signature through the runtime auth provider, and validate
+claims with an explicit `lonejson_jwt_claim_policy`. The OpenSSL provider
+supports `RS256`, `PS256`, `ES256`, and `EdDSA` for Ed25519 OKP keys.
+`alg: none` is rejected; `HS256` and Ed448 are not implemented.
+
+For command-line tools and services that already link curl, keep curl in the
+application and install a small HTTP provider callback. The callback receives a
+bounded `lonejson_http_request`, performs the GET or POST with the
+application's curl policy, and fills `lonejson_http_response`:
+
+```c
+lonejson_error error;
+lonejson *lj;
+lonejson_auth_provider auth;
+lonejson_http_provider http;
+struct my_http_state http_state;
+
+lonejson_error_init(&error);
+lj = lonejson_new(NULL, &error);
+lonejson_auth_provider_init_openssl(&auth, NULL, &error);
+lonejson_set_auth_provider(lj, &auth, &error);
+lonejson_http_provider_init_simple(&http, &http_state, "my-product/1.0",
+                                   my_curl_request, &error);
+lonejson_set_http_provider(lj, &http, &error);
+```
+
+After that, `lonejson_oidc_fetch_discovery()`,
+`lonejson_oidc_jwks_cache_refresh()`,
+`lonejson_oauth2_client_credentials_request()`,
+`lonejson_oauth2_refresh_token_request()`, and
+`lonejson_oidc_authorization_code_token_request()` use the installed HTTP
+provider. The auth HTTP provider materializes bounded discovery, JWKS, and
+token endpoint responses because those helper APIs are materialized by design;
+this keeps TLS trust roots, proxies, redirects, retry policy, and advanced curl
+options in application code. Use the lower-level curl parse adapters for
+general large JSON response streaming.
+
+For Kore, Vectis, or another C web framework, keep lonejson at the auth
+boundary instead of adding framework-specific dependencies. Refresh discovery
+and JWKS through a configured runtime during startup or cache maintenance, then
+call `lonejson_oidc_validate_bearer_token()` from the framework request handler
+before application logic:
+
+```c
+lonejson_oidc_bearer_validation_request request = {
+    .authorization_header = authorization_header,
+    .jwks_cache = &jwks_cache,
+    .jwks_policy = &jwks_policy,
+    .claim_policy = &claim_policy
+};
+lonejson_oidc_bearer_validation validation;
+
+lonejson_oidc_bearer_validation_init(&validation);
+status = lonejson_oidc_validate_bearer_token(lj, &request, &validation,
+                                             &error);
+if (status != LONEJSON_STATUS_OK || validation.failure != LONEJSON_AUTH_FAILURE_NONE) {
+    /* framework code returns 401/403 here */
+}
+lonejson_oidc_bearer_validation_cleanup(&validation);
+```
+
+The Lua facade follows the same provider model. A runtime can install an
+OpenSSL auth provider and an HTTP callback with a user-agent:
+
+```lua
+local lj = lonejson.new()
+lj:set_openssl_auth_provider()
+lj:set_http_provider(function(request)
+  return {
+    status_code = 200,
+    content_type = "application/json",
+    body = "{}"
+  }
+end, "my-product/1.0")
+```
+
+Remaining auth DX gaps are explicit. lonejson does not provide a built-in HTTP
+server, browser launcher, localhost callback listener, refresh scheduler,
+credential store, retry policy, proxy policy, redirect policy, or
+Kore/Vectis-specific handler wrapper. Those are application lifecycle concerns.
+Potential future simplifications would be an examples-level curl HTTP provider
+callback, an examples-level Kore/Vectis adapter, and a higher-level
+cache-refresh scheduler. Those should start as examples or application helpers
+because putting `curl_easy_*` calls directly in `liblonejson.so` would change
+the current binary dependency boundary.
+
 Short aliases are enabled by default. Disable them if they collide with another
 project:
 

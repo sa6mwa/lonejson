@@ -2408,8 +2408,15 @@ struct lonejson_http_response {
   lonejson_owned_buffer body;
 };
 
-/** Auth HTTP provider vtable. The caller owns `user_data` and must keep it
- * alive until no runtime using this provider can call OIDC/OAuth2 HTTP helpers.
+/** Auth HTTP provider vtable.
+ *
+ * The caller owns `user_data` and must keep it alive until no runtime using
+ * this provider can call OIDC/OAuth2 HTTP helpers. This is the public
+ * transport boundary for OIDC discovery, JWKS refresh, and OAuth2 token
+ * exchange helpers. Use `lonejson_http_provider_init_simple()` with the
+ * embedding application's HTTP client. In curl-enabled builds, curl remains an
+ * application-owned transport: configure libcurl in your callback and set a
+ * product-specific `user_agent` so identity providers can diagnose traffic.
  */
 struct lonejson_http_provider {
   void *user_data;
@@ -2420,8 +2427,15 @@ struct lonejson_http_provider {
                              lonejson_error *error);
 };
 
-/** Generic HTTP provider initializer config. The caller owns all referenced
- * pointers and must keep them alive while the initialized provider can be used.
+/** Generic HTTP provider initializer config.
+ *
+ * The caller owns all referenced pointers and must keep them alive while the
+ * initialized provider can be used. The recommended framework integration is:
+ * HTTP clients fill this provider for outbound OIDC/OAuth2 requests, while web
+ * frameworks such as Kore or Vectis pass each inbound Authorization header to
+ * `lonejson_oidc_validate_bearer_token()` from their request handler. lonejson
+ * intentionally does not own framework routing, response writing, TLS policy,
+ * retries, or credential storage.
  */
 struct lonejson_http_provider_config {
   void *user_data;
