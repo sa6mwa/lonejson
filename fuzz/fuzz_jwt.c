@@ -37,6 +37,39 @@ static const char lonejson_fuzz_rs256_jwks_json[] =
     "gnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWy"
     "YoQ\",\"e\":\"AQAB\"}]}";
 
+typedef struct lonejson_fuzz_http_state {
+  const char *body;
+  size_t len;
+} lonejson_fuzz_http_state;
+
+static lonejson_status lonejson_fuzz_http_request(
+    void *user_data, const lonejson_http_request *request,
+    lonejson_http_response *response, lonejson_error *error) {
+  const lonejson_fuzz_http_state *state =
+      (const lonejson_fuzz_http_state *)user_data;
+
+  (void)request;
+  lonejson_http_response_cleanup(response);
+  if (state == NULL || response == NULL) {
+    if (error != NULL) {
+      lonejson_error_init(error);
+      error->code = LONEJSON_STATUS_INVALID_ARGUMENT;
+    }
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (request != NULL && request->max_response_bytes != 0u &&
+      state->len > request->max_response_bytes) {
+    if (error != NULL) {
+      lonejson_error_init(error);
+      error->code = LONEJSON_STATUS_OVERFLOW;
+    }
+    return LONEJSON_STATUS_OVERFLOW;
+  }
+  response->status_code = 200;
+  return lonejson_owned_buffer_sink(&response->body, state->body, state->len,
+                                    error);
+}
+
 static void fuzz_decode_segment(const char *data, size_t len) {
   lonejson_error error;
   unsigned char stack_buf[128];
@@ -88,6 +121,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_owned_buffer authorization_url;
   lonejson_error error;
   lonejson *runtime;
+  lonejson_auth_provider auth_provider;
+  lonejson_http_provider http_provider;
+  lonejson_fuzz_http_state http_state;
   char *text;
   const char *mode_text;
   size_t mode_size;
@@ -134,9 +170,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     policy.max_token_bytes = 65536u;
     policy.max_decoded_header_bytes = 4096u;
     policy.max_decoded_claims_bytes = 16384u;
+    if (lonejson_auth_provider_init_openssl(&auth_provider, NULL, &error) ==
+        LONEJSON_STATUS_OK) {
+      (void)runtime->set_auth_provider(runtime, &auth_provider, &error);
+    }
+    http_state.body = text;
+    http_state.len = size;
+    if (lonejson_http_provider_init_simple(&http_provider, &http_state,
+                                           "lonejson-fuzz/1",
+                                           lonejson_fuzz_http_request,
+                                           &error) == LONEJSON_STATUS_OK) {
+      (void)runtime->set_http_provider(runtime, &http_provider, &error);
+    }
+
     lonejson_jwt_header_init(&header);
     lonejson_jwt_claims_init(&claims);
-    if (lonejson_jwt_decode_compact(runtime, text, size, &policy, &header,
+    if (runtime->jwt_decode_compact(runtime, text, size, &policy, &header,
                                     &claims, &error) == LONEJSON_STATUS_OK) {
       (void)lonejson_jwt_validate_claims(&header, &claims, &policy, &error);
     }
@@ -148,16 +197,17 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       mode_size = size - 4u;
       lonejson_jwt_header_init(&header);
       lonejson_jwt_claims_init(&claims);
-      if (lonejson_jwt_decode_compact(runtime, mode_text, mode_size, &policy,
+      if (runtime->jwt_decode_compact(runtime, mode_text, mode_size, &policy,
                                       &header, &claims, &error) ==
           LONEJSON_STATUS_OK) {
         lonejson_jwk_init(&jwk);
-        if (lonejson_jwk_parse_json(runtime, lonejson_fuzz_rs256_jwk_json,
+        if (runtime->jwk_parse_json(runtime, lonejson_fuzz_rs256_jwk_json,
                                     strlen(lonejson_fuzz_rs256_jwk_json), &jwk,
                                     &error) == LONEJSON_STATUS_OK &&
             lonejson_jwt_parse_compact(mode_text, mode_size, &jwt, &error) ==
                 LONEJSON_STATUS_OK) {
-          (void)lonejson_jwt_validate_signature(&jwt, &header, &jwk, &error);
+          (void)runtime->jwt_validate_signature_with_runtime(
+              runtime, &jwt, &header, &jwk, &error);
         }
         lonejson_jwk_cleanup(&jwk);
       }
@@ -169,18 +219,19 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       mode_text = text + 4u;
       mode_size = size - 4u;
       lonejson_jwk_init(&jwk);
-      if (lonejson_jwk_parse_json(runtime, mode_text, mode_size, &jwk,
+      if (runtime->jwk_parse_json(runtime, mode_text, mode_size, &jwk,
                                   &error) == LONEJSON_STATUS_OK) {
         if (lonejson_jwt_parse_compact(lonejson_fuzz_rs256_token,
                                        strlen(lonejson_fuzz_rs256_token), &jwt,
                                        &error) == LONEJSON_STATUS_OK) {
           lonejson_jwt_header_init(&header);
           lonejson_jwt_claims_init(&claims);
-          if (lonejson_jwt_decode_compact(runtime, lonejson_fuzz_rs256_token,
+          if (runtime->jwt_decode_compact(runtime, lonejson_fuzz_rs256_token,
                                           strlen(lonejson_fuzz_rs256_token),
-                                          &policy, &header, &claims,
-                                          &error) == LONEJSON_STATUS_OK) {
-            (void)lonejson_jwt_validate_signature(&jwt, &header, &jwk, &error);
+                                          &policy, &header, &claims, &error) ==
+              LONEJSON_STATUS_OK) {
+            (void)runtime->jwt_validate_signature_with_runtime(
+                runtime, &jwt, &header, &jwk, &error);
           }
           lonejson_jwt_header_cleanup(&header);
           lonejson_jwt_claims_cleanup(&claims);
@@ -190,7 +241,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
 
     lonejson_jwks_init(&jwks);
-    if (lonejson_jwks_parse_json(runtime, text, size, &jwks, &error) ==
+    if (runtime->jwks_parse_json(runtime, text, size, &jwks, &error) ==
         LONEJSON_STATUS_OK) {
       lonejson_jwk_select_options options;
       const lonejson_jwk *selected;
@@ -214,7 +265,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     cache_policy.now = 1000;
     cache_policy.ttl_seconds = 60;
     lonejson_oidc_jwks_cache_init(&cache);
-    if (lonejson_oidc_jwks_cache_update_json(runtime, &cache, &cache_policy,
+    if (runtime->oidc_jwks_cache_update_json(runtime, &cache, &cache_policy,
                                              text, size, &error) ==
         LONEJSON_STATUS_OK) {
       lonejson_jwk_select_options options;
@@ -278,8 +329,26 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     lonejson_owned_buffer_free(&form_body);
 
     lonejson_oauth2_token_response_init(&token_response);
-    (void)lonejson_oauth2_token_response_parse_json(
-        runtime, text, size, 4096u, &token_response, &error);
+    (void)runtime->oauth2_token_response_parse_json(runtime, text, size, 4096u,
+                                                    &token_response, &error);
+    lonejson_oauth2_token_response_cleanup(&token_response);
+
+    lonejson_oauth2_token_response_init(&token_response);
+    (void)runtime->oauth2_client_credentials_request(
+        runtime, "https://issuer.example/token", &credentials, 4096u,
+        &token_response, &error);
+    lonejson_oauth2_token_response_cleanup(&token_response);
+
+    lonejson_oauth2_token_response_init(&token_response);
+    (void)runtime->oauth2_refresh_token_request(
+        runtime, "https://issuer.example/token", &refresh_token, 4096u,
+        &token_response, &error);
+    lonejson_oauth2_token_response_cleanup(&token_response);
+
+    lonejson_oauth2_token_response_init(&token_response);
+    (void)runtime->oidc_authorization_code_token_request(
+        runtime, "https://issuer.example/token", &code_token, 4096u,
+        &token_response, &error);
     lonejson_oauth2_token_response_cleanup(&token_response);
 
     lonejson_owned_buffer_init(&pkce_challenge);
@@ -314,7 +383,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     (void)lonejson_oidc_authorization_bearer_token(text, &jwt.header, &error);
     lonejson_oidc_jwks_cache_init(&cache);
     lonejson_oidc_bearer_validation_init(&bearer_validation);
-    if (lonejson_oidc_jwks_cache_update_json(
+    if (runtime->oidc_jwks_cache_update_json(
             runtime, &cache, &cache_policy, lonejson_fuzz_rs256_jwks_json,
             strlen(lonejson_fuzz_rs256_jwks_json), &error) ==
         LONEJSON_STATUS_OK) {
@@ -323,7 +392,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       bearer_request.jwks_cache = &cache;
       bearer_request.jwks_policy = &cache_policy;
       bearer_request.claim_policy = &policy;
-      (void)lonejson_oidc_validate_bearer_token(runtime, &bearer_request,
+      (void)runtime->oidc_validate_bearer_token(runtime, &bearer_request,
                                                 &bearer_validation, &error);
       bearer_request.authorization_header =
           "Bearer "
@@ -336,7 +405,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
           "Lq-15X3TuE2CHN5P_zo_zkaJT8V0QhoQ3MUhUE_pBxMtAByRIUOEW32RbWjYgkwZ_"
           "zxaVkbhXv1CYznQCzikX2wXn9OQ_1z0TCH7bT5Ao3EXEQeiK7Fhuq8lyPFbkhDc_y"
           "CjxFRjm7ufSFZbg";
-      (void)lonejson_oidc_validate_bearer_token(runtime, &bearer_request,
+      (void)runtime->oidc_validate_bearer_token(runtime, &bearer_request,
                                                 &bearer_validation, &error);
     }
     lonejson_oidc_bearer_validation_cleanup(&bearer_validation);
@@ -347,7 +416,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     lonejson_owned_buffer_free(&discovery_url);
 
     lonejson_oidc_discovery_init(&discovery);
-    if (lonejson_oidc_discovery_parse_json(runtime, text, size, &discovery,
+    if (runtime->oidc_discovery_parse_json(runtime, text, size, &discovery,
                                            &error) == LONEJSON_STATUS_OK) {
       (void)lonejson_oidc_discovery_validate_issuer(
           &discovery, "https://issuer.example", &error);
@@ -357,6 +426,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       }
     }
     lonejson_oidc_discovery_cleanup(&discovery);
+
+    lonejson_oidc_discovery_init(&discovery);
+    (void)runtime->oidc_fetch_discovery(runtime, "https://issuer.example",
+                                        4096u, &discovery, &error);
+    lonejson_oidc_discovery_cleanup(&discovery);
+
+    lonejson_oidc_jwks_cache_init(&cache);
+    (void)runtime->oidc_jwks_cache_refresh(runtime, &cache, &cache_policy,
+                                           &error);
+    lonejson_oidc_jwks_cache_cleanup(&cache);
     lonejson_free(runtime);
   }
   free(text);
