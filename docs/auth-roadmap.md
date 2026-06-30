@@ -47,6 +47,9 @@ The current branch already implements the planned C baseline for:
   bearer-token validation,
 - provider-backed OAuth2 token introspection, token revocation, and OIDC
   UserInfo helpers with C, Lua, fuzz, and e2e coverage,
+- OAuth2/OIDC token-flow state helpers with transparent refresh, bounded
+  retry, refresh/retry opt-outs, and explicit `ready`, `refreshed`,
+  `needs_interaction`, and `failed` result states,
 - generic base64 helpers in C and Lua, including unpadded base64url for JWT/JWS
   segments,
 - runtime HTTP provider callbacks with explicit user-agent configuration,
@@ -68,23 +71,6 @@ For exact API behavior and known implementation gaps, use
 The remaining auth target for this branch is near-complete OAuth2/OIDC client
 and resource-server support plus JWT/JWK/JWKS compliance. JWE is intentionally
 not part of this target.
-
-### Token Flow State Helpers
-
-Add narrowly scoped helpers for token-bearing client flows:
-
-- represent the current access token, optional refresh token, expiry time, and
-  flow state without taking over durable storage,
-- transparently refresh an expired access token when a refresh token and token
-  endpoint inputs are available,
-- use bounded retry defaults for transient provider/network failures,
-- expose opt-out/override controls for refresh and retry behavior,
-- return explicit flow-state/failure values when interaction is required or the
-  flow cannot continue.
-
-The server-side bearer validation helper should continue to fail closed for an
-expired presented token; a resource server cannot refresh a caller's bearer
-token unless the application has separately chosen to own that client flow.
 
 ### JOSE/JWK Compliance Completion
 
@@ -118,6 +104,13 @@ Add examples-level helpers or documentation for common embedding patterns:
 
 These should start as examples or integration-layer code, not dependencies in
 `liblonejson.so`.
+
+Token-flow state is intentionally not durable storage. Applications still own
+credential persistence, locking, browser interaction, and user-facing
+authorization UX. The server-side bearer validation helper continues to fail
+closed for an expired presented token; a resource server cannot refresh a
+caller's bearer token unless the application has separately chosen to own that
+client flow.
 
 ### Operational Auth Gaps
 

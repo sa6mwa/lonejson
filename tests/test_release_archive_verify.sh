@@ -83,6 +83,11 @@ void lonejson_oauth2_token_revocation_body(void);
 void lonejson_oidc_authorization_code_token_body(void);
 void lonejson_oauth2_client_credentials_request(void);
 void lonejson_oauth2_refresh_token_request(void);
+void lonejson_oauth2_token_flow_init(void);
+void lonejson_oauth2_token_flow_cleanup(void);
+void lonejson_oauth2_token_flow_is_expired(void);
+void lonejson_oauth2_token_flow_update_response(void);
+void lonejson_oauth2_token_flow_ensure(void);
 void lonejson_oauth2_introspect_token_request(void);
 void lonejson_oauth2_revoke_token_request(void);
 void lonejson_oidc_fetch_userinfo(void);
@@ -251,6 +256,21 @@ void lonejson_oauth2_client_credentials_request(void) {
 }
 
 void lonejson_oauth2_refresh_token_request(void) {
+}
+
+void lonejson_oauth2_token_flow_init(void) {
+}
+
+void lonejson_oauth2_token_flow_cleanup(void) {
+}
+
+void lonejson_oauth2_token_flow_is_expired(void) {
+}
+
+void lonejson_oauth2_token_flow_update_response(void) {
+}
+
+void lonejson_oauth2_token_flow_ensure(void) {
 }
 
 void lonejson_oauth2_introspect_token_request(void) {

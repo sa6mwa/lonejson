@@ -174,6 +174,18 @@ For dev-only HTTPS test providers with self-signed certificates, put
 HTTP provider callback. Do not put that policy in lonejson configuration; TLS
 verification remains transport-owned.
 
+For client-side token state, use `lonejson_oauth2_token_flow`. Initialize it,
+copy a successful token endpoint response into it, then call
+`lonejson_oauth2_token_flow_ensure()` before sending a request that needs an
+access token. The helper returns `ready`, `refreshed`, `needs_interaction`, or
+`failed` state via `lonejson_oauth2_token_flow_result`; it refreshes expired
+tokens through the installed HTTP provider when a refresh token and token
+endpoint policy are available. Refresh and retry can be disabled per call, and
+the helper never starts a browser, persists credentials, sleeps, or schedules
+background work. Lua exposes the same workflow as table-based
+`oauth2_token_flow_update_response`, `oauth2_token_flow_is_expired`, and
+runtime `oauth2_token_flow_ensure`.
+
 For server-local machine-to-machine credentials,
 `lonejson_m2m_credential_generate()` creates one-time client secrets/API keys
 and a store-ready JSON record containing only salts, hashes, and an opaque claim
@@ -323,16 +335,12 @@ Remaining auth DX gaps are explicit. lonejson does not provide a built-in HTTP
 server, browser launcher, localhost callback listener, credential-store
 persistence/locking, proxy policy, redirect policy, TLS policy, or
 Kore/Vectis-specific handler wrapper. Those are application lifecycle concerns.
-The planned exception is token-flow state: helpers that own an OAuth2/OIDC
-client flow should transparently refresh expired access tokens and apply
-bounded retry defaults when the next step is protocol-obvious, while still
-letting callers opt out or override those policies. Current provider-backed
-helpers already cover discovery, JWKS refresh, token endpoint exchanges,
-server-side token introspection, token revocation, and UserInfo. The next auth
-compliance scope focuses on JOSE/JWK completion for certificate-backed keys
-(`x5c`, `x5t`, `x5t#S256`), critical header handling (`crit`), and JWK
-operation constraints (`key_ops`). JWE is intentionally deferred as a separate
-encryption feature.
+Current provider-backed helpers cover discovery, JWKS refresh, token endpoint
+exchanges, token-flow refresh/retry, server-side token introspection, token
+revocation, and UserInfo. The next auth compliance scope focuses on JOSE/JWK
+completion for certificate-backed keys (`x5c`, `x5t`, `x5t#S256`), critical
+header handling (`crit`), and JWK operation constraints (`key_ops`). JWE is
+intentionally deferred as a separate encryption feature.
 Potential future simplifications would be an examples-level curl HTTP provider
 callback, an examples-level Kore/Vectis adapter, and the token-flow helper
 described in `docs/auth-roadmap.md`. Those should preserve the current binary

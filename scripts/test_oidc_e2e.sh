@@ -136,11 +136,15 @@ refresh_json="$(
     --data-urlencode 'client_secret=lonejson-secret'
 )"
 refreshed_access_token="$(printf '%s' "$refresh_json" | json_field access_token)"
+rotated_refresh_token="$(printf '%s' "$refresh_json" | json_field refresh_token)"
+if [[ -z "$rotated_refresh_token" ]]; then
+  rotated_refresh_token="$refresh_token"
+fi
 
 LONEJSON_OIDC_E2E_CAINFO="$ca_file" \
   "$repo_root/build/host-curl/lonejson_oidc_fixture_server" \
   "$issuer" "$audience" "$server_port" 4 \
-  "$authorization_access_token" "$refresh_token" \
+  "$authorization_access_token" "$rotated_refresh_token" \
   >"$repo_root/build/host-curl/oidc-fixture-server.log" 2>&1 &
 server_pid=$!
 

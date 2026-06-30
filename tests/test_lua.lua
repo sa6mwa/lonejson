@@ -325,6 +325,11 @@ if lonejson.jwt_parse_compact ~= nil then
     })
     local token_response = lonejson.oauth2_token_response_parse_json(
         '{"access_token":"token","token_type":"Bearer","expires_in":3600,"scope":"read write"}')
+    local token_flow = lonejson.oauth2_token_flow_update_response({
+      refresh_token = "old-refresh",
+    }, token_response, 1000)
+    local token_flow_expired = lonejson.oauth2_token_flow_is_expired(
+        token_flow, 4550, 60)
     local introspection_response = lj:oauth2_introspection_response_parse_json(
         '{"active":true,"scope":"read write","client_id":"client","sub":"sub","exp":123}')
     local userinfo_response = lonejson.oidc_userinfo_response_parse_json(
@@ -412,6 +417,18 @@ if lonejson.jwt_parse_compact ~= nil then
           client_id = "client id",
           client_secret = "secret",
         }, 4096)
+    local ensured_flow, ensured_flow_result = provider_lj:oauth2_token_flow_ensure({
+      access_token = "old-token",
+      refresh_token = "r+e&f",
+      expires_at = 1000,
+    }, {
+      token_endpoint = "https://id.example/token",
+      client_id = "client id",
+      client_secret = "secret",
+      now = 1001,
+      max_response_bytes = 4096,
+      disable_retry = true,
+    })
     local requested_introspection = provider_lj:oauth2_introspect_token_request(
         "https://id.example/introspect", {
           token = "access",
@@ -474,6 +491,10 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(token_response.access_token, "token")
     assert_eq(token_response.token_type, "Bearer")
     assert_eq(token_response.expires_in, 3600)
+    assert_eq(token_flow.access_token, "token")
+    assert_eq(token_flow.refresh_token, "old-refresh")
+    assert_eq(token_flow.expires_at, 4600)
+    assert_true(token_flow_expired)
     assert_true(introspection_response.active)
     assert_eq(introspection_response.scope, "read write")
     assert_eq(introspection_response.client_id, "client")
@@ -510,6 +531,11 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(requested_client_token.access_token, "client-token")
     assert_eq(requested_client_token.expires_in, 60)
     assert_eq(requested_refresh_token.access_token, "refresh-token")
+    assert_eq(ensured_flow.access_token, "refresh-token")
+    assert_eq(ensured_flow.refresh_token, "r+e&f")
+    assert_eq(ensured_flow_result.state, "refreshed")
+    assert_true(ensured_flow_result.refreshed)
+    assert_eq(ensured_flow_result.attempts, 1)
     assert_true(requested_introspection.active)
     assert_eq(requested_introspection.sub, "subject")
     assert_true(revoked)
@@ -517,7 +543,7 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(requested_userinfo.email, "subject@example.com")
     assert_eq(requested_code_token.access_token, "code-token")
     assert_eq(requested_code_token.id_token, "id.jwt")
-    assert_eq(#http_requests, 8)
+    assert_eq(#http_requests, 9)
 
     bad, err = lonejson.oidc_discovery_parse_json(discovery_json, "https://id.example")
     assert_true(bad == nil)

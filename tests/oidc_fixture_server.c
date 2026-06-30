@@ -314,6 +314,10 @@ int main(int argc, char **argv) {
   lonejson_oidc_userinfo_request userinfo_request;
   lonejson_oidc_userinfo_response userinfo;
   lonejson_oauth2_token_revocation revocation_request;
+  lonejson_oauth2_token_flow flow;
+  lonejson_oauth2_token_flow_policy flow_policy;
+  lonejson_oauth2_token_flow_result flow_result;
+  lonejson_oauth2_token_response flow_response;
   lonejson_status status;
 
   if (argc != 5 && argc != 7) {
@@ -407,9 +411,9 @@ int main(int argc, char **argv) {
     memset(&userinfo_request, 0, sizeof(userinfo_request));
     userinfo_request.access_token = admin_access_token;
     lonejson_oidc_userinfo_response_init(&userinfo);
-    status = lonejson_oidc_fetch_userinfo(
-        server.runtime, discovery.userinfo_endpoint, &userinfo_request,
-        &userinfo, &error);
+    status = lonejson_oidc_fetch_userinfo(server.runtime,
+                                          discovery.userinfo_endpoint,
+                                          &userinfo_request, &userinfo, &error);
     if (status != LONEJSON_STATUS_OK || userinfo.json == NULL ||
         userinfo.len == 0u) {
       fprintf(stderr, "userinfo request failed: %s\n", error.message);
@@ -418,19 +422,51 @@ int main(int argc, char **argv) {
     }
     lonejson_oidc_userinfo_response_cleanup(&userinfo);
 
+    lonejson_oauth2_token_flow_init(&flow);
+    memset(&flow_response, 0, sizeof(flow_response));
+    flow_response.access_token = (char *)admin_access_token;
+    flow_response.token_type = (char *)"Bearer";
+    flow_response.refresh_token = (char *)refresh_token;
+    flow_response.expires_in = 0;
+    flow_response.has_expires_in = 1;
+    status = lonejson_oauth2_token_flow_update_response(
+        &flow, &flow_response, (lonejson_int64)time(NULL) - 1, &error);
+    if (status != LONEJSON_STATUS_OK) {
+      fprintf(stderr, "token flow setup failed: %s\n", error.message);
+      lonejson_oauth2_token_flow_cleanup(&flow);
+      return 1;
+    }
+    memset(&flow_policy, 0, sizeof(flow_policy));
+    flow_policy.token_endpoint = discovery.token_endpoint;
+    flow_policy.client_id = "lonejson-m2m";
+    flow_policy.client_secret = "lonejson-secret";
+    flow_policy.now = (lonejson_int64)time(NULL);
+    flow_policy.max_response_bytes = 256u * 1024u;
+    status = lonejson_oauth2_token_flow_ensure(
+        server.runtime, &flow, &flow_policy, &flow_result, &error);
+    if (status != LONEJSON_STATUS_OK ||
+        flow_result.state != LONEJSON_OAUTH2_TOKEN_FLOW_REFRESHED ||
+        flow.access_token == NULL) {
+      fprintf(stderr, "token flow refresh failed: %s\n", error.message);
+      lonejson_oauth2_token_flow_cleanup(&flow);
+      return 1;
+    }
+
     memset(&revocation_request, 0, sizeof(revocation_request));
-    revocation_request.token = refresh_token;
+    revocation_request.token = flow.refresh_token;
     revocation_request.token_type_hint = "refresh_token";
     revocation_request.client_id = "lonejson-m2m";
     revocation_request.client_secret = "lonejson-secret";
     revocation_request.use_basic_auth = 1;
-    status = lonejson_oauth2_revoke_token_request(
-        server.runtime, discovery.revocation_endpoint, &revocation_request,
-        &error);
+    status = lonejson_oauth2_revoke_token_request(server.runtime,
+                                                  discovery.revocation_endpoint,
+                                                  &revocation_request, &error);
     if (status != LONEJSON_STATUS_OK) {
       fprintf(stderr, "token revocation failed: %s\n", error.message);
+      lonejson_oauth2_token_flow_cleanup(&flow);
       return 1;
     }
+    lonejson_oauth2_token_flow_cleanup(&flow);
   }
 
   issuers[0] = server.issuer;

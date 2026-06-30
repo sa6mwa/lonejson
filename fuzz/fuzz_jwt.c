@@ -111,6 +111,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_oauth2_token_revocation revocation;
   lonejson_oidc_authorization_code_token code_token;
   lonejson_oauth2_token_response token_response;
+  lonejson_oauth2_token_flow token_flow;
+  lonejson_oauth2_token_flow_policy flow_policy;
+  lonejson_oauth2_token_flow_result flow_result;
   lonejson_oauth2_introspection_response introspection_response;
   lonejson_oidc_userinfo_request userinfo_request;
   lonejson_oidc_userinfo_response userinfo_response;
@@ -357,6 +360,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     lonejson_oauth2_token_response_init(&token_response);
     (void)runtime->oauth2_token_response_parse_json(runtime, text, size, 4096u,
                                                     &token_response, &error);
+    lonejson_oauth2_token_flow_init(&token_flow);
+    (void)lonejson_oauth2_token_flow_update_response(
+        &token_flow, &token_response, 1000, &error);
+    (void)lonejson_oauth2_token_flow_is_expired(&token_flow, 1001, 60);
+    lonejson_oauth2_token_flow_cleanup(&token_flow);
     lonejson_oauth2_token_response_cleanup(&token_response);
 
     lonejson_oauth2_introspection_response_init(&introspection_response);
@@ -380,6 +388,26 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         runtime, "https://issuer.example/token", &refresh_token, 4096u,
         &token_response, &error);
     lonejson_oauth2_token_response_cleanup(&token_response);
+
+    lonejson_oauth2_token_flow_init(&token_flow);
+    memset(&token_response, 0, sizeof(token_response));
+    token_response.access_token = (char *)"access";
+    token_response.token_type = (char *)"Bearer";
+    token_response.refresh_token = (char *)"refresh";
+    token_response.expires_in = 0;
+    token_response.has_expires_in = 1;
+    (void)lonejson_oauth2_token_flow_update_response(
+        &token_flow, &token_response, 999, &error);
+    memset(&flow_policy, 0, sizeof(flow_policy));
+    flow_policy.token_endpoint = "https://issuer.example/token";
+    flow_policy.client_id = "client";
+    flow_policy.client_secret = size > 4u ? text : NULL;
+    flow_policy.now = 1000;
+    flow_policy.max_response_bytes = 4096u;
+    flow_policy.disable_retry = (int)(size & 1u);
+    (void)runtime->oauth2_token_flow_ensure(runtime, &token_flow, &flow_policy,
+                                            &flow_result, &error);
+    lonejson_oauth2_token_flow_cleanup(&token_flow);
 
     lonejson_oauth2_token_response_init(&token_response);
     (void)runtime->oidc_authorization_code_token_request(

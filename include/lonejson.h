@@ -1524,6 +1524,79 @@ typedef struct lonejson_oauth2_token_response {
   int has_expires_in;
 } lonejson_oauth2_token_response;
 
+/** OAuth2/OIDC token-flow state retained by lonejson helpers.
+ *
+ * This object owns copied token strings. It is not durable storage and does
+ * not perform browser interaction; callers decide where to persist it and how
+ * to resume interactive flows.
+ */
+typedef struct lonejson_oauth2_token_flow {
+  /** Current Bearer access token, when known. */
+  char *access_token;
+  /** Token type, normally `Bearer`. */
+  char *token_type;
+  /** Refresh token used for transparent refresh, when available. */
+  char *refresh_token;
+  /** Granted or narrowed scope, when returned by the provider. */
+  char *scope;
+  /** OIDC ID token, when returned by the provider. */
+  char *id_token;
+  /** Access-token expiry time in seconds since Unix epoch. */
+  lonejson_int64 expires_at;
+  /** Non-zero when `expires_at` is meaningful. */
+  int has_expires_at;
+} lonejson_oauth2_token_flow;
+
+/** Token-flow state returned by `lonejson_oauth2_token_flow_ensure()`. */
+typedef enum lonejson_oauth2_token_flow_state {
+  /** Access token was already usable under the configured policy. */
+  LONEJSON_OAUTH2_TOKEN_FLOW_READY = 0,
+  /** Access token was refreshed through the runtime HTTP provider. */
+  LONEJSON_OAUTH2_TOKEN_FLOW_REFRESHED = 1,
+  /** The helper cannot continue without caller/user interaction. */
+  LONEJSON_OAUTH2_TOKEN_FLOW_NEEDS_INTERACTION = 2,
+  /** Refresh was attempted and failed. Inspect the returned status/error. */
+  LONEJSON_OAUTH2_TOKEN_FLOW_FAILED = 3
+} lonejson_oauth2_token_flow_state;
+
+/** Policy for ensuring an OAuth2/OIDC token flow.
+ *
+ * Zero-initialized fields use conservative defaults. `token_endpoint`,
+ * `client_id`, and `client_secret` are required only when refresh may be
+ * attempted.
+ */
+typedef struct lonejson_oauth2_token_flow_policy {
+  /** OAuth2 token endpoint used for refresh. Required for refresh. */
+  const char *token_endpoint;
+  /** OAuth2 client identifier used for refresh. Required for refresh. */
+  const char *client_id;
+  /** OAuth2 client secret used for refresh when required by the provider. */
+  const char *client_secret;
+  /** Optional scope narrowing for refresh requests. */
+  const char *scope;
+  /** Current time in seconds since Unix epoch. Required. */
+  lonejson_int64 now;
+  /** Refresh before expiry by this many seconds. Zero means 60 seconds. */
+  lonejson_int64 refresh_skew_seconds;
+  /** Maximum token endpoint response bytes. Zero means the default limit. */
+  size_t max_response_bytes;
+  /** Additional retries after the first refresh attempt. Zero means 2. */
+  unsigned max_retries;
+  /** Non-zero disables transparent refresh. */
+  int disable_refresh;
+  /** Non-zero disables retry; exactly one refresh attempt is made. */
+  int disable_retry;
+} lonejson_oauth2_token_flow_policy;
+
+/** Observable result from token-flow ensure. */
+typedef struct lonejson_oauth2_token_flow_result {
+  lonejson_oauth2_token_flow_state state;
+  /** Number of token endpoint attempts performed by this call. */
+  unsigned attempts;
+  /** Non-zero when `flow` was updated from a refresh response. */
+  int refreshed;
+} lonejson_oauth2_token_flow_result;
+
 /** Parsed OAuth2 token introspection response.
  *
  * The response owns all strings. `active` is required by RFC 7662. Other
@@ -3151,6 +3224,11 @@ struct lonejson {
       lonejson *runtime, const char *token_endpoint,
       const lonejson_oauth2_refresh_token *request, size_t max_response_bytes,
       lonejson_oauth2_token_response *out, lonejson_error *error);
+  /** Ensures a token-flow has a usable access token, refreshing if needed. */
+  lonejson_status (*oauth2_token_flow_ensure)(
+      lonejson *runtime, lonejson_oauth2_token_flow *flow,
+      const lonejson_oauth2_token_flow_policy *policy,
+      lonejson_oauth2_token_flow_result *result, lonejson_error *error);
   /** Introspects a token through this runtime's HTTP provider. */
   lonejson_status (*oauth2_introspect_token_request)(
       lonejson *runtime, const char *introspection_endpoint,
@@ -6579,6 +6657,40 @@ lonejson_status lonejson_oauth2_refresh_token_request(
     lonejson *runtime, const char *token_endpoint,
     const lonejson_oauth2_refresh_token *request, size_t max_response_bytes,
     lonejson_oauth2_token_response *out, lonejson_error *error);
+/** Initializes token-flow storage for update or cleanup. */
+void lonejson_oauth2_token_flow_init(lonejson_oauth2_token_flow *flow);
+/** Releases all storage owned by a token flow. */
+void lonejson_oauth2_token_flow_cleanup(lonejson_oauth2_token_flow *flow);
+/** Returns non-zero when the flow has no usable access token at `now`.
+ *
+ * A zero `skew_seconds` applies the default 60-second refresh skew. Negative
+ * skew is treated as zero.
+ */
+int lonejson_oauth2_token_flow_is_expired(
+    const lonejson_oauth2_token_flow *flow, lonejson_int64 now,
+    lonejson_int64 skew_seconds);
+/** Updates token-flow storage from a successful token endpoint response.
+ *
+ * Returned strings are copied. Existing refresh tokens are preserved when a
+ * refresh response omits `refresh_token`, matching common OAuth2 rotation
+ * behavior.
+ */
+lonejson_status lonejson_oauth2_token_flow_update_response(
+    lonejson_oauth2_token_flow *flow,
+    const lonejson_oauth2_token_response *response, lonejson_int64 now,
+    lonejson_error *error);
+/** Ensures a flow has a usable access token, refreshing through the runtime
+ * HTTP provider when refresh is enabled and required.
+ *
+ * This helper never performs browser interaction and never persists state.
+ * When interaction or re-authorization is needed it returns
+ * `LONEJSON_STATUS_OK` with result state
+ * `LONEJSON_OAUTH2_TOKEN_FLOW_NEEDS_INTERACTION`.
+ */
+lonejson_status lonejson_oauth2_token_flow_ensure(
+    lonejson *runtime, lonejson_oauth2_token_flow *flow,
+    const lonejson_oauth2_token_flow_policy *policy,
+    lonejson_oauth2_token_flow_result *result, lonejson_error *error);
 /** Introspects a token through the runtime HTTP provider. */
 lonejson_status lonejson_oauth2_introspect_token_request(
     lonejson *runtime, const char *introspection_endpoint,
@@ -6599,10 +6711,11 @@ lonejson_status lonejson_oidc_userinfo_response_parse_json(
     lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
     lonejson_oidc_userinfo_response *out, lonejson_error *error);
 /** Fetches OIDC UserInfo through the runtime HTTP provider. */
-lonejson_status lonejson_oidc_fetch_userinfo(
-    lonejson *runtime, const char *userinfo_endpoint,
-    const lonejson_oidc_userinfo_request *request,
-    lonejson_oidc_userinfo_response *out, lonejson_error *error);
+lonejson_status
+lonejson_oidc_fetch_userinfo(lonejson *runtime, const char *userinfo_endpoint,
+                             const lonejson_oidc_userinfo_request *request,
+                             lonejson_oidc_userinfo_response *out,
+                             lonejson_error *error);
 /** Exchanges an OIDC/OAuth2 authorization code through the runtime HTTP
  * provider.
  */
@@ -7512,8 +7625,11 @@ typedef lonejson_oauth2_token_introspection lj_oauth2_token_introspection;
 typedef lonejson_oauth2_token_revocation lj_oauth2_token_revocation;
 typedef lonejson_oidc_authorization_code_token lj_oidc_authorization_code_token;
 typedef lonejson_oauth2_token_response lj_oauth2_token_response;
-typedef lonejson_oauth2_introspection_response
-    lj_oauth2_introspection_response;
+typedef lonejson_oauth2_token_flow lj_oauth2_token_flow;
+typedef lonejson_oauth2_token_flow_state lj_oauth2_token_flow_state;
+typedef lonejson_oauth2_token_flow_policy lj_oauth2_token_flow_policy;
+typedef lonejson_oauth2_token_flow_result lj_oauth2_token_flow_result;
+typedef lonejson_oauth2_introspection_response lj_oauth2_introspection_response;
 typedef lonejson_oidc_userinfo_request lj_oidc_userinfo_request;
 typedef lonejson_oidc_userinfo_response lj_oidc_userinfo_response;
 typedef lonejson_oidc_pkce lj_oidc_pkce;
@@ -9652,15 +9768,14 @@ lj_oauth2_refresh_token_body(const lj_oauth2_refresh_token *request,
 }
 /** Builds an introspection request body. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_oauth2_token_introspection_body(
-    const lj_oauth2_token_introspection *request, lj_owned_buffer *out,
-    lj_error *error) {
+lj_oauth2_token_introspection_body(const lj_oauth2_token_introspection *request,
+                                   lj_owned_buffer *out, lj_error *error) {
   return lonejson_oauth2_token_introspection_body(request, out, error);
 }
 /** Builds a revocation request body. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_revocation_body(
-    const lj_oauth2_token_revocation *request, lj_owned_buffer *out,
-    lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oauth2_token_revocation_body(const lj_oauth2_token_revocation *request,
+                                lj_owned_buffer *out, lj_error *error) {
   return lonejson_oauth2_token_revocation_body(request, out, error);
 }
 /** Builds an authorization-code token body. */
@@ -9720,6 +9835,36 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_refresh_token_request(
   return lonejson_oauth2_refresh_token_request(runtime, token_endpoint, request,
                                                max_response_bytes, out, error);
 }
+/** Initializes token-flow storage for update or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oauth2_token_flow_init(lj_oauth2_token_flow *flow) {
+  lonejson_oauth2_token_flow_init(flow);
+}
+/** Releases all storage owned by a token flow. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oauth2_token_flow_cleanup(lj_oauth2_token_flow *flow) {
+  lonejson_oauth2_token_flow_cleanup(flow);
+}
+/** Returns non-zero when the flow has no usable access token at `now`. */
+LONEJSON_SHORT_ALIAS_INLINE int
+lj_oauth2_token_flow_is_expired(const lj_oauth2_token_flow *flow, lj_int64 now,
+                                lj_int64 skew_seconds) {
+  return lonejson_oauth2_token_flow_is_expired(flow, now, skew_seconds);
+}
+/** Updates token-flow storage from a successful token endpoint response. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_flow_update_response(
+    lj_oauth2_token_flow *flow, const lj_oauth2_token_response *response,
+    lj_int64 now, lj_error *error) {
+  return lonejson_oauth2_token_flow_update_response(flow, response, now, error);
+}
+/** Ensures a token-flow has a usable access token, refreshing if needed. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_flow_ensure(
+    lj *runtime, lj_oauth2_token_flow *flow,
+    const lj_oauth2_token_flow_policy *policy,
+    lj_oauth2_token_flow_result *result, lj_error *error) {
+  return lonejson_oauth2_token_flow_ensure(runtime, flow, policy, result,
+                                           error);
+}
 /** Introspects a token through the runtime HTTP provider. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_introspect_token_request(
     lj *runtime, const char *introspection_endpoint,
@@ -9753,12 +9898,12 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_userinfo_response_parse_json(
       runtime, json, len, max_response_bytes, out, error);
 }
 /** Fetches OIDC UserInfo through the runtime HTTP provider. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_fetch_userinfo(
-    lj *runtime, const char *userinfo_endpoint,
-    const lj_oidc_userinfo_request *request, lj_oidc_userinfo_response *out,
-    lj_error *error) {
-  return lonejson_oidc_fetch_userinfo(runtime, userinfo_endpoint, request,
-                                        out, error);
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_fetch_userinfo(lj *runtime, const char *userinfo_endpoint,
+                       const lj_oidc_userinfo_request *request,
+                       lj_oidc_userinfo_response *out, lj_error *error) {
+  return lonejson_oidc_fetch_userinfo(runtime, userinfo_endpoint, request, out,
+                                      error);
 }
 /** Exchanges an authorization code through the runtime HTTP provider. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_authorization_code_token_request(

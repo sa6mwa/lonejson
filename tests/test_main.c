@@ -43,6 +43,7 @@ int main(void) {
   test_oidc_http_provider_helpers();
   test_oauth2_client_credentials_body();
   test_oauth2_token_response_parse();
+  test_oauth2_token_flow_helpers();
   test_oauth2_token_response_failures();
   test_oidc_pkce_challenge_and_generate();
   test_oidc_authorization_url();

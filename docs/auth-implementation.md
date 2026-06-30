@@ -436,6 +436,11 @@ Implemented public APIs:
 - `lonejson_oidc_authorization_code_token_body`
 - `lonejson_oauth2_client_credentials_request`
 - `lonejson_oauth2_refresh_token_request`
+- `lonejson_oauth2_token_flow_init`
+- `lonejson_oauth2_token_flow_cleanup`
+- `lonejson_oauth2_token_flow_is_expired`
+- `lonejson_oauth2_token_flow_update_response`
+- `lonejson_oauth2_token_flow_ensure`
 - `lonejson_oauth2_introspect_token_request`
 - `lonejson_oauth2_revoke_token_request`
 - `lonejson_oidc_fetch_userinfo`
@@ -532,6 +537,55 @@ Transport execution remains provider-owned. The built-in helpers require a
 runtime HTTP provider; callers that need different flow control can still post
 the generated body themselves and parse with
 `lonejson_oauth2_token_response_parse_json`.
+
+`lonejson_oauth2_token_flow_*` adds a narrowly scoped client-flow state helper.
+The flow object owns copied token strings (`access_token`, `token_type`,
+`refresh_token`, `scope`, `id_token`) and optional `expires_at`. It is
+zero-initializable, can be cleaned repeatedly, and is not durable storage.
+
+Typical C usage:
+
+```c
+lonejson_oauth2_token_flow flow;
+lonejson_oauth2_token_flow_policy flow_policy;
+lonejson_oauth2_token_flow_result flow_result;
+
+lonejson_oauth2_token_flow_init(&flow);
+lonejson_oauth2_token_flow_update_response(&flow, &initial_token, now, &error);
+
+memset(&flow_policy, 0, sizeof(flow_policy));
+flow_policy.token_endpoint = discovery.token_endpoint;
+flow_policy.client_id = client_id;
+flow_policy.client_secret = client_secret;
+flow_policy.now = now;
+
+status = lonejson_oauth2_token_flow_ensure(lj, &flow, &flow_policy,
+                                           &flow_result, &error);
+```
+
+`lonejson_oauth2_token_flow_ensure` returns `LONEJSON_STATUS_OK` with one of
+these result states:
+
+- `LONEJSON_OAUTH2_TOKEN_FLOW_READY`: the existing access token is usable,
+- `LONEJSON_OAUTH2_TOKEN_FLOW_REFRESHED`: the helper refreshed and updated the
+  flow,
+- `LONEJSON_OAUTH2_TOKEN_FLOW_NEEDS_INTERACTION`: the helper cannot continue
+  without caller/user interaction, commonly because no refresh token exists or
+  refresh was disabled,
+- `LONEJSON_OAUTH2_TOKEN_FLOW_FAILED`: refresh failed; inspect status/error.
+
+The default refresh skew is 60 seconds. Zero `max_retries` means the default of
+two additional attempts; set `disable_retry` for exactly one attempt. Retries
+apply only to transient provider/callback failures and HTTP 429/5xx token
+endpoint responses. No sleep or background scheduler is hidden in the helper;
+applications that need wall-clock backoff keep that policy in their HTTP
+provider or caller loop.
+
+Refresh responses that omit `refresh_token` preserve the previous refresh token
+because many providers do not rotate on every refresh. Responses that include a
+new refresh token replace the old value. The helper never refreshes a
+server-side presented bearer token; resource-server validation still fails
+closed on expiry.
 
 ## Authorization Code With PKCE
 
@@ -690,6 +744,9 @@ OIDC/OAuth2 Lua facade:
 - `oidc_authorization_code_token_body`
 - `oauth2_client_credentials_request` on runtime userdata
 - `oauth2_refresh_token_request` on runtime userdata
+- `oauth2_token_flow_update_response`
+- `oauth2_token_flow_is_expired`
+- `oauth2_token_flow_ensure` on runtime userdata
 - `oauth2_introspect_token_request` on runtime userdata
 - `oauth2_revoke_token_request` on runtime userdata
 - `oidc_userinfo_request` on runtime userdata
