@@ -29,6 +29,7 @@ int main(void) {
   test_jwk_parse_failures();
   test_jwt_decode_and_validate_claims();
   test_jwt_validate_rs256_signature();
+  test_jwt_validate_x5c_signature_policy();
   test_jwt_validate_recommended_signatures();
   test_jwt_auth_provider_runtime_boundary();
   test_jwt_validate_signature_failures();

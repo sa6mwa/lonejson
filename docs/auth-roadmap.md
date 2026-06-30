@@ -43,8 +43,8 @@ The current branch already implements the planned C baseline for:
   claim validation,
 - OpenSSL-backed `RS256`, `PS256`, `ES256`, and Ed25519 `EdDSA` validation,
 - JOSE/JWK policy checks for fail-closed `crit`, JWK `key_ops` verification
-  use, optional `x5c`/`x5t`/`x5t#S256` syntax parsing, OIDC `azp`,
-  OAuth2 `scope`/`scp`, and strict multi-audience policy,
+  use, OpenSSL-backed `x5c` chain validation, `x5t`/`x5t#S256` thumbprint
+  matching, OIDC `azp`, OAuth2 `scope`/`scp`, and strict multi-audience policy,
 - OAuth2/OIDC discovery, JWKS cache, token endpoint helpers, refresh-token body
   construction, authorization-code with PKCE helpers, callback parsing, and
   bearer-token validation,
@@ -88,12 +88,10 @@ Completed JWT/JWK/JWKS compliance surface needed for OIDC use:
 - multiple-audience policy can require `azp` and can require every JWT audience
   to be in `accepted_audiences`,
 - `x5c`, `x5t`, and `x5t#S256` are parsed and checked for correct base64/base64url
-  syntax.
-
-Remaining certificate-backed-key work:
-
-- `x5c` certificate-chain trust validation policy,
-- `x5t` and `x5t#S256` thumbprint matching against certificate material.
+  syntax,
+- the OpenSSL auth provider validates `x5c` certificate chains when present,
+  matches JWK/header thumbprints against the leaf certificate, and requires the
+  leaf public key to match the selected JWK.
 
 `crit` is a JOSE extension-safety mechanism. Silently ignoring a critical
 header is not compliant; the safe default is fail closed.

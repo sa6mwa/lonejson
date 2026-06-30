@@ -1387,10 +1387,16 @@ struct lonejson_auth_provider {
 
 #ifdef LONEJSON_WITH_OPENSSL
 /** Optional OpenSSL provider configuration. NULL fields use OpenSSL defaults.
+ *
+ * `x509_store` may point to an OpenSSL `X509_STORE` owned by the caller. When
+ * NULL, the OpenSSL provider uses a temporary store with OpenSSL default verify
+ * paths. The caller must keep non-NULL pointed-to objects alive until no runtime
+ * using the provider can call auth APIs.
  */
 typedef struct lonejson_openssl_auth_provider_config {
   void *libctx;
   const char *propq;
+  void *x509_store;
 } lonejson_openssl_auth_provider_config;
 #endif
 #endif
@@ -6458,7 +6464,13 @@ lonejson_set_auth_provider(lonejson *runtime,
                            const lonejson_auth_provider *provider,
                            lonejson_error *error);
 #ifdef LONEJSON_WITH_OPENSSL
-/** Initializes `provider` with lonejson's OpenSSL-backed auth adapter. */
+/** Initializes `provider` with lonejson's OpenSSL-backed auth adapter.
+ *
+ * The adapter verifies JWT/JWS signatures and, when a selected JWK includes an
+ * `x5c` chain, validates the leaf certificate thumbprints, checks that the leaf
+ * public key matches the JWK, and verifies the chain against `config->x509_store`
+ * or OpenSSL's default verify paths.
+ */
 lonejson_status lonejson_auth_provider_init_openssl(
     lonejson_auth_provider *provider,
     const lonejson_openssl_auth_provider_config *config, lonejson_error *error);
@@ -6531,7 +6543,8 @@ lonejson_status lonejson_jwt_validate_claims(
  * This is a trust decision for the JWS signature only. The caller must still
  * validate claims with `lonejson_jwt_validate_claims()`. The decoded header is
  * supplied explicitly so algorithm and key constraints are checked against the
- * same parsed header the caller will use for claim policy.
+ * same parsed header the caller will use for claim policy. With the OpenSSL auth
+ * provider, selected JWK `x5c` chains are validated when present.
  */
 lonejson_status
 lonejson_jwt_validate_signature(const lonejson_jwt_compact *jwt,

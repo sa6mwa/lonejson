@@ -1,4 +1,14 @@
 #ifdef LONEJSON_WITH_JWT
+#ifdef LONEJSON_WITH_OPENSSL
+#include <openssl/bn.h>
+#include <openssl/core_names.h>
+#include <openssl/evp.h>
+#include <openssl/param_build.h>
+#include <openssl/x509.h>
+#include <openssl/x509_vfy.h>
+#include <openssl/x509v3.h>
+#endif
+
 static void test_base64_url_raw_decode_vectors(void) {
   lonejson_error error;
   unsigned char out[8];
@@ -337,6 +347,158 @@ static const char test_jwt_rs256_minimal_jwks_json[] =
     "YoQ\","
     "\"e\":\"AQAB\"}]}";
 
+#ifdef LONEJSON_WITH_OPENSSL
+static unsigned char *test_jwt_base64_decode_alloc(const char *value,
+                                                   lonejson_base64_variant variant,
+                                                   size_t *out_len) {
+  lonejson_error error;
+  unsigned char *out;
+  size_t len;
+  size_t needed;
+
+  lonejson_error_init(&error);
+  EXPECT(lonejson_base64_decoded_len(value, strlen(value), variant, &len,
+                                     &error) == LONEJSON_STATUS_OK);
+  out = (unsigned char *)malloc(len == 0u ? 1u : len);
+  EXPECT(out != NULL);
+  EXPECT(lonejson_base64_decode(value, strlen(value), variant, out, len, &needed,
+                                &error) == LONEJSON_STATUS_OK);
+  EXPECT(needed == len);
+  *out_len = len;
+  return out;
+}
+
+static EVP_PKEY *test_jwt_rsa_pkey_from_jwk(const lonejson_jwk *jwk) {
+  EVP_PKEY_CTX *ctx = NULL;
+  EVP_PKEY *pkey = NULL;
+  OSSL_PARAM_BLD *builder = NULL;
+  OSSL_PARAM *params = NULL;
+  BIGNUM *n_bn = NULL;
+  BIGNUM *e_bn = NULL;
+  unsigned char *n = NULL;
+  unsigned char *e = NULL;
+  size_t n_len = 0u;
+  size_t e_len = 0u;
+
+  n = test_jwt_base64_decode_alloc(jwk->n, LONEJSON_BASE64_URL_RAW, &n_len);
+  e = test_jwt_base64_decode_alloc(jwk->e, LONEJSON_BASE64_URL_RAW, &e_len);
+  n_bn = BN_bin2bn(n, (int)n_len, NULL);
+  e_bn = BN_bin2bn(e, (int)e_len, NULL);
+  builder = OSSL_PARAM_BLD_new();
+  ctx = EVP_PKEY_CTX_new_from_name(NULL, "RSA", NULL);
+  EXPECT(n_bn != NULL);
+  EXPECT(e_bn != NULL);
+  EXPECT(builder != NULL);
+  EXPECT(ctx != NULL);
+  EXPECT(OSSL_PARAM_BLD_push_BN(builder, OSSL_PKEY_PARAM_RSA_N, n_bn) == 1);
+  EXPECT(OSSL_PARAM_BLD_push_BN(builder, OSSL_PKEY_PARAM_RSA_E, e_bn) == 1);
+  params = OSSL_PARAM_BLD_to_param(builder);
+  EXPECT(params != NULL);
+  EXPECT(EVP_PKEY_fromdata_init(ctx) == 1);
+  EXPECT(EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) == 1);
+  EXPECT(pkey != NULL);
+  free(n);
+  free(e);
+  BN_free(n_bn);
+  BN_free(e_bn);
+  OSSL_PARAM_free(params);
+  OSSL_PARAM_BLD_free(builder);
+  EVP_PKEY_CTX_free(ctx);
+  return pkey;
+}
+
+static X509_NAME *test_jwt_x509_name(const char *cn) {
+  X509_NAME *name = X509_NAME_new();
+  EXPECT(name != NULL);
+  EXPECT(X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                                    (const unsigned char *)cn, -1, -1,
+                                    0) == 1);
+  return name;
+}
+
+static void test_jwt_x509_add_ext(X509 *cert, int nid, const char *value) {
+  X509_EXTENSION *ext = X509V3_EXT_conf_nid(NULL, NULL, nid, (char *)value);
+  EXPECT(ext != NULL);
+  EXPECT(X509_add_ext(cert, ext, -1) == 1);
+  X509_EXTENSION_free(ext);
+}
+
+static X509 *test_jwt_make_cert(EVP_PKEY *subject_key, EVP_PKEY *issuer_key,
+                                X509_NAME *subject, X509_NAME *issuer,
+                                long serial, int ca) {
+  X509 *cert = X509_new();
+  EXPECT(cert != NULL);
+  EXPECT(X509_set_version(cert, 2) == 1);
+  EXPECT(ASN1_INTEGER_set(X509_get_serialNumber(cert), serial) == 1);
+  EXPECT(X509_gmtime_adj(X509_get_notBefore(cert), -60) != NULL);
+  EXPECT(X509_gmtime_adj(X509_get_notAfter(cert), 3600) != NULL);
+  EXPECT(X509_set_subject_name(cert, subject) == 1);
+  EXPECT(X509_set_issuer_name(cert, issuer) == 1);
+  EXPECT(X509_set_pubkey(cert, subject_key) == 1);
+  test_jwt_x509_add_ext(cert, NID_basic_constraints,
+                        ca ? "critical,CA:TRUE" : "critical,CA:FALSE");
+  test_jwt_x509_add_ext(cert, NID_key_usage,
+                        ca ? "critical,keyCertSign,cRLSign"
+                           : "critical,digitalSignature");
+  EXPECT(X509_sign(cert, issuer_key, EVP_sha256()) > 0);
+  return cert;
+}
+
+static char *test_jwt_x509_base64_der(X509 *cert) {
+  unsigned char *der = NULL;
+  unsigned char *cursor;
+  char *out;
+  int der_len;
+  size_t encoded_len;
+  size_t needed;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  der_len = i2d_X509(cert, NULL);
+  EXPECT(der_len > 0);
+  der = (unsigned char *)malloc((size_t)der_len);
+  EXPECT(der != NULL);
+  cursor = der;
+  EXPECT(i2d_X509(cert, &cursor) == der_len);
+  EXPECT(lonejson_base64_encoded_len((size_t)der_len, LONEJSON_BASE64_STANDARD,
+                                     &encoded_len,
+                                     &error) == LONEJSON_STATUS_OK);
+  out = (char *)malloc(encoded_len + 1u);
+  EXPECT(out != NULL);
+  EXPECT(lonejson_base64_encode(der, (size_t)der_len, LONEJSON_BASE64_STANDARD,
+                                out, encoded_len + 1u, &needed,
+                                &error) == LONEJSON_STATUS_OK);
+  EXPECT(needed == encoded_len);
+  out[encoded_len] = '\0';
+  free(der);
+  return out;
+}
+
+static char *test_jwt_x509_thumbprint(X509 *cert,
+                                      const EVP_MD *md,
+                                      lonejson_base64_variant variant) {
+  unsigned char digest[EVP_MAX_MD_SIZE];
+  unsigned int digest_len = 0u;
+  char *out;
+  size_t encoded_len;
+  size_t needed;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  EXPECT(X509_digest(cert, md, digest, &digest_len) == 1);
+  EXPECT(lonejson_base64_encoded_len((size_t)digest_len, variant, &encoded_len,
+                                     &error) == LONEJSON_STATUS_OK);
+  out = (char *)malloc(encoded_len + 1u);
+  EXPECT(out != NULL);
+  EXPECT(lonejson_base64_encode(digest, (size_t)digest_len, variant, out,
+                                encoded_len + 1u, &needed,
+                                &error) == LONEJSON_STATUS_OK);
+  EXPECT(needed == encoded_len);
+  out[encoded_len] = '\0';
+  return out;
+}
+#endif
+
 static const char test_jwt_ps256_token[] =
     "eyJhbGciOiJQUzI1NiIsImtpZCI6InBzLXRlc3QiLCJ0eXAiOiJKV1QifQ."
     "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzdWJqZWN0IiwiYXVkIjoiYXBpIiwiZXhwIjoyM"
@@ -575,6 +737,138 @@ static void test_jwt_validate_rs256_signature(void) {
   lonejson_jwk_cleanup(&jwk);
   lonejson_jwt_header_cleanup(&header);
   lonejson_jwt_claims_cleanup(&claims);
+}
+
+static void test_jwt_validate_x5c_signature_policy(void) {
+#ifdef LONEJSON_WITH_OPENSSL
+  lonejson_jwt_compact compact;
+  lonejson_jwt_header header;
+  lonejson_jwt_claims claims;
+  lonejson_jwk jwk;
+  lonejson_error error;
+  lonejson_config runtime_config;
+  lonejson *runtime;
+  lonejson_auth_provider provider;
+  lonejson_openssl_auth_provider_config provider_config;
+  EVP_PKEY *jwt_key = NULL;
+  EVP_PKEY *ca_key = NULL;
+  X509_NAME *ca_name = NULL;
+  X509_NAME *leaf_name = NULL;
+  X509 *ca_cert = NULL;
+  X509 *leaf_cert = NULL;
+  X509 *bad_leaf_cert = NULL;
+  X509_STORE *store = NULL;
+  char **x5c_items;
+  char *leaf_b64;
+  char *ca_b64;
+  char *bad_leaf_b64;
+  char *thumb_sha1;
+  char *thumb_sha256;
+  char *saved_x5t_s256;
+
+  lonejson_error_init(&error);
+  lonejson_jwt_header_init(&header);
+  lonejson_jwt_claims_init(&claims);
+  lonejson_jwk_init(&jwk);
+  memset(&provider_config, 0, sizeof(provider_config));
+
+  EXPECT(lonejson_jwt_parse_compact(test_jwt_rs256_token,
+                                    strlen(test_jwt_rs256_token), &compact,
+                                    &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), test_jwt_rs256_token,
+                                     strlen(test_jwt_rs256_token), NULL, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_jwk_parse_json(test_default_runtime(), test_jwt_rs256_jwk_json,
+                                 strlen(test_jwt_rs256_jwk_json), &jwk,
+                                 &error) == LONEJSON_STATUS_OK);
+
+  jwt_key = test_jwt_rsa_pkey_from_jwk(&jwk);
+  ca_key = EVP_RSA_gen(2048);
+  EXPECT(ca_key != NULL);
+  ca_name = test_jwt_x509_name("lonejson test ca");
+  leaf_name = test_jwt_x509_name("lonejson test jwt leaf");
+  ca_cert = test_jwt_make_cert(ca_key, ca_key, ca_name, ca_name, 1, 1);
+  leaf_cert = test_jwt_make_cert(jwt_key, ca_key, leaf_name, ca_name, 2, 0);
+  bad_leaf_cert = test_jwt_make_cert(ca_key, ca_key, leaf_name, ca_name, 3, 0);
+  leaf_b64 = test_jwt_x509_base64_der(leaf_cert);
+  ca_b64 = test_jwt_x509_base64_der(ca_cert);
+  bad_leaf_b64 = test_jwt_x509_base64_der(bad_leaf_cert);
+  thumb_sha1 =
+      test_jwt_x509_thumbprint(leaf_cert, EVP_sha1(), LONEJSON_BASE64_URL_RAW);
+  thumb_sha256 =
+      test_jwt_x509_thumbprint(leaf_cert, EVP_sha256(), LONEJSON_BASE64_URL_RAW);
+
+  x5c_items = (char **)malloc(2u * sizeof(x5c_items[0]));
+  EXPECT(x5c_items != NULL);
+  x5c_items[0] = leaf_b64;
+  x5c_items[1] = ca_b64;
+  jwk.x5c.items = x5c_items;
+  jwk.x5c.count = 2u;
+  jwk.x5c.capacity = 2u;
+  jwk.x5c.flags = LONEJSON_ARRAY_OWNS_ITEMS;
+  jwk.x5t = thumb_sha1;
+  jwk.x5t_s256 = thumb_sha256;
+
+  EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+
+  store = X509_STORE_new();
+  EXPECT(store != NULL);
+  EXPECT(X509_STORE_add_cert(store, ca_cert) == 1);
+  provider_config.x509_store = store;
+  EXPECT(lonejson_auth_provider_init_openssl(&provider, &provider_config,
+                                             &error) == LONEJSON_STATUS_OK);
+  runtime_config = lonejson_default_config();
+  runtime = lonejson_new(&runtime_config, &error);
+  EXPECT(runtime != NULL);
+  EXPECT(lonejson_set_auth_provider(runtime, &provider, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_jwt_validate_signature_with_runtime(runtime, &compact, &header,
+                                                      &jwk,
+                                                      &error) ==
+         LONEJSON_STATUS_OK);
+
+  saved_x5t_s256 = header.x5t_s256;
+  header.x5t_s256 = (char *)malloc(3u);
+  EXPECT(header.x5t_s256 != NULL);
+  memcpy(header.x5t_s256, "AA", 3u);
+  EXPECT(lonejson_jwt_validate_signature_with_runtime(runtime, &compact, &header,
+                                                      &jwk,
+                                                      &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  free(header.x5t_s256);
+  header.x5t_s256 = saved_x5t_s256;
+
+  jwk.x5c.items[0] = bad_leaf_b64;
+  EXPECT(lonejson_jwt_validate_signature_with_runtime(runtime, &compact, &header,
+                                                      &jwk,
+                                                      &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  free(bad_leaf_b64);
+  jwk.x5c.items[0] = leaf_b64;
+
+  lonejson_free(runtime);
+  X509_STORE_free(store);
+  X509_free(bad_leaf_cert);
+  X509_free(leaf_cert);
+  X509_free(ca_cert);
+  X509_NAME_free(leaf_name);
+  X509_NAME_free(ca_name);
+  EVP_PKEY_free(ca_key);
+  EVP_PKEY_free(jwt_key);
+  free(jwk.x5t);
+  free(jwk.x5t_s256);
+  free(jwk.x5c.items[0]);
+  free(jwk.x5c.items[1]);
+  free(jwk.x5c.items);
+  jwk.x5t = NULL;
+  jwk.x5t_s256 = NULL;
+  memset(&jwk.x5c, 0, sizeof(jwk.x5c));
+  lonejson_jwk_cleanup(&jwk);
+  lonejson_jwt_header_cleanup(&header);
+  lonejson_jwt_claims_cleanup(&claims);
+#endif
 }
 
 static void test_jwt_validate_recommended_signatures(void) {
@@ -2597,6 +2891,7 @@ static void test_jwks_parse_and_select(void) {}
 static void test_jwk_parse_failures(void) {}
 static void test_jwt_decode_and_validate_claims(void) {}
 static void test_jwt_validate_rs256_signature(void) {}
+static void test_jwt_validate_x5c_signature_policy(void) {}
 static void test_jwt_validate_recommended_signatures(void) {}
 static void test_jwt_auth_provider_runtime_boundary(void) {}
 static void test_jwt_validate_signature_failures(void) {}

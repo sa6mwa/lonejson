@@ -171,6 +171,10 @@ Implemented JWK fields:
 - `x`
 - `y`
 - `k`
+- `key_ops`
+- `x5c`
+- `x5t`
+- `x5t#S256`
 
 Implemented JWK shape checks:
 
@@ -317,10 +321,24 @@ Signature validation enforces:
 - JWK `alg`, when present, must match the JWT header algorithm,
 - JWK `kid`, when present alongside header `kid`, must match,
 - JWK `use`, when present, must be `sig`,
+- JWK `key_ops`, when present, must allow `verify`,
 - `RS256` requires `kty: RSA`,
 - RSA modulus and exponent must decode and be bounded,
+- JWK `x5c`, when present with the OpenSSL provider, must decode to a trusted
+  X.509 chain,
+- JWK or header `x5t`/`x5t#S256`, when present, must match the `x5c` leaf
+  certificate,
+- the `x5c` leaf public key must match the selected JWK key material,
 - signature must be present and non-empty,
 - cryptographic verification must succeed.
+
+The OpenSSL provider verifies `x5c` chains against
+`lonejson_openssl_auth_provider_config.x509_store` when supplied, otherwise
+against a temporary store using OpenSSL default verify paths. The caller owns
+the store object and must keep it alive while any runtime can use the provider.
+Without `LONEJSON_WITH_OPENSSL`, JWK certificate fields are parsed and syntax
+checked only; no certificate trust decision is available from the built-in
+provider surface.
 
 This API is a signature trust decision only. It does not validate issuer,
 audience, time claims, or required claims.
@@ -909,9 +927,9 @@ The following are deliberate gaps or future work, not hidden behavior.
 - No implemented HS256 or `none` validation support. `none` remains rejected.
 - No Ed448 support for `EdDSA`; the OpenSSL provider currently supports
   Ed25519 OKP keys.
-- `x5c`, `x5t`, and `x5t#S256` are parsed and syntax-checked, but lonejson does
-  not yet validate certificate chains or match thumbprints against certificate
-  material.
+- Certificate-backed JWK trust requires the OpenSSL auth provider. Non-OpenSSL
+  builds parse and syntax-check `x5c`, `x5t`, and `x5t#S256`, but cannot
+  validate certificate chains or thumbprints.
 - `crit` JOSE header handling is fail-closed: every critical header name must be
   listed in the claim policy `accepted_crit` array.
 - `azp`, `scope`, `scp`, and stricter multi-audience policy checks are available
@@ -933,10 +951,8 @@ devices. It is distinct from the planned token-flow state helper that tracks
 where a supported OAuth2/OIDC flow is and decides whether to refresh, retry, or
 return a clear "cannot continue" state.
 
-The remaining compliance target is documented in `docs/auth-roadmap.md`:
-certificate-chain trust validation and thumbprint matching for certificate-backed
-JWKs. JWE should be handled as a later encryption-specific feature, not mixed
-into the OIDC/JWT/JWK target.
+The remaining encryption-specific JOSE target is JWE. It is intentionally not
+part of the current OIDC/JWT/JWK completion target.
 
 ## Recommended Composition Patterns
 

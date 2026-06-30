@@ -123,7 +123,12 @@ decode with `lonejson_jwt_decode_compact()`, select a JWK from a trusted JWKS
 cache, validate the signature through the runtime auth provider, and validate
 claims with an explicit `lonejson_jwt_claim_policy`. The OpenSSL provider
 supports `RS256`, `PS256`, `ES256`, and `EdDSA` for Ed25519 OKP keys.
-`alg: none` is rejected; `HS256` and Ed448 are not implemented.
+When a selected JWK includes `x5c`, the OpenSSL provider validates the
+certificate chain, verifies `x5t`/`x5t#S256` thumbprints declared by the JWK or
+JWT header, and requires the leaf certificate public key to match the JWK. Pass
+an OpenSSL `X509_STORE *` through `lonejson_openssl_auth_provider_config` for
+private CA/test roots; otherwise OpenSSL default verify paths are used.
+`alg: none` is rejected; `HS256`, Ed448, and JWE are not implemented.
 
 Base64 helpers are available independently of JWT. Use
 `lonejson_base64_encode()`/`lonejson_base64_decode()` for caller-provided
@@ -338,10 +343,10 @@ Kore/Vectis-specific handler wrapper. Those are application lifecycle concerns.
 Current provider-backed helpers cover discovery, JWKS refresh, token endpoint
 exchanges, token-flow refresh/retry, server-side token introspection, token
 revocation, UserInfo, fail-closed JOSE `crit`, JWK `key_ops`, OIDC `azp`,
-OAuth2 `scope`/`scp`, strict multi-audience policy, and syntax parsing for
-certificate-backed key fields (`x5c`, `x5t`, `x5t#S256`). Certificate-chain
-trust validation and thumbprint matching remain separate work. JWE is
-intentionally deferred as a separate encryption feature.
+OAuth2 `scope`/`scp`, strict multi-audience policy, and OpenSSL-backed
+certificate-chain/thumbprint validation for certificate-backed JWKs
+(`x5c`, `x5t`, `x5t#S256`). JWE is intentionally deferred as a separate
+encryption feature.
 Potential future simplifications would be an examples-level curl HTTP provider
 callback and an examples-level Kore/Vectis adapter. Those should preserve the
 current binary dependency boundary; putting `curl_easy_*` calls directly in
