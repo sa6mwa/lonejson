@@ -420,4 +420,114 @@ do
   end
 end
 
+do
+  local samples = {
+    "",
+    "{",
+    "[1,",
+    '{"a":true}',
+    '{"a":[1,null,"x"]}',
+    string.rep("A", 257),
+    "\0\1\2not-json",
+    "eyJhbGciOiJSUzI1NiJ9.e30.sig",
+    "%%%%",
+  }
+  local i
+
+  for i = 1, #samples do
+    local sample = samples[i]
+    pcall(function() lj.decode_json(sample) end)
+    pcall(function() lj.base64_decode(sample) end)
+    pcall(function() lj.base64_decode(sample, "url_raw") end)
+    pcall(function() lj.base64_encode(sample, "url_raw") end)
+    pcall(function()
+      lj.visit_path_value_string(sample, {
+        null = function() end,
+        bool = function() end,
+        number = function() end,
+        string = function() end,
+        object_begin = function() end,
+        object_end = function() end,
+        array_begin = function() end,
+        array_end = function() end,
+      })
+    end)
+    pcall(function()
+      lj.visit_candidates_string(sample, {
+        framing = "auto",
+        capture = "buffer",
+        candidate_end = function() end,
+      })
+    end)
+    pcall(function()
+      lj.array_rewrite_string("items", sample, {
+        item = function(value)
+          return value
+        end,
+      })
+    end)
+    if lj.jwt_parse_compact ~= nil then
+      pcall(function() lj.jwt_parse_compact(sample) end)
+      pcall(function() lj.jwt_decode_compact(sample) end)
+      pcall(function()
+        lj.jwt_validate_compact_claims(sample, {
+          accepted_algs = { "RS256" },
+          accepted_issuers = { "issuer" },
+          accepted_audiences = { "api" },
+          now = 1000,
+        })
+      end)
+      pcall(function()
+        lj.jwk_parse_json(sample)
+      end)
+      pcall(function()
+        lj.jwks_parse_json(sample)
+      end)
+      pcall(function()
+        lj.jwks_select_json(sample, { kid = "kid", kty = "RSA" })
+      end)
+    end
+    if lj.oauth2_token_response_parse_json ~= nil then
+      pcall(function() lj.oauth2_token_response_parse_json(sample) end)
+      pcall(function() lj.oauth2_introspection_response_parse_json(sample) end)
+      pcall(function() lj.oidc_userinfo_response_parse_json(sample) end)
+      pcall(function() lj.oidc_discovery_parse_json(sample) end)
+      pcall(function()
+        lj.oidc_authorization_callback_parse_query(sample, {
+          expected_state = "state",
+          max_query_bytes = 1024,
+        })
+      end)
+      pcall(function()
+        lj.oauth2_token_flow_update_response({}, {
+          access_token = sample,
+          token_type = "Bearer",
+          refresh_token = sample,
+          expires_in = 1,
+        }, 1000)
+      end)
+      pcall(function()
+        lj.oauth2_token_flow_is_expired({
+          access_token = sample,
+          token_type = "Bearer",
+          expires_at = 1000,
+        }, 1001, 0)
+      end)
+      pcall(function()
+        lj.oidc_authorization_url({
+          authorization_endpoint = "https://id.example/auth",
+          client_id = sample,
+          redirect_uri = "http://127.0.0.1/cb",
+          state = "state",
+          code_challenge = "challenge",
+        })
+      end)
+      pcall(function()
+        lj.m2m_verify_authorization("Authorization: Bearer " .. sample,
+                                    '{"credentials":[]}', {})
+      end)
+    end
+  end
+end
+
 print("lua fuzz smoke passed")

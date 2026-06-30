@@ -71,6 +71,7 @@ assert_eq(lonejson.base64_encode("Hello"), "SGVsbG8=")
 assert_eq(lonejson.base64_encode("\255", "url_raw"), "_w")
 assert_eq(lonejson.base64_decode("SGVsbG8="), "Hello")
 assert_eq(lj:base64_decode("_w", "jwt"), "\255")
+assert_true(lonejson.monotonic_ns == nil)
 do
   local bad_base64, bad_base64_err = lonejson.base64_decode("AA=", "url_raw")
   assert_true(bad_base64 == nil)
@@ -1548,6 +1549,14 @@ do
   payload_path = rec.payload:path()
   assert_true(exists(body_path))
   assert_true(exists(payload_path))
+  rec.body:rewind()
+  assert_eq(rec.body:read(6), text:sub(1, 6))
+  rec.body:rewind()
+  local body_chunks = {}
+  assert_true(rec.body:write_to(function(chunk)
+    body_chunks[#body_chunks + 1] = chunk
+  end, 5))
+  assert_eq(table.concat(body_chunks), text)
   rec:clear()
   assert_true(not exists(body_path))
   assert_true(not exists(payload_path))
@@ -1563,6 +1572,7 @@ end
 
 do
   local path = "/tmp/lonejson-lua-test.json"
+  local file_path = "/tmp/lonejson-lua-file.json"
   local rec = Test:new_record()
   local f
   local pretty
@@ -1578,6 +1588,16 @@ do
   local obj = Test:decode_path(path)
   assert_eq(obj.name, "Path")
   os.remove(path)
+
+  f = assert(io.open(file_path, "wb"))
+  assert_true(TestPretty:write_file({ name = "File", age = 11 }, f))
+  f:close()
+  f = assert(io.open(file_path, "rb"))
+  obj = Test:decode_file(f)
+  f:close()
+  assert_eq(obj.name, "File")
+  assert_eq(obj.age, 11)
+  os.remove(file_path)
 end
 
 do
@@ -1605,13 +1625,19 @@ end
 
 do
   local path = "/tmp/lonejson-lua-stream.jsonl"
-  local f = assert(io.open(path, "wb"))
+  local file_path = "/tmp/lonejson-lua-stream-file.jsonl"
+  local fd_path = "/tmp/lonejson-lua-stream-fd.jsonl"
+  local f
+  local stream
+  local rec = Test:new_record()
+  local obj, err, status
+
+  f = assert(io.open(path, "wb"))
   f:write('{"name":"One","age":1}{"name":"Two","age":2}')
   f:close()
 
-  local stream = Test:stream_path(path)
-  local rec = Test:new_record()
-  local obj, err, status = stream:next(rec)
+  stream = Test:stream_path(path)
+  obj, err, status = stream:next(rec)
   assert_eq(status, "object")
   assert_true(err == nil)
   assert_eq(obj.name, "One")
@@ -1622,6 +1648,38 @@ do
   assert_eq(status, "eof")
   stream:close()
   os.remove(path)
+
+  f = assert(io.open(file_path, "wb"))
+  f:write('{"name":"FileOne","age":3}{"name":"FileTwo","age":4}')
+  f:close()
+  f = assert(io.open(file_path, "rb"))
+  stream = Test:stream_file(f)
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.name, "FileOne")
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_eq(obj.name, "FileTwo")
+  stream:close()
+  f:close()
+  os.remove(file_path)
+
+  f = assert(io.open(fd_path, "wb"))
+  f:write('{"name":"FdOne","age":5}{"name":"FdTwo","age":6}')
+  f:close()
+  f = assert(io.open(fd_path, "rb"))
+  stream = Test:stream_fd(f)
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.name, "FdOne")
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_eq(obj.name, "FdTwo")
+  stream:close()
+  f:close()
+  os.remove(fd_path)
 end
 
 do
