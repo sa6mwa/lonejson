@@ -386,6 +386,10 @@ struct lonejson_runtime {
   lonejson__value_limits value_limits;
   lonejson__write_options write_options;
   lonejson__spool_options spool_options[3];
+#ifdef LONEJSON_WITH_JWT
+  lonejson_auth_provider auth_provider;
+  int has_auth_provider;
+#endif
 };
 
 struct lonejson__runtime_handle {

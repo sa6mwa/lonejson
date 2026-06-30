@@ -189,6 +189,15 @@ static lonejson *test_default_runtime(void) {
   if (runtime == NULL) {
     lonejson_config config = lonejson_default_config();
     config.allocator = &runtime_allocator;
+#if defined(LONEJSON_WITH_JWT) && defined(LONEJSON_WITH_OPENSSL)
+    {
+      static lonejson_auth_provider auth_provider;
+      if (lonejson_auth_provider_init_openssl(&auth_provider, NULL, NULL) ==
+          LONEJSON_STATUS_OK) {
+        config.auth_provider = &auth_provider;
+      }
+    }
+#endif
     runtime = lonejson_new(&config, NULL);
     if (runtime == NULL) {
       fprintf(stderr, "failed to allocate default lonejson test runtime\n");

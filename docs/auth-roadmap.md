@@ -40,9 +40,11 @@ The proposed feature gates are:
 
 - `LONEJSON_WITH_OPENSSL`: enables OpenSSL-backed cryptographic helpers.
 - `LONEJSON_WITH_JWT`: enables JWT/JWK/JWKS parsing and validation APIs. This
-  requires `LONEJSON_WITH_OPENSSL`.
+  does not require OpenSSL at the core API boundary; signature trust uses an
+  installed auth provider.
 - `LONEJSON_WITH_OIDC`: enables combined OAuth2/OIDC helpers. This requires
-  `LONEJSON_WITH_CURL`, `LONEJSON_WITH_OPENSSL`, and `LONEJSON_WITH_JWT`.
+  `LONEJSON_WITH_JWT`, but does not require curl or OpenSSL at the core API
+  boundary.
 
 `LONEJSON_WITH_OIDC` is the single feature gate for the combined OAuth2/OIDC
 facade. We should not split this into competing `LONEJSON_WITH_OAUTH2` and
@@ -62,16 +64,18 @@ Public API names should still use precise terminology:
 The dependency model should follow the curl precedent:
 
 - Normal lonejson consumers should not need OpenSSL or curl headers.
-- Consumers that opt into JWT validation need OpenSSL headers and libraries.
-- Consumers that opt into OIDC helpers need both curl and OpenSSL.
+- Consumers that opt into JWT/OIDC parsing and policy helpers should not need
+  OpenSSL or curl headers.
+- Consumers that want local cryptographic trust can install the OpenSSL auth
+  provider or provide an equivalent crypto provider.
+- Consumers that want local HTTP transfer can use curl adapters or provide
+  their own HTTP/request code.
 - Release packaging must make dependency requirements explicit in metadata and
   must test that unwanted dependency leakage does not occur.
 
-If the shared `liblonejson` cannot expose an OpenSSL-backed ABI without adding
-runtime `libssl` or `libcrypto` requirements for normal consumers, we should
-decide deliberately between separate crypto-enabled artifacts and accepting the
-runtime dependency for those artifacts. That decision belongs before the first
-public ABI for this work.
+The shared `liblonejson` must not require libcurl, libssl, or libcrypto merely
+because JWT/OIDC parsing and orchestration are enabled. Optional provider
+adapters own those dependencies.
 
 ## JWT/JWK Primitives
 
@@ -107,7 +111,8 @@ matching key is present.
 
 ## OAuth2/OIDC Helpers
 
-OIDC helpers should build on JWT/JWK primitives plus curl transport helpers.
+OIDC helpers should build on JWT/JWK primitives plus explicit provider or
+caller-owned transport helpers.
 The first useful flows are:
 
 - client credentials flow for machine-to-machine authentication,
@@ -201,14 +206,14 @@ The implementation must test and enforce at least these invariants:
    verification without public JWT APIs.
 2. Add JWT compact parsing and base64url decoding with syntax tests and fuzzing.
 3. Add JWK/JWKS parsing and key selection.
-4. Add OpenSSL-backed JWT signature validation.
+4. Add provider-backed JWT signature validation with an OpenSSL adapter.
 5. Add claim validation policy and failure diagnostics.
 6. Add Lua facade for JWT/JWK parse and validation.
-7. Add OIDC discovery and JWKS retrieval/cache over curl. Discovery URL
+7. Add OIDC discovery and JWKS retrieval/cache helpers. Discovery URL
    construction, discovery JSON parsing, issuer validation, Lua facade, bounded
-   JWKS cache installation, cache selection, and a curl write/finish adapter are
-   implemented. The network fetch remains caller-owned so lonejson does not hide
-   retry, timeout, credential, proxy, or event-loop policy.
+   JWKS cache installation, cache selection, and a curl write/finish adapter
+   are implemented. The network fetch remains caller-owned so lonejson does not
+   hide retry, timeout, credential, proxy, or event-loop policy.
 8. Add client credentials flow. A transport-neutral `client_secret_post` form
    body builder, bounded token response parser, Lua facade, regression tests,
    ABI/package checks, and fuzz coverage are implemented. HTTP execution,

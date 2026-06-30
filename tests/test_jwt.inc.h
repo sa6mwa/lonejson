@@ -308,6 +308,50 @@ static const char test_jwt_rs256_minimal_jwks_json[] =
     "YoQ\","
     "\"e\":\"AQAB\"}]}";
 
+static const char test_jwt_ps256_token[] =
+    "eyJhbGciOiJQUzI1NiIsImtpZCI6InBzLXRlc3QiLCJ0eXAiOiJKV1QifQ."
+    "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzdWJqZWN0IiwiYXVkIjoiYXBpIiwiZXhwIjoyM"
+    "DAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ."
+    "OdIVXXtzJsvBRJzTctmftYO4sDiVYLMy9r2O7yzmwwUPN0e-q4JWRiUc5aAITUDfWLbcn"
+    "gBHcVrSCYL2I2o4AASQi2P1A44nKHXsV3Zrn442tSxmyShDiyrpr-mDTJHLI1G949SIA"
+    "bF8Kt9zhQ3zcq9BC2fi-nl87Y7dngDWpFVqjF30QQMBV-l0MMlhEQrQT5u9LzlFj9xGE"
+    "2etdjs6KpHrI15gOnlGoC7H7hBX4QP3PK0y7B6RMh9HqSkOoINNnAA2srmhMhaoC3ZAh"
+    "awXx4fYS0hweeldTE39ZZiNmPk6wlHWLX8anu4AjFe22ND4mlbrBQX_Yt1uekCUUrb0I"
+    "A";
+
+static const char test_jwt_ps256_jwk_json[] =
+    "{\"kty\":\"RSA\",\"kid\":\"ps-test\",\"use\":\"sig\",\"alg\":\"PS256\","
+    "\"n\":\"rLE6MybeCWHjxJ-DG8PFFPGYeVwop5iEbtM75iTuQGglZIDmPRGbV62w6wnp"
+    "ILXeaCIBG2Z_JgPh6Zr-2Ic81g8wjAK33Ihd-afm2Ey1qzZltClHyF9pj1TnWn47KnTop"
+    "hziLpHuA3AtAyOxv9uyffHLsK6Y5fFtqLWgAynP1q4yDfjevY77TquLw05fmOnjyTbf9"
+    "T8cdYAH_LejYltyVS0D6oPdxGFJ8XMNyUwkNHE_w-d4piFzMG_rediEb_l6YT8fn8qyr"
+    "LwuxxgrDW88Rhr10W1w52jlHbwljJiN8dgNMR7e-mNe5-iWxAQQQCW3Pf8FQyiC5J3k"
+    "o5kK5OjSaQ\","
+    "\"e\":\"AQAB\"}";
+
+static const char test_jwt_es256_token[] =
+    "eyJhbGciOiJFUzI1NiIsImtpZCI6ImVjLXRlc3QiLCJ0eXAiOiJKV1QifQ."
+    "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzdWJqZWN0IiwiYXVkIjoiYXBpIiwiZXhwIjoyM"
+    "DAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ."
+    "95YnhtNbEKRS6fmhs543TmLdnljwB3r-wID-L4mGWcOYY4mEmIhmRlbTX1HM_GDKeLGK"
+    "yAEw2vY78a4c51eCWQ";
+
+static const char test_jwt_es256_jwk_json[] =
+    "{\"kty\":\"EC\",\"kid\":\"ec-test\",\"use\":\"sig\",\"alg\":\"ES256\","
+    "\"crv\":\"P-256\",\"x\":\"sKrqPeMnxHsFzQE1uhjgF1PK0x6oM9YBnJKeunXnVx8\","
+    "\"y\":\"KTGlbL_TW5NzmtqJRMuTWywE45o4xtm80MeDA84pv4M\"}";
+
+static const char test_jwt_eddsa_token[] =
+    "eyJhbGciOiJFZERTQSIsImtpZCI6ImVkLXRlc3QiLCJ0eXAiOiJKV1QifQ."
+    "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzdWJqZWN0IiwiYXVkIjoiYXBpIiwiZXhwIjoyM"
+    "DAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ."
+    "vZ8EHlu8rMpJbieq2KShKybLutH-oljg9sqjFy8tzk5a4lGoj_9eIKoeckMS5RwMTGwp"
+    "GeBgM5gQMl-yFVceCg";
+
+static const char test_jwt_eddsa_jwk_json[] =
+    "{\"kty\":\"OKP\",\"kid\":\"ed-test\",\"use\":\"sig\",\"alg\":\"EdDSA\","
+    "\"crv\":\"Ed25519\",\"x\":\"clqC7T1N8EI4ekdG3YiNhqGO6Ef30cKhOB4IOKDXjCM\"}";
+
 static void test_jwt_decode_and_validate_claims(void) {
   static const char token[] =
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
@@ -381,14 +425,121 @@ static void test_jwt_validate_rs256_signature(void) {
   EXPECT(lonejson_jwk_parse_json(test_default_runtime(), test_jwt_rs256_jwk_json,
                                  strlen(test_jwt_rs256_jwk_json), &jwk,
                                  &error) == LONEJSON_STATUS_OK);
+#ifdef LONEJSON_WITH_OPENSSL
   EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(lj_jwt_validate_signature(&compact, &header, &jwk, &error) ==
          LJ_STATUS_OK);
+  EXPECT(lonejson_jwt_validate_signature_with_runtime(
+             test_default_runtime(), &compact, &header, &jwk, &error) ==
+         LONEJSON_STATUS_OK);
+#else
+  EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lj_jwt_validate_signature(&compact, &header, &jwk, &error) ==
+         LJ_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_jwt_validate_signature_with_runtime(
+             test_default_runtime(), &compact, &header, &jwk, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+#endif
 
   lonejson_jwk_cleanup(&jwk);
   lonejson_jwt_header_cleanup(&header);
   lonejson_jwt_claims_cleanup(&claims);
+}
+
+static void test_jwt_validate_recommended_signatures(void) {
+#ifdef LONEJSON_WITH_OPENSSL
+  static const struct {
+    const char *token;
+    const char *jwk_json;
+  } cases[] = {{test_jwt_ps256_token, test_jwt_ps256_jwk_json},
+               {test_jwt_es256_token, test_jwt_es256_jwk_json},
+               {test_jwt_eddsa_token, test_jwt_eddsa_jwk_json}};
+  size_t i;
+  lonejson_error error;
+
+  lonejson_error_init(&error);
+  for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    lonejson_jwt_compact compact;
+    lonejson_jwt_header header;
+    lonejson_jwt_claims claims;
+    lonejson_jwk jwk;
+
+    lonejson_jwt_header_init(&header);
+    lonejson_jwt_claims_init(&claims);
+    lonejson_jwk_init(&jwk);
+    EXPECT(lonejson_jwt_parse_compact(cases[i].token, strlen(cases[i].token),
+                                      &compact, &error) == LONEJSON_STATUS_OK);
+    EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), cases[i].token,
+                                       strlen(cases[i].token), NULL, &header,
+                                       &claims, &error) ==
+           LONEJSON_STATUS_OK);
+    EXPECT(lonejson_jwk_parse_json(test_default_runtime(), cases[i].jwk_json,
+                                   strlen(cases[i].jwk_json), &jwk,
+                                   &error) == LONEJSON_STATUS_OK);
+    EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
+           LONEJSON_STATUS_OK);
+    EXPECT(lonejson_jwt_validate_signature_with_runtime(
+               test_default_runtime(), &compact, &header, &jwk, &error) ==
+           LONEJSON_STATUS_OK);
+    lonejson_jwk_cleanup(&jwk);
+    lonejson_jwt_header_cleanup(&header);
+    lonejson_jwt_claims_cleanup(&claims);
+  }
+#endif
+}
+
+static void test_jwt_auth_provider_runtime_boundary(void) {
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_jwt_compact compact;
+  lonejson_jwt_header header;
+  lonejson_jwt_claims claims;
+  lonejson_jwk jwk;
+  lonejson_error error;
+#ifdef LONEJSON_WITH_OPENSSL
+  lonejson_auth_provider provider;
+#endif
+
+  lonejson_error_init(&error);
+  lonejson_jwt_header_init(&header);
+  lonejson_jwt_claims_init(&claims);
+  lonejson_jwk_init(&jwk);
+  config = lonejson_default_config();
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+
+  EXPECT(lonejson_jwt_parse_compact(test_jwt_rs256_token,
+                                    strlen(test_jwt_rs256_token), &compact,
+                                    &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_jwt_decode_compact(runtime, test_jwt_rs256_token,
+                                     strlen(test_jwt_rs256_token), NULL,
+                                     &header, &claims,
+                                     &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_jwk_parse_json(runtime, test_jwt_rs256_jwk_json,
+                                 strlen(test_jwt_rs256_jwk_json), &jwk,
+                                 &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_jwt_validate_signature_with_runtime(runtime, &compact,
+                                                      &header, &jwk,
+                                                      &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_set_auth_provider(runtime, NULL, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(runtime->set_auth_provider(runtime, NULL, &error) ==
+         LONEJSON_STATUS_OK);
+#ifdef LONEJSON_WITH_OPENSSL
+  EXPECT(lonejson_auth_provider_init_openssl(&provider, NULL, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lj_set_auth_provider(runtime, &provider, &error) == LJ_STATUS_OK);
+  EXPECT(lj_jwt_validate_signature_with_runtime(runtime, &compact, &header,
+                                                &jwk, &error) == LJ_STATUS_OK);
+#endif
+
+  lonejson_jwk_cleanup(&jwk);
+  lonejson_jwt_header_cleanup(&header);
+  lonejson_jwt_claims_cleanup(&claims);
+  lonejson_free(runtime);
 }
 
 static void test_jwt_validate_signature_failures(void) {
@@ -466,8 +617,13 @@ static void test_jwt_validate_signature_failures(void) {
   memset(oversized_n, 'A', sizeof(oversized_n) - 1u);
   oversized_n[sizeof(oversized_n) - 1u] = '\0';
   jwk.n = oversized_n;
+#ifdef LONEJSON_WITH_OPENSSL
   EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
          LONEJSON_STATUS_OVERFLOW);
+#else
+  EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+#endif
 
   EXPECT(lonejson_jwt_validate_signature(NULL, &header, &jwk, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
@@ -869,6 +1025,7 @@ static void test_oidc_jwks_cache_failure_modes(void) {
 }
 
 static void test_oidc_jwks_cache_curl_adapter(void) {
+#ifdef LONEJSON_WITH_CURL
   static const char chunk0[] =
       "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"rsa-test\",";
   static const char chunk1[] =
@@ -910,6 +1067,7 @@ static void test_oidc_jwks_cache_curl_adapter(void) {
          LONEJSON_STATUS_OVERFLOW);
   lonejson_oidc_jwks_cache_parse_cleanup(&parse);
   lonejson_oidc_jwks_cache_cleanup(&cache);
+#endif
 }
 
 static void test_oauth2_client_credentials_body(void) {
@@ -1022,10 +1180,13 @@ static void test_oidc_pkce_challenge_and_generate(void) {
   lonejson_owned_buffer challenge;
   lonejson_oidc_pkce pkce;
   lonejson_error error;
+#ifdef LONEJSON_WITH_OPENSSL
   size_t i;
+#endif
 
   lonejson_error_init(&error);
   lonejson_owned_buffer_init(&challenge);
+#ifdef LONEJSON_WITH_OPENSSL
   EXPECT(lonejson_oidc_pkce_challenge(verifier, &challenge, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(strcmp(challenge.data,
@@ -1042,6 +1203,13 @@ static void test_oidc_pkce_challenge_and_generate(void) {
     EXPECT(pkce.code_verifier[i] != '=');
   }
   lonejson_oidc_pkce_cleanup(&pkce);
+#else
+  EXPECT(lonejson_oidc_pkce_challenge(verifier, &challenge, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_oidc_pkce_init(&pkce);
+  EXPECT(lj_oidc_pkce_generate(0u, &pkce, &error) ==
+         LJ_STATUS_TYPE_MISMATCH);
+#endif
 
   EXPECT(lonejson_oidc_pkce_challenge("too-short", &challenge, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
@@ -1172,6 +1340,7 @@ static void test_oidc_validate_bearer_token(void) {
   request.jwks_cache = &cache;
   request.jwks_policy = &cache_policy;
   request.claim_policy = &claim_policy;
+#ifdef LONEJSON_WITH_OPENSSL
   EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
                                              &validation, &error) ==
          LONEJSON_STATUS_OK);
@@ -1183,6 +1352,12 @@ static void test_oidc_validate_bearer_token(void) {
   EXPECT(strcmp(validation.claims.iss, "issuer") == 0);
   EXPECT(lj_oidc_validate_bearer_token(test_default_runtime(), &request,
                                        &validation, &error) == LJ_STATUS_OK);
+#else
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+#endif
   lonejson_oidc_bearer_validation_cleanup(&validation);
   lonejson_oidc_jwks_cache_cleanup(&cache);
 
@@ -1194,6 +1369,7 @@ static void test_oidc_validate_bearer_token(void) {
              strlen(test_jwt_rs256_minimal_jwks_json), &error) ==
          LONEJSON_STATUS_OK);
   request.jwks_cache = &cache;
+#ifdef LONEJSON_WITH_OPENSSL
   EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
                                              &validation, &error) ==
          LONEJSON_STATUS_OK);
@@ -1201,6 +1377,12 @@ static void test_oidc_validate_bearer_token(void) {
   EXPECT(validation.jwk != NULL);
   EXPECT(validation.jwk->alg == NULL);
   EXPECT(validation.jwk->use == NULL);
+#else
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+#endif
   lj_oidc_bearer_validation_cleanup(&validation);
   lonejson_oidc_jwks_cache_cleanup(&cache);
 }
@@ -1290,7 +1472,11 @@ static void test_oidc_validate_bearer_token_failures(void) {
   EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
                                              &validation, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
+#ifdef LONEJSON_WITH_OPENSSL
   EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_EXPIRED_TOKEN);
+#else
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+#endif
 
   claim_policy = test_jwt_policy();
   claim_policy.accepted_issuers = &bad_issuer;
@@ -1298,7 +1484,11 @@ static void test_oidc_validate_bearer_token_failures(void) {
   EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
                                              &validation, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
+#ifdef LONEJSON_WITH_OPENSSL
   EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_ISSUER_MISMATCH);
+#else
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+#endif
 
   claim_policy = test_jwt_policy();
   claim_policy.accepted_audiences = &bad_audience;
@@ -1306,7 +1496,11 @@ static void test_oidc_validate_bearer_token_failures(void) {
   EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
                                              &validation, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
+#ifdef LONEJSON_WITH_OPENSSL
   EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_AUDIENCE_MISMATCH);
+#else
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+#endif
 
   lonejson_oidc_bearer_validation_cleanup(&validation);
   lonejson_oidc_jwks_cache_cleanup(&cache);
@@ -1337,6 +1531,8 @@ static void test_jwks_parse_and_select(void) {}
 static void test_jwk_parse_failures(void) {}
 static void test_jwt_decode_and_validate_claims(void) {}
 static void test_jwt_validate_rs256_signature(void) {}
+static void test_jwt_validate_recommended_signatures(void) {}
+static void test_jwt_auth_provider_runtime_boundary(void) {}
 static void test_jwt_validate_signature_failures(void) {}
 static void test_jwt_claim_validation_failures(void) {}
 static void test_jwt_decode_claim_failures(void) {}

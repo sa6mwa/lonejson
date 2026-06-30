@@ -248,14 +248,9 @@ if(LONEJSON_BUILD_WITH_OPENSSL)
   lonejson_find_openssl()
 endif()
 
-if(LONEJSON_BUILD_WITH_JWT AND NOT LONEJSON_BUILD_WITH_OPENSSL)
-  message(FATAL_ERROR "LONEJSON_BUILD_WITH_JWT requires LONEJSON_BUILD_WITH_OPENSSL=ON.")
-endif()
-if(LONEJSON_BUILD_WITH_OIDC AND
-    (NOT LONEJSON_BUILD_WITH_CURL OR NOT LONEJSON_BUILD_WITH_OPENSSL OR NOT LONEJSON_BUILD_WITH_JWT))
+if(LONEJSON_BUILD_WITH_OIDC AND NOT LONEJSON_BUILD_WITH_JWT)
   message(FATAL_ERROR
-    "LONEJSON_BUILD_WITH_OIDC requires LONEJSON_BUILD_WITH_CURL=ON, "
-    "LONEJSON_BUILD_WITH_OPENSSL=ON, and LONEJSON_BUILD_WITH_JWT=ON.")
+    "LONEJSON_BUILD_WITH_OIDC requires LONEJSON_BUILD_WITH_JWT=ON.")
 endif()
 
 function(lonejson_target_include_curl target)
@@ -351,7 +346,7 @@ foreach(target lonejson_shared lonejson_static)
   endif()
   if(LONEJSON_BUILD_WITH_OPENSSL)
     target_compile_definitions(${target} PRIVATE LONEJSON_WITH_OPENSSL)
-    target_link_libraries(${target} PUBLIC OpenSSL::Crypto)
+    target_link_libraries(${target} PRIVATE OpenSSL::Crypto)
   endif()
   if(LONEJSON_BUILD_WITH_JWT)
     target_compile_definitions(${target} PRIVATE LONEJSON_WITH_JWT)

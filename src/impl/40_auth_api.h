@@ -1,11 +1,15 @@
 #ifdef LONEJSON_WITH_JWT
+#ifdef LONEJSON_WITH_OPENSSL
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
+#include <openssl/ec.h>
+#include <openssl/ecdsa.h>
 #include <openssl/evp.h>
 #include <openssl/param_build.h>
 #include <openssl/params.h>
 #include <openssl/rand.h>
 #include <openssl/rsa.h>
+#endif
 
 static int lonejson__base64url_value(unsigned char ch) {
   if (ch >= (unsigned char)'A' && ch <= (unsigned char)'Z') {
@@ -412,6 +416,15 @@ static lonejson_status lonejson__jwk_validate(lonejson_jwk *jwk,
     }
   } else if (lonejson__auth_streq(jwk->kty, "oct")) {
     status = lonejson__jwk_check_base64url_member(jwk->k, "k", 1, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  } else if (lonejson__auth_streq(jwk->kty, "OKP")) {
+    status = lonejson__jwk_require_member(jwk, jwk->crv, "crv", error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    status = lonejson__jwk_check_base64url_member(jwk->x, "x", 1, error);
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
@@ -1065,8 +1078,12 @@ void lonejson_oidc_pkce_cleanup(lonejson_oidc_pkce *pkce) {
 lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
                                              lonejson_owned_buffer *out,
                                              lonejson_error *error) {
+#ifdef LONEJSON_WITH_OPENSSL
   unsigned char digest[EVP_MAX_MD_SIZE];
   unsigned int digest_len = 0u;
+#else
+  unsigned char digest[32];
+#endif
   char *encoded;
   lonejson_status status;
 
@@ -1080,12 +1097,18 @@ lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
     return status;
   }
   lonejson_owned_buffer_free(out);
+#ifdef LONEJSON_WITH_OPENSSL
   if (EVP_Digest(code_verifier, strlen(code_verifier), digest, &digest_len,
                  EVP_sha256(), NULL) != 1) {
     return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
                                0u, "failed to compute PKCE challenge");
   }
   encoded = lonejson__base64url_encode_alloc(digest, (size_t)digest_len, error);
+#else
+  (void)digest;
+  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                             "PKCE challenge requires an auth crypto provider");
+#endif
   if (encoded == NULL) {
     return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
   }
@@ -1116,10 +1139,16 @@ lonejson_status lonejson_oidc_pkce_generate(size_t verifier_bytes,
                                0u,
                                "PKCE verifier entropy bytes must be 32..96");
   }
+#ifdef LONEJSON_WITH_OPENSSL
   if (RAND_bytes(random_bytes, (int)bytes) != 1) {
     return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
                                0u, "failed to generate PKCE verifier");
   }
+#else
+  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                             "PKCE verifier generation requires an auth "
+                             "crypto provider");
+#endif
   verifier = lonejson__base64url_encode_alloc(random_bytes, bytes, error);
   if (verifier == NULL) {
     return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
@@ -2429,6 +2458,7 @@ lonejson_status lonejson_jwt_validate_claims(
   return LONEJSON_STATUS_OK;
 }
 
+#ifdef LONEJSON_WITH_OPENSSL
 static unsigned char *lonejson__jwt_decode_base64url_alloc(
     const char *data, size_t len, size_t *out_len, const char *what,
     lonejson_error *error) {
@@ -2554,7 +2584,7 @@ done:
 }
 
 static lonejson_status lonejson__jwt_validate_rs256_signature(
-    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk,
+    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk, int pss,
     lonejson_error *error) {
   EVP_PKEY *pkey = NULL;
   EVP_MD_CTX *md = NULL;
@@ -2587,7 +2617,9 @@ static lonejson_status lonejson__jwt_validate_rs256_signature(
                                0u, "failed to allocate JWT verifier");
   }
   if (EVP_DigestVerifyInit(md, &pkey_ctx, EVP_sha256(), NULL, pkey) <= 0 ||
-      EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PADDING) <= 0) {
+      EVP_PKEY_CTX_set_rsa_padding(
+          pkey_ctx, pss ? RSA_PKCS1_PSS_PADDING : RSA_PKCS1_PADDING) <= 0 ||
+      (pss && EVP_PKEY_CTX_set_rsa_pss_saltlen(pkey_ctx, 32) <= 0)) {
     lonejson__owned_free(signature);
     EVP_MD_CTX_free(md);
     EVP_PKEY_free(pkey);
@@ -2608,9 +2640,381 @@ static lonejson_status lonejson__jwt_validate_rs256_signature(
                              "JWT signature validation failed");
 }
 
+static EVP_PKEY *lonejson__jwt_ec_public_key_from_jwk(
+    const lonejson_jwk *jwk, lonejson_error *error) {
+  EVP_PKEY_CTX *ctx = NULL;
+  EVP_PKEY *pkey = NULL;
+  OSSL_PARAM_BLD *builder = NULL;
+  OSSL_PARAM *params = NULL;
+  unsigned char *x = NULL;
+  unsigned char *y = NULL;
+  unsigned char pub[65];
+  size_t x_len = 0u;
+  size_t y_len = 0u;
+  int ok = 0;
+
+  if (!lonejson__auth_streq(jwk->crv, "P-256")) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                              "ES256 requires a P-256 JWK");
+    return NULL;
+  }
+  x = lonejson__jwt_decode_base64url_alloc(jwk->x, strlen(jwk->x), &x_len,
+                                           "JWK x coordinate", error);
+  y = lonejson__jwt_decode_base64url_alloc(jwk->y, strlen(jwk->y), &y_len,
+                                           "JWK y coordinate", error);
+  if (x == NULL || y == NULL) {
+    goto done;
+  }
+  if (x_len != 32u || y_len != 32u) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                              "ES256 JWK coordinates must be 32 bytes");
+    goto done;
+  }
+  pub[0] = 0x04u;
+  memcpy(pub + 1u, x, 32u);
+  memcpy(pub + 33u, y, 32u);
+  builder = OSSL_PARAM_BLD_new();
+  ctx = EVP_PKEY_CTX_new_from_name(NULL, "EC", NULL);
+  if (builder == NULL || ctx == NULL) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                              0u, "failed to allocate EC public key context");
+    goto done;
+  }
+  if (!OSSL_PARAM_BLD_push_utf8_string(builder, OSSL_PKEY_PARAM_GROUP_NAME,
+                                       "prime256v1", 0u) ||
+      !OSSL_PARAM_BLD_push_octet_string(builder, OSSL_PKEY_PARAM_PUB_KEY, pub,
+                                        sizeof(pub))) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                              0u, "failed to allocate EC public key params");
+    goto done;
+  }
+  params = OSSL_PARAM_BLD_to_param(builder);
+  if (params == NULL) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                              0u, "failed to allocate EC public key params");
+    goto done;
+  }
+  if (EVP_PKEY_fromdata_init(ctx) <= 0 ||
+      EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) <= 0 ||
+      pkey == NULL) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                              "EC JWK public key is invalid");
+    goto done;
+  }
+  ok = 1;
+
+done:
+  lonejson__owned_free(x);
+  lonejson__owned_free(y);
+  OSSL_PARAM_free(params);
+  OSSL_PARAM_BLD_free(builder);
+  EVP_PKEY_CTX_free(ctx);
+  if (!ok) {
+    EVP_PKEY_free(pkey);
+    pkey = NULL;
+  }
+  return pkey;
+}
+
+static unsigned char *lonejson__jwt_es256_der_signature_alloc(
+    const unsigned char *signature, size_t signature_len, size_t *out_len,
+    lonejson_error *error) {
+  ECDSA_SIG *sig = NULL;
+  BIGNUM *r = NULL;
+  BIGNUM *s = NULL;
+  unsigned char *der = NULL;
+  unsigned char *cursor;
+  int der_len;
+
+  if (signature_len != 64u) {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                              "ES256 signature must be 64 bytes");
+    return NULL;
+  }
+  sig = ECDSA_SIG_new();
+  r = BN_bin2bn(signature, 32, NULL);
+  s = BN_bin2bn(signature + 32u, 32, NULL);
+  if (sig == NULL || r == NULL || s == NULL) {
+    ECDSA_SIG_free(sig);
+    BN_free(r);
+    BN_free(s);
+    (void)lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                              0u, "failed to allocate ES256 signature");
+    return NULL;
+  }
+  if (ECDSA_SIG_set0(sig, r, s) != 1) {
+    ECDSA_SIG_free(sig);
+    BN_free(r);
+    BN_free(s);
+    (void)lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                              0u, "failed to prepare ES256 signature");
+    return NULL;
+  }
+  r = NULL;
+  s = NULL;
+  der_len = i2d_ECDSA_SIG(sig, NULL);
+  if (der_len <= 0) {
+    ECDSA_SIG_free(sig);
+    (void)lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                              "ES256 signature is invalid");
+    return NULL;
+  }
+  der = (unsigned char *)lonejson__owned_malloc(NULL, (size_t)der_len);
+  if (der == NULL) {
+    ECDSA_SIG_free(sig);
+    (void)lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                              0u, "failed to allocate ES256 signature");
+    return NULL;
+  }
+  cursor = der;
+  der_len = i2d_ECDSA_SIG(sig, &cursor);
+  ECDSA_SIG_free(sig);
+  if (der_len <= 0) {
+    lonejson__owned_free(der);
+    (void)lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                              "ES256 signature is invalid");
+    return NULL;
+  }
+  *out_len = (size_t)der_len;
+  return der;
+}
+
+static lonejson_status lonejson__jwt_validate_es256_signature(
+    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk,
+    lonejson_error *error) {
+  EVP_PKEY *pkey = NULL;
+  EVP_MD_CTX *md = NULL;
+  unsigned char *signature = NULL;
+  unsigned char *der_signature = NULL;
+  size_t signature_len = 0u;
+  size_t der_signature_len = 0u;
+  int verify_result;
+
+  signature = lonejson__jwt_decode_base64url_alloc(
+      jwt->signature.data, jwt->signature.len, &signature_len, "signature",
+      error);
+  if (signature == NULL) {
+    return error != NULL ? error->code : LONEJSON_STATUS_INVALID_JSON;
+  }
+  der_signature = lonejson__jwt_es256_der_signature_alloc(
+      signature, signature_len, &der_signature_len, error);
+  lonejson__owned_free(signature);
+  if (der_signature == NULL) {
+    return error != NULL ? error->code : LONEJSON_STATUS_TYPE_MISMATCH;
+  }
+  pkey = lonejson__jwt_ec_public_key_from_jwk(jwk, error);
+  if (pkey == NULL) {
+    lonejson__owned_free(der_signature);
+    return error != NULL ? error->code : LONEJSON_STATUS_TYPE_MISMATCH;
+  }
+  md = EVP_MD_CTX_new();
+  if (md == NULL) {
+    lonejson__owned_free(der_signature);
+    EVP_PKEY_free(pkey);
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to allocate JWT verifier");
+  }
+  if (EVP_DigestVerifyInit(md, NULL, EVP_sha256(), NULL, pkey) <= 0) {
+    lonejson__owned_free(der_signature);
+    EVP_MD_CTX_free(md);
+    EVP_PKEY_free(pkey);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                               0u, "failed to initialize JWT verifier");
+  }
+  verify_result =
+      EVP_DigestVerify(md, der_signature, der_signature_len,
+                       (const unsigned char *)jwt->signing_input.data,
+                       jwt->signing_input.len);
+  lonejson__owned_free(der_signature);
+  EVP_MD_CTX_free(md);
+  EVP_PKEY_free(pkey);
+  if (verify_result == 1) {
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                             "JWT signature validation failed");
+}
+
+static lonejson_status lonejson__jwt_validate_eddsa_signature(
+    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk,
+    lonejson_error *error) {
+  EVP_PKEY *pkey = NULL;
+  EVP_MD_CTX *md = NULL;
+  unsigned char *x = NULL;
+  unsigned char *signature = NULL;
+  size_t x_len = 0u;
+  size_t signature_len = 0u;
+  int verify_result;
+
+  if (!lonejson__auth_streq(jwk->crv, "Ed25519")) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "EdDSA requires an Ed25519 JWK");
+  }
+  x = lonejson__jwt_decode_base64url_alloc(jwk->x, strlen(jwk->x), &x_len,
+                                           "JWK x coordinate", error);
+  signature = lonejson__jwt_decode_base64url_alloc(
+      jwt->signature.data, jwt->signature.len, &signature_len, "signature",
+      error);
+  if (x == NULL || signature == NULL) {
+    lonejson__owned_free(x);
+    lonejson__owned_free(signature);
+    return error != NULL ? error->code : LONEJSON_STATUS_INVALID_JSON;
+  }
+  if (x_len != 32u || signature_len != 64u) {
+    lonejson__owned_free(x);
+    lonejson__owned_free(signature);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "Ed25519 JWK or signature length is invalid");
+  }
+  pkey = EVP_PKEY_new_raw_public_key_ex(NULL, "ED25519", NULL, x, x_len);
+  lonejson__owned_free(x);
+  if (pkey == NULL) {
+    lonejson__owned_free(signature);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "Ed25519 JWK public key is invalid");
+  }
+  md = EVP_MD_CTX_new();
+  if (md == NULL) {
+    EVP_PKEY_free(pkey);
+    lonejson__owned_free(signature);
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to allocate JWT verifier");
+  }
+  if (EVP_DigestVerifyInit(md, NULL, NULL, NULL, pkey) <= 0) {
+    EVP_MD_CTX_free(md);
+    EVP_PKEY_free(pkey);
+    lonejson__owned_free(signature);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                               0u, "failed to initialize JWT verifier");
+  }
+  verify_result =
+      EVP_DigestVerify(md, signature, signature_len,
+                       (const unsigned char *)jwt->signing_input.data,
+                       jwt->signing_input.len);
+  EVP_MD_CTX_free(md);
+  EVP_PKEY_free(pkey);
+  lonejson__owned_free(signature);
+  if (verify_result == 1) {
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                             "JWT signature validation failed");
+}
+
+static lonejson_status lonejson__openssl_auth_verify_jws(
+    void *user_data, const lonejson_jws_verify_request *request,
+    lonejson_error *error) {
+  const lonejson_jwt_compact *jwt;
+  const lonejson_jwt_header *header;
+  const lonejson_jwk *jwk;
+
+  (void)user_data;
+  if (request == NULL || request->jwt == NULL || request->header == NULL ||
+      request->jwk == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JWS verification request is required");
+  }
+  jwt = request->jwt;
+  header = request->header;
+  jwk = request->jwk;
+  if (strcmp(header->alg, "RS256") == 0 ||
+      strcmp(header->alg, "PS256") == 0) {
+    if (!lonejson__auth_streq(jwk->kty, "RSA")) {
+      return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                                 0u,
+                                 "JWT JWK key type does not match algorithm");
+    }
+    return lonejson__jwt_validate_rs256_signature(
+        jwt, jwk, strcmp(header->alg, "PS256") == 0, error);
+  }
+  if (strcmp(header->alg, "ES256") == 0) {
+    if (!lonejson__auth_streq(jwk->kty, "EC")) {
+      return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                                 0u,
+                                 "JWT JWK key type does not match algorithm");
+    }
+    return lonejson__jwt_validate_es256_signature(jwt, jwk, error);
+  }
+  if (strcmp(header->alg, "EdDSA") == 0) {
+    if (!lonejson__auth_streq(jwk->kty, "OKP")) {
+      return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                                 0u,
+                                 "JWT JWK key type does not match algorithm");
+    }
+    return lonejson__jwt_validate_eddsa_signature(jwt, jwk, error);
+  }
+  {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT signature algorithm is not supported");
+  }
+}
+
+static lonejson_status lonejson__openssl_auth_random_bytes(
+    void *user_data, unsigned char *dst, size_t len, lonejson_error *error) {
+  (void)user_data;
+  if (dst == NULL && len != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "random byte output is required");
+  }
+  if (len > (size_t)INT_MAX) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "random byte request exceeds OpenSSL limit");
+  }
+  if (len != 0u && RAND_bytes(dst, (int)len) != 1) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
+                               0u, "failed to generate random bytes");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__openssl_auth_sha256(
+    void *user_data, const void *data, size_t len, unsigned char out[32],
+    lonejson_error *error) {
+  unsigned int digest_len = 0u;
+
+  (void)user_data;
+  if ((data == NULL && len != 0u) || out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "SHA-256 input and output are required");
+  }
+  if (EVP_Digest(data, len, out, &digest_len, EVP_sha256(), NULL) != 1 ||
+      digest_len != 32u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
+                               0u, "failed to compute SHA-256 digest");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_auth_provider_init_openssl(
+    lonejson_auth_provider *provider,
+    const lonejson_openssl_auth_provider_config *config,
+    lonejson_error *error) {
+  lonejson__clear_error(error);
+  if (provider == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "auth provider output is required");
+  }
+  if (config != NULL && (config->libctx != NULL || config->propq != NULL)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "OpenSSL provider config fields are reserved");
+  }
+  memset(provider, 0, sizeof(*provider));
+  provider->verify_jws = lonejson__openssl_auth_verify_jws;
+  provider->random_bytes = lonejson__openssl_auth_random_bytes;
+  provider->sha256 = lonejson__openssl_auth_sha256;
+  return LONEJSON_STATUS_OK;
+}
+#endif
+
 lonejson_status lonejson_jwt_validate_signature(
     const lonejson_jwt_compact *jwt, const lonejson_jwt_header *header,
     const lonejson_jwk *jwk, lonejson_error *error) {
+  lonejson_jws_verify_request request;
+#ifdef LONEJSON_WITH_OPENSSL
+  lonejson_auth_provider provider;
+#endif
+
   lonejson__clear_error(error);
   if (jwt == NULL || header == NULL || jwk == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -2633,15 +3037,71 @@ lonejson_status lonejson_jwt_validate_signature(
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                "JWT JWK use is not valid for signatures");
   }
-  if (strcmp(header->alg, "RS256") != 0) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "JWT signature algorithm is not supported");
+  request.jwt = jwt;
+  request.header = header;
+  request.jwk = jwk;
+#ifdef LONEJSON_WITH_OPENSSL
+  if (lonejson_auth_provider_init_openssl(&provider, NULL, error) !=
+      LONEJSON_STATUS_OK) {
+    return error != NULL ? error->code : LONEJSON_STATUS_INTERNAL_ERROR;
   }
-  if (!lonejson__auth_streq(jwk->kty, "RSA")) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "JWT JWK key type does not match algorithm");
+  return provider.verify_jws(provider.user_data, &request, error);
+#else
+  (void)request;
+  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                             "JWT signature validation requires an auth "
+                             "crypto provider");
+#endif
+}
+
+lonejson_status lonejson_jwt_validate_signature_with_runtime(
+    lonejson *runtime, const lonejson_jwt_compact *jwt,
+    const lonejson_jwt_header *header, const lonejson_jwk *jwk,
+    lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  lonejson_jws_verify_request request;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (jwt == NULL || header == NULL || jwk == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JWT, header, and JWK are required");
   }
-  return lonejson__jwt_validate_rs256_signature(jwt, jwk, error);
+  if (header->alg == NULL || strcmp(header->alg, "none") == 0) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT signature algorithm is not accepted");
+  }
+  if (jwk->alg != NULL && strcmp(jwk->alg, header->alg) != 0) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT JWK algorithm does not match header");
+  }
+  if (header->kid != NULL && jwk->kid != NULL &&
+      strcmp(header->kid, jwk->kid) != 0) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT JWK key id does not match header");
+  }
+  if (jwk->use != NULL && strcmp(jwk->use, "sig") != 0) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT JWK use is not valid for signatures");
+  }
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (!runtime_state->has_auth_provider ||
+      runtime_state->auth_provider.verify_jws == NULL) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "runtime auth provider cannot verify JWS");
+  }
+  request.jwt = jwt;
+  request.header = header;
+  request.jwk = jwk;
+  status = runtime_state->auth_provider.verify_jws(
+      runtime_state->auth_provider.user_data, &request, error);
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
 }
 
 #ifdef LONEJSON_WITH_OIDC
@@ -2878,7 +3338,13 @@ lonejson_status lonejson_oidc_validate_bearer_token(
   memset(&select_options, 0, sizeof(select_options));
   select_options.kid = out->header.kid;
   select_options.kty =
-      lonejson__auth_streq(out->header.alg, "RS256") ? "RSA" : NULL;
+      (lonejson__auth_streq(out->header.alg, "RS256") ||
+       lonejson__auth_streq(out->header.alg, "PS256"))
+          ? "RSA"
+          : (lonejson__auth_streq(out->header.alg, "ES256")
+                 ? "EC"
+                 : (lonejson__auth_streq(out->header.alg, "EdDSA") ? "OKP"
+                                                                    : NULL));
   status = lonejson_oidc_jwks_cache_select(
       request->jwks_cache, request->jwks_policy, &select_options, &selected,
       error);
@@ -2894,8 +3360,8 @@ lonejson_status lonejson_oidc_validate_bearer_token(
         "no JWKS key matches bearer JWT header");
   }
 
-  status = lonejson_jwt_validate_signature(&compact, &out->header, selected,
-                                           error);
+  status = lonejson_jwt_validate_signature_with_runtime(
+      runtime, &compact, &out->header, selected, error);
   if (status != LONEJSON_STATUS_OK) {
     return lonejson__oidc_bearer_fail(
         out, LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE, status, error,

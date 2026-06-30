@@ -17,10 +17,11 @@ The auth surface is compile-time optional.
 
 - `LONEJSON_WITH_OPENSSL` enables OpenSSL-backed cryptographic internals.
 - `LONEJSON_WITH_JWT` enables JWT, JWK, JWKS, and claim/signature validation
-  APIs. It requires `LONEJSON_WITH_OPENSSL`.
+  APIs. It does not require OpenSSL at the core API boundary.
 - `LONEJSON_WITH_CURL` enables existing curl adapter APIs.
 - `LONEJSON_WITH_OIDC` enables OAuth2/OIDC helpers. It requires
-  `LONEJSON_WITH_CURL`, `LONEJSON_WITH_OPENSSL`, and `LONEJSON_WITH_JWT`.
+  `LONEJSON_WITH_JWT`, but does not require curl or OpenSSL at the core API
+  boundary.
 
 The corresponding CMake options are:
 
@@ -29,19 +30,36 @@ The corresponding CMake options are:
 - `LONEJSON_BUILD_WITH_CURL`
 - `LONEJSON_BUILD_WITH_OIDC`
 
-CMake enforces the dependency graph. `LONEJSON_BUILD_WITH_JWT=ON` without
-OpenSSL is a configure error. `LONEJSON_BUILD_WITH_OIDC=ON` without curl,
-OpenSSL, or JWT is also a configure error.
+CMake enforces only the core feature graph. `LONEJSON_BUILD_WITH_OIDC=ON`
+without JWT is a configure error. JWT and OIDC builds without OpenSSL/curl are
+valid and must compile; trust operations that need crypto fail with an
+actionable missing-provider error until an auth provider is installed.
 
 When `LONEJSON_C_PKT_SYSTEMS_ROOT` is set, curl and OpenSSL are resolved through
 the c.pkt.systems bundle. OIDC-capable release/package builds require the
-c.pkt.systems route to provide curl and OpenSSL package metadata. Normal
-non-auth consumers do not need curl or OpenSSL headers.
+c.pkt.systems route to provide curl and OpenSSL package metadata for the
+optional adapters. Normal consumers, and JWT/OIDC core consumers that provide
+their own auth providers, do not need curl or OpenSSL headers.
 
 ## Dependency And Packaging Posture
 
-Auth-enabled builds link OpenSSL Crypto for cryptographic operations. The
-OpenSSL dependency is private to the implementation from the public ABI
+JWT/OIDC core builds do not own HTTP or crypto dependencies. They expose
+bounded parsing, policy, cache, and validation orchestration. Cryptographic
+trust decisions go through a `lonejson_auth_provider` installed on the runtime:
+
+```c
+lonejson_auth_provider provider;
+lonejson_auth_provider_init_openssl(&provider, NULL, &error);
+lonejson_set_auth_provider(runtime, &provider, &error);
+```
+
+The provider vtable is receiver-style and narrow: verify one JWS, produce
+random bytes, and compute SHA-256. Downstream projects that already own
+OpenSSL can use the OpenSSL initializer. Projects using another crypto stack can
+provide equivalent callbacks without exposing that stack through `lonejson.h`.
+
+OpenSSL-enabled builds link OpenSSL Crypto only for the optional OpenSSL auth
+adapter. The dependency is private to the implementation from the public ABI
 perspective: release verification checks that exported shared-library symbols do
 not leak OpenSSL symbol names.
 
@@ -253,14 +271,25 @@ validation helper.
 Implemented public APIs:
 
 - `lonejson_jwt_validate_signature`
-- short alias `lj_jwt_validate_signature`
+- `lonejson_jwt_validate_signature_with_runtime`
+- `lonejson_set_auth_provider`
+- `lonejson_auth_provider_init_openssl` when `LONEJSON_WITH_OPENSSL` is enabled
+- short aliases `lj_jwt_validate_signature`,
+  `lj_jwt_validate_signature_with_runtime`, `lj_set_auth_provider`,
+  `lj_auth_provider_init_openssl`
 
 Implemented algorithm support:
 
-- `RS256`.
+- `RS256`,
+- `PS256`,
+- `ES256`,
+- `EdDSA` for Ed25519 OKP keys.
 
-The implementation validates RS256 signatures with OpenSSL using RSA public key
-material from a selected JWK.
+The compatibility free function validates signatures with the built-in OpenSSL
+adapter when compiled with `LONEJSON_WITH_OPENSSL`. The preferred API is
+`lonejson_jwt_validate_signature_with_runtime`, which dispatches to the auth
+provider installed on the runtime. Without a provider capable of `verify_jws`,
+runtime-backed signature validation fails before claims are trusted.
 
 Signature validation enforces:
 
@@ -668,7 +697,9 @@ The following are deliberate gaps or future work, not hidden behavior.
 - No Kore-specific or Vectis-specific middleware API.
 - No HTTP response writer for auth failures.
 - No request-router integration.
-- No ES256, PS256, EdDSA, HS256, or `none` validation support.
+- No implemented HS256 or `none` validation support. `none` remains rejected.
+- No Ed448 support for `EdDSA`; the OpenSSL provider currently supports
+  Ed25519 OKP keys.
 - No x5c/x5t certificate-chain validation.
 - No `crit` JOSE header handling.
 - No `azp` validation.
@@ -730,10 +761,11 @@ Consumers that do not define the auth feature gates see no auth API and should
 not need OpenSSL or curl headers.
 
 Consumers that define `LONEJSON_WITH_JWT` must build against a library compiled
-with JWT/OpenSSL support.
+with JWT support. Signature trust APIs require an installed auth provider.
 
 Consumers that define `LONEJSON_WITH_OIDC` must build against a library
-compiled with OIDC, JWT, OpenSSL, and curl support.
+compiled with OIDC and JWT support. Bearer validation requires an installed
+auth provider. HTTP discovery and JWKS retrieval remain caller/provider-owned.
 
 Parsing JWTs is never trust. Trust is established only by explicit validation:
 

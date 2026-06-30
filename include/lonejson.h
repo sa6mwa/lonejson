@@ -49,14 +49,8 @@
 #if defined(LJ_WITH_OIDC) && !defined(LONEJSON_WITH_OIDC)
 #define LONEJSON_WITH_OIDC
 #endif
-#if defined(LONEJSON_WITH_JWT) && !defined(LONEJSON_WITH_OPENSSL)
-#error "LONEJSON_WITH_JWT requires LONEJSON_WITH_OPENSSL"
-#endif
-#if defined(LONEJSON_WITH_OIDC) &&                                             \
-    (!defined(LONEJSON_WITH_CURL) || !defined(LONEJSON_WITH_OPENSSL) ||        \
-     !defined(LONEJSON_WITH_JWT))
-#error                                                                         \
-    "LONEJSON_WITH_OIDC requires LONEJSON_WITH_CURL, LONEJSON_WITH_OPENSSL, and LONEJSON_WITH_JWT"
+#if defined(LONEJSON_WITH_OIDC) && !defined(LONEJSON_WITH_JWT)
+#error "LONEJSON_WITH_OIDC requires LONEJSON_WITH_JWT"
 #endif
 #if defined(LJ_MALLOC) && !defined(LONEJSON_MALLOC)
 #define LONEJSON_MALLOC LJ_MALLOC
@@ -826,6 +820,11 @@ typedef struct lonejson_allocator {
   lonejson_allocator_stats *stats;
 } lonejson_allocator;
 
+#ifdef LONEJSON_WITH_JWT
+/** Forward declaration for the optional auth provider vtable. */
+typedef struct lonejson_auth_provider lonejson_auth_provider;
+#endif
+
 /** Named spool policy selectors used by streamed text and base64 fields. */
 typedef enum lonejson_spool_class {
   /** Use the runtime's default spool policy. */
@@ -910,6 +909,13 @@ typedef struct lonejson_config {
    * metadata and does not route through this allocator.
    */
   const lonejson_allocator *allocator;
+#ifdef LONEJSON_WITH_JWT
+  /** Optional auth provider used by runtime-backed JWT/OIDC trust helpers.
+   * `lonejson_new()` copies this vtable by value. The provider's `user_data`
+   * remains caller-owned and must outlive the runtime.
+   */
+  const lonejson_auth_provider *auth_provider;
+#endif
   /** Internal initialization marker set by `lonejson_default_config()`.
    * Build configs from that helper before overriding fields; raw zeroed or
    * partial designated literals are rejected because `0` is a meaningful
@@ -1179,6 +1185,7 @@ typedef struct lonejson_stream lonejson_stream;
 typedef struct lonejson_array_stream lonejson_array_stream;
 struct lonejson_array_stream_string_handler;
 #ifdef LONEJSON_WITH_JWT
+typedef struct lonejson_jws_verify_request lonejson_jws_verify_request;
 /** Caller-owned JWT compact-serialization segment. */
 typedef struct lonejson_jwt_segment {
   /** Pointer into the original token or caller-provided segment buffer. */
@@ -1300,6 +1307,39 @@ typedef struct lonejson_jwt_claim_policy {
   /** Maximum decoded claims JSON size. Zero means the default limit. */
   size_t max_decoded_claims_bytes;
 } lonejson_jwt_claim_policy;
+
+/** High-level JWS verification request passed to auth crypto providers. */
+struct lonejson_jws_verify_request {
+  /** Parsed compact JWT/JWS segments. All slices are caller-owned. */
+  const lonejson_jwt_compact *jwt;
+  /** Decoded JOSE header associated with `jwt`. */
+  const lonejson_jwt_header *header;
+  /** Selected candidate verification key. */
+  const lonejson_jwk *jwk;
+};
+
+/** Auth provider vtable. The caller owns `user_data` and must keep it alive
+ * until no runtime using this provider can call auth APIs.
+ */
+struct lonejson_auth_provider {
+  void *user_data;
+  lonejson_status (*verify_jws)(void *user_data,
+                                const lonejson_jws_verify_request *request,
+                                lonejson_error *error);
+  lonejson_status (*random_bytes)(void *user_data, unsigned char *dst,
+                                  size_t len, lonejson_error *error);
+  lonejson_status (*sha256)(void *user_data, const void *data, size_t len,
+                            unsigned char out[32], lonejson_error *error);
+};
+
+#ifdef LONEJSON_WITH_OPENSSL
+/** Optional OpenSSL provider configuration. NULL fields use OpenSSL defaults.
+ */
+typedef struct lonejson_openssl_auth_provider_config {
+  void *libctx;
+  const char *propq;
+} lonejson_openssl_auth_provider_config;
+#endif
 #endif
 #ifdef LONEJSON_WITH_OIDC
 /** Parsed OpenID Connect discovery metadata retained by lonejson.
@@ -2697,6 +2737,12 @@ struct lonejson {
                                           const void *items, size_t count,
                                           size_t stride, const char *path,
                                           lonejson_error *error);
+#ifdef LONEJSON_WITH_JWT
+  /** Installs or clears the runtime auth provider. */
+  lonejson_status (*set_auth_provider)(lonejson *runtime,
+                                       const lonejson_auth_provider *provider,
+                                       lonejson_error *error);
+#endif
 #ifdef LONEJSON_WITH_CURL
   /** Initializes one curl parse adapter. */
   lonejson_status (*curl_parse_init)(lonejson *runtime,
@@ -5782,6 +5828,18 @@ void *lonejson_record_object_array_append_slot(lonejson *runtime,
                                                lonejson_error *error);
 
 #ifdef LONEJSON_WITH_JWT
+/** Installs or clears the runtime auth provider. */
+lonejson_status
+lonejson_set_auth_provider(lonejson *runtime,
+                           const lonejson_auth_provider *provider,
+                           lonejson_error *error);
+#ifdef LONEJSON_WITH_OPENSSL
+/** Initializes `provider` with lonejson's OpenSSL-backed auth adapter. */
+lonejson_status lonejson_auth_provider_init_openssl(
+    lonejson_auth_provider *provider,
+    const lonejson_openssl_auth_provider_config *config,
+    lonejson_error *error);
+#endif
 /** Computes the decoded byte length of one unpadded base64url segment.
  *
  * This accepts only the JWT/JWS base64url alphabet (`A-Z`, `a-z`, `0-9`, `-`,
@@ -5873,6 +5931,11 @@ lonejson_status lonejson_jwt_validate_claims(
 lonejson_status lonejson_jwt_validate_signature(
     const lonejson_jwt_compact *jwt, const lonejson_jwt_header *header,
     const lonejson_jwk *jwk, lonejson_error *error);
+/** Validates a compact JWT signature through a runtime auth provider. */
+lonejson_status lonejson_jwt_validate_signature_with_runtime(
+    lonejson *runtime, const lonejson_jwt_compact *jwt,
+    const lonejson_jwt_header *header, const lonejson_jwk *jwk,
+    lonejson_error *error);
 #endif
 #ifdef LONEJSON_WITH_OIDC
 /** Initializes OIDC discovery metadata storage. */
@@ -6769,6 +6832,12 @@ typedef lonejson_candidate_event_fn lj_candidate_event_fn;
 /** Options for arbitrary JSON candidate streams. */
 typedef lonejson_candidate_stream_options lj_candidate_stream_options;
 #ifdef LONEJSON_WITH_JWT
+typedef lonejson_auth_provider lj_auth_provider;
+typedef lonejson_jws_verify_request lj_jws_verify_request;
+#ifdef LONEJSON_WITH_OPENSSL
+typedef lonejson_openssl_auth_provider_config
+    lj_openssl_auth_provider_config;
+#endif
 /** Caller-owned JWT compact-serialization segment. */
 typedef lonejson_jwt_segment lj_jwt_segment;
 /** Parsed JWT compact serialization. */
@@ -8657,6 +8726,20 @@ LONEJSON_SHORT_ALIAS_INLINE void lj_reset(lonejson *runtime, const lj_map *map,
   lonejson_reset(runtime, map, value);
 }
 #ifdef LONEJSON_WITH_JWT
+/** Installs or clears the runtime auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_set_auth_provider(lj *runtime, const lj_auth_provider *provider,
+                     lj_error *error) {
+  return lonejson_set_auth_provider(runtime, provider, error);
+}
+#ifdef LONEJSON_WITH_OPENSSL
+/** Initializes an OpenSSL-backed auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_auth_provider_init_openssl(
+    lj_auth_provider *provider,
+    const lj_openssl_auth_provider_config *config, lj_error *error) {
+  return lonejson_auth_provider_init_openssl(provider, config, error);
+}
+#endif
 /** Computes the decoded byte length of one unpadded base64url segment. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_base64url_decoded_len(
     const char *data, size_t len, size_t *out_len, lj_error *error) {
@@ -8744,6 +8827,13 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_validate_signature(
     const lj_jwt_compact *jwt, const lj_jwt_header *header, const lj_jwk *jwk,
     lj_error *error) {
   return lonejson_jwt_validate_signature(jwt, header, jwk, error);
+}
+/** Validates a compact JWT signature through a runtime auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_validate_signature_with_runtime(
+    lj *runtime, const lj_jwt_compact *jwt, const lj_jwt_header *header,
+    const lj_jwk *jwk, lj_error *error) {
+  return lonejson_jwt_validate_signature_with_runtime(runtime, jwt, header, jwk,
+                                                      error);
 }
 #endif
 #ifdef LONEJSON_WITH_OIDC

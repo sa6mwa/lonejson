@@ -252,15 +252,12 @@ fi
 grep -F 'LONEJSON_C_PKT_SYSTEMS_ROOT is missing OpenSSLConfig.cmake' \
   "$tmp_dir/missing-openssl-config.log" >/dev/null
 
-if cmake -S "$repo_root" -B "$jwt_without_openssl_build_dir" \
+cmake -S "$repo_root" -B "$jwt_without_openssl_build_dir" \
   -G Ninja \
   -D CMAKE_MODULE_PATH="$fake_modules" \
   -D LONEJSON_BUILD_WITH_JWT=ON \
   -D LONEJSON_BUILD_TESTS=OFF \
   -D LONEJSON_BUILD_EXAMPLES=OFF \
-  >"$tmp_dir/jwt-without-openssl.log" 2>&1; then
-  printf 'expected JWT configure without OpenSSL to fail\n' >&2
-  exit 1
-fi
-grep -F 'LONEJSON_BUILD_WITH_JWT requires LONEJSON_BUILD_WITH_OPENSSL=ON' \
-  "$tmp_dir/jwt-without-openssl.log" >/dev/null
+  >"$tmp_dir/jwt-without-openssl.log" 2>&1
+cmake --build "$jwt_without_openssl_build_dir" --target lonejson_static \
+  >>"$tmp_dir/jwt-without-openssl.log" 2>&1
