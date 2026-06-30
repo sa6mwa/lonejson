@@ -887,20 +887,39 @@ The implementation is covered by:
 - makefile fuzz target registration checks,
 - c.pkt.systems dependency route tests,
 - curl/OpenSSL dependency leakage checks,
-- release metadata checks.
+- release metadata checks,
+- OIDC/OAuth2 e2e in `scripts/test_oidc_e2e.sh`,
+- M2M/signup e2e in `scripts/test_m2m_e2e.sh`.
 
-The standard auth verification path used during implementation was:
+Current e2e coverage is targeted rather than exhaustive for every JOSE policy
+branch. `make test-oidc-e2e` uses the local compose OIDC/OAuth2 provider,
+`curl` as the non-lonejson client, and a lonejson-backed fixture server to
+exercise discovery, JWKS refresh, bearer validation, authorization-code token
+exchange, refresh-token exchange, token-flow refresh, token introspection,
+token revocation, and UserInfo. `make test-m2m-e2e` uses `curl` against a
+lonejson-backed fixture server to exercise Basic credentials, Bearer API keys,
+missing/wrong credentials, signup completion, consumed-signup rejection, and
+signup-generated Basic/Bearer credentials.
+
+Detailed JOSE policy invariants such as fail-closed `crit`, JWK `key_ops`,
+strict multi-audience policy, and `x5c` certificate-chain/thumbprint failure
+modes are covered by C unit/regression tests, Lua facade tests where exposed,
+and JWT fuzz seeds rather than by dedicated live OIDC e2e scenarios.
+
+The standard auth verification path for the current branch is:
 
 ```sh
-cmake --build --preset host-curl
-ctest --preset host-curl
-cmake --build --preset debug
-ctest --preset debug
+make test-host
+make test-oidc-e2e
+make test-m2m-e2e
 make fuzz-smoke
 ```
 
-At the time this document was written, those gates passed on the feature branch
-containing the auth implementation.
+At the time this document was updated, those gates passed on the feature branch
+containing the auth implementation. If new auth behavior is added, the proof
+must move with the behavior: C tests for policy detail, Lua tests for facade
+parity, fuzz seeds for untrusted inputs, and e2e when the behavior crosses an
+HTTP/provider boundary.
 
 ## Known Gaps And Non-Implemented Work
 

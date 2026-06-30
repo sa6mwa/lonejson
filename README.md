@@ -346,7 +346,9 @@ revocation, UserInfo, fail-closed JOSE `crit`, JWK `key_ops`, OIDC `azp`,
 OAuth2 `scope`/`scp`, strict multi-audience policy, and OpenSSL-backed
 certificate-chain/thumbprint validation for certificate-backed JWKs
 (`x5c`, `x5t`, `x5t#S256`). JWE is intentionally deferred as a separate
-encryption feature.
+encryption feature. This is implemented for lonejson's JSON-centered auth
+scope, not as a full identity-provider SDK, complete OAuth2 grant matrix, or
+complete JOSE implementation.
 Potential future simplifications would be an examples-level curl HTTP provider
 callback and an examples-level Kore/Vectis adapter. Those should preserve the
 current binary dependency boundary; putting `curl_easy_*` calls directly in
@@ -365,7 +367,10 @@ against the mock provider and requires a returned access token.
 as the non-lonejson client to verify Basic client credentials, Bearer API keys,
 missing credentials, wrong-secret rejection, signup completion with email
 metadata, consumed-signup rejection, and use of signup-generated Basic and
-Bearer credentials.
+Bearer credentials. Detailed JOSE policy branches such as `crit`, `key_ops`,
+strict multi-audience policy, and `x5c` certificate-chain/thumbprint failure
+modes are covered by C/Lua regression tests and JWT fuzz seeds rather than by a
+separate live OIDC e2e scenario for each branch.
 
 Short aliases are enabled by default. Disable them if they collide with another
 project:

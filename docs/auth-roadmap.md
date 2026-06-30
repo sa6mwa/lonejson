@@ -35,7 +35,7 @@ glue.
 
 ## Implemented Baseline
 
-The current branch already implements the planned C baseline for:
+The current branch already implements the planned auth baseline for:
 
 - `LONEJSON_WITH_OPENSSL`, `LONEJSON_WITH_JWT`, and `LONEJSON_WITH_OIDC`
   feature gates,
@@ -71,9 +71,31 @@ For exact API behavior and known implementation gaps, use
 
 ## Current Completion Status
 
-The in-scope auth target for this branch is implemented: near-complete
-OAuth2/OIDC client and resource-server support plus JWT/JWK/JWKS compliance.
-JWE is intentionally not part of this target.
+The in-scope auth target for this branch is implemented: JSON-centered
+OAuth2/OIDC client and resource-server helpers plus JWT/JWK/JWKS validation for
+the algorithms and policy checks listed below. This is not a full
+identity-provider SDK, not a complete OAuth2 grant matrix, and not complete
+JOSE coverage. JWE is intentionally not part of this target.
+
+Implementation evidence is split by layer:
+
+- C unit/regression tests cover the detailed policy matrix and failure modes.
+- Lua tests cover facade parity for the Lua-exposed workflows.
+- `fuzz/fuzz_jwt.c` covers attacker-controlled JWT/JWK/JWKS/OIDC helper inputs,
+  including certificate-field seeds.
+- `make test-oidc-e2e` covers live local OIDC discovery, JWKS refresh, bearer
+  validation, authorization-code token exchange, refresh-token exchange,
+  token-flow refresh, introspection, revocation, and UserInfo through a
+  lonejson-backed fixture server plus `curl` as the non-lonejson client.
+- `make test-m2m-e2e` covers Basic credentials, Bearer API keys, missing and
+  wrong credentials, signup completion, consumed-signup rejection, and
+  signup-generated Basic/Bearer credentials through a lonejson-backed fixture
+  server plus `curl`.
+
+The e2e layer intentionally does not duplicate every JOSE invariant. `crit`,
+`key_ops`, strict multi-audience policy, and `x5c` certificate-chain/thumbprint
+failure modes are covered by C/Lua/fuzz tests rather than by a separate live
+OIDC provider scenario for each invariant.
 
 ### JOSE/JWK Compliance Completion
 
