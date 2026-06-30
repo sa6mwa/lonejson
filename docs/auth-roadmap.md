@@ -215,13 +215,16 @@ The implementation must test and enforce at least these invariants:
 6. Add Lua facade for JWT/JWK parse and validation.
 7. Add OIDC discovery and JWKS retrieval/cache helpers. Discovery URL
    construction, discovery JSON parsing, issuer validation, Lua facade, bounded
-   JWKS cache installation, cache selection, and a curl write/finish adapter
-   are implemented. The network fetch remains caller-owned so lonejson does not
-   hide retry, timeout, credential, proxy, or event-loop policy.
+   JWKS cache installation, cache selection, provider-backed discovery fetch,
+   provider-backed JWKS refresh, and a curl write/finish adapter are
+   implemented. The HTTP transport remains caller-owned through the provider
+   boundary so lonejson does not hide retry, timeout, credential, proxy, TLS, or
+   event-loop policy.
 8. Add client credentials flow. A transport-neutral `client_secret_post` form
-   body builder, bounded token response parser, Lua facade, regression tests,
-   ABI/package checks, and fuzz coverage are implemented. HTTP execution,
-   retry, TLS, proxy, and credential storage policy remain caller-owned.
+   body builder, provider-backed token request helper, bounded token response
+   parser, Lua facade, regression tests, ABI/package checks, and fuzz coverage
+   are implemented. HTTP transport, retry, TLS, proxy, and credential storage
+   policy remain caller-owned.
 9. Add authorization-code with PKCE flow-control helpers. PKCE S256 challenge
    derivation, random verifier/challenge generation, authorization URL
    construction, callback query parsing/state validation, Lua facade,

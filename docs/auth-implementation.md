@@ -707,12 +707,9 @@ containing the auth implementation.
 
 The following are deliberate gaps or future work, not hidden behavior.
 
-- No HTTP fetch helper for OIDC discovery.
-- No HTTP fetch helper for JWKS retrieval.
-- No automatic JWKS cache refresh.
+- No built-in HTTP transport; caller-owned providers perform network I/O.
 - No retry, timeout, proxy, redirect, or TLS policy helper.
 - No credential storage helper.
-- No token endpoint HTTP POST helper.
 - No refresh-token exchange body builder.
 - No authorization-code token exchange body builder.
 - No ID-token nonce validation helper.
@@ -749,17 +746,19 @@ framework-specific code to compose.
 
 Machine-to-machine client credentials:
 
-1. Fetch and validate OIDC discovery metadata.
+1. Fetch and validate OIDC discovery metadata with
+   `lonejson_oidc_fetch_discovery` and a configured HTTP provider.
 2. Build a client-credentials body with
    `lonejson_oauth2_client_credentials_body`.
-3. POST the body using caller-owned HTTP code.
-4. Parse the token response with
+3. Exchange credentials with `lonejson_oauth2_client_credentials_request`, or
+   POST with caller-owned HTTP code and parse with
    `lonejson_oauth2_token_response_parse_json`.
-5. Treat returned token material as secret credential material.
+4. Treat returned token material as secret credential material.
 
 CLI or desktop authorization-code with PKCE:
 
-1. Fetch and validate OIDC discovery metadata.
+1. Fetch and validate OIDC discovery metadata with
+   `lonejson_oidc_fetch_discovery` and a configured HTTP provider.
 2. Generate PKCE with `lonejson_oidc_pkce_generate`.
 3. Build the authorization URL with `lonejson_oidc_authorization_url`.
 4. Open the browser using caller-owned platform code.
@@ -771,9 +770,11 @@ CLI or desktop authorization-code with PKCE:
 
 Server-side bearer validation:
 
-1. Fetch and validate OIDC discovery metadata.
-2. Fetch JWKS with caller-owned HTTP code.
-3. Install JWKS into `lonejson_oidc_jwks_cache`.
+1. Fetch and validate OIDC discovery metadata with
+   `lonejson_oidc_fetch_discovery`.
+2. Refresh JWKS with `lonejson_oidc_jwks_cache_refresh`, or fetch with
+   caller-owned HTTP code and install with `lonejson_oidc_jwks_cache_update_json`.
+3. Keep the JWKS in `lonejson_oidc_jwks_cache`.
 4. For each request, call `lonejson_oidc_validate_bearer_token` before
    application logic.
 5. Map `lonejson_auth_failure` to framework-specific HTTP responses.
