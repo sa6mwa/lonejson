@@ -73,6 +73,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_oidc_jwks_cache_parse cache_parse;
   lonejson_oidc_jwks_cache_policy cache_policy;
   lonejson_oauth2_client_credentials credentials;
+  lonejson_oauth2_refresh_token refresh_token;
+  lonejson_oidc_authorization_code_token code_token;
   lonejson_oauth2_token_response token_response;
   lonejson_oidc_pkce pkce;
   lonejson_oidc_authorization_request authorization_request;
@@ -250,6 +252,29 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     lonejson_owned_buffer_init(&form_body);
     (void)lonejson_oauth2_client_credentials_body(&credentials, &form_body,
                                                   &error);
+    lonejson_owned_buffer_free(&form_body);
+
+    memset(&refresh_token, 0, sizeof(refresh_token));
+    refresh_token.refresh_token = size > 0u ? text : "refresh";
+    refresh_token.client_id = "client";
+    refresh_token.client_secret = size > 3u ? text : NULL;
+    refresh_token.scope = "read write";
+    refresh_token.max_body_bytes = 4096u;
+    lonejson_owned_buffer_init(&form_body);
+    (void)lonejson_oauth2_refresh_token_body(&refresh_token, &form_body,
+                                             &error);
+    lonejson_owned_buffer_free(&form_body);
+
+    memset(&code_token, 0, sizeof(code_token));
+    code_token.client_id = "client";
+    code_token.code = size > 0u ? text : "code";
+    code_token.redirect_uri = "http://127.0.0.1/callback";
+    code_token.code_verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    code_token.client_secret = size > 5u ? text : NULL;
+    code_token.max_body_bytes = 4096u;
+    lonejson_owned_buffer_init(&form_body);
+    (void)lonejson_oidc_authorization_code_token_body(&code_token, &form_body,
+                                                      &error);
     lonejson_owned_buffer_free(&form_body);
 
     lonejson_oauth2_token_response_init(&token_response);

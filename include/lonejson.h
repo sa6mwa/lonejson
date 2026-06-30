@@ -1415,6 +1415,37 @@ typedef struct lonejson_oauth2_client_credentials {
   size_t max_body_bytes;
 } lonejson_oauth2_client_credentials;
 
+/** OAuth2 refresh-token request body options. */
+typedef struct lonejson_oauth2_refresh_token {
+  /** Refresh token previously issued by the authorization server. Required. */
+  const char *refresh_token;
+  /** Optional OAuth2 client identifier. Required when `client_secret` is set. */
+  const char *client_id;
+  /** Optional OAuth2 client secret for `client_secret_post` authentication. */
+  const char *client_secret;
+  /** Optional OAuth2 scope string for scope narrowing. */
+  const char *scope;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oauth2_refresh_token;
+
+/** OIDC/OAuth2 authorization-code token request body options. */
+typedef struct lonejson_oidc_authorization_code_token {
+  /** OAuth2 client identifier. Required. */
+  const char *client_id;
+  /** Authorization code received from the redirect callback. Required. */
+  const char *code;
+  /** Redirect URI used in the authorization request. Required. */
+  const char *redirect_uri;
+  /** PKCE code verifier matching the authorization request challenge. Required.
+   */
+  const char *code_verifier;
+  /** Optional OAuth2 client secret for confidential clients. */
+  const char *client_secret;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oidc_authorization_code_token;
+
 /** Parsed successful OAuth2 token endpoint response.
  *
  * This object owns all strings. An access token is credential material; callers
@@ -6001,6 +6032,14 @@ void lonejson_http_response_cleanup(lonejson_http_response *response);
 lonejson_status lonejson_http_provider_init(
     lonejson_http_provider *provider, const lonejson_http_provider_config *config,
     lonejson_error *error);
+/** Initializes an HTTP provider from direct caller-owned callback arguments. */
+lonejson_status lonejson_http_provider_init_simple(
+    lonejson_http_provider *provider, void *user_data, const char *user_agent,
+    lonejson_status (*request)(void *user_data,
+                               const lonejson_http_request *request,
+                               lonejson_http_response *response,
+                               lonejson_error *error),
+    lonejson_error *error);
 /** Installs or clears the runtime auth HTTP provider. */
 lonejson_status
 lonejson_set_http_provider(lonejson *runtime,
@@ -6075,6 +6114,15 @@ lonejson_status lonejson_oidc_jwks_cache_refresh(
 lonejson_status lonejson_oauth2_client_credentials_body(
     const lonejson_oauth2_client_credentials *request,
     lonejson_owned_buffer *out, lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` refresh-token body. */
+lonejson_status lonejson_oauth2_refresh_token_body(
+    const lonejson_oauth2_refresh_token *request, lonejson_owned_buffer *out,
+    lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` authorization-code token body.
+ */
+lonejson_status lonejson_oidc_authorization_code_token_body(
+    const lonejson_oidc_authorization_code_token *request,
+    lonejson_owned_buffer *out, lonejson_error *error);
 /** Initializes a token response for parsing or cleanup. */
 void lonejson_oauth2_token_response_init(
     lonejson_oauth2_token_response *response);
@@ -6095,6 +6143,19 @@ lonejson_status lonejson_oauth2_token_response_parse_json(
 lonejson_status lonejson_oauth2_client_credentials_request(
     lonejson *runtime, const char *token_endpoint,
     const lonejson_oauth2_client_credentials *request,
+    size_t max_response_bytes, lonejson_oauth2_token_response *out,
+    lonejson_error *error);
+/** Exchanges an OAuth2 refresh token through the runtime HTTP provider. */
+lonejson_status lonejson_oauth2_refresh_token_request(
+    lonejson *runtime, const char *token_endpoint,
+    const lonejson_oauth2_refresh_token *request, size_t max_response_bytes,
+    lonejson_oauth2_token_response *out, lonejson_error *error);
+/** Exchanges an OIDC/OAuth2 authorization code through the runtime HTTP
+ * provider.
+ */
+lonejson_status lonejson_oidc_authorization_code_token_request(
+    lonejson *runtime, const char *token_endpoint,
+    const lonejson_oidc_authorization_code_token *request,
     size_t max_response_bytes, lonejson_oauth2_token_response *out,
     lonejson_error *error);
 /** Initializes a PKCE pair for generation or cleanup. */
@@ -6952,6 +7013,9 @@ typedef lonejson_oidc_discovery lj_oidc_discovery;
 typedef lonejson_oidc_jwks_cache_policy lj_oidc_jwks_cache_policy;
 typedef lonejson_oidc_jwks_cache lj_oidc_jwks_cache;
 typedef lonejson_oauth2_client_credentials lj_oauth2_client_credentials;
+typedef lonejson_oauth2_refresh_token lj_oauth2_refresh_token;
+typedef lonejson_oidc_authorization_code_token
+    lj_oidc_authorization_code_token;
 typedef lonejson_oauth2_token_response lj_oauth2_token_response;
 typedef lonejson_oidc_pkce lj_oidc_pkce;
 typedef lonejson_oidc_authorization_request lj_oidc_authorization_request;
@@ -8945,6 +9009,18 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_http_provider_init(
     lj_error *error) {
   return lonejson_http_provider_init(provider, config, error);
 }
+/** Initializes an HTTP provider from direct caller-owned callback arguments. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_http_provider_init_simple(
+    lj_http_provider *provider, void *user_data, const char *user_agent,
+    lj_status (*request)(void *user_data, const lj_http_request *request,
+                         lj_http_response *response, lj_error *error),
+    lj_error *error) {
+  return lonejson_http_provider_init_simple(
+      provider, user_data, user_agent,
+      (lonejson_status(*)(void *, const lonejson_http_request *,
+                          lonejson_http_response *, lonejson_error *))request,
+      error);
+}
 /** Installs or clears the runtime auth HTTP provider. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
 lj_set_http_provider(lj *runtime, const lj_http_provider *provider,
@@ -9032,6 +9108,18 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_client_credentials_body(
     lj_error *error) {
   return lonejson_oauth2_client_credentials_body(request, out, error);
 }
+/** Builds an `application/x-www-form-urlencoded` refresh-token body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_refresh_token_body(
+    const lj_oauth2_refresh_token *request, lj_owned_buffer *out,
+    lj_error *error) {
+  return lonejson_oauth2_refresh_token_body(request, out, error);
+}
+/** Builds an authorization-code token body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_authorization_code_token_body(
+    const lj_oidc_authorization_code_token *request, lj_owned_buffer *out,
+    lj_error *error) {
+  return lonejson_oidc_authorization_code_token_body(request, out, error);
+}
 /** Initializes a token response for parsing or cleanup. */
 LONEJSON_SHORT_ALIAS_INLINE void
 lj_oauth2_token_response_init(lj_oauth2_token_response *response) {
@@ -9055,6 +9143,24 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_client_credentials_request(
     const lj_oauth2_client_credentials *request, size_t max_response_bytes,
     lj_oauth2_token_response *out, lj_error *error) {
   return lonejson_oauth2_client_credentials_request(
+      runtime, token_endpoint, request, max_response_bytes, out, error);
+}
+/** Exchanges an OAuth2 refresh token through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_refresh_token_request(
+    lj *runtime, const char *token_endpoint,
+    const lj_oauth2_refresh_token *request, size_t max_response_bytes,
+    lj_oauth2_token_response *out, lj_error *error) {
+  return lonejson_oauth2_refresh_token_request(
+      runtime, token_endpoint, request, max_response_bytes, out, error);
+}
+/** Exchanges an authorization code through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_authorization_code_token_request(
+    lj *runtime, const char *token_endpoint,
+    const lj_oidc_authorization_code_token *request,
+    size_t max_response_bytes, lj_oauth2_token_response *out,
+    lj_error *error) {
+  return lonejson_oidc_authorization_code_token_request(
       runtime, token_endpoint, request, max_response_bytes, out, error);
 }
 /** Initializes a PKCE pair for generation or cleanup. */

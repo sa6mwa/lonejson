@@ -143,6 +143,9 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"jwks_select_json", ljlua_jwks_select_json},
 #ifdef LONEJSON_WITH_OIDC
     {"oauth2_client_credentials_body", ljlua_oauth2_client_credentials_body},
+    {"oauth2_refresh_token_body", ljlua_oauth2_refresh_token_body},
+    {"oidc_authorization_code_token_body",
+     ljlua_oidc_authorization_code_token_body},
     {"oauth2_token_response_parse_json",
      ljlua_oauth2_token_response_parse_json},
     {"oidc_pkce_challenge", ljlua_oidc_pkce_challenge},
@@ -294,6 +297,9 @@ int luaopen_lonejson_core(lua_State *L) {
       {"jwks_select_json", ljlua_jwks_select_json},
 #ifdef LONEJSON_WITH_OIDC
       {"oauth2_client_credentials_body", ljlua_oauth2_client_credentials_body},
+      {"oauth2_refresh_token_body", ljlua_oauth2_refresh_token_body},
+      {"oidc_authorization_code_token_body",
+       ljlua_oidc_authorization_code_token_body},
       {"oauth2_token_response_parse_json",
        ljlua_oauth2_token_response_parse_json},
       {"oidc_pkce_challenge", ljlua_oidc_pkce_challenge},

@@ -1138,10 +1138,7 @@ static lonejson_status test_oidc_http_provider_request(
                   "application/x-www-form-urlencoded") == 0);
     EXPECT(request->body != NULL);
     EXPECT(request->body_len != 0u);
-    EXPECT(strstr((const char *)request->body,
-                  "grant_type=client_credentials") != NULL);
-    EXPECT(strstr((const char *)request->body, "client_id=client") != NULL);
-    EXPECT(strstr((const char *)request->body, "client_secret=secret") != NULL);
+    EXPECT(strstr((const char *)request->body, "grant_type=") != NULL);
     return test_oidc_http_provider_respond(
         response, token_json, request->max_response_bytes, error);
   }
@@ -1160,6 +1157,8 @@ static void test_oidc_http_provider_helpers(void) {
   lonejson_oidc_jwks_cache cache;
   lonejson_oidc_jwks_cache_policy policy;
   lonejson_oauth2_client_credentials token_request;
+  lonejson_oauth2_refresh_token refresh_request;
+  lonejson_oidc_authorization_code_token code_request;
   lonejson_oauth2_token_response token_response;
 
   lonejson_error_init(&error);
@@ -1182,6 +1181,13 @@ static void test_oidc_http_provider_helpers(void) {
          LONEJSON_STATUS_OK);
   EXPECT(provider.user_data == &state);
   EXPECT(provider.user_agent == provider_config.user_agent);
+  EXPECT(provider.request == test_oidc_http_provider_request);
+  EXPECT(lonejson_http_provider_init_simple(
+             &provider, &state, "lonejson-test/1",
+             test_oidc_http_provider_request, &error) == LONEJSON_STATUS_OK);
+  EXPECT(provider.user_data == &state);
+  EXPECT(provider.user_agent != NULL);
+  EXPECT(strcmp(provider.user_agent, "lonejson-test/1") == 0);
   EXPECT(provider.request == test_oidc_http_provider_request);
   EXPECT(runtime->set_http_provider(runtime, &provider, &error) ==
          LONEJSON_STATUS_OK);
@@ -1215,10 +1221,32 @@ static void test_oidc_http_provider_helpers(void) {
   EXPECT(token_response.expires_in == 60);
   lonejson_oauth2_token_response_cleanup(&token_response);
 
+  memset(&refresh_request, 0, sizeof(refresh_request));
+  refresh_request.refresh_token = "refresh token";
+  refresh_request.client_id = "client";
+  refresh_request.client_secret = "secret";
+  EXPECT(lonejson_oauth2_refresh_token_request(
+             runtime, "https://issuer.example/token", &refresh_request, 4096u,
+             &token_response, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(token_response.access_token, "abc.def.sig") == 0);
+  lonejson_oauth2_token_response_cleanup(&token_response);
+
+  memset(&code_request, 0, sizeof(code_request));
+  code_request.client_id = "client";
+  code_request.code = "code+123";
+  code_request.redirect_uri = "http://127.0.0.1/cb";
+  code_request.code_verifier =
+      "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+  EXPECT(lonejson_oidc_authorization_code_token_request(
+             runtime, "https://issuer.example/token", &code_request, 4096u,
+             &token_response, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(token_response.token_type, "Bearer") == 0);
+  lonejson_oauth2_token_response_cleanup(&token_response);
+
   EXPECT(lonejson_oauth2_client_credentials_request(
              runtime, "https://issuer.example/token", &token_request, 8u,
              &token_response, &error) == LONEJSON_STATUS_OVERFLOW);
-  EXPECT(state.requests >= 4);
+  EXPECT(state.requests >= 6);
 
   state.fail_callback = 1;
   EXPECT(lonejson_oidc_fetch_discovery(runtime, "https://issuer.example",
@@ -1237,12 +1265,17 @@ static void test_oidc_http_provider_helpers(void) {
   provider_config.request = NULL;
   EXPECT(lonejson_http_provider_init(&provider, &provider_config, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lj_http_provider_init_simple(&provider, &state, "lonejson-test/1",
+                                      NULL, &error) ==
+         LJ_STATUS_INVALID_ARGUMENT);
 
   lonejson_free(runtime);
 }
 
 static void test_oauth2_client_credentials_body(void) {
   lonejson_oauth2_client_credentials request;
+  lonejson_oauth2_refresh_token refresh_request;
+  lonejson_oidc_authorization_code_token code_request;
   lonejson_owned_buffer out;
   lonejson_error error;
 
@@ -1275,6 +1308,56 @@ static void test_oauth2_client_credentials_body(void) {
   request.client_secret = "secret";
   request.client_id = NULL;
   EXPECT(lonejson_oauth2_client_credentials_body(&request, &out, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  memset(&refresh_request, 0, sizeof(refresh_request));
+  refresh_request.refresh_token = "r+e&f";
+  refresh_request.client_id = "client id";
+  refresh_request.client_secret = "secret";
+  refresh_request.scope = "read write";
+  EXPECT(lonejson_oauth2_refresh_token_body(&refresh_request, &out, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(out.data,
+                "grant_type=refresh_token&refresh_token=r%2Be%26f&"
+                "client_id=client+id&client_secret=secret&scope=read+write") ==
+         0);
+  lonejson_owned_buffer_free(&out);
+
+  refresh_request.max_body_bytes = 8u;
+  EXPECT(lonejson_oauth2_refresh_token_body(&refresh_request, &out, &error) ==
+         LONEJSON_STATUS_OVERFLOW);
+  refresh_request.max_body_bytes = 0u;
+  refresh_request.refresh_token = NULL;
+  EXPECT(lonejson_oauth2_refresh_token_body(&refresh_request, &out, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  refresh_request.refresh_token = "refresh";
+  refresh_request.client_id = NULL;
+  EXPECT(lonejson_oauth2_refresh_token_body(&refresh_request, &out, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  memset(&code_request, 0, sizeof(code_request));
+  code_request.client_id = "client id";
+  code_request.code = "code+123";
+  code_request.redirect_uri = "http://127.0.0.1:1234/cb";
+  code_request.code_verifier = "verifier value";
+  code_request.client_secret = "secret";
+  EXPECT(lonejson_oidc_authorization_code_token_body(&code_request, &out,
+                                                     &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(out.data,
+                "grant_type=authorization_code&client_id=client+id&"
+                "code=code%2B123&"
+                "redirect_uri=http%3A%2F%2F127.0.0.1%3A1234%2Fcb&"
+                "code_verifier=verifier+value&client_secret=secret") == 0);
+  lonejson_owned_buffer_free(&out);
+
+  code_request.max_body_bytes = 8u;
+  EXPECT(lj_oidc_authorization_code_token_body(&code_request, &out, &error) ==
+         LJ_STATUS_OVERFLOW);
+  code_request.max_body_bytes = 0u;
+  code_request.code_verifier = NULL;
+  EXPECT(lonejson_oidc_authorization_code_token_body(&code_request, &out,
+                                                     &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
   lonejson_owned_buffer_free(&out);
 }

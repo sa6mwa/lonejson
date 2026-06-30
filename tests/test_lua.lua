@@ -256,6 +256,19 @@ if lonejson.jwt_parse_compact ~= nil then
       audience = "https://api.example/a?b=c",
       resource = "urn:example:resource",
     })
+    local refresh_body = lj:oauth2_refresh_token_body({
+      refresh_token = "r+e&f",
+      client_id = "client id",
+      client_secret = "secret",
+      scope = "read write",
+    })
+    local code_body = lonejson.oidc_authorization_code_token_body({
+      client_id = "client id",
+      code = "code+123",
+      redirect_uri = "http://127.0.0.1:1234/cb",
+      code_verifier = "verifier value",
+      client_secret = "secret",
+    })
     local token_response = lonejson.oauth2_token_response_parse_json(
         '{"access_token":"token","token_type":"Bearer","expires_in":3600,"scope":"read write"}')
     local pkce_challenge = lonejson.oidc_pkce_challenge(
@@ -287,6 +300,14 @@ if lonejson.jwt_parse_compact ~= nil then
               "client_secret=s%2Be%26c%3Dr%25t&scope=read+write&" ..
               "audience=https%3A%2F%2Fapi.example%2Fa%3Fb%3Dc&" ..
               "resource=urn%3Aexample%3Aresource")
+    assert_eq(refresh_body,
+              "grant_type=refresh_token&refresh_token=r%2Be%26f&" ..
+              "client_id=client+id&client_secret=secret&scope=read+write")
+    assert_eq(code_body,
+              "grant_type=authorization_code&client_id=client+id&" ..
+              "code=code%2B123&" ..
+              "redirect_uri=http%3A%2F%2F127.0.0.1%3A1234%2Fcb&" ..
+              "code_verifier=verifier+value&client_secret=secret")
     assert_eq(token_response.access_token, "token")
     assert_eq(token_response.token_type, "Bearer")
     assert_eq(token_response.expires_in, 3600)
@@ -318,6 +339,21 @@ if lonejson.jwt_parse_compact ~= nil then
     })
     assert_true(bad == nil)
     assert_eq(err.status, "overflow")
+
+    bad, err = lonejson.oauth2_refresh_token_body({
+      refresh_token = "refresh",
+      client_secret = "secret",
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
+
+    bad, err = lj:oidc_authorization_code_token_body({
+      client_id = "client",
+      code = "code",
+      redirect_uri = "http://127.0.0.1/cb",
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
 
     bad, err = lj:oauth2_token_response_parse_json(
         '{"access_token":"token","token_type":"mac"}')

@@ -166,6 +166,61 @@ static void ljlua_auth_read_client_credentials(
   lua_pop(L, 1);
 }
 
+static void ljlua_auth_read_refresh_token(
+    lua_State *L, int index, lonejson_oauth2_refresh_token *request) {
+  lua_Integer max_body_bytes;
+
+  memset(request, 0, sizeof(*request));
+  luaL_checktype(L, index, LUA_TTABLE);
+  index = lua_absindex(L, index);
+  lua_getfield(L, index, "refresh_token");
+  request->refresh_token = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  request->client_id = ljlua_auth_optional_table_string(L, index, "client_id");
+  request->client_secret =
+      ljlua_auth_optional_table_string(L, index, "client_secret");
+  request->scope = ljlua_auth_optional_table_string(L, index, "scope");
+  lua_getfield(L, index, "max_body_bytes");
+  if (!lua_isnil(L, -1)) {
+    max_body_bytes = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, max_body_bytes >= 0, index,
+                  "max_body_bytes must be non-negative");
+    request->max_body_bytes = (size_t)max_body_bytes;
+  }
+  lua_pop(L, 1);
+}
+
+static void ljlua_auth_read_authorization_code_token(
+    lua_State *L, int index, lonejson_oidc_authorization_code_token *request) {
+  lua_Integer max_body_bytes;
+
+  memset(request, 0, sizeof(*request));
+  luaL_checktype(L, index, LUA_TTABLE);
+  index = lua_absindex(L, index);
+  lua_getfield(L, index, "client_id");
+  request->client_id = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  lua_getfield(L, index, "code");
+  request->code = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  lua_getfield(L, index, "redirect_uri");
+  request->redirect_uri = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  lua_getfield(L, index, "code_verifier");
+  request->code_verifier = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  request->client_secret =
+      ljlua_auth_optional_table_string(L, index, "client_secret");
+  lua_getfield(L, index, "max_body_bytes");
+  if (!lua_isnil(L, -1)) {
+    max_body_bytes = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, max_body_bytes >= 0, index,
+                  "max_body_bytes must be non-negative");
+    request->max_body_bytes = (size_t)max_body_bytes;
+  }
+  lua_pop(L, 1);
+}
+
 static void ljlua_auth_read_authorization_request(
     lua_State *L, int index, lonejson_oidc_authorization_request *request) {
   lua_Integer max_url_bytes;
@@ -640,6 +695,52 @@ static int ljlua_oauth2_client_credentials_body(lua_State *L) {
   lonejson_owned_buffer_init(&out);
   lonejson_error_init(&error);
   status = lonejson_oauth2_client_credentials_body(&request, &out, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_owned_buffer_free(&out);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushlstring(L, out.data != NULL ? out.data : "", out.len);
+  lonejson_owned_buffer_free(&out);
+  return 1;
+}
+
+static int ljlua_oauth2_refresh_token_body(lua_State *L) {
+  lonejson_oauth2_refresh_token request;
+  lonejson_owned_buffer out;
+  lonejson_error error;
+  lonejson_status status;
+  int arg = 1;
+
+  if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
+    arg = 2;
+  }
+  ljlua_auth_read_refresh_token(L, arg, &request);
+  lonejson_owned_buffer_init(&out);
+  lonejson_error_init(&error);
+  status = lonejson_oauth2_refresh_token_body(&request, &out, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_owned_buffer_free(&out);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushlstring(L, out.data != NULL ? out.data : "", out.len);
+  lonejson_owned_buffer_free(&out);
+  return 1;
+}
+
+static int ljlua_oidc_authorization_code_token_body(lua_State *L) {
+  lonejson_oidc_authorization_code_token request;
+  lonejson_owned_buffer out;
+  lonejson_error error;
+  lonejson_status status;
+  int arg = 1;
+
+  if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
+    arg = 2;
+  }
+  ljlua_auth_read_authorization_code_token(L, arg, &request);
+  lonejson_owned_buffer_init(&out);
+  lonejson_error_init(&error);
+  status = lonejson_oidc_authorization_code_token_body(&request, &out, &error);
   if (status != LONEJSON_STATUS_OK) {
     lonejson_owned_buffer_free(&out);
     return ljlua_push_status_result(L, status, &error);

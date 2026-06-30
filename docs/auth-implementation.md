@@ -348,6 +348,11 @@ config:
 - `user_agent`,
 - `request` callback.
 
+`lonejson_http_provider_init_simple` is the same initialization path for callers
+that prefer direct arguments over a config struct. It accepts `user_data`,
+`user_agent`, and the `request` callback explicitly, so even the compact setup
+form can set the provider's default user-agent.
+
 The helper layer copies the provider's `user_agent` into each request unless a
 request already has one. Core lonejson does not embed curl, OpenSSL transport,
 event-loop, proxy, retry, TLS, or telemetry policy in the shared library;
@@ -406,7 +411,11 @@ application policy.
 Implemented public APIs:
 
 - `lonejson_oauth2_client_credentials_body`
+- `lonejson_oauth2_refresh_token_body`
+- `lonejson_oidc_authorization_code_token_body`
 - `lonejson_oauth2_client_credentials_request`
+- `lonejson_oauth2_refresh_token_request`
+- `lonejson_oidc_authorization_code_token_request`
 - `lonejson_oauth2_token_response_init`
 - `lonejson_oauth2_token_response_cleanup`
 - `lonejson_oauth2_token_response_parse_json`
@@ -434,12 +443,24 @@ grant_type=client_credentials
 Then it appends configured fields with form encoding and enforces
 `max_body_bytes` or an internal default.
 
+`lonejson_oauth2_refresh_token_body` builds a refresh-token exchange body with
+`grant_type=refresh_token`, required `refresh_token`, optional `client_id`,
+optional `client_secret`, optional scope narrowing, and the same body limit
+rules. `client_id` is required when `client_secret` is supplied.
+
+`lonejson_oidc_authorization_code_token_body` builds an authorization-code
+token exchange body with `grant_type=authorization_code`, required `client_id`,
+`code`, `redirect_uri`, and `code_verifier`, optional `client_secret`, and the
+same body limit rules.
+
 `lonejson_oauth2_token_response_parse_json` parses a bounded successful token
 endpoint response.
 
-`lonejson_oauth2_client_credentials_request` composes form-body construction,
-a provider-backed HTTPS POST, HTTP 2xx checking, and bounded token response
-parsing.
+`lonejson_oauth2_client_credentials_request`,
+`lonejson_oauth2_refresh_token_request`, and
+`lonejson_oidc_authorization_code_token_request` compose form-body
+construction, a provider-backed HTTPS POST, HTTP 2xx checking, and bounded token
+response parsing.
 
 Implemented response fields:
 
@@ -460,8 +481,10 @@ Validation rules:
 - provider error responses are rejected as `LONEJSON_STATUS_TYPE_MISMATCH`,
 - response JSON is bounded by `max_response_bytes` or an internal default.
 
-HTTP execution is not implemented here. The caller posts the generated body to
-the token endpoint and passes the response bytes back to lonejson.
+Transport execution remains provider-owned. The built-in helpers require a
+runtime HTTP provider; callers that need different flow control can still post
+the generated body themselves and parse with
+`lonejson_oauth2_token_response_parse_json`.
 
 ## Authorization Code With PKCE
 
@@ -524,8 +547,9 @@ Callback query parsing:
 - applies `max_query_bytes` or an internal default.
 
 Browser launching, local HTTP listener creation, random callback path
-management, token exchange HTTP execution, and ID-token nonce validation are
-not implemented in core lonejson.
+management, and ID-token nonce validation are not implemented in core lonejson.
+Authorization-code token POST execution is available through the runtime HTTP
+provider helper or through caller-owned HTTP code plus token-response parsing.
 
 ## Server-Side Bearer Validation
 
@@ -764,9 +788,10 @@ CLI or desktop authorization-code with PKCE:
 4. Open the browser using caller-owned platform code.
 5. Receive callback query through caller-owned local HTTP code.
 6. Parse callback with `lonejson_oidc_authorization_callback_parse_query`.
-7. Exchange the code with caller-owned HTTP code.
-8. Parse token response with `lonejson_oauth2_token_response_parse_json`.
-9. Validate any ID token with the JWT/JWKS validation primitives.
+7. Exchange the code with `lonejson_oidc_authorization_code_token_request`, or
+   POST with caller-owned HTTP code and parse with
+   `lonejson_oauth2_token_response_parse_json`.
+8. Validate any ID token with the JWT/JWKS validation primitives.
 
 Server-side bearer validation:
 
@@ -791,7 +816,8 @@ with JWT support. Signature trust APIs require an installed auth provider.
 
 Consumers that define `LONEJSON_WITH_OIDC` must build against a library
 compiled with OIDC and JWT support. Bearer validation requires an installed
-auth provider. HTTP discovery and JWKS retrieval remain caller/provider-owned.
+auth provider. HTTP discovery, JWKS retrieval, and token endpoint POST helpers
+require an installed HTTP provider.
 
 Parsing JWTs is never trust. Trust is established only by explicit validation:
 

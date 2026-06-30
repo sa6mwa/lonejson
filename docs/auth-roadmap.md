@@ -136,7 +136,8 @@ optional runtime HTTP provider for common fetch flows:
 Network policy remains caller-owned at this layer. Applications provide an HTTP
 provider for event-loop, proxy, retry, telemetry, TLS policy, and actual socket
 I/O. The generic provider initializer accepts caller-owned callback config
-including a default user-agent; core lonejson does not embed a curl easy
+including a default user-agent, and the simple direct-argument initializer also
+accepts the user-agent explicitly. Core lonejson does not embed a curl easy
 transfer path into `liblonejson`.
 
 The CLI/desktop browser flow should be expressed as reusable flow control, not
@@ -220,17 +221,17 @@ The implementation must test and enforce at least these invariants:
    implemented. The HTTP transport remains caller-owned through the provider
    boundary so lonejson does not hide retry, timeout, credential, proxy, TLS, or
    event-loop policy.
-8. Add client credentials flow. A transport-neutral `client_secret_post` form
-   body builder, provider-backed token request helper, bounded token response
-   parser, Lua facade, regression tests, ABI/package checks, and fuzz coverage
-   are implemented. HTTP transport, retry, TLS, proxy, and credential storage
-   policy remain caller-owned.
+8. Add token endpoint helpers. Transport-neutral client-credentials,
+   refresh-token, and authorization-code form body builders, provider-backed
+   token request helpers, bounded token response parsing, Lua facade,
+   regression tests, ABI/package checks, and fuzz coverage are implemented. HTTP
+   transport, retry, TLS, proxy, and credential storage policy remain
+   caller/provider-owned.
 9. Add authorization-code with PKCE flow-control helpers. PKCE S256 challenge
    derivation, random verifier/challenge generation, authorization URL
    construction, callback query parsing/state validation, Lua facade,
    regression tests, ABI/package checks, and fuzz coverage are implemented.
-   Browser launching, localhost listener lifetime, and token exchange HTTP
-   execution remain caller-owned.
+   Browser launching and localhost listener lifetime remain caller-owned.
 10. Add framework-neutral server-side bearer validation helpers. Bearer
     Authorization header extraction, fresh JWKS cache selection, compact JWT
     decode, signature validation, claim-policy validation, structured failure
