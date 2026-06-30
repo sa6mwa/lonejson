@@ -326,11 +326,16 @@ Kore/Vectis-specific handler wrapper. Those are application lifecycle concerns.
 The planned exception is token-flow state: helpers that own an OAuth2/OIDC
 client flow should transparently refresh expired access tokens and apply
 bounded retry defaults when the next step is protocol-obvious, while still
-letting callers opt out or override those policies. Potential future
-simplifications would be an examples-level curl HTTP provider callback, an
-examples-level Kore/Vectis adapter, and the token-flow helper described in
-`docs/auth-roadmap.md`. Those should preserve the current binary dependency
-boundary; putting `curl_easy_*` calls directly in `liblonejson.so` would not.
+letting callers opt out or override those policies. The next auth compliance
+scope also includes server-side token introspection, token revocation, userinfo
+helpers, and JOSE/JWK completion for certificate-backed keys (`x5c`, `x5t`,
+`x5t#S256`), critical header handling (`crit`), and JWK operation constraints
+(`key_ops`). JWE is intentionally deferred as a separate encryption feature.
+Potential future simplifications would be an examples-level curl HTTP provider
+callback, an examples-level Kore/Vectis adapter, and the token-flow helper
+described in `docs/auth-roadmap.md`. Those should preserve the current binary
+dependency boundary; putting `curl_easy_*` calls directly in `liblonejson.so`
+would not.
 
 The local Docker/nerdctl development rig includes a mock OIDC/OAuth2 provider
 and API fixture. `make test-oidc-e2e` starts the compose stack, obtains a token

@@ -63,6 +63,10 @@ For exact API behavior and known implementation gaps, use
 
 ## Remaining Work
 
+The remaining auth target for this branch is near-complete OAuth2/OIDC client
+and resource-server support plus JWT/JWK/JWKS compliance. JWE is intentionally
+not part of this target.
+
 ### Token Flow State Helpers
 
 Add narrowly scoped helpers for token-bearing client flows:
@@ -79,6 +83,43 @@ Add narrowly scoped helpers for token-bearing client flows:
 The server-side bearer validation helper should continue to fail closed for an
 expired presented token; a resource server cannot refresh a caller's bearer
 token unless the application has separately chosen to own that client flow.
+
+### Server-Side OAuth2/OIDC Helpers
+
+Add provider-backed helpers for common resource-server and administration
+flows:
+
+- token introspection request/response helpers,
+- token revocation request helpers,
+- userinfo request/response helpers,
+- bounded response parsing and explicit failure classification,
+- the same HTTP provider, user-agent, retry, and size-limit model used by the
+  existing discovery/JWKS/token helpers,
+- C, Lua, fuzz, and e2e coverage for success paths and multiple failure modes.
+
+These helpers should not own routing, response writing, durable credential
+storage, or authorization decisions. They should return authenticated or
+provider-reported facts for the embedding application to authorize.
+
+### JOSE/JWK Compliance Completion
+
+Complete the JWT/JWK/JWKS compliance surface needed for OIDC use:
+
+- `x5c` certificate-chain parsing and validation policy,
+- `x5t` and `x5t#S256` certificate thumbprint matching,
+- `crit` handling: reject tokens with unrecognized critical headers, and only
+  accept recognized critical headers when the caller explicitly enables the
+  relevant behavior,
+- JWK `key_ops` parsing and enforcement for verification use,
+- `azp`, `scope`, and `scp` claim parsing/validation helpers where useful for
+  OIDC resource-server decisions,
+- stronger multiple-audience policy controls where OIDC requires them.
+
+`crit` is a JOSE extension-safety mechanism. Silently ignoring a critical
+header is not compliant; the safe default is fail closed.
+
+`key_ops` limits what a JWK may be used for. Signature validation should reject
+keys whose declared operations do not allow verification.
 
 ### Examples And Integration DX
 
@@ -103,27 +144,24 @@ justifies a narrowly scoped helper:
 - background refresh scheduler,
 - proxy/redirect/TLS policy abstraction,
 - credential-store persistence, encryption, and audit helpers,
-- token introspection endpoint,
-- revocation endpoint,
-- userinfo endpoint helper.
 
 OAuth2 device authorization is not the same as a generic "helper knows where in
 the flow you are" state machine. A generic flow-state helper belongs in the
 token-flow work above; the device authorization grant itself should be added
 only when we intentionally support that grant type.
 
-### Crypto And JOSE Gaps
+### Out-Of-Scope JOSE/Crypto Work
 
-Current support is intentionally conservative. Future work may add:
+The following remain outside this OIDC/JWT/JWK completion target:
 
 - HS256 only if a clear key-management boundary is specified,
 - Ed448 if there is real demand and provider support is clean,
-- `x5c`/`x5t` certificate-chain validation,
-- `crit` JOSE header handling,
-- JWK `key_ops` enforcement,
 - encrypted JWT/JWE support.
 
 `alg: none` should remain rejected outside explicit test-only paths.
+JWE is a separate encryption feature with its own key-management and content
+encryption matrix; it should not be bundled into the current OIDC/JWT/JWK
+completion slice.
 
 ## Future Slice Rules
 

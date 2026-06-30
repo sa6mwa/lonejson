@@ -818,19 +818,21 @@ The following are deliberate gaps or future work, not hidden behavior.
 - No implemented HS256 or `none` validation support. `none` remains rejected.
 - No Ed448 support for `EdDSA`; the OpenSSL provider currently supports
   Ed25519 OKP keys.
-- No x5c/x5t certificate-chain validation.
-- No `crit` JOSE header handling.
+- No x5c/x5t certificate-chain validation yet. This is part of the planned
+  OIDC/JWT/JWK completion scope.
+- No `crit` JOSE header handling yet. Until implemented, tokens declaring
+  critical headers should be treated as unsupported rather than trusted.
 - No `azp` validation.
 - No `scope` or `scp` authorization helper.
 - No multiple-audience policy mode beyond accepted-audience membership.
-- No JWK `key_ops` enforcement.
+- No JWK `key_ops` enforcement yet.
 - No JWKS cache eviction policy beyond one explicit cache object.
 - No concurrency synchronization inside the JWKS cache object.
-- No full OAuth2/OIDC provider abstraction.
-- No token introspection endpoint support.
-- No revocation endpoint support.
-- No userinfo endpoint helper.
-- No encrypted JWT/JWE support.
+- No token introspection endpoint support yet.
+- No revocation endpoint support yet.
+- No userinfo endpoint helper yet.
+- No encrypted JWT/JWE support. JWE is intentionally out of the current
+  OIDC/JWT/JWK completion scope.
 
 Most of these omissions are intentional because lonejson is not meant to own
 application flow control. The core value is bounded parsing, explicit
@@ -841,6 +843,12 @@ OAuth2 device authorization is a specific grant type for browser-constrained
 devices. It is distinct from the planned token-flow state helper that tracks
 where a supported OAuth2/OIDC flow is and decides whether to refresh, retry, or
 return a clear "cannot continue" state.
+
+The next compliance target is documented in `docs/auth-roadmap.md`: transparent
+token-flow state with retry/refresh defaults, server-side introspection,
+revocation, and userinfo helpers, plus JOSE/JWK completion for `x5c`, `x5t`,
+`crit`, and `key_ops`. JWE should be handled as a later encryption-specific
+feature, not mixed into that target.
 
 ## Recommended Composition Patterns
 
