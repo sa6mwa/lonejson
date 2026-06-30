@@ -77,9 +77,25 @@ void lonejson_oidc_jwks_cache_write_callback(void);
 void lonejson_oidc_jwks_cache_parse_finish(void);
 void lonejson_oidc_jwks_cache_parse_cleanup(void);
 void lonejson_oauth2_client_credentials_body(void);
+void lonejson_oauth2_refresh_token_body(void);
+void lonejson_oauth2_token_introspection_body(void);
+void lonejson_oauth2_token_revocation_body(void);
+void lonejson_oidc_authorization_code_token_body(void);
+void lonejson_oauth2_client_credentials_request(void);
+void lonejson_oauth2_refresh_token_request(void);
+void lonejson_oauth2_introspect_token_request(void);
+void lonejson_oauth2_revoke_token_request(void);
+void lonejson_oidc_fetch_userinfo(void);
+void lonejson_oidc_authorization_code_token_request(void);
 void lonejson_oauth2_token_response_init(void);
 void lonejson_oauth2_token_response_cleanup(void);
 void lonejson_oauth2_token_response_parse_json(void);
+void lonejson_oauth2_introspection_response_init(void);
+void lonejson_oauth2_introspection_response_cleanup(void);
+void lonejson_oauth2_introspection_response_parse_json(void);
+void lonejson_oidc_userinfo_response_init(void);
+void lonejson_oidc_userinfo_response_cleanup(void);
+void lonejson_oidc_userinfo_response_parse_json(void);
 void lonejson_oidc_pkce_init(void);
 void lonejson_oidc_pkce_cleanup(void);
 void lonejson_oidc_pkce_challenge(void);
@@ -219,6 +235,36 @@ void lonejson_oidc_jwks_cache_parse_cleanup(void) {
 void lonejson_oauth2_client_credentials_body(void) {
 }
 
+void lonejson_oauth2_refresh_token_body(void) {
+}
+
+void lonejson_oauth2_token_introspection_body(void) {
+}
+
+void lonejson_oauth2_token_revocation_body(void) {
+}
+
+void lonejson_oidc_authorization_code_token_body(void) {
+}
+
+void lonejson_oauth2_client_credentials_request(void) {
+}
+
+void lonejson_oauth2_refresh_token_request(void) {
+}
+
+void lonejson_oauth2_introspect_token_request(void) {
+}
+
+void lonejson_oauth2_revoke_token_request(void) {
+}
+
+void lonejson_oidc_fetch_userinfo(void) {
+}
+
+void lonejson_oidc_authorization_code_token_request(void) {
+}
+
 void lonejson_oauth2_token_response_init(void) {
 }
 
@@ -226,6 +272,24 @@ void lonejson_oauth2_token_response_cleanup(void) {
 }
 
 void lonejson_oauth2_token_response_parse_json(void) {
+}
+
+void lonejson_oauth2_introspection_response_init(void) {
+}
+
+void lonejson_oauth2_introspection_response_cleanup(void) {
+}
+
+void lonejson_oauth2_introspection_response_parse_json(void) {
+}
+
+void lonejson_oidc_userinfo_response_init(void) {
+}
+
+void lonejson_oidc_userinfo_response_cleanup(void) {
+}
+
+void lonejson_oidc_userinfo_response_parse_json(void) {
 }
 
 void lonejson_oidc_pkce_init(void) {

@@ -37,7 +37,14 @@ static const lonejson_field lonejson__oidc_discovery_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC_REQ(lonejson_oidc_discovery, token_endpoint,
                                     "token_endpoint"),
     LONEJSON_FIELD_STRING_ALLOC_REQ(lonejson_oidc_discovery, jwks_uri,
-                                    "jwks_uri")};
+                                    "jwks_uri"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oidc_discovery,
+                                introspection_endpoint,
+                                "introspection_endpoint"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oidc_discovery, revocation_endpoint,
+                                "revocation_endpoint"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oidc_discovery, userinfo_endpoint,
+                                "userinfo_endpoint")};
 LONEJSON_MAP_DEFINE(lonejson__oidc_discovery_map, lonejson_oidc_discovery,
                     lonejson__oidc_discovery_fields);
 
@@ -61,6 +68,46 @@ static const lonejson_field lonejson__oauth2_token_response_fields[] = {
 LONEJSON_MAP_DEFINE(lonejson__oauth2_token_response_map,
                     lonejson_oauth2_token_response,
                     lonejson__oauth2_token_response_fields);
+
+static const lonejson_field lonejson__oauth2_introspection_response_fields[] = {
+    LONEJSON_FIELD_BOOL_PRESENT(lonejson_oauth2_introspection_response, active,
+                                has_active, "active"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oauth2_introspection_response, scope,
+                                "scope"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oauth2_introspection_response,
+                                client_id, "client_id"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oauth2_introspection_response,
+                                username, "username"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oauth2_introspection_response,
+                                token_type, "token_type"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oauth2_introspection_response, sub,
+                                "sub"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oauth2_introspection_response, iss,
+                                "iss"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oauth2_introspection_response, jti,
+                                "jti"),
+    LONEJSON_FIELD_I64_PRESENT(lonejson_oauth2_introspection_response, exp,
+                               has_exp, "exp"),
+    LONEJSON_FIELD_I64_PRESENT(lonejson_oauth2_introspection_response, iat,
+                               has_iat, "iat"),
+    LONEJSON_FIELD_I64_PRESENT(lonejson_oauth2_introspection_response, nbf,
+                               has_nbf, "nbf")};
+LONEJSON_MAP_DEFINE(lonejson__oauth2_introspection_response_map,
+                    lonejson_oauth2_introspection_response,
+                    lonejson__oauth2_introspection_response_fields);
+
+static const lonejson_field lonejson__oidc_userinfo_known_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oidc_userinfo_response, sub, "sub"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oidc_userinfo_response, name, "name"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oidc_userinfo_response,
+                                preferred_username, "preferred_username"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_oidc_userinfo_response, email,
+                                "email"),
+    LONEJSON_FIELD_BOOL_PRESENT(lonejson_oidc_userinfo_response, email_verified,
+                                has_email_verified, "email_verified")};
+LONEJSON_MAP_DEFINE(lonejson__oidc_userinfo_known_map,
+                    lonejson_oidc_userinfo_response,
+                    lonejson__oidc_userinfo_known_fields);
 #endif
 
 #define LONEJSON__JWT_DEFAULT_MAX_HEADER_BYTES (16u * 1024u)
@@ -70,6 +117,9 @@ LONEJSON_MAP_DEFINE(lonejson__oauth2_token_response_map,
 #define LONEJSON__OIDC_DEFAULT_MAX_JWKS_BYTES (1024u * 1024u)
 #define LONEJSON__OAUTH2_DEFAULT_MAX_FORM_BODY_BYTES (64u * 1024u)
 #define LONEJSON__OAUTH2_DEFAULT_MAX_TOKEN_RESPONSE_BYTES (1024u * 1024u)
+#define LONEJSON__OAUTH2_DEFAULT_MAX_INTROSPECTION_RESPONSE_BYTES              \
+  (1024u * 1024u)
+#define LONEJSON__OIDC_DEFAULT_MAX_USERINFO_RESPONSE_BYTES (1024u * 1024u)
 #define LONEJSON__OIDC_DEFAULT_MAX_AUTH_URL_BYTES (16u * 1024u)
 #define LONEJSON__OIDC_DEFAULT_MAX_CALLBACK_QUERY_BYTES (16u * 1024u)
 #define LONEJSON__OIDC_PKCE_DEFAULT_VERIFIER_BYTES 32u
@@ -716,6 +766,18 @@ lonejson_status lonejson_oidc_discovery_parse_json(lonejson *runtime,
     status = lonejson__oidc_require_https_url(
         out->authorization_endpoint, "authorization_endpoint", 1, error);
   }
+  if (status == LONEJSON_STATUS_OK && out->introspection_endpoint != NULL) {
+    status = lonejson__oidc_require_https_url(
+        out->introspection_endpoint, "introspection_endpoint", 1, error);
+  }
+  if (status == LONEJSON_STATUS_OK && out->revocation_endpoint != NULL) {
+    status = lonejson__oidc_require_https_url(
+        out->revocation_endpoint, "revocation_endpoint", 1, error);
+  }
+  if (status == LONEJSON_STATUS_OK && out->userinfo_endpoint != NULL) {
+    status = lonejson__oidc_require_https_url(
+        out->userinfo_endpoint, "userinfo_endpoint", 1, error);
+  }
   if (status != LONEJSON_STATUS_OK) {
     lonejson_oidc_discovery_cleanup(out);
   }
@@ -1059,6 +1121,83 @@ lonejson_oauth2_refresh_token_body(const lonejson_oauth2_refresh_token *request,
   return status;
 }
 
+static lonejson_status lonejson__oauth2_token_admin_body(
+    const char *kind, const char *token, const char *token_type_hint,
+    const char *client_id, const char *client_secret, size_t max_body_bytes,
+    lonejson_owned_buffer *out, lonejson_error *error) {
+  size_t max_bytes;
+  lonejson_status status;
+  int has_pair = 0;
+
+  if (token == NULL || token[0] == '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, kind);
+  }
+  if (client_secret != NULL &&
+      (client_id == NULL || client_id[0] == '\0')) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "OAuth2 client_id is required with "
+                               "client_secret");
+  }
+  lonejson_owned_buffer_free(out);
+  max_bytes = max_body_bytes == 0u
+                  ? LONEJSON__OAUTH2_DEFAULT_MAX_FORM_BODY_BYTES
+                  : max_body_bytes;
+  status = lonejson__oauth2_form_append_pair(out, "token", token, &has_pair,
+                                             max_bytes, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oauth2_form_append_pair(
+        out, "token_type_hint", token_type_hint, &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oauth2_form_append_pair(
+        out, "client_id", client_id, &has_pair, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oauth2_form_append_pair(
+        out, "client_secret", client_secret, &has_pair, max_bytes, error);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_owned_buffer_free(out);
+  }
+  return status;
+}
+
+lonejson_status lonejson_oauth2_token_introspection_body(
+    const lonejson_oauth2_token_introspection *request,
+    lonejson_owned_buffer *out, lonejson_error *error) {
+  lonejson__clear_error(error);
+  if (request == NULL || out == NULL) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "OAuth2 token introspection request is required");
+  }
+  return lonejson__oauth2_token_admin_body(
+      "OAuth2 introspection token is required", request->token,
+      request->token_type_hint,
+      request->use_basic_auth ? NULL : request->client_id,
+      request->use_basic_auth ? NULL : request->client_secret,
+      request->max_body_bytes, out, error);
+}
+
+lonejson_status lonejson_oauth2_token_revocation_body(
+    const lonejson_oauth2_token_revocation *request, lonejson_owned_buffer *out,
+    lonejson_error *error) {
+  lonejson__clear_error(error);
+  if (request == NULL || out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "OAuth2 token revocation request is required");
+  }
+  return lonejson__oauth2_token_admin_body(
+      "OAuth2 revocation token is required", request->token,
+      request->token_type_hint,
+      request->use_basic_auth ? NULL : request->client_id,
+      request->use_basic_auth ? NULL : request->client_secret,
+      request->max_body_bytes, out, error);
+}
+
 lonejson_status lonejson_oidc_authorization_code_token_body(
     const lonejson_oidc_authorization_code_token *request,
     lonejson_owned_buffer *out, lonejson_error *error) {
@@ -1354,6 +1493,122 @@ lonejson_status lonejson_oauth2_token_response_parse_json(
   return LONEJSON_STATUS_OK;
 }
 
+void lonejson_oauth2_introspection_response_init(
+    lonejson_oauth2_introspection_response *response) {
+  if (response != NULL) {
+    memset(response, 0, sizeof(*response));
+  }
+}
+
+void lonejson_oauth2_introspection_response_cleanup(
+    lonejson_oauth2_introspection_response *response) {
+  if (response != NULL) {
+    lonejson_cleanup(&lonejson__oauth2_introspection_response_map, response);
+    memset(response, 0, sizeof(*response));
+  }
+}
+
+lonejson_status lonejson_oauth2_introspection_response_parse_json(
+    lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lonejson_oauth2_introspection_response *out, lonejson_error *error) {
+  lonejson_status status;
+  size_t max_bytes;
+
+  lonejson__clear_error(error);
+  if (out == NULL || (json == NULL && len != 0u)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "OAuth2 introspection response JSON and output are required");
+  }
+  max_bytes =
+      max_response_bytes == 0u
+          ? LONEJSON__OAUTH2_DEFAULT_MAX_INTROSPECTION_RESPONSE_BYTES
+          : max_response_bytes;
+  if (len > max_bytes) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_OVERFLOW, len, 0u, 0u,
+        "OAuth2 introspection response exceeds configured limit");
+  }
+  lonejson_oauth2_introspection_response_cleanup(out);
+  status = lonejson_parse_buffer(runtime,
+                                 &lonejson__oauth2_introspection_response_map,
+                                 out, json, len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oauth2_introspection_response_cleanup(out);
+    return status;
+  }
+  if (!out->has_active) {
+    lonejson_oauth2_introspection_response_cleanup(out);
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+        "OAuth2 introspection response requires active");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+void lonejson_oidc_userinfo_response_init(lonejson_oidc_userinfo_response *out) {
+  if (out != NULL) {
+    memset(out, 0, sizeof(*out));
+  }
+}
+
+void lonejson_oidc_userinfo_response_cleanup(
+    lonejson_oidc_userinfo_response *out) {
+  if (out != NULL) {
+    lonejson__owned_free(out->json);
+    out->json = NULL;
+    lonejson_cleanup(&lonejson__oidc_userinfo_known_map, out);
+    memset(out, 0, sizeof(*out));
+  }
+}
+
+lonejson_status lonejson_oidc_userinfo_response_parse_json(
+    lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lonejson_oidc_userinfo_response *out, lonejson_error *error) {
+  lonejson_status status;
+  size_t max_bytes;
+  char *copy;
+
+  lonejson__clear_error(error);
+  if (out == NULL || (json == NULL && len != 0u)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "OIDC UserInfo response JSON and output are required");
+  }
+  max_bytes = max_response_bytes == 0u
+                  ? LONEJSON__OIDC_DEFAULT_MAX_USERINFO_RESPONSE_BYTES
+                  : max_response_bytes;
+  if (len > max_bytes) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_OVERFLOW, len, 0u, 0u,
+        "OIDC UserInfo response exceeds configured limit");
+  }
+  lonejson_oidc_userinfo_response_cleanup(out);
+  status = lonejson_validate_buffer(runtime, json, len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson_parse_buffer(runtime, &lonejson__oidc_userinfo_known_map,
+                                 out, json, len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oidc_userinfo_response_cleanup(out);
+    return status;
+  }
+  copy = (char *)lonejson__owned_malloc(NULL, len + 1u);
+  if (copy == NULL) {
+    lonejson_oidc_userinfo_response_cleanup(out);
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to copy OIDC UserInfo JSON");
+  }
+  if (len != 0u) {
+    memcpy(copy, json, len);
+  }
+  copy[len] = '\0';
+  out->json = copy;
+  out->len = len;
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status lonejson__oauth2_token_endpoint_post(
     lonejson *runtime, const char *token_endpoint, const void *request_options,
     lonejson_status (*body_fn)(const void *, lonejson_owned_buffer *,
@@ -1424,6 +1679,18 @@ static lonejson_status lonejson__oauth2_refresh_token_body_adapter(
       (const lonejson_oauth2_refresh_token *)request, out, error);
 }
 
+static lonejson_status lonejson__oauth2_token_introspection_body_adapter(
+    const void *request, lonejson_owned_buffer *out, lonejson_error *error) {
+  return lonejson_oauth2_token_introspection_body(
+      (const lonejson_oauth2_token_introspection *)request, out, error);
+}
+
+static lonejson_status lonejson__oauth2_token_revocation_body_adapter(
+    const void *request, lonejson_owned_buffer *out, lonejson_error *error) {
+  return lonejson_oauth2_token_revocation_body(
+      (const lonejson_oauth2_token_revocation *)request, out, error);
+}
+
 static lonejson_status lonejson__oidc_authorization_code_token_body_adapter(
     const void *request, lonejson_owned_buffer *out, lonejson_error *error) {
   return lonejson_oidc_authorization_code_token_body(
@@ -1450,6 +1717,267 @@ lonejson_status lonejson_oauth2_refresh_token_request(
       runtime, token_endpoint, request_options,
       lonejson__oauth2_refresh_token_body_adapter, max_response_bytes, out,
       error);
+}
+
+static lonejson_status lonejson__oauth2_form_endpoint_post(
+    lonejson *runtime, const char *endpoint, const char *endpoint_name,
+    const void *request_options,
+    lonejson_status (*body_fn)(const void *, lonejson_owned_buffer *,
+                               lonejson_error *),
+    const char *authorization, size_t max_response_bytes,
+    lonejson_http_response *response, lonejson_error *error) {
+  lonejson_owned_buffer body;
+  lonejson_http_request request;
+  size_t max_bytes;
+  lonejson_status status;
+
+  status = lonejson__oidc_require_https_url(endpoint, endpoint_name, 1, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  max_bytes = max_response_bytes == 0u
+                  ? LONEJSON__OAUTH2_DEFAULT_MAX_TOKEN_RESPONSE_BYTES
+                  : max_response_bytes;
+  lonejson_owned_buffer_init(&body);
+  status = body_fn(request_options, &body, error);
+  if (status == LONEJSON_STATUS_OK) {
+    memset(&request, 0, sizeof(request));
+    request.method = "POST";
+    request.url = endpoint;
+    request.content_type = "application/x-www-form-urlencoded";
+    request.authorization = authorization;
+    request.body = body.data;
+    request.body_len = body.len;
+    request.max_response_bytes = max_bytes;
+    status =
+        lonejson__http_provider_request(runtime, &request, response, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__http_require_success(response, endpoint_name, error);
+  }
+  lonejson_owned_buffer_free(&body);
+  return status;
+}
+
+static lonejson_status lonejson__oauth2_basic_authorization(
+    const char *client_id, const char *client_secret, lonejson_owned_buffer *out,
+    lonejson_error *error) {
+  lonejson_owned_buffer credentials;
+  char *encoded;
+  size_t id_len;
+  size_t secret_len;
+  size_t encoded_len;
+  size_t needed;
+  lonejson_status status;
+
+  encoded = NULL;
+  if (client_id == NULL || client_id[0] == '\0' || client_secret == NULL ||
+      client_secret[0] == '\0' || out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "OAuth2 client_id and client_secret are "
+                               "required for client_secret_basic");
+  }
+  id_len = strlen(client_id);
+  secret_len = strlen(client_secret);
+  if (id_len > SIZE_MAX - secret_len - 1u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "OAuth2 client credentials are too large");
+  }
+  lonejson_owned_buffer_init(&credentials);
+  lonejson_owned_buffer_free(out);
+  status = lonejson_owned_buffer_sink(&credentials, client_id, id_len, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_owned_buffer_sink(&credentials, ":", 1u, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status =
+        lonejson_owned_buffer_sink(&credentials, client_secret, secret_len,
+                                   error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_base64_encoded_len(credentials.len,
+                                         LONEJSON_BASE64_STANDARD,
+                                         &encoded_len, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_owned_buffer_sink(out, "Basic ", 6u, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    if (encoded_len > SIZE_MAX - out->len - 1u) {
+      status = lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                                   0u,
+                                   "OAuth2 Basic authorization header is too "
+                                   "large");
+    } else {
+      encoded = (char *)LONEJSON_MALLOC(encoded_len + 1u);
+      if (encoded == NULL) {
+        status = lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                     0u, 0u, 0u,
+                                     "failed to allocate OAuth2 Basic "
+                                     "authorization header");
+      }
+    }
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_base64_encode(credentials.data, credentials.len,
+                                    LONEJSON_BASE64_STANDARD, encoded,
+                                    encoded_len + 1u, &needed, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_owned_buffer_sink(out, encoded, needed, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    out->data[out->len] = '\0';
+  } else {
+    lonejson_owned_buffer_free(out);
+  }
+  LONEJSON_FREE(encoded);
+  lonejson_owned_buffer_free(&credentials);
+  return status;
+}
+
+lonejson_status lonejson_oauth2_introspect_token_request(
+    lonejson *runtime, const char *introspection_endpoint,
+    const lonejson_oauth2_token_introspection *request_options,
+    size_t max_response_bytes, lonejson_oauth2_introspection_response *out,
+    lonejson_error *error) {
+  lonejson_http_response response;
+  lonejson_owned_buffer authorization;
+  const char *authorization_header;
+  size_t max_bytes;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "OAuth2 introspection response output is "
+                               "required");
+  }
+  max_bytes =
+      max_response_bytes == 0u
+          ? LONEJSON__OAUTH2_DEFAULT_MAX_INTROSPECTION_RESPONSE_BYTES
+          : max_response_bytes;
+  authorization_header = NULL;
+  lonejson_owned_buffer_init(&authorization);
+  if (request_options != NULL && request_options->use_basic_auth) {
+    status = lonejson__oauth2_basic_authorization(
+        request_options->client_id, request_options->client_secret,
+        &authorization, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    authorization_header = authorization.data;
+  }
+  lonejson_http_response_init(&response);
+  status = lonejson__oauth2_form_endpoint_post(
+      runtime, introspection_endpoint, "OAuth2 introspection endpoint",
+      request_options, lonejson__oauth2_token_introspection_body_adapter,
+      authorization_header, max_bytes, &response, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_oauth2_introspection_response_parse_json(
+        runtime, response.body.data, response.body.len, max_bytes, out, error);
+  }
+  lonejson_http_response_cleanup(&response);
+  lonejson_owned_buffer_free(&authorization);
+  return status;
+}
+
+lonejson_status lonejson_oauth2_revoke_token_request(
+    lonejson *runtime, const char *revocation_endpoint,
+    const lonejson_oauth2_token_revocation *request_options,
+    lonejson_error *error) {
+  lonejson_http_response response;
+  lonejson_owned_buffer authorization;
+  const char *authorization_header;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  authorization_header = NULL;
+  lonejson_owned_buffer_init(&authorization);
+  if (request_options != NULL && request_options->use_basic_auth) {
+    status = lonejson__oauth2_basic_authorization(
+        request_options->client_id, request_options->client_secret,
+        &authorization, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    authorization_header = authorization.data;
+  }
+  lonejson_http_response_init(&response);
+  status = lonejson__oauth2_form_endpoint_post(
+      runtime, revocation_endpoint, "OAuth2 revocation endpoint",
+      request_options, lonejson__oauth2_token_revocation_body_adapter,
+      authorization_header, 4096u, &response, error);
+  lonejson_http_response_cleanup(&response);
+  lonejson_owned_buffer_free(&authorization);
+  return status;
+}
+
+lonejson_status lonejson_oidc_fetch_userinfo(
+    lonejson *runtime, const char *userinfo_endpoint,
+    const lonejson_oidc_userinfo_request *request_options,
+    lonejson_oidc_userinfo_response *out, lonejson_error *error) {
+  lonejson_http_request request;
+  lonejson_http_response response;
+  size_t max_bytes;
+  lonejson_status status;
+  size_t token_len;
+  char *authorization;
+
+  lonejson__clear_error(error);
+  if (request_options == NULL || out == NULL ||
+      request_options->access_token == NULL ||
+      request_options->access_token[0] == '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "OIDC UserInfo access token and output are "
+                               "required");
+  }
+  status = lonejson__oidc_require_https_url(userinfo_endpoint,
+                                            "userinfo_endpoint", 1, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  token_len = strlen(request_options->access_token);
+  if (token_len > SIZE_MAX - sizeof("Bearer ")) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "OIDC UserInfo access token is too large");
+  }
+  authorization = (char *)lonejson__owned_malloc(NULL, sizeof("Bearer ") +
+                                                           token_len);
+  if (authorization == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u,
+                               "failed to allocate OIDC UserInfo authorization "
+                               "header");
+  }
+  memcpy(authorization, "Bearer ", sizeof("Bearer ") - 1u);
+  memcpy(authorization + sizeof("Bearer ") - 1u, request_options->access_token,
+         token_len + 1u);
+  max_bytes = request_options->max_response_bytes == 0u
+                  ? LONEJSON__OIDC_DEFAULT_MAX_USERINFO_RESPONSE_BYTES
+                  : request_options->max_response_bytes;
+  lonejson_http_response_init(&response);
+  memset(&request, 0, sizeof(request));
+  request.method = "GET";
+  request.url = userinfo_endpoint;
+  request.authorization = authorization;
+  request.max_response_bytes = max_bytes;
+  status = lonejson__http_provider_request(runtime, &request, &response, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status =
+        lonejson__http_require_success(&response, "OIDC UserInfo endpoint",
+                                       error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_oidc_userinfo_response_parse_json(
+        runtime, response.body.data, response.body.len, max_bytes, out, error);
+  }
+  lonejson_http_response_cleanup(&response);
+  lonejson__owned_free(authorization);
+  return status;
 }
 
 lonejson_status lonejson_oidc_authorization_code_token_request(

@@ -45,6 +45,8 @@ The current branch already implements the planned C baseline for:
 - OAuth2/OIDC discovery, JWKS cache, token endpoint helpers, refresh-token body
   construction, authorization-code with PKCE helpers, callback parsing, and
   bearer-token validation,
+- provider-backed OAuth2 token introspection, token revocation, and OIDC
+  UserInfo helpers with C, Lua, fuzz, and e2e coverage,
 - generic base64 helpers in C and Lua, including unpadded base64url for JWT/JWS
   segments,
 - runtime HTTP provider callbacks with explicit user-agent configuration,
@@ -83,23 +85,6 @@ Add narrowly scoped helpers for token-bearing client flows:
 The server-side bearer validation helper should continue to fail closed for an
 expired presented token; a resource server cannot refresh a caller's bearer
 token unless the application has separately chosen to own that client flow.
-
-### Server-Side OAuth2/OIDC Helpers
-
-Add provider-backed helpers for common resource-server and administration
-flows:
-
-- token introspection request/response helpers,
-- token revocation request helpers,
-- userinfo request/response helpers,
-- bounded response parsing and explicit failure classification,
-- the same HTTP provider, user-agent, retry, and size-limit model used by the
-  existing discovery/JWKS/token helpers,
-- C, Lua, fuzz, and e2e coverage for success paths and multiple failure modes.
-
-These helpers should not own routing, response writing, durable credential
-storage, or authorization decisions. They should return authenticated or
-provider-reported facts for the embedding application to authorize.
 
 ### JOSE/JWK Compliance Completion
 

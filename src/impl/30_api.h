@@ -1157,6 +1157,10 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
       lonejson_oauth2_client_credentials_request;
   runtime->oauth2_refresh_token_request =
       lonejson_oauth2_refresh_token_request;
+  runtime->oauth2_introspect_token_request =
+      lonejson_oauth2_introspect_token_request;
+  runtime->oauth2_revoke_token_request = lonejson_oauth2_revoke_token_request;
+  runtime->oidc_fetch_userinfo = lonejson_oidc_fetch_userinfo;
   runtime->oidc_authorization_code_token_request =
       lonejson_oidc_authorization_code_token_request;
   runtime->oidc_validate_bearer_token = lonejson_oidc_validate_bearer_token;

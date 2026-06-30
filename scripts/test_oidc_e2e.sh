@@ -62,6 +62,9 @@ wait_url "$discovery_url"
 discovery_json="$(curl -fsS --max-time 10 --cacert "$ca_file" "$discovery_url")"
 token_endpoint="$(printf '%s' "$discovery_json" | json_field token_endpoint)"
 authorization_endpoint="$(printf '%s' "$discovery_json" | json_field authorization_endpoint)"
+introspection_endpoint="$(printf '%s' "$discovery_json" | json_field introspection_endpoint)"
+revocation_endpoint="$(printf '%s' "$discovery_json" | json_field revocation_endpoint)"
+userinfo_endpoint="$(printf '%s' "$discovery_json" | json_field userinfo_endpoint)"
 
 token_json="$(
   curl -fsS --max-time 10 --cacert "$ca_file" -X POST "$token_endpoint" \
@@ -98,7 +101,32 @@ authorization_token_json="$(
     --data-urlencode 'client_id=lonejson-m2m' \
     --data-urlencode 'client_secret=lonejson-secret'
 )"
+authorization_access_token="$(printf '%s' "$authorization_token_json" | json_field access_token)"
 refresh_token="$(printf '%s' "$authorization_token_json" | json_field refresh_token)"
+
+curl -fsS --max-time 10 --cacert "$ca_file" -X POST "$introspection_endpoint" \
+  -u 'lonejson-m2m:lonejson-secret' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode "token=$authorization_access_token" \
+  --data-urlencode 'token_type_hint=access_token' \
+  | python3 -c '
+import json
+import sys
+value = json.load(sys.stdin)
+if value.get("active") is not True:
+    raise SystemExit("authorization-code access token is not introspection-active")
+'
+
+curl -fsS --max-time 10 --cacert "$ca_file" "$userinfo_endpoint" \
+  -H "Authorization: Bearer $authorization_access_token" \
+  | python3 -c '
+import json
+import sys
+value = json.load(sys.stdin)
+if not value.get("iss"):
+    raise SystemExit("userinfo response did not include issuer")
+'
+
 refresh_json="$(
   curl -fsS --max-time 10 --cacert "$ca_file" -X POST "$token_endpoint" \
     -H 'Content-Type: application/x-www-form-urlencoded' \
@@ -111,7 +139,9 @@ refreshed_access_token="$(printf '%s' "$refresh_json" | json_field access_token)
 
 LONEJSON_OIDC_E2E_CAINFO="$ca_file" \
   "$repo_root/build/host-curl/lonejson_oidc_fixture_server" \
-  "$issuer" "$audience" "$server_port" 4 >"$repo_root/build/host-curl/oidc-fixture-server.log" 2>&1 &
+  "$issuer" "$audience" "$server_port" 4 \
+  "$authorization_access_token" "$refresh_token" \
+  >"$repo_root/build/host-curl/oidc-fixture-server.log" 2>&1 &
 server_pid=$!
 
 ready=0

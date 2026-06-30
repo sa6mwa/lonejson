@@ -64,6 +64,7 @@ fixture_http_request(void *user_data, const lonejson_http_request *request,
   CURLcode code;
   struct curl_slist *headers = NULL;
   char content_type_header[160];
+  char authorization_header[1152];
   fixture_http_sink sink;
   curl_off_t body_len;
   const char *cainfo;
@@ -107,6 +108,15 @@ fixture_http_request(void *user_data, const lonejson_http_request *request,
   if (code == CURLE_OK) {
     code = curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
   }
+  if (code == CURLE_OK && request->authorization != NULL) {
+    snprintf(authorization_header, sizeof(authorization_header),
+             "Authorization: %.1128s", request->authorization);
+    headers = curl_slist_append(headers, authorization_header);
+    if (headers == NULL) {
+      curl_easy_cleanup(curl);
+      return LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+  }
   if (code == CURLE_OK && strcmp(request->method, "POST") == 0) {
     code = curl_easy_setopt(curl, CURLOPT_POST, 1L);
     if (code == CURLE_OK) {
@@ -116,15 +126,22 @@ fixture_http_request(void *user_data, const lonejson_http_request *request,
       code = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, body_len);
     }
     if (code == CURLE_OK && request->content_type != NULL) {
+      struct curl_slist *next;
       snprintf(content_type_header, sizeof(content_type_header),
                "Content-Type: %.120s", request->content_type);
-      headers = curl_slist_append(headers, content_type_header);
-      if (headers == NULL) {
+      next = curl_slist_append(headers, content_type_header);
+      if (next == NULL) {
+        if (headers != NULL) {
+          curl_slist_free_all(headers);
+        }
         curl_easy_cleanup(curl);
         return LONEJSON_STATUS_ALLOCATION_FAILED;
       }
-      code = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+      headers = next;
     }
+  }
+  if (code == CURLE_OK && headers != NULL) {
+    code = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   }
   if (code == CURLE_OK) {
     code = curl_easy_perform(curl);
@@ -290,10 +307,20 @@ int main(int argc, char **argv) {
   const char *algs[] = {"RS256"};
   const char *issuers[1];
   const char *audiences[1];
+  const char *admin_access_token;
+  const char *refresh_token;
+  lonejson_oauth2_token_introspection introspection_request;
+  lonejson_oauth2_introspection_response introspection;
+  lonejson_oidc_userinfo_request userinfo_request;
+  lonejson_oidc_userinfo_response userinfo;
+  lonejson_oauth2_token_revocation revocation_request;
   lonejson_status status;
 
-  if (argc != 5) {
-    fprintf(stderr, "usage: %s ISSUER AUDIENCE PORT MAX_REQUESTS\n", argv[0]);
+  if (argc != 5 && argc != 7) {
+    fprintf(stderr,
+            "usage: %s ISSUER AUDIENCE PORT MAX_REQUESTS [ACCESS_TOKEN "
+            "REFRESH_TOKEN]\n",
+            argv[0]);
     return 2;
   }
   memset(&server, 0, sizeof(server));
@@ -301,6 +328,8 @@ int main(int argc, char **argv) {
   server.audience = argv[2];
   server.port = atoi(argv[3]);
   server.max_requests = atoi(argv[4]);
+  admin_access_token = argc == 7 ? argv[5] : NULL;
+  refresh_token = argc == 7 ? argv[6] : NULL;
   if (server.port <= 0 || server.max_requests <= 0) {
     return 2;
   }
@@ -347,6 +376,61 @@ int main(int argc, char **argv) {
   if (status != LONEJSON_STATUS_OK) {
     fprintf(stderr, "JWKS refresh failed: %s\n", error.message);
     return 1;
+  }
+
+  if (admin_access_token != NULL && refresh_token != NULL) {
+    if (discovery.introspection_endpoint == NULL ||
+        discovery.revocation_endpoint == NULL ||
+        discovery.userinfo_endpoint == NULL) {
+      fprintf(stderr, "OIDC discovery did not advertise admin endpoints\n");
+      return 1;
+    }
+
+    memset(&introspection_request, 0, sizeof(introspection_request));
+    introspection_request.token = admin_access_token;
+    introspection_request.token_type_hint = "access_token";
+    introspection_request.client_id = "lonejson-m2m";
+    introspection_request.client_secret = "lonejson-secret";
+    introspection_request.use_basic_auth = 1;
+    lonejson_oauth2_introspection_response_init(&introspection);
+    status = lonejson_oauth2_introspect_token_request(
+        server.runtime, discovery.introspection_endpoint,
+        &introspection_request, 256u * 1024u, &introspection, &error);
+    if (status != LONEJSON_STATUS_OK || !introspection.has_active ||
+        !introspection.active) {
+      fprintf(stderr, "token introspection failed: %s\n", error.message);
+      lonejson_oauth2_introspection_response_cleanup(&introspection);
+      return 1;
+    }
+    lonejson_oauth2_introspection_response_cleanup(&introspection);
+
+    memset(&userinfo_request, 0, sizeof(userinfo_request));
+    userinfo_request.access_token = admin_access_token;
+    lonejson_oidc_userinfo_response_init(&userinfo);
+    status = lonejson_oidc_fetch_userinfo(
+        server.runtime, discovery.userinfo_endpoint, &userinfo_request,
+        &userinfo, &error);
+    if (status != LONEJSON_STATUS_OK || userinfo.json == NULL ||
+        userinfo.len == 0u) {
+      fprintf(stderr, "userinfo request failed: %s\n", error.message);
+      lonejson_oidc_userinfo_response_cleanup(&userinfo);
+      return 1;
+    }
+    lonejson_oidc_userinfo_response_cleanup(&userinfo);
+
+    memset(&revocation_request, 0, sizeof(revocation_request));
+    revocation_request.token = refresh_token;
+    revocation_request.token_type_hint = "refresh_token";
+    revocation_request.client_id = "lonejson-m2m";
+    revocation_request.client_secret = "lonejson-secret";
+    revocation_request.use_basic_auth = 1;
+    status = lonejson_oauth2_revoke_token_request(
+        server.runtime, discovery.revocation_endpoint, &revocation_request,
+        &error);
+    if (status != LONEJSON_STATUS_OK) {
+      fprintf(stderr, "token revocation failed: %s\n", error.message);
+      return 1;
+    }
   }
 
   issuers[0] = server.issuer;

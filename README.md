@@ -326,11 +326,13 @@ Kore/Vectis-specific handler wrapper. Those are application lifecycle concerns.
 The planned exception is token-flow state: helpers that own an OAuth2/OIDC
 client flow should transparently refresh expired access tokens and apply
 bounded retry defaults when the next step is protocol-obvious, while still
-letting callers opt out or override those policies. The next auth compliance
-scope also includes server-side token introspection, token revocation, userinfo
-helpers, and JOSE/JWK completion for certificate-backed keys (`x5c`, `x5t`,
-`x5t#S256`), critical header handling (`crit`), and JWK operation constraints
-(`key_ops`). JWE is intentionally deferred as a separate encryption feature.
+letting callers opt out or override those policies. Current provider-backed
+helpers already cover discovery, JWKS refresh, token endpoint exchanges,
+server-side token introspection, token revocation, and UserInfo. The next auth
+compliance scope focuses on JOSE/JWK completion for certificate-backed keys
+(`x5c`, `x5t`, `x5t#S256`), critical header handling (`crit`), and JWK
+operation constraints (`key_ops`). JWE is intentionally deferred as a separate
+encryption feature.
 Potential future simplifications would be an examples-level curl HTTP provider
 callback, an examples-level Kore/Vectis adapter, and the token-flow helper
 described in `docs/auth-roadmap.md`. Those should preserve the current binary
@@ -340,11 +342,11 @@ would not.
 The local Docker/nerdctl development rig includes a mock OIDC/OAuth2 provider
 and API fixture. `make test-oidc-e2e` starts the compose stack, obtains a token
 from the mock provider using `curl` rather than lonejson, starts the
-lonejson-backed fixture server, and verifies discovery, JWKS refresh, bearer
-rejection, and bearer acceptance against the live endpoints. Compose commands
-prefer `nerdctl compose` and fall back to `docker compose`. The e2e also
-exercises refresh-token grant exchange against the mock provider and requires a
-returned access token.
+lonejson-backed fixture server, and verifies discovery, JWKS refresh, token
+introspection, UserInfo, revocation, bearer rejection, and bearer acceptance
+against the live endpoints. Compose commands prefer `nerdctl compose` and fall
+back to `docker compose`. The e2e also exercises refresh-token grant exchange
+against the mock provider and requires a returned access token.
 
 `make test-m2m-e2e` starts a tiny lonejson-backed API fixture and uses `curl`
 as the non-lonejson client to verify Basic client credentials, Bearer API keys,

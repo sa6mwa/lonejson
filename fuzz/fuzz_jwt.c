@@ -107,8 +107,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   lonejson_oidc_jwks_cache_policy cache_policy;
   lonejson_oauth2_client_credentials credentials;
   lonejson_oauth2_refresh_token refresh_token;
+  lonejson_oauth2_token_introspection introspection;
+  lonejson_oauth2_token_revocation revocation;
   lonejson_oidc_authorization_code_token code_token;
   lonejson_oauth2_token_response token_response;
+  lonejson_oauth2_introspection_response introspection_response;
+  lonejson_oidc_userinfo_request userinfo_request;
+  lonejson_oidc_userinfo_response userinfo_response;
   lonejson_oidc_pkce pkce;
   lonejson_oidc_authorization_request authorization_request;
   lonejson_oidc_authorization_callback authorization_callback;
@@ -315,6 +320,28 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                                              &error);
     lonejson_owned_buffer_free(&form_body);
 
+    memset(&introspection, 0, sizeof(introspection));
+    introspection.token = size > 0u ? text : "access";
+    introspection.token_type_hint = "access_token";
+    introspection.client_id = "client";
+    introspection.client_secret = size > 3u ? text : NULL;
+    introspection.max_body_bytes = 4096u;
+    lonejson_owned_buffer_init(&form_body);
+    (void)lonejson_oauth2_token_introspection_body(&introspection, &form_body,
+                                                   &error);
+    lonejson_owned_buffer_free(&form_body);
+
+    memset(&revocation, 0, sizeof(revocation));
+    revocation.token = size > 0u ? text : "refresh";
+    revocation.token_type_hint = "refresh_token";
+    revocation.client_id = "client";
+    revocation.client_secret = size > 3u ? text : NULL;
+    revocation.max_body_bytes = 4096u;
+    lonejson_owned_buffer_init(&form_body);
+    (void)lonejson_oauth2_token_revocation_body(&revocation, &form_body,
+                                                &error);
+    lonejson_owned_buffer_free(&form_body);
+
     memset(&code_token, 0, sizeof(code_token));
     code_token.client_id = "client";
     code_token.code = size > 0u ? text : "code";
@@ -331,6 +358,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     (void)runtime->oauth2_token_response_parse_json(runtime, text, size, 4096u,
                                                     &token_response, &error);
     lonejson_oauth2_token_response_cleanup(&token_response);
+
+    lonejson_oauth2_introspection_response_init(&introspection_response);
+    (void)lonejson_oauth2_introspection_response_parse_json(
+        runtime, text, size, 4096u, &introspection_response, &error);
+    lonejson_oauth2_introspection_response_cleanup(&introspection_response);
+
+    lonejson_oidc_userinfo_response_init(&userinfo_response);
+    (void)lonejson_oidc_userinfo_response_parse_json(
+        runtime, text, size, 4096u, &userinfo_response, &error);
+    lonejson_oidc_userinfo_response_cleanup(&userinfo_response);
 
     lonejson_oauth2_token_response_init(&token_response);
     (void)runtime->oauth2_client_credentials_request(
@@ -349,6 +386,24 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         runtime, "https://issuer.example/token", &code_token, 4096u,
         &token_response, &error);
     lonejson_oauth2_token_response_cleanup(&token_response);
+
+    lonejson_oauth2_introspection_response_init(&introspection_response);
+    (void)runtime->oauth2_introspect_token_request(
+        runtime, "https://issuer.example/introspect", &introspection, 4096u,
+        &introspection_response, &error);
+    lonejson_oauth2_introspection_response_cleanup(&introspection_response);
+
+    (void)runtime->oauth2_revoke_token_request(
+        runtime, "https://issuer.example/revoke", &revocation, &error);
+
+    memset(&userinfo_request, 0, sizeof(userinfo_request));
+    userinfo_request.access_token = size > 0u ? text : "access";
+    userinfo_request.max_response_bytes = 4096u;
+    lonejson_oidc_userinfo_response_init(&userinfo_response);
+    (void)runtime->oidc_fetch_userinfo(
+        runtime, "https://issuer.example/userinfo", &userinfo_request,
+        &userinfo_response, &error);
+    lonejson_oidc_userinfo_response_cleanup(&userinfo_response);
 
     lonejson_owned_buffer_init(&pkce_challenge);
     if (size >= 43u && size <= 128u) {

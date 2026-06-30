@@ -1379,6 +1379,12 @@ typedef struct lonejson_oidc_discovery {
   char *token_endpoint;
   /** JWK Set endpoint used for JWT signature key retrieval. Required. */
   char *jwks_uri;
+  /** OAuth2 token introspection endpoint, when advertised. */
+  char *introspection_endpoint;
+  /** OAuth2 token revocation endpoint, when advertised. */
+  char *revocation_endpoint;
+  /** OIDC UserInfo endpoint, when advertised. */
+  char *userinfo_endpoint;
 } lonejson_oidc_discovery;
 
 /** Explicit policy for installing and selecting a cached JWKS document. */
@@ -1447,6 +1453,42 @@ typedef struct lonejson_oauth2_refresh_token {
   size_t max_body_bytes;
 } lonejson_oauth2_refresh_token;
 
+/** OAuth2 token introspection request body options. */
+typedef struct lonejson_oauth2_token_introspection {
+  /** Access or refresh token to introspect. Required. */
+  const char *token;
+  /** Optional token type hint, commonly `access_token` or `refresh_token`. */
+  const char *token_type_hint;
+  /** Optional OAuth2 client identifier for `client_secret_post`. */
+  const char *client_id;
+  /** Optional OAuth2 client secret for `client_secret_post`. */
+  const char *client_secret;
+  /** Use `client_secret_basic` on provider-backed requests instead of posting
+   * client credentials in the form body.
+   */
+  int use_basic_auth;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oauth2_token_introspection;
+
+/** OAuth2 token revocation request body options. */
+typedef struct lonejson_oauth2_token_revocation {
+  /** Access or refresh token to revoke. Required. */
+  const char *token;
+  /** Optional token type hint, commonly `access_token` or `refresh_token`. */
+  const char *token_type_hint;
+  /** Optional OAuth2 client identifier for `client_secret_post`. */
+  const char *client_id;
+  /** Optional OAuth2 client secret for `client_secret_post`. */
+  const char *client_secret;
+  /** Use `client_secret_basic` on provider-backed requests instead of posting
+   * client credentials in the form body.
+   */
+  int use_basic_auth;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oauth2_token_revocation;
+
 /** OIDC/OAuth2 authorization-code token request body options. */
 typedef struct lonejson_oidc_authorization_code_token {
   /** OAuth2 client identifier. Required. */
@@ -1481,6 +1523,55 @@ typedef struct lonejson_oauth2_token_response {
   lonejson_int64 expires_in;
   int has_expires_in;
 } lonejson_oauth2_token_response;
+
+/** Parsed OAuth2 token introspection response.
+ *
+ * The response owns all strings. `active` is required by RFC 7662. Other
+ * fields are optional provider facts; applications still own authorization.
+ */
+typedef struct lonejson_oauth2_introspection_response {
+  int active;
+  int has_active;
+  char *scope;
+  char *client_id;
+  char *username;
+  char *token_type;
+  char *sub;
+  char *aud;
+  char *iss;
+  char *jti;
+  lonejson_int64 exp;
+  int has_exp;
+  lonejson_int64 iat;
+  int has_iat;
+  lonejson_int64 nbf;
+  int has_nbf;
+} lonejson_oauth2_introspection_response;
+
+/** OIDC UserInfo request options. */
+typedef struct lonejson_oidc_userinfo_request {
+  /** Bearer access token. Required. */
+  const char *access_token;
+  /** Maximum JSON response bytes. Zero means the default limit. */
+  size_t max_response_bytes;
+} lonejson_oidc_userinfo_request;
+
+/** Parsed OIDC UserInfo response.
+ *
+ * The helper validates that the response is bounded JSON and retains the exact
+ * JSON bytes. Common claims are copied when present; provider-specific claims
+ * remain available in `json`.
+ */
+typedef struct lonejson_oidc_userinfo_response {
+  char *json;
+  size_t len;
+  char *sub;
+  char *name;
+  char *preferred_username;
+  char *email;
+  int email_verified;
+  int has_email_verified;
+} lonejson_oidc_userinfo_response;
 
 /** Generated OIDC/OAuth2 PKCE verifier and S256 challenge pair. */
 typedef struct lonejson_oidc_pkce {
@@ -2410,6 +2501,7 @@ struct lonejson_http_request {
   const char *method;
   const char *url;
   const char *content_type;
+  const char *authorization;
   const char *user_agent;
   const void *body;
   size_t body_len;
@@ -3059,6 +3151,21 @@ struct lonejson {
       lonejson *runtime, const char *token_endpoint,
       const lonejson_oauth2_refresh_token *request, size_t max_response_bytes,
       lonejson_oauth2_token_response *out, lonejson_error *error);
+  /** Introspects a token through this runtime's HTTP provider. */
+  lonejson_status (*oauth2_introspect_token_request)(
+      lonejson *runtime, const char *introspection_endpoint,
+      const lonejson_oauth2_token_introspection *request,
+      size_t max_response_bytes, lonejson_oauth2_introspection_response *out,
+      lonejson_error *error);
+  /** Revokes a token through this runtime's HTTP provider. */
+  lonejson_status (*oauth2_revoke_token_request)(
+      lonejson *runtime, const char *revocation_endpoint,
+      const lonejson_oauth2_token_revocation *request, lonejson_error *error);
+  /** Fetches OIDC UserInfo through this runtime's HTTP provider. */
+  lonejson_status (*oidc_fetch_userinfo)(
+      lonejson *runtime, const char *userinfo_endpoint,
+      const lonejson_oidc_userinfo_request *request,
+      lonejson_oidc_userinfo_response *out, lonejson_error *error);
   /** Exchanges an authorization code through this runtime's HTTP provider. */
   lonejson_status (*oidc_authorization_code_token_request)(
       lonejson *runtime, const char *token_endpoint,
@@ -6422,6 +6529,14 @@ lonejson_status
 lonejson_oauth2_refresh_token_body(const lonejson_oauth2_refresh_token *request,
                                    lonejson_owned_buffer *out,
                                    lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` introspection body. */
+lonejson_status lonejson_oauth2_token_introspection_body(
+    const lonejson_oauth2_token_introspection *request,
+    lonejson_owned_buffer *out, lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` revocation body. */
+lonejson_status lonejson_oauth2_token_revocation_body(
+    const lonejson_oauth2_token_revocation *request, lonejson_owned_buffer *out,
+    lonejson_error *error);
 /** Builds an `application/x-www-form-urlencoded` authorization-code token body.
  */
 lonejson_status lonejson_oidc_authorization_code_token_body(
@@ -6441,6 +6556,16 @@ void lonejson_oauth2_token_response_cleanup(
 lonejson_status lonejson_oauth2_token_response_parse_json(
     lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
     lonejson_oauth2_token_response *out, lonejson_error *error);
+/** Initializes an introspection response for parsing or cleanup. */
+void lonejson_oauth2_introspection_response_init(
+    lonejson_oauth2_introspection_response *response);
+/** Releases all storage owned by an introspection response. */
+void lonejson_oauth2_introspection_response_cleanup(
+    lonejson_oauth2_introspection_response *response);
+/** Parses and validates a bounded OAuth2 token introspection response. */
+lonejson_status lonejson_oauth2_introspection_response_parse_json(
+    lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lonejson_oauth2_introspection_response *out, lonejson_error *error);
 /** Exchanges OAuth2 client credentials through the runtime HTTP provider and
  * parses the bounded token endpoint response.
  */
@@ -6454,6 +6579,30 @@ lonejson_status lonejson_oauth2_refresh_token_request(
     lonejson *runtime, const char *token_endpoint,
     const lonejson_oauth2_refresh_token *request, size_t max_response_bytes,
     lonejson_oauth2_token_response *out, lonejson_error *error);
+/** Introspects a token through the runtime HTTP provider. */
+lonejson_status lonejson_oauth2_introspect_token_request(
+    lonejson *runtime, const char *introspection_endpoint,
+    const lonejson_oauth2_token_introspection *request,
+    size_t max_response_bytes, lonejson_oauth2_introspection_response *out,
+    lonejson_error *error);
+/** Revokes a token through the runtime HTTP provider. */
+lonejson_status lonejson_oauth2_revoke_token_request(
+    lonejson *runtime, const char *revocation_endpoint,
+    const lonejson_oauth2_token_revocation *request, lonejson_error *error);
+/** Initializes an OIDC UserInfo response for request or cleanup. */
+void lonejson_oidc_userinfo_response_init(lonejson_oidc_userinfo_response *out);
+/** Releases all storage owned by an OIDC UserInfo response. */
+void lonejson_oidc_userinfo_response_cleanup(
+    lonejson_oidc_userinfo_response *out);
+/** Parses and validates a bounded OIDC UserInfo JSON response. */
+lonejson_status lonejson_oidc_userinfo_response_parse_json(
+    lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lonejson_oidc_userinfo_response *out, lonejson_error *error);
+/** Fetches OIDC UserInfo through the runtime HTTP provider. */
+lonejson_status lonejson_oidc_fetch_userinfo(
+    lonejson *runtime, const char *userinfo_endpoint,
+    const lonejson_oidc_userinfo_request *request,
+    lonejson_oidc_userinfo_response *out, lonejson_error *error);
 /** Exchanges an OIDC/OAuth2 authorization code through the runtime HTTP
  * provider.
  */
@@ -7359,8 +7508,14 @@ typedef lonejson_oidc_jwks_cache_policy lj_oidc_jwks_cache_policy;
 typedef lonejson_oidc_jwks_cache lj_oidc_jwks_cache;
 typedef lonejson_oauth2_client_credentials lj_oauth2_client_credentials;
 typedef lonejson_oauth2_refresh_token lj_oauth2_refresh_token;
+typedef lonejson_oauth2_token_introspection lj_oauth2_token_introspection;
+typedef lonejson_oauth2_token_revocation lj_oauth2_token_revocation;
 typedef lonejson_oidc_authorization_code_token lj_oidc_authorization_code_token;
 typedef lonejson_oauth2_token_response lj_oauth2_token_response;
+typedef lonejson_oauth2_introspection_response
+    lj_oauth2_introspection_response;
+typedef lonejson_oidc_userinfo_request lj_oidc_userinfo_request;
+typedef lonejson_oidc_userinfo_response lj_oidc_userinfo_response;
 typedef lonejson_oidc_pkce lj_oidc_pkce;
 typedef lonejson_oidc_authorization_request lj_oidc_authorization_request;
 typedef lonejson_oidc_authorization_callback lj_oidc_authorization_callback;
@@ -9495,6 +9650,19 @@ lj_oauth2_refresh_token_body(const lj_oauth2_refresh_token *request,
                              lj_owned_buffer *out, lj_error *error) {
   return lonejson_oauth2_refresh_token_body(request, out, error);
 }
+/** Builds an introspection request body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oauth2_token_introspection_body(
+    const lj_oauth2_token_introspection *request, lj_owned_buffer *out,
+    lj_error *error) {
+  return lonejson_oauth2_token_introspection_body(request, out, error);
+}
+/** Builds a revocation request body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_revocation_body(
+    const lj_oauth2_token_revocation *request, lj_owned_buffer *out,
+    lj_error *error) {
+  return lonejson_oauth2_token_revocation_body(request, out, error);
+}
 /** Builds an authorization-code token body. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_authorization_code_token_body(
     const lj_oidc_authorization_code_token *request, lj_owned_buffer *out,
@@ -9518,6 +9686,24 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_response_parse_json(
   return lonejson_oauth2_token_response_parse_json(
       runtime, json, len, max_response_bytes, out, error);
 }
+/** Initializes an introspection response for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oauth2_introspection_response_init(
+    lj_oauth2_introspection_response *response) {
+  lonejson_oauth2_introspection_response_init(response);
+}
+/** Releases all storage owned by an introspection response. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oauth2_introspection_response_cleanup(
+    lj_oauth2_introspection_response *response) {
+  lonejson_oauth2_introspection_response_cleanup(response);
+}
+/** Parses and validates a bounded OAuth2 introspection response. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oauth2_introspection_response_parse_json(
+    lj *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lj_oauth2_introspection_response *out, lj_error *error) {
+  return lonejson_oauth2_introspection_response_parse_json(
+      runtime, json, len, max_response_bytes, out, error);
+}
 /** Exchanges OAuth2 client credentials through the runtime HTTP provider. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_client_credentials_request(
     lj *runtime, const char *token_endpoint,
@@ -9533,6 +9719,46 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_refresh_token_request(
     lj_oauth2_token_response *out, lj_error *error) {
   return lonejson_oauth2_refresh_token_request(runtime, token_endpoint, request,
                                                max_response_bytes, out, error);
+}
+/** Introspects a token through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_introspect_token_request(
+    lj *runtime, const char *introspection_endpoint,
+    const lj_oauth2_token_introspection *request, size_t max_response_bytes,
+    lj_oauth2_introspection_response *out, lj_error *error) {
+  return lonejson_oauth2_introspect_token_request(
+      runtime, introspection_endpoint, request, max_response_bytes, out, error);
+}
+/** Revokes a token through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_revoke_token_request(
+    lj *runtime, const char *revocation_endpoint,
+    const lj_oauth2_token_revocation *request, lj_error *error) {
+  return lonejson_oauth2_revoke_token_request(runtime, revocation_endpoint,
+                                              request, error);
+}
+/** Initializes an OIDC UserInfo response for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_userinfo_response_init(lj_oidc_userinfo_response *out) {
+  lonejson_oidc_userinfo_response_init(out);
+}
+/** Releases all storage owned by an OIDC UserInfo response. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_userinfo_response_cleanup(lj_oidc_userinfo_response *out) {
+  lonejson_oidc_userinfo_response_cleanup(out);
+}
+/** Parses and validates a bounded OIDC UserInfo response. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_userinfo_response_parse_json(
+    lj *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lj_oidc_userinfo_response *out, lj_error *error) {
+  return lonejson_oidc_userinfo_response_parse_json(
+      runtime, json, len, max_response_bytes, out, error);
+}
+/** Fetches OIDC UserInfo through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_fetch_userinfo(
+    lj *runtime, const char *userinfo_endpoint,
+    const lj_oidc_userinfo_request *request, lj_oidc_userinfo_response *out,
+    lj_error *error) {
+  return lonejson_oidc_fetch_userinfo(runtime, userinfo_endpoint, request,
+                                        out, error);
 }
 /** Exchanges an authorization code through the runtime HTTP provider. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_authorization_code_token_request(

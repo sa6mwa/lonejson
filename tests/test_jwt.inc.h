@@ -1134,10 +1134,20 @@ static lonejson_status test_oidc_http_provider_request(
       "{\"issuer\":\"https://issuer.example\","
       "\"authorization_endpoint\":\"https://issuer.example/auth\","
       "\"token_endpoint\":\"https://issuer.example/token\","
-      "\"jwks_uri\":\"https://issuer.example/jwks\"}";
+      "\"jwks_uri\":\"https://issuer.example/jwks\","
+      "\"introspection_endpoint\":\"https://issuer.example/introspect\","
+      "\"revocation_endpoint\":\"https://issuer.example/revoke\","
+      "\"userinfo_endpoint\":\"https://issuer.example/userinfo\"}";
   static const char token_json[] =
       "{\"access_token\":\"abc.def.sig\",\"token_type\":\"Bearer\","
       "\"expires_in\":60}";
+  static const char introspection_json[] =
+      "{\"active\":true,\"scope\":\"read write\",\"client_id\":\"client\","
+      "\"sub\":\"subject\",\"aud\":[\"api\"],\"iss\":\"https://issuer.example\","
+      "\"exp\":123,\"iat\":100,\"nbf\":90}";
+  static const char userinfo_json[] =
+      "{\"sub\":\"subject\",\"email\":\"user@example.com\","
+      "\"email_verified\":true,\"custom\":1}";
   test_oidc_http_provider_state *state =
       (test_oidc_http_provider_state *)user_data;
 
@@ -1181,6 +1191,48 @@ static lonejson_status test_oidc_http_provider_request(
     return test_oidc_http_provider_respond(response, token_json,
                                            request->max_response_bytes, error);
   }
+  if (strcmp(request->url, "https://issuer.example/introspect") == 0) {
+    EXPECT(strcmp(request->method, "POST") == 0);
+    EXPECT(request->content_type != NULL);
+    EXPECT(strcmp(request->content_type, "application/x-www-form-urlencoded") ==
+           0);
+    EXPECT(request->body != NULL);
+    EXPECT(strstr((const char *)request->body, "token=access") != NULL);
+    EXPECT(strstr((const char *)request->body,
+                  "token_type_hint=access_token") != NULL);
+    if (request->authorization != NULL) {
+      EXPECT(strcmp(request->authorization, "Basic Y2xpZW50OnNlY3JldA==") ==
+             0);
+      EXPECT(strstr((const char *)request->body, "client_secret=") == NULL);
+    }
+    return test_oidc_http_provider_respond(response, introspection_json,
+                                           request->max_response_bytes, error);
+  }
+  if (strcmp(request->url, "https://issuer.example/revoke") == 0) {
+    EXPECT(strcmp(request->method, "POST") == 0);
+    EXPECT(request->content_type != NULL);
+    EXPECT(strcmp(request->content_type, "application/x-www-form-urlencoded") ==
+           0);
+    EXPECT(request->body != NULL);
+    EXPECT(strstr((const char *)request->body, "token=refresh") != NULL);
+    EXPECT(strstr((const char *)request->body,
+                  "token_type_hint=refresh_token") != NULL);
+    if (request->authorization != NULL) {
+      EXPECT(strcmp(request->authorization, "Basic Y2xpZW50OnNlY3JldA==") ==
+             0);
+      EXPECT(strstr((const char *)request->body, "client_secret=") == NULL);
+    }
+    return test_oidc_http_provider_respond(response, "{}", 0u, error);
+  }
+  if (strcmp(request->url, "https://issuer.example/userinfo") == 0) {
+    EXPECT(strcmp(request->method, "GET") == 0);
+    EXPECT(request->authorization != NULL);
+    EXPECT(strcmp(request->authorization, "Bearer access") == 0);
+    EXPECT(request->body == NULL);
+    EXPECT(request->body_len == 0u);
+    return test_oidc_http_provider_respond(response, userinfo_json,
+                                           request->max_response_bytes, error);
+  }
   lonejson_http_response_cleanup(response);
   response->status_code = 404;
   return lonejson_owned_buffer_sink(&response->body, "not found", 9u, error);
@@ -1197,13 +1249,21 @@ static void test_oidc_http_provider_helpers(void) {
   lonejson_oidc_jwks_cache_policy policy;
   lonejson_oauth2_client_credentials token_request;
   lonejson_oauth2_refresh_token refresh_request;
+  lonejson_oauth2_token_introspection introspection_request;
+  lonejson_oauth2_token_revocation revocation_request;
   lonejson_oidc_authorization_code_token code_request;
   lonejson_oauth2_token_response token_response;
+  lonejson_oauth2_introspection_response introspection_response;
+  lonejson_oidc_userinfo_request userinfo_request;
+  lonejson_oidc_userinfo_response userinfo_response;
   static const char discovery_json[] =
       "{\"issuer\":\"https://issuer.example\","
       "\"authorization_endpoint\":\"https://issuer.example/auth\","
       "\"token_endpoint\":\"https://issuer.example/token\","
-      "\"jwks_uri\":\"https://issuer.example/jwks\"}";
+      "\"jwks_uri\":\"https://issuer.example/jwks\","
+      "\"introspection_endpoint\":\"https://issuer.example/introspect\","
+      "\"revocation_endpoint\":\"https://issuer.example/revoke\","
+      "\"userinfo_endpoint\":\"https://issuer.example/userinfo\"}";
 
   lonejson_error_init(&error);
   memset(&provider, 0, sizeof(provider));
@@ -1244,12 +1304,21 @@ static void test_oidc_http_provider_helpers(void) {
   EXPECT(runtime->oauth2_token_response_parse_json != NULL);
   EXPECT(runtime->oauth2_client_credentials_request != NULL);
   EXPECT(runtime->oauth2_refresh_token_request != NULL);
+  EXPECT(runtime->oauth2_introspect_token_request != NULL);
+  EXPECT(runtime->oauth2_revoke_token_request != NULL);
+  EXPECT(runtime->oidc_fetch_userinfo != NULL);
   EXPECT(runtime->oidc_authorization_code_token_request != NULL);
   EXPECT(runtime->oidc_validate_bearer_token != NULL);
   EXPECT(runtime->oidc_discovery_parse_json(runtime, discovery_json,
                                             strlen(discovery_json), &discovery,
                                             &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(discovery.issuer, "https://issuer.example") == 0);
+  EXPECT(strcmp(discovery.introspection_endpoint,
+                "https://issuer.example/introspect") == 0);
+  EXPECT(strcmp(discovery.revocation_endpoint,
+                "https://issuer.example/revoke") == 0);
+  EXPECT(strcmp(discovery.userinfo_endpoint,
+                "https://issuer.example/userinfo") == 0);
   lonejson_oidc_discovery_cleanup(&discovery);
 
   lonejson_oidc_discovery_init(&discovery);
@@ -1258,6 +1327,12 @@ static void test_oidc_http_provider_helpers(void) {
                                        &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(discovery.issuer, "https://issuer.example") == 0);
   EXPECT(strcmp(discovery.jwks_uri, "https://issuer.example/jwks") == 0);
+  EXPECT(strcmp(discovery.introspection_endpoint,
+                "https://issuer.example/introspect") == 0);
+  EXPECT(strcmp(discovery.revocation_endpoint,
+                "https://issuer.example/revoke") == 0);
+  EXPECT(strcmp(discovery.userinfo_endpoint,
+                "https://issuer.example/userinfo") == 0);
   lonejson_oidc_discovery_cleanup(&discovery);
 
   lonejson_oidc_jwks_cache_init(&cache);
@@ -1322,7 +1397,64 @@ static void test_oidc_http_provider_helpers(void) {
   EXPECT(runtime->oauth2_client_credentials_request(
              runtime, "https://issuer.example/token", &token_request, 8u,
              &token_response, &error) == LONEJSON_STATUS_OVERFLOW);
-  EXPECT(state.requests >= 6);
+
+  memset(&introspection_request, 0, sizeof(introspection_request));
+  introspection_request.token = "access";
+  introspection_request.token_type_hint = "access_token";
+  introspection_request.client_id = "client";
+  introspection_request.client_secret = "secret";
+  lonejson_oauth2_introspection_response_init(&introspection_response);
+  EXPECT(runtime->oauth2_introspect_token_request(
+             runtime, "https://issuer.example/introspect",
+             &introspection_request, 4096u, &introspection_response, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(introspection_response.has_active);
+  EXPECT(introspection_response.active);
+  EXPECT(strcmp(introspection_response.scope, "read write") == 0);
+  EXPECT(strcmp(introspection_response.client_id, "client") == 0);
+  EXPECT(strcmp(introspection_response.sub, "subject") == 0);
+  EXPECT(introspection_response.has_exp);
+  EXPECT(introspection_response.exp == 123);
+  lonejson_oauth2_introspection_response_cleanup(&introspection_response);
+
+  introspection_request.use_basic_auth = 1;
+  lonejson_oauth2_introspection_response_init(&introspection_response);
+  EXPECT(runtime->oauth2_introspect_token_request(
+             runtime, "https://issuer.example/introspect",
+             &introspection_request, 4096u, &introspection_response, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(introspection_response.active);
+  lonejson_oauth2_introspection_response_cleanup(&introspection_response);
+  introspection_request.use_basic_auth = 0;
+
+  memset(&revocation_request, 0, sizeof(revocation_request));
+  revocation_request.token = "refresh";
+  revocation_request.token_type_hint = "refresh_token";
+  revocation_request.client_id = "client";
+  revocation_request.client_secret = "secret";
+  EXPECT(runtime->oauth2_revoke_token_request(
+             runtime, "https://issuer.example/revoke", &revocation_request,
+             &error) == LONEJSON_STATUS_OK);
+  revocation_request.use_basic_auth = 1;
+  EXPECT(runtime->oauth2_revoke_token_request(
+             runtime, "https://issuer.example/revoke", &revocation_request,
+             &error) == LONEJSON_STATUS_OK);
+
+  memset(&userinfo_request, 0, sizeof(userinfo_request));
+  userinfo_request.access_token = "access";
+  lonejson_oidc_userinfo_response_init(&userinfo_response);
+  EXPECT(runtime->oidc_fetch_userinfo(
+             runtime, "https://issuer.example/userinfo", &userinfo_request,
+             &userinfo_response, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(userinfo_response.sub, "subject") == 0);
+  EXPECT(strcmp(userinfo_response.email, "user@example.com") == 0);
+  EXPECT(userinfo_response.has_email_verified);
+  EXPECT(userinfo_response.email_verified);
+  EXPECT(userinfo_response.json != NULL);
+  EXPECT(strstr(userinfo_response.json, "\"custom\":1") != NULL);
+  lonejson_oidc_userinfo_response_cleanup(&userinfo_response);
+
+  EXPECT(state.requests >= 11);
 
   state.fail_callback = 1;
   EXPECT(runtime->oidc_fetch_discovery(runtime, "https://issuer.example", 4096u,
@@ -1351,6 +1483,8 @@ static void test_oidc_http_provider_helpers(void) {
 static void test_oauth2_client_credentials_body(void) {
   lonejson_oauth2_client_credentials request;
   lonejson_oauth2_refresh_token refresh_request;
+  lonejson_oauth2_token_introspection introspection_request;
+  lonejson_oauth2_token_revocation revocation_request;
   lonejson_oidc_authorization_code_token code_request;
   lonejson_owned_buffer out;
   lonejson_error error;
@@ -1410,6 +1544,76 @@ static void test_oauth2_client_credentials_body(void) {
   EXPECT(lonejson_oauth2_refresh_token_body(&refresh_request, &out, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
 
+  memset(&introspection_request, 0, sizeof(introspection_request));
+  introspection_request.token = "a+b&c";
+  introspection_request.token_type_hint = "access_token";
+  introspection_request.client_id = "client id";
+  introspection_request.client_secret = "secret";
+  EXPECT(lonejson_oauth2_token_introspection_body(&introspection_request, &out,
+                                                  &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(out.data,
+                "token=a%2Bb%26c&token_type_hint=access_token&"
+                "client_id=client+id&client_secret=secret") == 0);
+  lonejson_owned_buffer_free(&out);
+
+  introspection_request.max_body_bytes = 8u;
+  EXPECT(lj_oauth2_token_introspection_body(&introspection_request, &out,
+                                            &error) == LJ_STATUS_OVERFLOW);
+  introspection_request.max_body_bytes = 0u;
+  introspection_request.token = NULL;
+  EXPECT(lonejson_oauth2_token_introspection_body(&introspection_request, &out,
+                                                  &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  introspection_request.token = "token";
+  introspection_request.client_id = NULL;
+  EXPECT(lonejson_oauth2_token_introspection_body(&introspection_request, &out,
+                                                  &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  introspection_request.client_id = "client";
+  introspection_request.client_secret = "secret";
+  introspection_request.use_basic_auth = 1;
+  EXPECT(lonejson_oauth2_token_introspection_body(&introspection_request, &out,
+                                                  &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(out.data, "token=token&token_type_hint=access_token") == 0);
+  EXPECT(strstr(out.data, "client_secret") == NULL);
+  lonejson_owned_buffer_free(&out);
+
+  memset(&revocation_request, 0, sizeof(revocation_request));
+  revocation_request.token = "refresh";
+  revocation_request.token_type_hint = "refresh_token";
+  revocation_request.client_id = "client";
+  revocation_request.client_secret = "secret";
+  EXPECT(lonejson_oauth2_token_revocation_body(&revocation_request, &out,
+                                               &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(out.data,
+                "token=refresh&token_type_hint=refresh_token&"
+                "client_id=client&client_secret=secret") == 0);
+  lonejson_owned_buffer_free(&out);
+
+  revocation_request.max_body_bytes = 8u;
+  EXPECT(lj_oauth2_token_revocation_body(&revocation_request, &out, &error) ==
+         LJ_STATUS_OVERFLOW);
+  revocation_request.max_body_bytes = 0u;
+  revocation_request.token = NULL;
+  EXPECT(lonejson_oauth2_token_revocation_body(&revocation_request, &out,
+                                               &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  revocation_request.token = "token";
+  revocation_request.client_id = NULL;
+  EXPECT(lonejson_oauth2_token_revocation_body(&revocation_request, &out,
+                                               &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  revocation_request.client_id = "client";
+  revocation_request.client_secret = "secret";
+  revocation_request.use_basic_auth = 1;
+  EXPECT(lonejson_oauth2_token_revocation_body(&revocation_request, &out,
+                                               &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(out.data, "token=token&token_type_hint=refresh_token") == 0);
+  EXPECT(strstr(out.data, "client_secret") == NULL);
+  lonejson_owned_buffer_free(&out);
+
   memset(&code_request, 0, sizeof(code_request));
   code_request.client_id = "client id";
   code_request.code = "code+123";
@@ -1440,7 +1644,18 @@ static void test_oauth2_token_response_parse(void) {
       "{\"access_token\":\"token\",\"token_type\":\"bearer\","
       "\"expires_in\":3600,\"scope\":\"read write\","
       "\"refresh_token\":\"refresh\",\"id_token\":\"id.jwt\"}";
+  static const char introspection_json[] =
+      "{\"active\":false,\"scope\":\"read\",\"client_id\":\"client\","
+      "\"username\":\"user\",\"token_type\":\"Bearer\",\"sub\":\"sub\","
+      "\"aud\":[\"aud\"],\"iss\":\"https://issuer.example\",\"jti\":\"jti\","
+      "\"exp\":10,\"iat\":2,\"nbf\":1}";
+  static const char userinfo_json[] =
+      "{\"sub\":\"sub\",\"name\":\"User\",\"preferred_username\":\"user\","
+      "\"email\":\"user@example.com\",\"email_verified\":false,"
+      "\"extra\":{\"ok\":true}}";
   lonejson_oauth2_token_response response;
+  lonejson_oauth2_introspection_response introspection;
+  lonejson_oidc_userinfo_response userinfo;
   lonejson_error error;
 
   lonejson_error_init(&error);
@@ -1457,10 +1672,46 @@ static void test_oauth2_token_response_parse(void) {
   EXPECT(strcmp(response.id_token, "id.jwt") == 0);
   lonejson_oauth2_token_response_cleanup(&response);
   EXPECT(response.access_token == NULL);
+
+  lonejson_oauth2_introspection_response_init(&introspection);
+  EXPECT(lj_oauth2_introspection_response_parse_json(
+             test_default_runtime(), introspection_json,
+             strlen(introspection_json), 0u, &introspection, &error) ==
+         LJ_STATUS_OK);
+  EXPECT(introspection.has_active);
+  EXPECT(!introspection.active);
+  EXPECT(strcmp(introspection.scope, "read") == 0);
+  EXPECT(strcmp(introspection.client_id, "client") == 0);
+  EXPECT(strcmp(introspection.username, "user") == 0);
+  EXPECT(strcmp(introspection.token_type, "Bearer") == 0);
+  EXPECT(strcmp(introspection.sub, "sub") == 0);
+  EXPECT(strcmp(introspection.iss, "https://issuer.example") == 0);
+  EXPECT(strcmp(introspection.jti, "jti") == 0);
+  EXPECT(introspection.has_exp && introspection.exp == 10);
+  EXPECT(introspection.has_iat && introspection.iat == 2);
+  EXPECT(introspection.has_nbf && introspection.nbf == 1);
+  lonejson_oauth2_introspection_response_cleanup(&introspection);
+
+  lonejson_oidc_userinfo_response_init(&userinfo);
+  EXPECT(lj_oidc_userinfo_response_parse_json(
+             test_default_runtime(), userinfo_json, strlen(userinfo_json), 0u,
+             &userinfo, &error) == LJ_STATUS_OK);
+  EXPECT(strcmp(userinfo.sub, "sub") == 0);
+  EXPECT(strcmp(userinfo.name, "User") == 0);
+  EXPECT(strcmp(userinfo.preferred_username, "user") == 0);
+  EXPECT(strcmp(userinfo.email, "user@example.com") == 0);
+  EXPECT(userinfo.has_email_verified);
+  EXPECT(!userinfo.email_verified);
+  EXPECT(userinfo.json != NULL);
+  EXPECT(userinfo.len == strlen(userinfo_json));
+  EXPECT(strstr(userinfo.json, "\"extra\":{\"ok\":true}") != NULL);
+  lonejson_oidc_userinfo_response_cleanup(&userinfo);
 }
 
 static void test_oauth2_token_response_failures(void) {
   lonejson_oauth2_token_response response;
+  lonejson_oauth2_introspection_response introspection;
+  lonejson_oidc_userinfo_response userinfo;
   lonejson_error error;
 
   lonejson_error_init(&error);
@@ -1499,6 +1750,35 @@ static void test_oauth2_token_response_failures(void) {
              strlen("{\"access_token\":\"token\",\"token_type\":\"Bearer\"}"),
              8u, &response, &error) == LONEJSON_STATUS_OVERFLOW);
   lonejson_oauth2_token_response_cleanup(&response);
+
+  lonejson_oauth2_introspection_response_init(&introspection);
+  EXPECT(lonejson_oauth2_introspection_response_parse_json(
+             test_default_runtime(), "{\"scope\":\"read\"}",
+             strlen("{\"scope\":\"read\"}"), 0u, &introspection, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(introspection.scope == NULL);
+  EXPECT(lonejson_oauth2_introspection_response_parse_json(
+             test_default_runtime(), "{\"active\":\"true\"}",
+             strlen("{\"active\":\"true\"}"), 0u, &introspection, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_oauth2_introspection_response_parse_json(
+             test_default_runtime(), "{\"active\":true}",
+             strlen("{\"active\":true}"), 8u, &introspection, &error) ==
+         LONEJSON_STATUS_OVERFLOW);
+  lonejson_oauth2_introspection_response_cleanup(&introspection);
+
+  lonejson_oidc_userinfo_response_init(&userinfo);
+  EXPECT(lonejson_oidc_userinfo_response_parse_json(
+             test_default_runtime(), "{\"sub\":\"sub\"}",
+             strlen("{\"sub\":\"sub\"}"), 8u, &userinfo, &error) ==
+         LONEJSON_STATUS_OVERFLOW);
+  EXPECT(userinfo.json == NULL);
+  EXPECT(lonejson_oidc_userinfo_response_parse_json(
+             test_default_runtime(), "{\"email_verified\":\"yes\"}",
+             strlen("{\"email_verified\":\"yes\"}"), 0u, &userinfo, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(userinfo.json == NULL);
+  lonejson_oidc_userinfo_response_cleanup(&userinfo);
 }
 
 static void test_oidc_pkce_challenge_and_generate(void) {

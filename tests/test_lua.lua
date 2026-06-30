@@ -268,7 +268,10 @@ if lonejson.jwt_parse_compact ~= nil then
         '{"issuer":"https://id.example/tenant",' ..
         '"authorization_endpoint":"https://id.example/auth",' ..
         '"token_endpoint":"https://id.example/token",' ..
-        '"jwks_uri":"https://id.example/jwks"}'
+        '"jwks_uri":"https://id.example/jwks",' ..
+        '"introspection_endpoint":"https://id.example/introspect",' ..
+        '"revocation_endpoint":"https://id.example/revoke",' ..
+        '"userinfo_endpoint":"https://id.example/userinfo"}'
     local discovery = lj:oidc_discovery_parse_json(discovery_json, "https://id.example/tenant")
     local cache_policy = {
       issuer = "https://id.example/tenant",
@@ -294,6 +297,25 @@ if lonejson.jwt_parse_compact ~= nil then
       client_secret = "secret",
       scope = "read write",
     })
+    local introspection_body = lonejson.oauth2_token_introspection_body({
+      token = "a+b&c",
+      token_type_hint = "access_token",
+      client_id = "client id",
+      client_secret = "secret",
+    })
+    local introspection_basic_body = lonejson.oauth2_token_introspection_body({
+      token = "access",
+      token_type_hint = "access_token",
+      client_id = "client",
+      client_secret = "secret",
+      use_basic_auth = true,
+    })
+    local revocation_body = lj:oauth2_token_revocation_body({
+      token = "refresh",
+      token_type_hint = "refresh_token",
+      client_id = "client",
+      client_secret = "secret",
+    })
     local code_body = lonejson.oidc_authorization_code_token_body({
       client_id = "client id",
       code = "code+123",
@@ -303,6 +325,10 @@ if lonejson.jwt_parse_compact ~= nil then
     })
     local token_response = lonejson.oauth2_token_response_parse_json(
         '{"access_token":"token","token_type":"Bearer","expires_in":3600,"scope":"read write"}')
+    local introspection_response = lj:oauth2_introspection_response_parse_json(
+        '{"active":true,"scope":"read write","client_id":"client","sub":"sub","exp":123}')
+    local userinfo_response = lonejson.oidc_userinfo_response_parse_json(
+        '{"sub":"sub","email":"user@example.com","email_verified":true,"extra":1}')
     local pkce_challenge = lonejson.oidc_pkce_challenge(
         "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
     local pkce = lonejson.oidc_pkce_generate()
@@ -345,6 +371,31 @@ if lonejson.jwt_parse_compact ~= nil then
           return { status_code = 200, body = '{"access_token":"code-token","token_type":"Bearer","id_token":"id.jwt"}' }
         end
       end
+      if request.url == "https://id.example/introspect" then
+        assert_eq(request.method, "POST")
+        assert_eq(request.content_type, "application/x-www-form-urlencoded")
+        assert_true(request.body:find("token=access", 1, true) ~= nil)
+        if request.authorization ~= nil then
+          assert_eq(request.authorization, "Basic Y2xpZW50OnNlY3JldA==")
+          assert_true(request.body:find("client_secret=", 1, true) == nil)
+        end
+        return { status_code = 200, body = '{"active":true,"scope":"read","client_id":"client","sub":"subject"}' }
+      end
+      if request.url == "https://id.example/revoke" then
+        assert_eq(request.method, "POST")
+        assert_eq(request.content_type, "application/x-www-form-urlencoded")
+        assert_true(request.body:find("token=refresh", 1, true) ~= nil)
+        if request.authorization ~= nil then
+          assert_eq(request.authorization, "Basic Y2xpZW50OnNlY3JldA==")
+          assert_true(request.body:find("client_secret=", 1, true) == nil)
+        end
+        return { status_code = 200, body = "{}" }
+      end
+      if request.url == "https://id.example/userinfo" then
+        assert_eq(request.method, "GET")
+        assert_eq(request.authorization, "Bearer access")
+        return { status_code = 200, body = '{"sub":"subject","email":"subject@example.com","email_verified":true}' }
+      end
       return nil, "unexpected request " .. tostring(request.url)
     end, "lonejson-lua-test/1")
     local fetched_discovery = provider_lj:oidc_fetch_discovery("https://id.example/tenant", 4096)
@@ -361,6 +412,26 @@ if lonejson.jwt_parse_compact ~= nil then
           client_id = "client id",
           client_secret = "secret",
         }, 4096)
+    local requested_introspection = provider_lj:oauth2_introspect_token_request(
+        "https://id.example/introspect", {
+          token = "access",
+          token_type_hint = "access_token",
+          client_id = "client",
+          client_secret = "secret",
+          use_basic_auth = true,
+        }, 4096)
+    local revoked = provider_lj:oauth2_revoke_token_request(
+        "https://id.example/revoke", {
+          token = "refresh",
+          token_type_hint = "refresh_token",
+          client_id = "client",
+          client_secret = "secret",
+          use_basic_auth = true,
+        })
+    local requested_userinfo = provider_lj:oidc_userinfo_request(
+        "https://id.example/userinfo", {
+          access_token = "access",
+        })
     local requested_code_token = provider_lj:oidc_authorization_code_token_request(
         "https://id.example/token", {
           client_id = "client id",
@@ -374,6 +445,9 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(discovery.issuer, "https://id.example/tenant")
     assert_eq(discovery.token_endpoint, "https://id.example/token")
     assert_eq(discovery.jwks_uri, "https://id.example/jwks")
+    assert_eq(discovery.introspection_endpoint, "https://id.example/introspect")
+    assert_eq(discovery.revocation_endpoint, "https://id.example/revoke")
+    assert_eq(discovery.userinfo_endpoint, "https://id.example/userinfo")
     assert_eq(cache_selected.kid, "rsa1")
     assert_true(cache_missing == nil)
     assert_eq(token_body,
@@ -384,6 +458,14 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(refresh_body,
               "grant_type=refresh_token&refresh_token=r%2Be%26f&" ..
               "client_id=client+id&client_secret=secret&scope=read+write")
+    assert_eq(introspection_body,
+              "token=a%2Bb%26c&token_type_hint=access_token&" ..
+              "client_id=client+id&client_secret=secret")
+    assert_eq(introspection_basic_body,
+              "token=access&token_type_hint=access_token")
+    assert_eq(revocation_body,
+              "token=refresh&token_type_hint=refresh_token&" ..
+              "client_id=client&client_secret=secret")
     assert_eq(code_body,
               "grant_type=authorization_code&client_id=client+id&" ..
               "code=code%2B123&" ..
@@ -392,6 +474,15 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(token_response.access_token, "token")
     assert_eq(token_response.token_type, "Bearer")
     assert_eq(token_response.expires_in, 3600)
+    assert_true(introspection_response.active)
+    assert_eq(introspection_response.scope, "read write")
+    assert_eq(introspection_response.client_id, "client")
+    assert_eq(introspection_response.sub, "sub")
+    assert_eq(introspection_response.exp, 123)
+    assert_eq(userinfo_response.sub, "sub")
+    assert_eq(userinfo_response.email, "user@example.com")
+    assert_true(userinfo_response.email_verified)
+    assert_true(userinfo_response.json:find('"extra":1', 1, true) ~= nil)
     assert_eq(pkce_challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
     assert_eq(#pkce.code_verifier, 43)
     assert_eq(#pkce.code_challenge, 43)
@@ -419,9 +510,14 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(requested_client_token.access_token, "client-token")
     assert_eq(requested_client_token.expires_in, 60)
     assert_eq(requested_refresh_token.access_token, "refresh-token")
+    assert_true(requested_introspection.active)
+    assert_eq(requested_introspection.sub, "subject")
+    assert_true(revoked)
+    assert_eq(requested_userinfo.sub, "subject")
+    assert_eq(requested_userinfo.email, "subject@example.com")
     assert_eq(requested_code_token.access_token, "code-token")
     assert_eq(requested_code_token.id_token, "id.jwt")
-    assert_eq(#http_requests, 5)
+    assert_eq(#http_requests, 8)
 
     bad, err = lonejson.oidc_discovery_parse_json(discovery_json, "https://id.example")
     assert_true(bad == nil)
@@ -442,6 +538,20 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_true(bad == nil)
     assert_eq(err.status, "invalid_argument")
 
+    bad, err = lonejson.oauth2_token_introspection_body({
+      token = "access",
+      client_secret = "secret",
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
+
+    bad, err = lonejson.oauth2_token_revocation_body({
+      token = "refresh",
+      max_body_bytes = 8,
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "overflow")
+
     bad, err = lj:oidc_authorization_code_token_body({
       client_id = "client",
       code = "code",
@@ -456,6 +566,14 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(err.status, "type_mismatch")
 
     bad, err = lj:oauth2_token_response_parse_json('{"error":"invalid_client"}')
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = lj:oauth2_introspection_response_parse_json('{"scope":"read"}')
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_json")
+
+    bad, err = lj:oidc_userinfo_response_parse_json('{"email_verified":"yes"}')
     assert_true(bad == nil)
     assert_eq(err.status, "type_mismatch")
 

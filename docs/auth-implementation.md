@@ -431,13 +431,24 @@ Implemented public APIs:
 
 - `lonejson_oauth2_client_credentials_body`
 - `lonejson_oauth2_refresh_token_body`
+- `lonejson_oauth2_token_introspection_body`
+- `lonejson_oauth2_token_revocation_body`
 - `lonejson_oidc_authorization_code_token_body`
 - `lonejson_oauth2_client_credentials_request`
 - `lonejson_oauth2_refresh_token_request`
+- `lonejson_oauth2_introspect_token_request`
+- `lonejson_oauth2_revoke_token_request`
+- `lonejson_oidc_fetch_userinfo`
 - `lonejson_oidc_authorization_code_token_request`
 - `lonejson_oauth2_token_response_init`
 - `lonejson_oauth2_token_response_cleanup`
 - `lonejson_oauth2_token_response_parse_json`
+- `lonejson_oauth2_introspection_response_init`
+- `lonejson_oauth2_introspection_response_cleanup`
+- `lonejson_oauth2_introspection_response_parse_json`
+- `lonejson_oidc_userinfo_response_init`
+- `lonejson_oidc_userinfo_response_cleanup`
+- `lonejson_oidc_userinfo_response_parse_json`
 - short aliases `lj_oauth2_*`
 
 `lonejson_oauth2_client_credentials_body` builds an
@@ -467,6 +478,15 @@ Then it appends configured fields with form encoding and enforces
 optional `client_secret`, optional scope narrowing, and the same body limit
 rules. `client_id` is required when `client_secret` is supplied.
 
+`lonejson_oauth2_token_introspection_body` and
+`lonejson_oauth2_token_revocation_body` build bounded form bodies for RFC 7662
+token introspection and RFC 7009 token revocation. They require `token`, accept
+optional `token_type_hint`, and support optional `client_id`/`client_secret`
+for `client_secret_post`; `client_id` is required when `client_secret` is
+supplied. Set `use_basic_auth` to use `client_secret_basic` in provider-backed
+requests. In that mode the form body omits `client_id` and `client_secret`, and
+the helper sends `Authorization: Basic <base64(client_id:client_secret)>`.
+
 `lonejson_oidc_authorization_code_token_body` builds an authorization-code
 token exchange body with `grant_type=authorization_code`, required `client_id`,
 `code`, `redirect_uri`, and `code_verifier`, optional `client_secret`, and the
@@ -479,7 +499,15 @@ endpoint response.
 `lonejson_oauth2_refresh_token_request`, and
 `lonejson_oidc_authorization_code_token_request` compose form-body
 construction, a provider-backed HTTPS POST, HTTP 2xx checking, and bounded token
-response parsing.
+response parsing. `lonejson_oauth2_introspect_token_request` and
+`lonejson_oauth2_revoke_token_request` use the same provider-backed HTTPS POST
+model against discovery's `introspection_endpoint` and `revocation_endpoint`.
+Introspection parses a bounded response and requires the RFC 7662 `active`
+field. Revocation accepts any HTTP 2xx response body and returns success.
+`lonejson_oidc_fetch_userinfo` performs a provider-backed HTTPS GET with
+`Authorization: Bearer <access_token>`, validates a bounded JSON response, keeps
+the exact JSON bytes, and copies common claims (`sub`, `name`,
+`preferred_username`, `email`, `email_verified`) when present.
 
 Implemented response fields:
 
@@ -657,11 +685,18 @@ OIDC/OAuth2 Lua facade:
 - `oidc_jwks_cache_refresh` on runtime userdata
 - `oauth2_client_credentials_body`
 - `oauth2_refresh_token_body`
+- `oauth2_token_introspection_body`
+- `oauth2_token_revocation_body`
 - `oidc_authorization_code_token_body`
 - `oauth2_client_credentials_request` on runtime userdata
 - `oauth2_refresh_token_request` on runtime userdata
+- `oauth2_introspect_token_request` on runtime userdata
+- `oauth2_revoke_token_request` on runtime userdata
+- `oidc_userinfo_request` on runtime userdata
 - `oidc_authorization_code_token_request` on runtime userdata
 - `oauth2_token_response_parse_json`
+- `oauth2_introspection_response_parse_json`
+- `oidc_userinfo_response_parse_json`
 - `oidc_pkce_challenge`
 - `oidc_pkce_generate`
 - `oidc_authorization_url`
@@ -828,9 +863,6 @@ The following are deliberate gaps or future work, not hidden behavior.
 - No JWK `key_ops` enforcement yet.
 - No JWKS cache eviction policy beyond one explicit cache object.
 - No concurrency synchronization inside the JWKS cache object.
-- No token introspection endpoint support yet.
-- No revocation endpoint support yet.
-- No userinfo endpoint helper yet.
 - No encrypted JWT/JWE support. JWE is intentionally out of the current
   OIDC/JWT/JWK completion scope.
 
@@ -845,10 +877,9 @@ where a supported OAuth2/OIDC flow is and decides whether to refresh, retry, or
 return a clear "cannot continue" state.
 
 The next compliance target is documented in `docs/auth-roadmap.md`: transparent
-token-flow state with retry/refresh defaults, server-side introspection,
-revocation, and userinfo helpers, plus JOSE/JWK completion for `x5c`, `x5t`,
-`crit`, and `key_ops`. JWE should be handled as a later encryption-specific
-feature, not mixed into that target.
+token-flow state with retry/refresh defaults plus JOSE/JWK completion for
+`x5c`, `x5t`, `crit`, and `key_ops`. JWE should be handled as a later
+encryption-specific feature, not mixed into that target.
 
 ## Recommended Composition Patterns
 
