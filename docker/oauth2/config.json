@@ -10,6 +10,7 @@
           "match": "client_credentials",
           "claims": {
             "sub": "${client_id}",
+            "azp": "${client_id}",
             "aud": [
               "lonejson-api"
             ],
@@ -21,6 +22,7 @@
           "match": "refresh_token",
           "claims": {
             "sub": "${client_id}",
+            "azp": "${client_id}",
             "aud": [
               "lonejson-api"
             ],

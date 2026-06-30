@@ -337,15 +337,15 @@ persistence/locking, proxy policy, redirect policy, TLS policy, or
 Kore/Vectis-specific handler wrapper. Those are application lifecycle concerns.
 Current provider-backed helpers cover discovery, JWKS refresh, token endpoint
 exchanges, token-flow refresh/retry, server-side token introspection, token
-revocation, and UserInfo. The next auth compliance scope focuses on JOSE/JWK
-completion for certificate-backed keys (`x5c`, `x5t`, `x5t#S256`), critical
-header handling (`crit`), and JWK operation constraints (`key_ops`). JWE is
+revocation, UserInfo, fail-closed JOSE `crit`, JWK `key_ops`, OIDC `azp`,
+OAuth2 `scope`/`scp`, strict multi-audience policy, and syntax parsing for
+certificate-backed key fields (`x5c`, `x5t`, `x5t#S256`). Certificate-chain
+trust validation and thumbprint matching remain separate work. JWE is
 intentionally deferred as a separate encryption feature.
 Potential future simplifications would be an examples-level curl HTTP provider
-callback, an examples-level Kore/Vectis adapter, and the token-flow helper
-described in `docs/auth-roadmap.md`. Those should preserve the current binary
-dependency boundary; putting `curl_easy_*` calls directly in `liblonejson.so`
-would not.
+callback and an examples-level Kore/Vectis adapter. Those should preserve the
+current binary dependency boundary; putting `curl_easy_*` calls directly in
+`liblonejson.so` would not.
 
 The local Docker/nerdctl development rig includes a mock OIDC/OAuth2 provider
 and API fixture. `make test-oidc-e2e` starts the compose stack, obtains a token

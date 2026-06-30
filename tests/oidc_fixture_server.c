@@ -307,6 +307,7 @@ int main(int argc, char **argv) {
   const char *algs[] = {"RS256"};
   const char *issuers[1];
   const char *audiences[1];
+  const char *required_scopes[] = {"openid", "profile"};
   const char *admin_access_token;
   const char *refresh_token;
   lonejson_oauth2_token_introspection introspection_request;
@@ -478,6 +479,10 @@ int main(int argc, char **argv) {
   server.claim_policy.accepted_issuer_count = 1u;
   server.claim_policy.accepted_audiences = audiences;
   server.claim_policy.accepted_audience_count = 1u;
+  server.claim_policy.expected_azp = "lonejson-m2m";
+  server.claim_policy.required_scopes = required_scopes;
+  server.claim_policy.required_scope_count =
+      sizeof(required_scopes) / sizeof(required_scopes[0]);
   server.claim_policy.now = (lonejson_int64)time(NULL);
   server.claim_policy.allowed_clock_skew = 60;
 

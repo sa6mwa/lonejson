@@ -110,7 +110,8 @@ static void test_jwk_parse_json_shapes(void) {
   lonejson_error error;
   const char *rsa =
       "{\"kty\":\"RSA\",\"kid\":\"rsa1\",\"use\":\"sig\",\"alg\":\"RS256\","
-      "\"n\":\"AQIDBA\",\"e\":\"AQAB\"}";
+      "\"key_ops\":[\"verify\"],\"x5t\":\"AA\",\"x5t#S256\":\"AA\","
+      "\"x5c\":[\"AA==\"],\"n\":\"AQIDBA\",\"e\":\"AQAB\"}";
   const char *ec =
       "{\"kty\":\"EC\",\"kid\":\"ec1\",\"crv\":\"P-256\",\"x\":\"AAEC\","
       "\"y\":\"AwQF\"}";
@@ -123,6 +124,12 @@ static void test_jwk_parse_json_shapes(void) {
   EXPECT(strcmp(jwk.kty, "RSA") == 0);
   EXPECT(strcmp(jwk.kid, "rsa1") == 0);
   EXPECT(strcmp(jwk.alg, "RS256") == 0);
+  EXPECT(jwk.key_ops.count == 1u);
+  EXPECT(strcmp(jwk.key_ops.items[0], "verify") == 0);
+  EXPECT(strcmp(jwk.x5t, "AA") == 0);
+  EXPECT(strcmp(jwk.x5t_s256, "AA") == 0);
+  EXPECT(jwk.x5c.count == 1u);
+  EXPECT(strcmp(jwk.x5c.items[0], "AA==") == 0);
   EXPECT(strcmp(jwk.n, "AQIDBA") == 0);
   EXPECT(strcmp(jwk.e, "AQAB") == 0);
   lonejson_jwk_cleanup(&jwk);
@@ -216,6 +223,20 @@ static void test_jwk_parse_failures(void) {
   }
   {
     const char *json = "{\"kty\":\"RSA\",\"n\":\"AQ=\",\"e\":\"AQAB\"}";
+    EXPECT(lonejson_jwk_parse_json(test_default_runtime(), json, strlen(json),
+                                   &jwk,
+                                   &error) == LONEJSON_STATUS_INVALID_JSON);
+  }
+  {
+    const char *json =
+        "{\"kty\":\"RSA\",\"n\":\"AQID\",\"e\":\"AQAB\",\"x5t\":\"@@\"}";
+    EXPECT(lonejson_jwk_parse_json(test_default_runtime(), json, strlen(json),
+                                   &jwk,
+                                   &error) == LONEJSON_STATUS_INVALID_JSON);
+  }
+  {
+    const char *json =
+        "{\"kty\":\"RSA\",\"n\":\"AQID\",\"e\":\"AQAB\",\"x5c\":[\"@@\"]}";
     EXPECT(lonejson_jwk_parse_json(test_default_runtime(), json, strlen(json),
                                    &jwk,
                                    &error) == LONEJSON_STATUS_INVALID_JSON);
@@ -376,6 +397,23 @@ static void test_jwt_decode_and_validate_claims(void) {
       "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJu"
       "b25jZSI6Im5vbmNlLTQ1NiJ9."
       "c2ln";
+  static const char jose_policy_token[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIiwiY3JpdCI6WyJleHAt"
+      "dGVzdCJdLCJ4NXQiOiJBQSIsIng1dCNTMjU2IjoiQUEiLCJ4NWMiOlsiQUE9PSJdfQ."
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjpbImFwaSIsImNsaWVudCJdLCJh"
+      "enAiOiJjbGllbnQiLCJzY29wZSI6InJlYWQgd3JpdGUiLCJzY3AiOlsiYWRtaW4iLCJi"
+      "aWxsaW5nLnJlYWQiXSwiZXhwIjoyMDAwfQ."
+      "c2ln";
+  static const char no_azp_token[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOlsiYXBpIiwiY2xpZW50Il0sInNjb3BlIjoicmVh"
+      "ZCIsImV4cCI6MjAwMH0."
+      "c2ln";
+  static const char *const algs[] = {"RS256"};
+  static const char *const issuers[] = {"issuer"};
+  static const char *const audiences[] = {"api", "client"};
+  static const char *const accepted_crit[] = {"exp-test"};
+  static const char *const required_scopes[] = {"read", "admin"};
   lonejson_jwt_header header;
   lonejson_jwt_claims claims;
   lonejson_jwt_claim_policy policy;
@@ -424,6 +462,69 @@ static void test_jwt_decode_and_validate_claims(void) {
   EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
          LONEJSON_STATUS_OK);
   policy.expected_nonce = "other";
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_jwt_header_cleanup(&header);
+  lonejson_jwt_claims_cleanup(&claims);
+
+  memset(&policy, 0, sizeof(policy));
+  policy.accepted_algs = algs;
+  policy.accepted_alg_count = sizeof(algs) / sizeof(algs[0]);
+  policy.accepted_issuers = issuers;
+  policy.accepted_issuer_count = sizeof(issuers) / sizeof(issuers[0]);
+  policy.accepted_audiences = audiences;
+  policy.accepted_audience_count = sizeof(audiences) / sizeof(audiences[0]);
+  policy.accepted_crit = accepted_crit;
+  policy.accepted_crit_count = sizeof(accepted_crit) / sizeof(accepted_crit[0]);
+  policy.required_scopes = required_scopes;
+  policy.required_scope_count =
+      sizeof(required_scopes) / sizeof(required_scopes[0]);
+  policy.expected_azp = "client";
+  policy.require_azp_when_multiple_audiences = 1;
+  policy.require_all_audiences_accepted = 1;
+  policy.now = 1000;
+
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), jose_policy_token,
+                                     strlen(jose_policy_token), &policy,
+                                     &header, &claims,
+                                     &error) == LONEJSON_STATUS_OK);
+  EXPECT(header.crit.count == 1u);
+  EXPECT(strcmp(header.crit.items[0], "exp-test") == 0);
+  EXPECT(strcmp(header.x5t, "AA") == 0);
+  EXPECT(strcmp(header.x5t_s256, "AA") == 0);
+  EXPECT(header.x5c.count == 1u);
+  EXPECT(strcmp(header.x5c.items[0], "AA==") == 0);
+  EXPECT(strcmp(claims.azp, "client") == 0);
+  EXPECT(strcmp(claims.scope, "read write") == 0);
+  EXPECT(claims.scp.count == 2u);
+  EXPECT(strcmp(claims.scp.items[0], "admin") == 0);
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_OK);
+  policy.accepted_crit_count = 0u;
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  policy.accepted_crit_count = sizeof(accepted_crit) / sizeof(accepted_crit[0]);
+  policy.expected_azp = "other";
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  policy.expected_azp = "client";
+  policy.required_scope_count = 1u;
+  policy.required_scopes = &required_scopes[1];
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_OK);
+  policy.required_scopes = required_scopes;
+  policy.required_scope_count = 2u;
+  policy.accepted_audience_count = 1u;
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_jwt_header_cleanup(&header);
+  lonejson_jwt_claims_cleanup(&claims);
+
+  policy.accepted_audience_count = sizeof(audiences) / sizeof(audiences[0]);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), no_azp_token,
+                                     strlen(no_azp_token), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
   lonejson_jwt_header_cleanup(&header);
@@ -586,6 +687,8 @@ static void test_jwt_validate_signature_failures(void) {
   char *jwk_kty;
   char *jwk_kid;
   char *jwk_n;
+  lonejson_string_array jwk_key_ops;
+  char *disallowed_key_ops[1];
 
   lonejson_error_init(&error);
   lonejson_jwt_header_init(&header);
@@ -609,6 +712,8 @@ static void test_jwt_validate_signature_failures(void) {
   jwk_kty = jwk.kty;
   jwk_kid = jwk.kid;
   jwk_n = jwk.n;
+  jwk_key_ops = jwk.key_ops;
+  disallowed_key_ops[0] = (char *)"sign";
 
   memcpy(tampered, test_jwt_rs256_token, sizeof(tampered));
   tampered[sizeof(tampered) - 2u] =
@@ -640,6 +745,15 @@ static void test_jwt_validate_signature_failures(void) {
   EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
   jwk.use = (char *)"sig";
+  jwk.key_ops.items = disallowed_key_ops;
+  jwk.key_ops.count = 1u;
+  jwk.key_ops.capacity = 1u;
+  EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_jwt_validate_signature_with_runtime(
+             test_default_runtime(), &compact, &header, &jwk, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  jwk.key_ops = jwk_key_ops;
   jwk.kty = (char *)"EC";
   EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
@@ -668,6 +782,7 @@ static void test_jwt_validate_signature_failures(void) {
   jwk.kty = jwk_kty;
   jwk.kid = jwk_kid;
   jwk.n = jwk_n;
+  jwk.key_ops = jwk_key_ops;
   lonejson_jwk_cleanup(&jwk);
   lonejson_jwt_header_cleanup(&header);
   lonejson_jwt_claims_cleanup(&claims);
@@ -760,6 +875,22 @@ static void test_jwt_decode_claim_failures(void) {
       "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDAsIm5vbmNlIjoxMjN9."
       "c2ln";
+  static const char crit_object[] =
+      "eyJhbGciOiJSUzI1NiIsImNyaXQiOnt9fQ."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char bad_crit_item[] =
+      "eyJhbGciOiJSUzI1NiIsImNyaXQiOls0Ml19."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char bad_scp_item[] =
+      "eyJhbGciOiJSUzI1NiJ9."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJzY3AiOls0Ml0sImV4cCI6MjAwMH0."
+      "c2ln";
+  static const char bad_x5c[] =
+      "eyJhbGciOiJSUzI1NiIsIng1YyI6WyJAQCJdfQ."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
   static const char root_array[] =
       "W10."
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
@@ -796,6 +927,21 @@ static void test_jwt_decode_claim_failures(void) {
                                      strlen(nonce_number), &policy, &header,
                                      &claims,
                                      &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), crit_object,
+                                     strlen(crit_object), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), bad_crit_item,
+                                     strlen(bad_crit_item), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), bad_scp_item,
+                                     strlen(bad_scp_item), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), bad_x5c,
+                                     strlen(bad_x5c), &policy, &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(lonejson_jwt_decode_compact(
              test_default_runtime(), root_array, strlen(root_array), &policy,
              &header, &claims, &error) == LONEJSON_STATUS_TYPE_MISMATCH);

@@ -889,10 +889,9 @@ containing the auth implementation.
 The following are deliberate gaps or future work, not hidden behavior.
 
 - No built-in HTTP transport; caller-owned providers perform network I/O.
-- No complete token-flow state helper yet. Current token endpoint helpers can
-  build or perform one request, but they do not yet retain token state,
-  transparently refresh expired access tokens, or apply helper-owned retry
-  policy. That is now roadmap work, with opt-out controls required.
+- Token-flow state helpers retain token state, transparently refresh expired
+  access tokens by default when a refresh token is available, apply bounded
+  retry policy, and expose opt-out controls.
 - No timeout, proxy, redirect, or TLS policy helper; those remain provider-owned.
 - No built-in credential persistence, locking, or encryption helper. The M2M
   helpers generate store-ready JSON records, verify caller-owned JSON store
@@ -910,14 +909,15 @@ The following are deliberate gaps or future work, not hidden behavior.
 - No implemented HS256 or `none` validation support. `none` remains rejected.
 - No Ed448 support for `EdDSA`; the OpenSSL provider currently supports
   Ed25519 OKP keys.
-- No x5c/x5t certificate-chain validation yet. This is part of the planned
-  OIDC/JWT/JWK completion scope.
-- No `crit` JOSE header handling yet. Until implemented, tokens declaring
-  critical headers should be treated as unsupported rather than trusted.
-- No `azp` validation.
-- No `scope` or `scp` authorization helper.
-- No multiple-audience policy mode beyond accepted-audience membership.
-- No JWK `key_ops` enforcement yet.
+- `x5c`, `x5t`, and `x5t#S256` are parsed and syntax-checked, but lonejson does
+  not yet validate certificate chains or match thumbprints against certificate
+  material.
+- `crit` JOSE header handling is fail-closed: every critical header name must be
+  listed in the claim policy `accepted_crit` array.
+- `azp`, `scope`, `scp`, and stricter multi-audience policy checks are available
+  in `lonejson_jwt_claim_policy`.
+- JWK `key_ops` is parsed and signature verification rejects keys that declare
+  operations without `verify`.
 - No JWKS cache eviction policy beyond one explicit cache object.
 - No concurrency synchronization inside the JWKS cache object.
 - No encrypted JWT/JWE support. JWE is intentionally out of the current
@@ -933,10 +933,10 @@ devices. It is distinct from the planned token-flow state helper that tracks
 where a supported OAuth2/OIDC flow is and decides whether to refresh, retry, or
 return a clear "cannot continue" state.
 
-The next compliance target is documented in `docs/auth-roadmap.md`: transparent
-token-flow state with retry/refresh defaults plus JOSE/JWK completion for
-`x5c`, `x5t`, `crit`, and `key_ops`. JWE should be handled as a later
-encryption-specific feature, not mixed into that target.
+The remaining compliance target is documented in `docs/auth-roadmap.md`:
+certificate-chain trust validation and thumbprint matching for certificate-backed
+JWKs. JWE should be handled as a later encryption-specific feature, not mixed
+into the OIDC/JWT/JWK target.
 
 ## Recommended Composition Patterns
 

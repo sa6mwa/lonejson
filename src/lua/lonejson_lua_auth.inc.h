@@ -7,12 +7,31 @@ static void ljlua_auth_push_optional_string(lua_State *L, const char *value,
   }
 }
 
+static void ljlua_auth_push_string_array(lua_State *L,
+                                         const lonejson_string_array *array,
+                                         const char *name) {
+  size_t i;
+  if (array == NULL || array->count == 0u) {
+    return;
+  }
+  lua_createtable(L, (int)array->count, 0);
+  for (i = 0u; i < array->count; ++i) {
+    lua_pushstring(L, array->items[i]);
+    lua_rawseti(L, -2, (lua_Integer)i + 1);
+  }
+  lua_setfield(L, -2, name);
+}
+
 static void ljlua_auth_push_jwk(lua_State *L, const lonejson_jwk *jwk) {
   lua_newtable(L);
   ljlua_auth_push_optional_string(L, jwk->kty, "kty");
   ljlua_auth_push_optional_string(L, jwk->kid, "kid");
   ljlua_auth_push_optional_string(L, jwk->alg, "alg");
   ljlua_auth_push_optional_string(L, jwk->use, "use");
+  ljlua_auth_push_string_array(L, &jwk->key_ops, "key_ops");
+  ljlua_auth_push_optional_string(L, jwk->x5t, "x5t");
+  ljlua_auth_push_optional_string(L, jwk->x5t_s256, "x5t#S256");
+  ljlua_auth_push_string_array(L, &jwk->x5c, "x5c");
   ljlua_auth_push_optional_string(L, jwk->crv, "crv");
   ljlua_auth_push_optional_string(L, jwk->n, "n");
   ljlua_auth_push_optional_string(L, jwk->e, "e");
@@ -40,6 +59,10 @@ static void ljlua_auth_push_header(lua_State *L,
   ljlua_auth_push_optional_string(L, header->alg, "alg");
   ljlua_auth_push_optional_string(L, header->kid, "kid");
   ljlua_auth_push_optional_string(L, header->typ, "typ");
+  ljlua_auth_push_string_array(L, &header->crit, "crit");
+  ljlua_auth_push_optional_string(L, header->x5t, "x5t");
+  ljlua_auth_push_optional_string(L, header->x5t_s256, "x5t#S256");
+  ljlua_auth_push_string_array(L, &header->x5c, "x5c");
 }
 
 static void ljlua_auth_push_claims(lua_State *L,
@@ -50,6 +73,9 @@ static void ljlua_auth_push_claims(lua_State *L,
   ljlua_auth_push_optional_string(L, claims->iss, "iss");
   ljlua_auth_push_optional_string(L, claims->sub, "sub");
   ljlua_auth_push_optional_string(L, claims->nonce, "nonce");
+  ljlua_auth_push_optional_string(L, claims->azp, "azp");
+  ljlua_auth_push_optional_string(L, claims->scope, "scope");
+  ljlua_auth_push_string_array(L, &claims->scp, "scp");
   ljlua_auth_push_optional_string(L, claims->aud, "aud");
   if (claims->aud_array.count != 0u) {
     lua_createtable(L, (int)claims->aud_array.count, 0);
@@ -1032,6 +1058,8 @@ static void ljlua_auth_free_policy(lonejson_jwt_claim_policy *policy) {
   free((void *)policy->accepted_issuers);
   free((void *)policy->accepted_audiences);
   free((void *)policy->required_claims);
+  free((void *)policy->accepted_crit);
+  free((void *)policy->required_scopes);
 }
 
 static int ljlua_auth_read_policy(lua_State *L, int index,
@@ -1059,6 +1087,15 @@ static int ljlua_auth_read_policy(lua_State *L, int index,
     lua_getfield(L, index, "expected_nonce");
     policy->expected_nonce = lua_isnil(L, -1) ? NULL : luaL_checkstring(L, -1);
     lua_pop(L, 1);
+    lua_getfield(L, index, "expected_azp");
+    policy->expected_azp = lua_isnil(L, -1) ? NULL : luaL_checkstring(L, -1);
+    lua_pop(L, 1);
+    ljlua_auth_read_string_list(L, index, "accepted_crit",
+                                &policy->accepted_crit,
+                                &policy->accepted_crit_count, 0);
+    ljlua_auth_read_string_list(L, index, "required_scopes",
+                                &policy->required_scopes,
+                                &policy->required_scope_count, 0);
     ljlua_auth_read_string_list(L, index, "required_claims",
                                 &policy->required_claims,
                                 &policy->required_claim_count, 0);
@@ -1068,6 +1105,12 @@ static int ljlua_auth_read_policy(lua_State *L, int index,
     lua_getfield(L, index, "allowed_clock_skew");
     policy->allowed_clock_skew =
         lua_isnil(L, -1) ? 0 : (lonejson_int64)luaL_checkinteger(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, index, "require_azp_when_multiple_audiences");
+    policy->require_azp_when_multiple_audiences = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, index, "require_all_audiences_accepted");
+    policy->require_all_audiences_accepted = lua_toboolean(L, -1);
     lua_pop(L, 1);
   }
   lua_getfield(L, index, "max_token_bytes");

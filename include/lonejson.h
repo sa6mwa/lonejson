@@ -1234,6 +1234,8 @@ typedef struct lonejson_jwk {
   char *alg;
   /** Optional public key use such as `sig`. */
   char *use;
+  /** Optional permitted key operations such as `verify`. */
+  lonejson_string_array key_ops;
   /** Optional curve name for EC keys. */
   char *crv;
   /** RSA modulus, base64url encoded. */
@@ -1246,6 +1248,12 @@ typedef struct lonejson_jwk {
   char *y;
   /** Symmetric key bytes, base64url encoded. */
   char *k;
+  /** Optional X.509 certificate SHA-1 thumbprint, base64url encoded. */
+  char *x5t;
+  /** Optional X.509 certificate SHA-256 thumbprint, base64url encoded. */
+  char *x5t_s256;
+  /** Optional X.509 certificate chain, each entry base64 DER encoded. */
+  lonejson_string_array x5c;
 } lonejson_jwk;
 
 /** Parsed JWK Set. `keys.items` contains `lonejson_jwk` elements. */
@@ -1269,6 +1277,14 @@ typedef struct lonejson_jwt_header {
   char *kid;
   /** Optional token type. */
   char *typ;
+  /** Optional critical JOSE header parameters. */
+  lonejson_string_array crit;
+  /** Optional X.509 certificate SHA-1 thumbprint, base64url encoded. */
+  char *x5t;
+  /** Optional X.509 certificate SHA-256 thumbprint, base64url encoded. */
+  char *x5t_s256;
+  /** Optional X.509 certificate chain, each entry base64 DER encoded. */
+  lonejson_string_array x5c;
 } lonejson_jwt_header;
 
 /** Decoded JWT claims retained by lonejson.
@@ -1283,6 +1299,12 @@ typedef struct lonejson_jwt_claims {
   char *sub;
   /** OIDC nonce claim, when present. */
   char *nonce;
+  /** OIDC authorized party claim, when present. */
+  char *azp;
+  /** OAuth2 scope claim when encoded as a space-delimited string. */
+  char *scope;
+  /** OAuth2 `scp` claim values when encoded as a string or array. */
+  lonejson_string_array scp;
   /** String audience claim when `aud` is encoded as a JSON string. */
   char *aud;
   /** Audience array when `aud` is encoded as a JSON array of strings. */
@@ -1312,6 +1334,18 @@ typedef struct lonejson_jwt_claim_policy {
   /** Optional expected OIDC nonce. When non-NULL, `claims->nonce` must match.
    */
   const char *expected_nonce;
+  /** Optional expected OIDC authorized party. */
+  const char *expected_azp;
+  /** Critical JOSE header names explicitly handled by the caller. */
+  const char *const *accepted_crit;
+  size_t accepted_crit_count;
+  /** Required OAuth2 scopes. They may appear in `scope` or `scp`. */
+  const char *const *required_scopes;
+  size_t required_scope_count;
+  /** Non-zero requires `azp` when `aud` contains multiple audiences. */
+  int require_azp_when_multiple_audiences;
+  /** Non-zero requires every JWT audience to be in `accepted_audiences`. */
+  int require_all_audiences_accepted;
   /** Required claim names such as `sub` or `iat`. */
   const char *const *required_claims;
   size_t required_claim_count;

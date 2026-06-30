@@ -196,6 +196,13 @@ if lonejson.jwt_parse_compact ~= nil then
       "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJu" ..
       "b25jZSI6Im5vbmNlLTQ1NiJ9." ..
       "c2ln"
+  local jose_policy_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIiwiY3JpdCI6WyJleHAt" ..
+      "dGVzdCJdLCJ4NXQiOiJBQSIsIng1dCNTMjU2IjoiQUEiLCJ4NWMiOlsiQUE9PSJdfQ." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjpbImFwaSIsImNsaWVudCJdLCJh" ..
+      "enAiOiJjbGllbnQiLCJzY29wZSI6InJlYWQgd3JpdGUiLCJzY3AiOlsiYWRtaW4iLCJi" ..
+      "aWxsaW5nLnJlYWQiXSwiZXhwIjoyMDAwfQ." ..
+      "c2ln"
   local policy = {
     accepted_algs = { "RS256" },
     accepted_issuers = { "issuer" },
@@ -217,7 +224,21 @@ if lonejson.jwt_parse_compact ~= nil then
     now = 1000,
   }
   local nonce_validated = lj:jwt_validate_compact_claims(nonce_token, nonce_policy)
-  local jwk = lonejson.jwk_parse_json('{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","n":"AQIDBA","e":"AQAB"}')
+  local jose_policy = {
+    accepted_algs = { "RS256" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api", "client" },
+    accepted_crit = { "exp-test" },
+    required_scopes = { "read", "admin" },
+    expected_azp = "client",
+    require_azp_when_multiple_audiences = true,
+    require_all_audiences_accepted = true,
+    now = 1000,
+  }
+  local jose_validated = lj:jwt_validate_compact_claims(jose_policy_token, jose_policy)
+  local jwk = lonejson.jwk_parse_json(
+      '{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","key_ops":["verify"],' ..
+      '"x5t":"AA","x5t#S256":"AA","x5c":["AA=="],"n":"AQIDBA","e":"AQAB"}')
   local signed_token =
       "eyJhbGciOiJSUzI1NiIsImtpZCI6InJzYS10ZXN0IiwidHlwIjoiSldUIn0." ..
       "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ." ..
@@ -256,7 +277,15 @@ if lonejson.jwt_parse_compact ~= nil then
   assert_eq(aud_array.claims.aud[2], "other")
   assert_eq(nonce_validated.claims.nonce, "nonce-456")
   assert_eq(jwk.kid, "rsa1")
+  assert_eq(jwk.key_ops[1], "verify")
+  assert_eq(jwk["x5t#S256"], "AA")
+  assert_eq(jwk.x5c[1], "AA==")
   assert_eq(jwk.n, "AQIDBA")
+  assert_eq(jose_validated.header.crit[1], "exp-test")
+  assert_eq(jose_validated.header.x5t, "AA")
+  assert_eq(jose_validated.claims.azp, "client")
+  assert_eq(jose_validated.claims.scope, "read write")
+  assert_eq(jose_validated.claims.scp[1], "admin")
   assert_true(lj:jwt_validate_compact_signature(signed_token, signed_jwk_json))
   assert_eq(#jwks.keys, 2)
   assert_eq(jwks.keys[2].kid, "ec1")

@@ -42,6 +42,9 @@ The current branch already implements the planned C baseline for:
 - provider-backed JWT/JWK/JWKS parsing, selection, signature validation, and
   claim validation,
 - OpenSSL-backed `RS256`, `PS256`, `ES256`, and Ed25519 `EdDSA` validation,
+- JOSE/JWK policy checks for fail-closed `crit`, JWK `key_ops` verification
+  use, optional `x5c`/`x5t`/`x5t#S256` syntax parsing, OIDC `azp`,
+  OAuth2 `scope`/`scp`, and strict multi-audience policy,
 - OAuth2/OIDC discovery, JWKS cache, token endpoint helpers, refresh-token body
   construction, authorization-code with PKCE helpers, callback parsing, and
   bearer-token validation,
@@ -74,17 +77,23 @@ not part of this target.
 
 ### JOSE/JWK Compliance Completion
 
-Complete the JWT/JWK/JWKS compliance surface needed for OIDC use:
+Completed JWT/JWK/JWKS compliance surface needed for OIDC use:
 
-- `x5c` certificate-chain parsing and validation policy,
-- `x5t` and `x5t#S256` certificate thumbprint matching,
-- `crit` handling: reject tokens with unrecognized critical headers, and only
-  accept recognized critical headers when the caller explicitly enables the
-  relevant behavior,
-- JWK `key_ops` parsing and enforcement for verification use,
-- `azp`, `scope`, and `scp` claim parsing/validation helpers where useful for
-  OIDC resource-server decisions,
-- stronger multiple-audience policy controls where OIDC requires them.
+- `crit` handling rejects tokens with unrecognized critical headers unless the
+  caller explicitly lists those headers in `accepted_crit`,
+- JWK `key_ops` parsing and enforcement rejects signature verification when a
+  key declares operations that do not include `verify`,
+- `azp`, `scope`, and `scp` claim parsing/validation helpers support
+  OIDC/OAuth2 resource-server decisions,
+- multiple-audience policy can require `azp` and can require every JWT audience
+  to be in `accepted_audiences`,
+- `x5c`, `x5t`, and `x5t#S256` are parsed and checked for correct base64/base64url
+  syntax.
+
+Remaining certificate-backed-key work:
+
+- `x5c` certificate-chain trust validation policy,
+- `x5t` and `x5t#S256` thumbprint matching against certificate material.
 
 `crit` is a JOSE extension-safety mechanism. Silently ignoring a critical
 header is not compliant; the safe default is fail closed.

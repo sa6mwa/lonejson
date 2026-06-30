@@ -16,12 +16,18 @@ static const lonejson_field lonejson__jwk_fields[] = {
     LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, kid, "kid"),
     LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, alg, "alg"),
     LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, use, "use"),
+    LONEJSON_FIELD_STRING_ARRAY(lonejson_jwk, key_ops, "key_ops",
+                                LONEJSON_OVERFLOW_FAIL),
     LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, crv, "crv"),
     LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, n, "n"),
     LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, e, "e"),
     LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, x, "x"),
     LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, y, "y"),
-    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, k, "k")};
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, k, "k"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, x5t, "x5t"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson_jwk, x5t_s256, "x5t#S256"),
+    LONEJSON_FIELD_STRING_ARRAY(lonejson_jwk, x5c, "x5c",
+                                LONEJSON_OVERFLOW_FAIL)};
 LONEJSON_MAP_DEFINE(lonejson__jwk_map, lonejson_jwk, lonejson__jwk_fields);
 
 static const lonejson_field lonejson__jwks_fields[] = {
@@ -251,9 +257,17 @@ typedef enum lonejson__jwt_claim_field {
   LONEJSON__JWT_FIELD_HEADER_ALG,
   LONEJSON__JWT_FIELD_HEADER_KID,
   LONEJSON__JWT_FIELD_HEADER_TYP,
+  LONEJSON__JWT_FIELD_HEADER_CRIT_ITEM,
+  LONEJSON__JWT_FIELD_HEADER_X5T,
+  LONEJSON__JWT_FIELD_HEADER_X5T_S256,
+  LONEJSON__JWT_FIELD_HEADER_X5C_ITEM,
   LONEJSON__JWT_FIELD_ISS,
   LONEJSON__JWT_FIELD_SUB,
   LONEJSON__JWT_FIELD_NONCE,
+  LONEJSON__JWT_FIELD_AZP,
+  LONEJSON__JWT_FIELD_SCOPE,
+  LONEJSON__JWT_FIELD_SCP_STRING,
+  LONEJSON__JWT_FIELD_SCP_ARRAY_ITEM,
   LONEJSON__JWT_FIELD_AUD_STRING,
   LONEJSON__JWT_FIELD_AUD_ARRAY_ITEM,
   LONEJSON__JWT_FIELD_EXP,
@@ -273,9 +287,16 @@ typedef struct lonejson__jwt_claim_visit {
   int seen_alg;
   int seen_kid;
   int seen_typ;
+  int seen_crit;
+  int seen_x5t;
+  int seen_x5t_s256;
+  int seen_x5c;
   int seen_iss;
   int seen_sub;
   int seen_nonce;
+  int seen_azp;
+  int seen_scope;
+  int seen_scp;
   int seen_aud;
   int seen_exp;
   int seen_nbf;
@@ -422,9 +443,33 @@ lonejson__jwk_check_base64url_member(const char *value, const char *member,
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status
+lonejson__jwk_check_base64_member(const char *value, const char *member,
+                                  lonejson_error *error) {
+  size_t decoded_len;
+  lonejson_status status;
+
+  if (value == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = lonejson_base64_decoded_len(value, strlen(value),
+                                       LONEJSON_BASE64_STANDARD, &decoded_len,
+                                       error);
+  if (status != LONEJSON_STATUS_OK) {
+    if (error != NULL) {
+      (void)snprintf(error->message, sizeof(error->message),
+                     "invalid base64 in JWK %s member", member);
+    }
+    return status;
+  }
+  (void)decoded_len;
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status lonejson__jwk_validate(lonejson_jwk *jwk,
                                               lonejson_error *error) {
   lonejson_status status;
+  size_t i;
 
   if (jwk == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -487,7 +532,28 @@ static lonejson_status lonejson__jwk_validate(lonejson_jwk *jwk,
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  return lonejson__jwk_check_base64url_member(jwk->k, "k", 0, error);
+  status = lonejson__jwk_check_base64url_member(jwk->k, "k", 0, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__jwk_check_base64url_member(jwk->x5t, "x5t", 0, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status =
+      lonejson__jwk_check_base64url_member(jwk->x5t_s256, "x5t#S256", 0,
+                                           error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  for (i = 0u; i < jwk->x5c.count; ++i) {
+    status = lonejson__jwk_check_base64_member(jwk->x5c.items[i], "x5c",
+                                               error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  return LONEJSON_STATUS_OK;
 }
 
 void lonejson_jwk_init(lonejson_jwk *jwk) {
@@ -2738,11 +2804,15 @@ static int lonejson__jwt_path_is(const lonejson_value_path *path,
          memcmp(path->segments[0].data, name, path->segments[0].len) == 0;
 }
 
-static int lonejson__jwt_path_is_aud_item(const lonejson_value_path *path) {
+static int lonejson__jwt_path_is_array_item(const lonejson_value_path *path,
+                                            const char *name) {
   size_t i;
+  size_t name_len;
+
+  name_len = strlen(name);
   if (path == NULL || path->segment_count != 2u ||
-      path->segments[0].len != 3u ||
-      memcmp(path->segments[0].data, "aud", 3u) != 0) {
+      path->segments[0].len != name_len ||
+      memcmp(path->segments[0].data, name, name_len) != 0) {
     return 0;
   }
   if (path->segments[1].len == 0u) {
@@ -2755,6 +2825,39 @@ static int lonejson__jwt_path_is_aud_item(const lonejson_value_path *path) {
     }
   }
   return 1;
+}
+
+static int lonejson__jwt_path_is_aud_item(const lonejson_value_path *path) {
+  return lonejson__jwt_path_is_array_item(path, "aud");
+}
+
+static int lonejson__jwt_path_is_registered_header(
+    const lonejson_value_path *path) {
+  return lonejson__jwt_path_is(path, "alg") ||
+         lonejson__jwt_path_is(path, "kid") ||
+         lonejson__jwt_path_is(path, "typ") ||
+         lonejson__jwt_path_is(path, "crit") ||
+         lonejson__jwt_path_is_array_item(path, "crit") ||
+         lonejson__jwt_path_is(path, "x5t") ||
+         lonejson__jwt_path_is(path, "x5t#S256") ||
+         lonejson__jwt_path_is(path, "x5c") ||
+         lonejson__jwt_path_is_array_item(path, "x5c");
+}
+
+static int lonejson__jwt_path_is_registered_claim(
+    const lonejson_value_path *path) {
+  return lonejson__jwt_path_is(path, "iss") ||
+         lonejson__jwt_path_is(path, "sub") ||
+         lonejson__jwt_path_is(path, "nonce") ||
+         lonejson__jwt_path_is(path, "azp") ||
+         lonejson__jwt_path_is(path, "scope") ||
+         lonejson__jwt_path_is(path, "scp") ||
+         lonejson__jwt_path_is_array_item(path, "scp") ||
+         lonejson__jwt_path_is(path, "aud") ||
+         lonejson__jwt_path_is_aud_item(path) ||
+         lonejson__jwt_path_is(path, "exp") ||
+         lonejson__jwt_path_is(path, "nbf") ||
+         lonejson__jwt_path_is(path, "iat");
 }
 
 static lonejson_status lonejson__jwt_claim_type_error(lonejson_error *error,
@@ -2889,6 +2992,26 @@ lonejson__jwt_claim_string_begin(void *user, const lonejson_value_path *path,
                                               LONEJSON__JWT_FIELD_HEADER_TYP,
                                               &state->seen_typ, "typ", error);
     }
+    if (lonejson__jwt_path_is_array_item(path, "crit")) {
+      state->active = LONEJSON__JWT_FIELD_HEADER_CRIT_ITEM;
+      lonejson__jwt_visit_buffer_reset(state);
+      return LONEJSON_STATUS_OK;
+    }
+    if (lonejson__jwt_path_is(path, "x5t")) {
+      return lonejson__jwt_begin_string_field(state,
+                                              LONEJSON__JWT_FIELD_HEADER_X5T,
+                                              &state->seen_x5t, "x5t", error);
+    }
+    if (lonejson__jwt_path_is(path, "x5t#S256")) {
+      return lonejson__jwt_begin_string_field(
+          state, LONEJSON__JWT_FIELD_HEADER_X5T_S256,
+          &state->seen_x5t_s256, "x5t#S256", error);
+    }
+    if (lonejson__jwt_path_is_array_item(path, "x5c")) {
+      state->active = LONEJSON__JWT_FIELD_HEADER_X5C_ITEM;
+      lonejson__jwt_visit_buffer_reset(state);
+      return LONEJSON_STATUS_OK;
+    }
     return LONEJSON_STATUS_OK;
   }
   if (lonejson__jwt_path_is(path, "iss")) {
@@ -2902,6 +3025,23 @@ lonejson__jwt_claim_string_begin(void *user, const lonejson_value_path *path,
   if (lonejson__jwt_path_is(path, "nonce")) {
     return lonejson__jwt_begin_string_field(state, LONEJSON__JWT_FIELD_NONCE,
                                             &state->seen_nonce, "nonce", error);
+  }
+  if (lonejson__jwt_path_is(path, "azp")) {
+    return lonejson__jwt_begin_string_field(state, LONEJSON__JWT_FIELD_AZP,
+                                            &state->seen_azp, "azp", error);
+  }
+  if (lonejson__jwt_path_is(path, "scope")) {
+    return lonejson__jwt_begin_string_field(state, LONEJSON__JWT_FIELD_SCOPE,
+                                            &state->seen_scope, "scope", error);
+  }
+  if (lonejson__jwt_path_is(path, "scp")) {
+    return lonejson__jwt_begin_string_field(
+        state, LONEJSON__JWT_FIELD_SCP_STRING, &state->seen_scp, "scp", error);
+  }
+  if (lonejson__jwt_path_is_array_item(path, "scp")) {
+    state->active = LONEJSON__JWT_FIELD_SCP_ARRAY_ITEM;
+    lonejson__jwt_visit_buffer_reset(state);
+    return LONEJSON_STATUS_OK;
   }
   if (lonejson__jwt_path_is(path, "aud")) {
     return lonejson__jwt_begin_string_field(
@@ -2961,6 +3101,44 @@ lonejson__jwt_claim_string_end(void *user, const lonejson_value_path *path,
                                  0u, 0u, "failed to allocate JWT claim value");
     }
     break;
+  case LONEJSON__JWT_FIELD_HEADER_X5T:
+    state->header->x5t = lonejson__jwt_visit_buffer_take(state);
+    if (state->header->x5t == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to allocate JWT claim value");
+    }
+    break;
+  case LONEJSON__JWT_FIELD_HEADER_X5T_S256:
+    state->header->x5t_s256 = lonejson__jwt_visit_buffer_take(state);
+    if (state->header->x5t_s256 == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to allocate JWT claim value");
+    }
+    break;
+  case LONEJSON__JWT_FIELD_HEADER_CRIT_ITEM:
+    value = lonejson__jwt_visit_buffer_take(state);
+    if (value == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to allocate JWT claim value");
+    }
+    if (lonejson__jwt_string_array_append(&state->header->crit, value,
+                                          error) != LONEJSON_STATUS_OK) {
+      lonejson__owned_free(value);
+      return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+    break;
+  case LONEJSON__JWT_FIELD_HEADER_X5C_ITEM:
+    value = lonejson__jwt_visit_buffer_take(state);
+    if (value == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to allocate JWT claim value");
+    }
+    if (lonejson__jwt_string_array_append(&state->header->x5c, value, error) !=
+        LONEJSON_STATUS_OK) {
+      lonejson__owned_free(value);
+      return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+    break;
   case LONEJSON__JWT_FIELD_ISS:
     state->claims->iss = lonejson__jwt_visit_buffer_take(state);
     if (state->claims->iss == NULL) {
@@ -2982,6 +3160,32 @@ lonejson__jwt_claim_string_end(void *user, const lonejson_value_path *path,
                                  0u, 0u, "failed to allocate JWT claim value");
     }
     break;
+  case LONEJSON__JWT_FIELD_AZP:
+    state->claims->azp = lonejson__jwt_visit_buffer_take(state);
+    if (state->claims->azp == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to allocate JWT claim value");
+    }
+    break;
+  case LONEJSON__JWT_FIELD_SCOPE:
+    state->claims->scope = lonejson__jwt_visit_buffer_take(state);
+    if (state->claims->scope == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to allocate JWT claim value");
+    }
+    break;
+  case LONEJSON__JWT_FIELD_SCP_STRING:
+    value = lonejson__jwt_visit_buffer_take(state);
+    if (value == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to allocate JWT claim value");
+    }
+    if (lonejson__jwt_string_array_append(&state->claims->scp, value, error) !=
+        LONEJSON_STATUS_OK) {
+      lonejson__owned_free(value);
+      return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+    break;
   case LONEJSON__JWT_FIELD_AUD_STRING:
     state->claims->aud = lonejson__jwt_visit_buffer_take(state);
     if (state->claims->aud == NULL) {
@@ -2990,13 +3194,17 @@ lonejson__jwt_claim_string_end(void *user, const lonejson_value_path *path,
     }
     break;
   case LONEJSON__JWT_FIELD_AUD_ARRAY_ITEM:
+  case LONEJSON__JWT_FIELD_SCP_ARRAY_ITEM:
     value = lonejson__jwt_visit_buffer_take(state);
     if (value == NULL) {
       return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
                                  0u, 0u, "failed to allocate JWT claim value");
     }
-    if (lonejson__jwt_string_array_append(&state->claims->aud_array, value,
-                                          error) != LONEJSON_STATUS_OK) {
+    if (lonejson__jwt_string_array_append(
+            state->active == LONEJSON__JWT_FIELD_AUD_ARRAY_ITEM
+                ? &state->claims->aud_array
+                : &state->claims->scp,
+            value, error) != LONEJSON_STATUS_OK) {
       lonejson__owned_free(value);
       return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
     }
@@ -3027,9 +3235,7 @@ lonejson__jwt_claim_number_begin(void *user, const lonejson_value_path *path,
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
 
   if (state->header_mode) {
-    if (lonejson__jwt_path_is(path, "alg") ||
-        lonejson__jwt_path_is(path, "kid") ||
-        lonejson__jwt_path_is(path, "typ")) {
+    if (lonejson__jwt_path_is_registered_header(path)) {
       return lonejson__jwt_claim_type_error(error, "registered");
     }
     return LONEJSON_STATUS_OK;
@@ -3047,10 +3253,7 @@ lonejson__jwt_claim_number_begin(void *user, const lonejson_value_path *path,
                                             &state->seen_iat, "iat", error);
   }
   if (lonejson__jwt_path_is(path, "iss") ||
-      lonejson__jwt_path_is(path, "sub") ||
-      lonejson__jwt_path_is(path, "nonce") ||
-      lonejson__jwt_path_is(path, "aud") ||
-      lonejson__jwt_path_is_aud_item(path)) {
+      lonejson__jwt_path_is_registered_claim(path)) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
   return LONEJSON_STATUS_OK;
@@ -3121,19 +3324,10 @@ lonejson__jwt_claim_object_begin(void *user, const lonejson_value_path *path,
     state->root_object_seen = 1;
     return LONEJSON_STATUS_OK;
   }
-  if (state->header_mode && (lonejson__jwt_path_is(path, "alg") ||
-                             lonejson__jwt_path_is(path, "kid") ||
-                             lonejson__jwt_path_is(path, "typ"))) {
+  if (state->header_mode && lonejson__jwt_path_is_registered_header(path)) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
-  if (!state->header_mode && (lonejson__jwt_path_is(path, "iss") ||
-                              lonejson__jwt_path_is(path, "sub") ||
-                              lonejson__jwt_path_is(path, "nonce") ||
-                              lonejson__jwt_path_is(path, "aud") ||
-                              lonejson__jwt_path_is(path, "exp") ||
-                              lonejson__jwt_path_is(path, "nbf") ||
-                              lonejson__jwt_path_is(path, "iat") ||
-                              lonejson__jwt_path_is_aud_item(path))) {
+  if (!state->header_mode && lonejson__jwt_path_is_registered_claim(path)) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
   return LONEJSON_STATUS_OK;
@@ -3143,6 +3337,20 @@ static lonejson_status
 lonejson__jwt_claim_array_begin(void *user, const lonejson_value_path *path,
                                 lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
+  if (state->header_mode && lonejson__jwt_path_is(path, "crit")) {
+    if (state->seen_crit) {
+      return lonejson__jwt_claim_duplicate_error(error, "crit");
+    }
+    state->seen_crit = 1;
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->header_mode && lonejson__jwt_path_is(path, "x5c")) {
+    if (state->seen_x5c) {
+      return lonejson__jwt_claim_duplicate_error(error, "x5c");
+    }
+    state->seen_x5c = 1;
+    return LONEJSON_STATUS_OK;
+  }
   if (!state->header_mode && lonejson__jwt_path_is(path, "aud")) {
     if (state->seen_aud) {
       return lonejson__jwt_claim_duplicate_error(error, "aud");
@@ -3150,18 +3358,17 @@ lonejson__jwt_claim_array_begin(void *user, const lonejson_value_path *path,
     state->seen_aud = 1;
     return LONEJSON_STATUS_OK;
   }
-  if (state->header_mode && (lonejson__jwt_path_is(path, "alg") ||
-                             lonejson__jwt_path_is(path, "kid") ||
-                             lonejson__jwt_path_is(path, "typ"))) {
+  if (!state->header_mode && lonejson__jwt_path_is(path, "scp")) {
+    if (state->seen_scp) {
+      return lonejson__jwt_claim_duplicate_error(error, "scp");
+    }
+    state->seen_scp = 1;
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->header_mode && lonejson__jwt_path_is_registered_header(path)) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
-  if (!state->header_mode && (lonejson__jwt_path_is(path, "iss") ||
-                              lonejson__jwt_path_is(path, "sub") ||
-                              lonejson__jwt_path_is(path, "nonce") ||
-                              lonejson__jwt_path_is(path, "exp") ||
-                              lonejson__jwt_path_is(path, "nbf") ||
-                              lonejson__jwt_path_is(path, "iat") ||
-                              lonejson__jwt_path_is_aud_item(path))) {
+  if (!state->header_mode && lonejson__jwt_path_is_registered_claim(path)) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
   return LONEJSON_STATUS_OK;
@@ -3171,19 +3378,10 @@ static lonejson_status
 lonejson__jwt_claim_literal_type(void *user, const lonejson_value_path *path,
                                  lonejson_error *error) {
   lonejson__jwt_claim_visit *state = (lonejson__jwt_claim_visit *)user;
-  if (state->header_mode && (lonejson__jwt_path_is(path, "alg") ||
-                             lonejson__jwt_path_is(path, "kid") ||
-                             lonejson__jwt_path_is(path, "typ"))) {
+  if (state->header_mode && lonejson__jwt_path_is_registered_header(path)) {
     return lonejson__jwt_claim_type_error(error, "registered");
   }
-  if (!state->header_mode && (lonejson__jwt_path_is(path, "iss") ||
-                              lonejson__jwt_path_is(path, "sub") ||
-                              lonejson__jwt_path_is(path, "nonce") ||
-                              lonejson__jwt_path_is(path, "aud") ||
-                              lonejson__jwt_path_is(path, "exp") ||
-                              lonejson__jwt_path_is(path, "nbf") ||
-                              lonejson__jwt_path_is(path, "iat") ||
-                              lonejson__jwt_path_is_aud_item(path))) {
+  if (!state->header_mode && lonejson__jwt_path_is_registered_claim(path)) {
     return lonejson__jwt_claim_type_error(
         error, path->segment_count == 0u ? "root" : "registered");
   }
@@ -3213,6 +3411,18 @@ static lonejson_path_value_visitor lonejson__jwt_claim_visitor(void) {
   return visitor;
 }
 
+static void lonejson__jwt_owned_string_array_cleanup(lonejson_string_array *array) {
+  size_t i;
+  if (array == NULL) {
+    return;
+  }
+  for (i = 0u; i < array->count; ++i) {
+    lonejson__owned_free(array->items[i]);
+  }
+  lonejson__owned_free(array->items);
+  memset(array, 0, sizeof(*array));
+}
+
 void lonejson_jwt_header_init(lonejson_jwt_header *header) {
   if (header != NULL) {
     memset(header, 0, sizeof(*header));
@@ -3224,6 +3434,10 @@ void lonejson_jwt_header_cleanup(lonejson_jwt_header *header) {
     lonejson__owned_free(header->alg);
     lonejson__owned_free(header->kid);
     lonejson__owned_free(header->typ);
+    lonejson__jwt_owned_string_array_cleanup(&header->crit);
+    lonejson__owned_free(header->x5t);
+    lonejson__owned_free(header->x5t_s256);
+    lonejson__jwt_owned_string_array_cleanup(&header->x5c);
     memset(header, 0, sizeof(*header));
   }
 }
@@ -3241,6 +3455,9 @@ void lonejson_jwt_claims_cleanup(lonejson_jwt_claims *claims) {
     lonejson__owned_free(claims->sub);
     lonejson__owned_free(claims->nonce);
     lonejson__owned_free(claims->aud);
+    lonejson__owned_free(claims->azp);
+    lonejson__owned_free(claims->scope);
+    lonejson__jwt_owned_string_array_cleanup(&claims->scp);
     for (i = 0u; i < claims->aud_array.count; ++i) {
       lonejson__owned_free(claims->aud_array.items[i]);
     }
@@ -3272,6 +3489,36 @@ static lonejson_status lonejson__jwt_parse_decoded_json(
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                header_mode ? "JWT header must be an object"
                                            : "JWT claims must be an object");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+lonejson__jwt_header_validate(const lonejson_jwt_header *header,
+                              lonejson_error *error) {
+  size_t i;
+  lonejson_status status;
+
+  if (header == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "JWT header is required");
+  }
+  status =
+      lonejson__jwk_check_base64url_member(header->x5t, "x5t", 0, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__jwk_check_base64url_member(header->x5t_s256, "x5t#S256",
+                                                0, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  for (i = 0u; i < header->x5c.count; ++i) {
+    status =
+        lonejson__jwk_check_base64_member(header->x5c.items[i], "x5c", error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
   }
   return LONEJSON_STATUS_OK;
 }
@@ -3357,6 +3604,9 @@ lonejson_status lonejson_jwt_decode_compact(
                                               1, header, claims, error);
   }
   if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__jwt_header_validate(header, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
     status = lonejson__jwt_parse_decoded_json(runtime, claims_json, claims_len,
                                               0, header, claims, error);
   }
@@ -3384,6 +3634,21 @@ static int lonejson__jwt_string_in_list(const char *value,
   return 0;
 }
 
+static int
+lonejson__jwt_string_array_contains(const lonejson_string_array *array,
+                                    const char *value) {
+  size_t i;
+  if (array == NULL || value == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < array->count; ++i) {
+    if (array->items[i] != NULL && strcmp(array->items[i], value) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int lonejson__jwt_claim_has_audience(const lonejson_jwt_claims *claims,
                                             const char *audience) {
   size_t i;
@@ -3397,6 +3662,17 @@ static int lonejson__jwt_claim_has_audience(const lonejson_jwt_claims *claims,
     }
   }
   return 0;
+}
+
+static size_t
+lonejson__jwt_claim_audience_count(const lonejson_jwt_claims *claims) {
+  if (claims == NULL) {
+    return 0u;
+  }
+  if (claims->aud_array.count != 0u) {
+    return claims->aud_array.count;
+  }
+  return claims->aud == NULL ? 0u : 1u;
 }
 
 static int
@@ -3413,6 +3689,86 @@ lonejson__jwt_any_audience_accepted(const lonejson_jwt_claims *claims,
   return 0;
 }
 
+static int
+lonejson__jwt_all_audiences_accepted(const lonejson_jwt_claims *claims,
+                                     const lonejson_jwt_claim_policy *policy) {
+  size_t i;
+  if (claims->aud != NULL &&
+      !lonejson__jwt_string_in_list(claims->aud, policy->accepted_audiences,
+                                    policy->accepted_audience_count)) {
+    return 0;
+  }
+  for (i = 0u; i < claims->aud_array.count; ++i) {
+    if (!lonejson__jwt_string_in_list(claims->aud_array.items[i],
+                                      policy->accepted_audiences,
+                                      policy->accepted_audience_count)) {
+      return 0;
+    }
+  }
+  return lonejson__jwt_claim_audience_count(claims) != 0u;
+}
+
+static int lonejson__jwt_scope_list_has(const char *scope_list,
+                                        const char *required) {
+  const char *cursor;
+  const char *end;
+  size_t required_len;
+
+  if (scope_list == NULL || required == NULL || required[0] == '\0') {
+    return 0;
+  }
+  required_len = strlen(required);
+  cursor = scope_list;
+  while (*cursor != '\0') {
+    while (*cursor == ' ') {
+      ++cursor;
+    }
+    end = cursor;
+    while (*end != '\0' && *end != ' ') {
+      ++end;
+    }
+    if ((size_t)(end - cursor) == required_len &&
+        memcmp(cursor, required, required_len) == 0) {
+      return 1;
+    }
+    cursor = end;
+  }
+  return 0;
+}
+
+static int lonejson__jwt_claim_has_scope(const lonejson_jwt_claims *claims,
+                                         const char *required) {
+  size_t i;
+  if (claims == NULL || required == NULL) {
+    return 0;
+  }
+  if (lonejson__jwt_scope_list_has(claims->scope, required)) {
+    return 1;
+  }
+  for (i = 0u; i < claims->scp.count; ++i) {
+    if (claims->scp.items[i] != NULL &&
+        (strcmp(claims->scp.items[i], required) == 0 ||
+         lonejson__jwt_scope_list_has(claims->scp.items[i], required))) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static lonejson_status lonejson__jwt_validate_jwk_signature_use(
+    const lonejson_jwk *jwk, lonejson_error *error) {
+  if (jwk->use != NULL && strcmp(jwk->use, "sig") != 0) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT JWK use is not valid for signatures");
+  }
+  if (jwk->key_ops.count != 0u &&
+      !lonejson__jwt_string_array_contains(&jwk->key_ops, "verify")) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT JWK key_ops does not allow verify");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 static int lonejson__jwt_has_required_claim(const lonejson_jwt_claims *claims,
                                             const char *name) {
   if (strcmp(name, "iss") == 0) {
@@ -3423,6 +3779,15 @@ static int lonejson__jwt_has_required_claim(const lonejson_jwt_claims *claims,
   }
   if (strcmp(name, "nonce") == 0) {
     return claims->nonce != NULL;
+  }
+  if (strcmp(name, "azp") == 0) {
+    return claims->azp != NULL;
+  }
+  if (strcmp(name, "scope") == 0) {
+    return claims->scope != NULL;
+  }
+  if (strcmp(name, "scp") == 0) {
+    return claims->scp.count != 0u;
   }
   if (strcmp(name, "aud") == 0) {
     return claims->aud != NULL || claims->aud_array.count != 0u;
@@ -3455,7 +3820,9 @@ lonejson_status lonejson_jwt_validate_claims(
       policy->accepted_issuers == NULL || policy->accepted_issuer_count == 0u ||
       policy->accepted_audiences == NULL ||
       policy->accepted_audience_count == 0u || policy->now < 0 ||
-      policy->allowed_clock_skew < 0) {
+      policy->allowed_clock_skew < 0 ||
+      (policy->accepted_crit_count != 0u && policy->accepted_crit == NULL) ||
+      (policy->required_scope_count != 0u && policy->required_scopes == NULL)) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "JWT claim policy is incomplete");
   }
@@ -3474,11 +3841,44 @@ lonejson_status lonejson_jwt_validate_claims(
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                "JWT audience is not accepted");
   }
+  if (policy->require_all_audiences_accepted &&
+      !lonejson__jwt_all_audiences_accepted(claims, policy)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT audience is not accepted");
+  }
   if (policy->expected_nonce != NULL &&
       (claims->nonce == NULL ||
        strcmp(claims->nonce, policy->expected_nonce) != 0)) {
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                "JWT nonce is not accepted");
+  }
+  if (policy->expected_azp != NULL &&
+      (claims->azp == NULL || strcmp(claims->azp, policy->expected_azp) != 0)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT authorized party is not accepted");
+  }
+  if (policy->require_azp_when_multiple_audiences &&
+      lonejson__jwt_claim_audience_count(claims) > 1u &&
+      (claims->azp == NULL || claims->azp[0] == '\0')) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "JWT authorized party is required");
+  }
+  for (i = 0u; i < header->crit.count; ++i) {
+    if (header->crit.items[i] == NULL || header->crit.items[i][0] == '\0' ||
+        !lonejson__jwt_string_in_list(header->crit.items[i],
+                                      policy->accepted_crit,
+                                      policy->accepted_crit_count)) {
+      return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                                 0u,
+                                 "JWT critical header parameter is unsupported");
+    }
+  }
+  for (i = 0u; i < policy->required_scope_count; ++i) {
+    if (policy->required_scopes[i] == NULL ||
+        !lonejson__jwt_claim_has_scope(claims, policy->required_scopes[i])) {
+      return lonejson__set_error(error, LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
+                                 0u, 0u, 0u, "JWT required scope is missing");
+    }
   }
   for (i = 0u; i < policy->required_claim_count; ++i) {
     if (policy->required_claims == NULL || policy->required_claims[i] == NULL ||
@@ -4085,9 +4485,9 @@ lonejson_status lonejson_jwt_validate_signature(
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                "JWT JWK key id does not match header");
   }
-  if (jwk->use != NULL && strcmp(jwk->use, "sig") != 0) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "JWT JWK use is not valid for signatures");
+  if (lonejson__jwt_validate_jwk_signature_use(jwk, error) !=
+      LONEJSON_STATUS_OK) {
+    return error != NULL ? error->code : LONEJSON_STATUS_TYPE_MISMATCH;
   }
   request.jwt = jwt;
   request.header = header;
@@ -4133,9 +4533,9 @@ lonejson_status lonejson_jwt_validate_signature_with_runtime(
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                "JWT JWK key id does not match header");
   }
-  if (jwk->use != NULL && strcmp(jwk->use, "sig") != 0) {
-    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "JWT JWK use is not valid for signatures");
+  if (lonejson__jwt_validate_jwk_signature_use(jwk, error) !=
+      LONEJSON_STATUS_OK) {
+    return error != NULL ? error->code : LONEJSON_STATUS_TYPE_MISMATCH;
   }
   runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
   if (runtime_state == NULL) {
