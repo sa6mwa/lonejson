@@ -93,6 +93,18 @@ void lonejson_oidc_bearer_validation_init(void);
 void lonejson_oidc_bearer_validation_cleanup(void);
 void lonejson_oidc_authorization_bearer_token(void);
 void lonejson_oidc_validate_bearer_token(void);
+void lonejson_m2m_credential_init(void);
+void lonejson_m2m_credential_cleanup(void);
+void lonejson_m2m_credential_generate(void);
+void lonejson_m2m_authentication_init(void);
+void lonejson_m2m_authentication_cleanup(void);
+void lonejson_m2m_verify_authorization(void);
+void lonejson_m2m_signup_init(void);
+void lonejson_m2m_signup_cleanup(void);
+void lonejson_m2m_signup_generate(void);
+void lonejson_m2m_signup_complete_init(void);
+void lonejson_m2m_signup_complete_cleanup(void);
+void lonejson_m2m_signup_complete(void);
 
 #endif
 EOF
@@ -253,6 +265,42 @@ void lonejson_oidc_authorization_bearer_token(void) {
 }
 
 void lonejson_oidc_validate_bearer_token(void) {
+}
+
+void lonejson_m2m_credential_init(void) {
+}
+
+void lonejson_m2m_credential_cleanup(void) {
+}
+
+void lonejson_m2m_credential_generate(void) {
+}
+
+void lonejson_m2m_authentication_init(void) {
+}
+
+void lonejson_m2m_authentication_cleanup(void) {
+}
+
+void lonejson_m2m_verify_authorization(void) {
+}
+
+void lonejson_m2m_signup_init(void) {
+}
+
+void lonejson_m2m_signup_cleanup(void) {
+}
+
+void lonejson_m2m_signup_generate(void) {
+}
+
+void lonejson_m2m_signup_complete_init(void) {
+}
+
+void lonejson_m2m_signup_complete_cleanup(void) {
+}
+
+void lonejson_m2m_signup_complete(void) {
 }
 EOF
 

@@ -1837,6 +1837,189 @@ static void test_oidc_validate_bearer_token_failures(void) {
   lonejson_oidc_bearer_validation_cleanup(&validation);
   lonejson_oidc_jwks_cache_cleanup(&cache);
 }
+
+static void test_m2m_basic_base64(char *out, size_t out_size, const char *id,
+                                  const char *secret) {
+  static const char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  char raw[512];
+  size_t raw_len;
+  size_t i = 0u;
+  size_t o = 0u;
+  int n;
+
+  n = snprintf(raw, sizeof(raw), "%s:%s", id, secret);
+  EXPECT(n > 0 && (size_t)n < sizeof(raw));
+  raw_len = (size_t)n;
+  while (i < raw_len) {
+    size_t rem = raw_len - i;
+    unsigned int b0 = (unsigned char)raw[i++];
+    unsigned int b1 = rem > 1u ? (unsigned char)raw[i++] : 0u;
+    unsigned int b2 = rem > 2u ? (unsigned char)raw[i++] : 0u;
+    unsigned int bits = (b0 << 16u) | (b1 << 8u) | b2;
+    EXPECT(o + 4u < out_size);
+    out[o++] = alphabet[(bits >> 18u) & 63u];
+    out[o++] = alphabet[(bits >> 12u) & 63u];
+    out[o++] = rem > 1u ? alphabet[(bits >> 6u) & 63u] : '=';
+    out[o++] = rem > 2u ? alphabet[bits & 63u] : '=';
+  }
+  out[o] = '\0';
+}
+
+static void test_m2m_credential_store_auth(void) {
+#ifdef LONEJSON_WITH_OPENSSL
+  lonejson_error error;
+  lonejson_m2m_credential_request request;
+  lonejson_m2m_credential credential;
+  lonejson_m2m_store store;
+  lonejson_m2m_verify_request verify;
+  lonejson_m2m_authentication auth;
+  lonejson_owned_buffer store_json;
+  char basic_payload[768];
+  char header[1024];
+
+  lonejson_error_init(&error);
+  memset(&request, 0, sizeof(request));
+  lonejson_m2m_credential_init(&credential);
+  memset(&store, 0, sizeof(store));
+  memset(&verify, 0, sizeof(verify));
+  lonejson_m2m_authentication_init(&auth);
+  lonejson_owned_buffer_init(&store_json);
+
+  request.claim_json = "{\"scope\":[\"read\",\"write\"],\"tenant\":\"acme\"}";
+  EXPECT(lonejson_m2m_credential_generate(test_default_runtime(), &request,
+                                          &credential, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(credential.client_id != NULL);
+  EXPECT(credential.client_secret != NULL);
+  EXPECT(credential.api_key != NULL);
+  EXPECT(strstr(credential.record_json.data, credential.client_secret) == NULL);
+  EXPECT(strstr(credential.record_json.data, credential.api_key) == NULL);
+
+  EXPECT(lonejson_owned_buffer_sink(&store_json, "{\"credentials\":[", 16u,
+                                    &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_owned_buffer_sink(&store_json, credential.record_json.data,
+                                    credential.record_json.len, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_owned_buffer_sink(&store_json, "]}", 2u, &error) ==
+         LONEJSON_STATUS_OK);
+  store.json = store_json.data;
+  store.len = store_json.len;
+  verify.store = &store;
+
+  test_m2m_basic_base64(basic_payload, sizeof(basic_payload),
+                        credential.client_id, credential.client_secret);
+  snprintf(header, sizeof(header), "Basic %s", basic_payload);
+  verify.authorization_header = header;
+  EXPECT(test_default_runtime()->m2m_verify_authorization != NULL);
+  EXPECT(test_default_runtime()->m2m_verify_authorization(
+             test_default_runtime(), &verify, &auth, &error) ==
+         LONEJSON_STATUS_OK);
+  if (auth.failure == LONEJSON_AUTH_FAILURE_NONE) {
+    EXPECT(auth.auth_mode == LONEJSON_M2M_AUTH_BASIC);
+    EXPECT(strcmp(auth.client_id, credential.client_id) == 0);
+    EXPECT(auth.claim.kind == LONEJSON_JSON_VALUE_BUFFER);
+    EXPECT(strstr(auth.claim.json, "\"tenant\":\"acme\"") != NULL);
+  }
+
+  lonejson_m2m_authentication_cleanup(&auth);
+  lonejson_m2m_authentication_init(&auth);
+  snprintf(header, sizeof(header), "Bearer %s", credential.api_key);
+  verify.authorization_header = header;
+  EXPECT(lonejson_m2m_verify_authorization(test_default_runtime(), &verify,
+                                           &auth, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(auth.auth_mode == LONEJSON_M2M_AUTH_BEARER);
+
+  lonejson_m2m_authentication_cleanup(&auth);
+  lonejson_m2m_authentication_init(&auth);
+  verify.allowed_auth_modes = LONEJSON_M2M_AUTH_BASIC;
+  EXPECT(lonejson_m2m_verify_authorization(test_default_runtime(), &verify,
+                                           &auth, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(auth.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+
+  lonejson_m2m_authentication_cleanup(&auth);
+  lonejson_m2m_authentication_init(&auth);
+  test_m2m_basic_base64(basic_payload, sizeof(basic_payload),
+                        credential.client_id, "wrong-secret");
+  snprintf(header, sizeof(header), "Basic %s", basic_payload);
+  verify.allowed_auth_modes = LONEJSON_M2M_AUTH_DEFAULT;
+  verify.authorization_header = header;
+  EXPECT(lonejson_m2m_verify_authorization(test_default_runtime(), &verify,
+                                           &auth, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+
+  lonejson_m2m_authentication_cleanup(&auth);
+  lonejson_m2m_credential_cleanup(&credential);
+  lonejson_owned_buffer_free(&store_json);
+#endif
+}
+
+static void test_m2m_signup_flow(void) {
+#ifdef LONEJSON_WITH_OPENSSL
+  lonejson_error error;
+  lonejson_m2m_signup_request signup_request;
+  lonejson_m2m_signup signup;
+  lonejson_m2m_store store;
+  lonejson_m2m_signup_complete_request complete_request;
+  lonejson_m2m_signup_completion complete;
+  lonejson_owned_buffer store_json;
+
+  lonejson_error_init(&error);
+  memset(&signup_request, 0, sizeof(signup_request));
+  lonejson_m2m_signup_init(&signup);
+  memset(&store, 0, sizeof(store));
+  memset(&complete_request, 0, sizeof(complete_request));
+  lonejson_m2m_signup_complete_init(&complete);
+  lonejson_owned_buffer_init(&store_json);
+
+  signup_request.base_url = "https://app.example/signup";
+  signup_request.claim_json = "{\"scope\":[\"read\"],\"plan\":\"trial\"}";
+  EXPECT(lonejson_m2m_signup_generate(test_default_runtime(), &signup_request,
+                                      &signup, &error) == LONEJSON_STATUS_OK);
+  EXPECT(signup.signup_id != NULL);
+  EXPECT(signup.signup_secret != NULL);
+  EXPECT(strstr(signup.url.data, "signup_id=") != NULL);
+  EXPECT(strstr(signup.url.data, "signup_secret=") != NULL);
+  EXPECT(strstr(signup.record_json.data, signup.signup_secret) == NULL);
+
+  EXPECT(lonejson_owned_buffer_sink(&store_json, "{\"signups\":[", 12u,
+                                    &error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_owned_buffer_sink(&store_json, signup.record_json.data,
+                                    signup.record_json.len, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_owned_buffer_sink(&store_json, "]}", 2u, &error) ==
+         LONEJSON_STATUS_OK);
+  store.json = store_json.data;
+  store.len = store_json.len;
+  complete_request.store = &store;
+  complete_request.signup_id = signup.signup_id;
+  complete_request.signup_secret = signup.signup_secret;
+  complete_request.email = "user@example.com";
+  complete_request.credential_auth_modes = LONEJSON_M2M_AUTH_BEARER;
+  EXPECT(test_default_runtime()->m2m_signup_complete != NULL);
+  EXPECT(test_default_runtime()->m2m_signup_complete(
+             test_default_runtime(), &complete_request, &complete, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(complete.signup_id, signup.signup_id) == 0);
+  EXPECT(strcmp(complete.email, "user@example.com") == 0);
+  EXPECT(complete.credential.api_key != NULL);
+  EXPECT(complete.credential.client_secret == NULL);
+  EXPECT(strstr(complete.credential.record_json.data, "\"plan\":\"trial\"") !=
+         NULL);
+
+  lonejson_m2m_signup_complete_cleanup(&complete);
+  complete_request.signup_secret = "wrong-secret";
+  EXPECT(lonejson_m2m_signup_complete(test_default_runtime(), &complete_request,
+                                      &complete, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+
+  lonejson_m2m_signup_complete_cleanup(&complete);
+  lonejson_m2m_signup_cleanup(&signup);
+  lonejson_owned_buffer_free(&store_json);
+#endif
+}
 #else
 static void test_oidc_discovery_url(void) {}
 static void test_oidc_discovery_parse_and_validate(void) {}
@@ -1854,6 +2037,8 @@ static void test_oidc_authorization_callback_parse(void) {}
 static void test_oidc_authorization_bearer_token(void) {}
 static void test_oidc_validate_bearer_token(void) {}
 static void test_oidc_validate_bearer_token_failures(void) {}
+static void test_m2m_credential_store_auth(void) {}
+static void test_m2m_signup_flow(void) {}
 #endif
 #else
 static void test_jwt_base64url_decode_vectors(void) {}
@@ -1885,4 +2070,6 @@ static void test_oidc_authorization_callback_parse(void) {}
 static void test_oidc_authorization_bearer_token(void) {}
 static void test_oidc_validate_bearer_token(void) {}
 static void test_oidc_validate_bearer_token_failures(void) {}
+static void test_m2m_credential_store_auth(void) {}
+static void test_m2m_signup_flow(void) {}
 #endif

@@ -157,6 +157,17 @@ this keeps TLS trust roots, proxies, redirects, retry policy, and advanced curl
 options in application code. Use the lower-level curl parse adapters for
 general large JSON response streaming.
 
+For server-local machine-to-machine credentials,
+`lonejson_m2m_credential_generate()` creates one-time client secrets/API keys
+and a store-ready JSON record containing only salts, hashes, and an opaque claim
+JSON value. `lonejson_m2m_verify_authorization()` checks
+`Authorization: Basic ...` client credentials or `Authorization: Bearer ...`
+API keys against caller-owned store JSON and returns the authenticated
+`client_id` plus claim. `lonejson_m2m_signup_generate()` and
+`lonejson_m2m_signup_complete()` support admin-seeded signup links where the
+handler collects an email address, issues credentials once, and then removes
+the consumed signup seed from caller-owned storage.
+
 For Kore, Vectis, or another C web framework, keep lonejson at the auth
 boundary instead of adding framework-specific dependencies. Refresh discovery
 and JWKS through a configured runtime during startup or cache maintenance, then
@@ -198,8 +209,9 @@ end, "my-product/1.0")
 
 Remaining auth DX gaps are explicit. lonejson does not provide a built-in HTTP
 server, browser launcher, localhost callback listener, refresh scheduler,
-credential store, retry policy, proxy policy, redirect policy, or
-Kore/Vectis-specific handler wrapper. Those are application lifecycle concerns.
+credential-store persistence/locking, retry policy, proxy policy, redirect
+policy, or Kore/Vectis-specific handler wrapper. Those are application
+lifecycle concerns.
 Potential future simplifications would be an examples-level curl HTTP provider
 callback, an examples-level Kore/Vectis adapter, and a higher-level
 cache-refresh scheduler. Those should start as examples or application helpers
@@ -215,6 +227,10 @@ prefer `nerdctl compose` and fall back to `docker compose`. The mock provider
 does not issue refresh tokens for the client-credentials flow, so this e2e
 checks refresh-token exchange only when a provider returns one; refresh request
 construction remains covered by the auth unit tests.
+
+`make test-m2m-e2e` starts a tiny lonejson-backed API fixture and uses `curl`
+as the non-lonejson client to verify Basic client credentials, Bearer API keys,
+missing credentials, and wrong-secret rejection.
 
 Short aliases are enabled by default. Disable them if they collide with another
 project:

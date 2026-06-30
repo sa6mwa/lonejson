@@ -461,6 +461,19 @@ if(LONEJSON_BUILD_TESTS)
       CURL::libcurl
       OpenSSL::Crypto)
     lonejson_configure_c_target(lonejson_oidc_fixture_server)
+
+    add_executable(lonejson_m2m_fixture_server
+      tests/m2m_fixture_server.c)
+    target_include_directories(lonejson_m2m_fixture_server PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+    target_compile_definitions(lonejson_m2m_fixture_server PRIVATE
+      LONEJSON_WITH_JWT
+      LONEJSON_WITH_OIDC
+      LONEJSON_WITH_OPENSSL)
+    target_link_libraries(lonejson_m2m_fixture_server PRIVATE
+      lonejson
+      OpenSSL::Crypto)
+    lonejson_configure_c_target(lonejson_m2m_fixture_server)
   endif()
 
   add_executable(lonejson_map_cache_no_tls_tests
@@ -1211,6 +1224,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_jwt.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_main.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/oidc_fixture_server.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/m2m_fixture_server.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_parse_serialize.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_protocol_framing.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_support.inc.h"

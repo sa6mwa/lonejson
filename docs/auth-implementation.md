@@ -766,7 +766,9 @@ The following are deliberate gaps or future work, not hidden behavior.
 
 - No built-in HTTP transport; caller-owned providers perform network I/O.
 - No retry, timeout, proxy, redirect, or TLS policy helper.
-- No credential storage helper.
+- No built-in credential persistence, locking, or encryption helper. The m2m
+  helpers generate store-ready JSON records and verify caller-owned JSON store
+  bytes, but applications still own durable storage and concurrent updates.
 - No complete browser-launch helper.
 - No localhost HTTP listener.
 - No random callback-path session object.
@@ -808,6 +810,43 @@ Machine-to-machine client credentials:
    POST with caller-owned HTTP code and parse with
    `lonejson_oauth2_token_response_parse_json`.
 4. Treat returned token material as secret credential material.
+
+Server-local machine-to-machine credentials:
+
+1. Generate a credential with `lonejson_m2m_credential_generate`. The helper
+   returns one-time cleartext `client_secret` and/or `api_key` values plus a
+   `record_json` object containing only salts, hashes, and the caller-supplied
+   opaque `claim` JSON.
+2. Store `record_json` in the caller-owned credential store under
+   `credentials[]`. The recommended persistence boundary is an admin CLI or
+   framework-owned storage layer that controls file permissions, locking,
+   encryption, and auditing.
+3. In a request handler, pass the HTTP `Authorization` header and store JSON to
+   `lonejson_m2m_verify_authorization`. By default it accepts both
+   `Authorization: Basic <base64(client_id:client_secret)>` and
+   `Authorization: Bearer <api_key>`. Set `allowed_auth_modes` to
+   `LONEJSON_M2M_AUTH_BASIC` or `LONEJSON_M2M_AUTH_BEARER` to opt out of one
+   mode.
+4. On success, use the returned `client_id` and opaque `claim` JSON to make the
+   application authorization decision. lonejson authenticates and returns
+   facts; it does not decide whether a method, tool, endpoint, tenant, or
+   operation is allowed.
+
+Server-local signup seed flow:
+
+1. An admin process calls `lonejson_m2m_signup_generate` with claim/metadata
+   JSON and optionally a public signup base URL. The helper returns a one-time
+   signup secret, a query string/URL suitable for email or another delivery
+   channel, and a store-ready signup record.
+2. Store the signup record under `signups[]`. Prefer exposing signup seeding
+   through an admin CLI or trusted automation path.
+3. The web handler asks the recipient for the required email address and calls
+   `lonejson_m2m_signup_complete` with the signup secret, optional signup ID,
+   email, and store JSON.
+4. On success, show the generated API key and/or client credentials once,
+   insert the returned credential record into `credentials[]`, and remove the
+   consumed signup record from `signups[]`. The helper returns the signup ID to
+   remove, but the caller owns the actual persistent store mutation.
 
 CLI or desktop authorization-code with PKCE:
 

@@ -212,6 +212,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	curl-examples \
 	test-curl-e2e \
 	test-oidc-e2e \
+	test-m2m-e2e \
 	clean \
 	clean-dist
 
@@ -290,6 +291,7 @@ help:
 		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
 		'make test-curl-e2e          Build and run the curl examples against the local HTTPS rig.' \
 		'make test-oidc-e2e          Build and run OIDC/OAuth2/JWKS e2e against the local compose rig.' \
+		'make test-m2m-e2e           Build and run M2M Basic/Bearer auth e2e with curl as the client.' \
 		'make release-source-artifact Build the source-only release tarball in dist/.' \
 		'make clean                  Remove build/, dist/, .deps/, examples/bin/, and generated Lua module artifacts.' \
 		'make clean-dist             Remove dist/ release artifacts only.'
@@ -773,6 +775,11 @@ test-oidc-e2e: compose-up deps-host
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset host-curl --target lonejson_oidc_fixture_server
 	./scripts/test_oidc_e2e.sh
+
+test-m2m-e2e: deps-host
+	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
+	cmake --build --preset host-curl --target lonejson_m2m_fixture_server
+	./scripts/test_m2m_e2e.sh
 
 clean:
 	./scripts/clean.sh

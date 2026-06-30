@@ -127,7 +127,19 @@ for symbol in \
     lonejson_oidc_bearer_validation_init \
     lonejson_oidc_bearer_validation_cleanup \
     lonejson_oidc_authorization_bearer_token \
-    lonejson_oidc_validate_bearer_token; do
+    lonejson_oidc_validate_bearer_token \
+    lonejson_m2m_credential_init \
+    lonejson_m2m_credential_cleanup \
+    lonejson_m2m_credential_generate \
+    lonejson_m2m_authentication_init \
+    lonejson_m2m_authentication_cleanup \
+    lonejson_m2m_verify_authorization \
+    lonejson_m2m_signup_init \
+    lonejson_m2m_signup_cleanup \
+    lonejson_m2m_signup_generate \
+    lonejson_m2m_signup_complete_init \
+    lonejson_m2m_signup_complete_cleanup \
+    lonejson_m2m_signup_complete; do
   if ! symbol_present "$shared_symbols" "$symbol" "$symbol_prefix_optional"; then
     printf 'missing lonejson_jwt_* ABI symbol in shared library for %s: %s\n' "$context" "$symbol" >&2
     exit 1

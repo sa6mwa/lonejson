@@ -1160,6 +1160,10 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
   runtime->oidc_authorization_code_token_request =
       lonejson_oidc_authorization_code_token_request;
   runtime->oidc_validate_bearer_token = lonejson_oidc_validate_bearer_token;
+  runtime->m2m_credential_generate = lonejson_m2m_credential_generate;
+  runtime->m2m_verify_authorization = lonejson_m2m_verify_authorization;
+  runtime->m2m_signup_generate = lonejson_m2m_signup_generate;
+  runtime->m2m_signup_complete = lonejson_m2m_signup_complete;
   runtime->set_http_provider = lonejson__runtime_set_http_provider;
 #endif
 #ifdef LONEJSON_WITH_CURL

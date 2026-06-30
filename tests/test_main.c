@@ -46,6 +46,8 @@ int main(void) {
   test_oidc_authorization_bearer_token();
   test_oidc_validate_bearer_token();
   test_oidc_validate_bearer_token_failures();
+  test_m2m_credential_store_auth();
+  test_m2m_signup_flow();
   test_parse_implicit_destination_reset();
   test_dynamic_allocation_cleanup_balance();
   test_dynamic_allocation_reset_reparse_balance();

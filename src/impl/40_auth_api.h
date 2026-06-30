@@ -3829,5 +3829,1068 @@ lonejson_status lonejson_oidc_validate_bearer_token(
   out->jwk = selected;
   return LONEJSON_STATUS_OK;
 }
+
+typedef struct lonejson__m2m_record {
+  char *client_id;
+  char *secret_salt;
+  char *secret_hash;
+  char *api_key_salt;
+  char *api_key_hash;
+  int revoked;
+  lonejson_json_value claim;
+} lonejson__m2m_record;
+
+typedef struct lonejson__m2m_signup_record {
+  char *signup_id;
+  char *secret_salt;
+  char *secret_hash;
+  int revoked;
+  lonejson_json_value claim;
+} lonejson__m2m_signup_record;
+
+typedef struct lonejson__m2m_store_doc {
+  lonejson_object_array credentials;
+  lonejson_object_array signups;
+} lonejson__m2m_store_doc;
+
+static const lonejson_field lonejson__m2m_record_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_record, client_id, "client_id"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_record, secret_salt,
+                                "secret_salt"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_record, secret_hash,
+                                "secret_hash"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_record, api_key_salt,
+                                "api_key_salt"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_record, api_key_hash,
+                                "api_key_hash"),
+    LONEJSON_FIELD_BOOL(lonejson__m2m_record, revoked, "revoked"),
+    {"claim",
+     LONEJSON__KEY_LEN("claim"),
+     LONEJSON__KEY_FIRST("claim"),
+     LONEJSON__KEY_LAST("claim"),
+     offsetof(lonejson__m2m_record, claim),
+     LONEJSON_FIELD_KIND_JSON_VALUE,
+     LONEJSON_STORAGE_FIXED,
+     LONEJSON_OVERFLOW_FAIL,
+     LONEJSON_FIELD_REQUIRED | LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE,
+     0u,
+     0u,
+     NULL,
+     NULL,
+     0u,
+     LONEJSON_SPOOL_CLASS_DEFAULT}};
+LONEJSON_MAP_DEFINE(lonejson__m2m_record_map, lonejson__m2m_record,
+                    lonejson__m2m_record_fields);
+
+static const lonejson_field lonejson__m2m_signup_record_fields[] = {
+    LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_signup_record, signup_id,
+                                "signup_id"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_signup_record, secret_salt,
+                                "secret_salt"),
+    LONEJSON_FIELD_STRING_ALLOC(lonejson__m2m_signup_record, secret_hash,
+                                "secret_hash"),
+    LONEJSON_FIELD_BOOL(lonejson__m2m_signup_record, revoked, "revoked"),
+    {"claim",
+     LONEJSON__KEY_LEN("claim"),
+     LONEJSON__KEY_FIRST("claim"),
+     LONEJSON__KEY_LAST("claim"),
+     offsetof(lonejson__m2m_signup_record, claim),
+     LONEJSON_FIELD_KIND_JSON_VALUE,
+     LONEJSON_STORAGE_FIXED,
+     LONEJSON_OVERFLOW_FAIL,
+     LONEJSON_FIELD_REQUIRED | LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE,
+     0u,
+     0u,
+     NULL,
+     NULL,
+     0u,
+     LONEJSON_SPOOL_CLASS_DEFAULT}};
+LONEJSON_MAP_DEFINE(lonejson__m2m_signup_record_map,
+                    lonejson__m2m_signup_record,
+                    lonejson__m2m_signup_record_fields);
+
+static const lonejson_field lonejson__m2m_store_doc_fields[] = {
+    LONEJSON_FIELD_OBJECT_ARRAY_OMIT_EMPTY(
+        lonejson__m2m_store_doc, credentials, "credentials",
+        lonejson__m2m_record, &lonejson__m2m_record_map,
+        LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_OBJECT_ARRAY_OMIT_EMPTY(
+        lonejson__m2m_store_doc, signups, "signups",
+        lonejson__m2m_signup_record, &lonejson__m2m_signup_record_map,
+        LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(lonejson__m2m_store_doc_map, lonejson__m2m_store_doc,
+                    lonejson__m2m_store_doc_fields);
+
+static unsigned lonejson__m2m_modes_or_default(unsigned modes) {
+  return modes == 0u ? LONEJSON_M2M_AUTH_DEFAULT : modes;
+}
+
+static void lonejson__m2m_store_cleanup(lonejson__m2m_store_doc *store) {
+  if (store != NULL) {
+    lonejson_cleanup(&lonejson__m2m_store_doc_map, store);
+  }
+}
+
+static lonejson_status lonejson__m2m_require_crypto(
+    lonejson *runtime, lonejson__runtime_borrow *borrow,
+    const lonejson_runtime **runtime_state, lonejson_error *error) {
+  *runtime_state = lonejson__require_runtime_borrow(runtime, borrow, error);
+  if (*runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (!(*runtime_state)->has_auth_provider ||
+      (*runtime_state)->auth_provider.random_bytes == NULL ||
+      (*runtime_state)->auth_provider.sha256 == NULL) {
+    lonejson__runtime_borrow_release(borrow);
+    *runtime_state = NULL;
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "runtime auth provider must provide random_bytes and sha256");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__m2m_random_token(
+    const lonejson_runtime *runtime_state, size_t bytes, char **out,
+    lonejson_error *error) {
+  unsigned char random_bytes[32];
+
+  if (bytes == 0u || bytes > sizeof(random_bytes) || out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "invalid random token request");
+  }
+  *out = NULL;
+  if (runtime_state->auth_provider.random_bytes(
+          runtime_state->auth_provider.user_data, random_bytes, bytes, error) !=
+      LONEJSON_STATUS_OK) {
+    return error != NULL ? error->code : LONEJSON_STATUS_INTERNAL_ERROR;
+  }
+  *out = lonejson__base64url_encode_alloc(random_bytes, bytes, error);
+  memset(random_bytes, 0, sizeof(random_bytes));
+  return *out != NULL ? LONEJSON_STATUS_OK
+                      : (error != NULL ? error->code
+                                       : LONEJSON_STATUS_ALLOCATION_FAILED);
+}
+
+static lonejson_status lonejson__m2m_hash_secret(
+    const lonejson_runtime *runtime_state, const char *salt, const char *secret,
+    char **out_hash, lonejson_error *error) {
+  unsigned char salt_bytes[16];
+  unsigned char digest[32];
+  unsigned char *input = NULL;
+  size_t salt_len;
+  size_t needed;
+  size_t secret_len;
+  lonejson_status status;
+
+  if (salt == NULL || secret == NULL || out_hash == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "salt, secret, and hash output required");
+  }
+  *out_hash = NULL;
+  status = lonejson_base64url_decode(salt, strlen(salt), salt_bytes,
+                                     sizeof(salt_bytes), &needed, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  salt_len = needed;
+  secret_len = strlen(secret);
+  if (secret_len == 0u || secret_len > 4096u ||
+      salt_len > SIZE_MAX - secret_len) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "secret length is invalid");
+  }
+  input = (unsigned char *)lonejson__owned_malloc(NULL, salt_len + secret_len);
+  if (input == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to allocate secret hash input");
+  }
+  memcpy(input, salt_bytes, salt_len);
+  memcpy(input + salt_len, secret, secret_len);
+  status = runtime_state->auth_provider.sha256(
+      runtime_state->auth_provider.user_data, input, salt_len + secret_len,
+      digest, error);
+  memset(input, 0, salt_len + secret_len);
+  lonejson__owned_free(input);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  *out_hash = lonejson__base64url_encode_alloc(digest, sizeof(digest), error);
+  memset(digest, 0, sizeof(digest));
+  return *out_hash != NULL ? LONEJSON_STATUS_OK
+                           : (error != NULL ? error->code
+                                            : LONEJSON_STATUS_ALLOCATION_FAILED);
+}
+
+static int lonejson__m2m_constant_equal(const char *a, const char *b) {
+  size_t a_len;
+  size_t b_len;
+  size_t i;
+  unsigned char diff = 0u;
+
+  if (a == NULL || b == NULL) {
+    return 0;
+  }
+  a_len = strlen(a);
+  b_len = strlen(b);
+  if (a_len != b_len) {
+    return 0;
+  }
+  for (i = 0u; i < a_len; ++i) {
+    diff |= (unsigned char)a[i] ^ (unsigned char)b[i];
+  }
+  return diff == 0u;
+}
+
+static int lonejson__m2m_ascii_scheme_prefix(const char *value,
+                                             const char *scheme) {
+  unsigned char a;
+  unsigned char b;
+
+  if (value == NULL || scheme == NULL) {
+    return 0;
+  }
+  while (*scheme != '\0') {
+    a = (unsigned char)*value++;
+    b = (unsigned char)*scheme++;
+    if (a >= (unsigned char)'A' && a <= (unsigned char)'Z') {
+      a = (unsigned char)(a - (unsigned char)'A' + (unsigned char)'a');
+    }
+    if (b >= (unsigned char)'A' && b <= (unsigned char)'Z') {
+      b = (unsigned char)(b - (unsigned char)'A' + (unsigned char)'a');
+    }
+    if (a != b) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static lonejson_status lonejson__m2m_verify_hash(
+    const lonejson_runtime *runtime_state, const char *salt, const char *hash,
+    const char *secret, int *ok, lonejson_error *error) {
+  char *computed = NULL;
+  lonejson_status status;
+
+  *ok = 0;
+  status = lonejson__m2m_hash_secret(runtime_state, salt, secret, &computed,
+                                     error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__clear_error(error);
+    return LONEJSON_STATUS_OK;
+  }
+  *ok = lonejson__m2m_constant_equal(computed, hash);
+  lonejson__owned_free(computed);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__m2m_append_json_string(
+    lonejson_owned_buffer *out, const char *value, size_t max_bytes,
+    lonejson_error *error) {
+  static const char hex[] = "0123456789abcdef";
+  const unsigned char *p = (const unsigned char *)value;
+  char esc[6];
+  lonejson_status status;
+
+  status = lonejson__oauth2_form_append_raw(out, "\"", 1u, max_bytes, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  while (p != NULL && *p != '\0') {
+    unsigned char ch = *p++;
+    switch (ch) {
+    case '"':
+      status = lonejson__oauth2_form_append_raw(out, "\\\"", 2u, max_bytes,
+                                                error);
+      break;
+    case '\\':
+      status = lonejson__oauth2_form_append_raw(out, "\\\\", 2u, max_bytes,
+                                                error);
+      break;
+    case '\b':
+      status = lonejson__oauth2_form_append_raw(out, "\\b", 2u, max_bytes,
+                                                error);
+      break;
+    case '\f':
+      status = lonejson__oauth2_form_append_raw(out, "\\f", 2u, max_bytes,
+                                                error);
+      break;
+    case '\n':
+      status = lonejson__oauth2_form_append_raw(out, "\\n", 2u, max_bytes,
+                                                error);
+      break;
+    case '\r':
+      status = lonejson__oauth2_form_append_raw(out, "\\r", 2u, max_bytes,
+                                                error);
+      break;
+    case '\t':
+      status = lonejson__oauth2_form_append_raw(out, "\\t", 2u, max_bytes,
+                                                error);
+      break;
+    default:
+      if (ch < 0x20u) {
+        esc[0] = '\\';
+        esc[1] = 'u';
+        esc[2] = '0';
+        esc[3] = '0';
+        esc[4] = hex[(ch >> 4u) & 0x0fu];
+        esc[5] = hex[ch & 0x0fu];
+        status =
+            lonejson__oauth2_form_append_raw(out, esc, sizeof(esc), max_bytes,
+                                             error);
+      } else {
+        status = lonejson__oauth2_form_append_raw(out, (const char *)&ch, 1u,
+                                                  max_bytes, error);
+      }
+      break;
+    }
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  return lonejson__oauth2_form_append_raw(out, "\"", 1u, max_bytes, error);
+}
+
+static lonejson_status lonejson__m2m_append_member_string(
+    lonejson_owned_buffer *out, const char *key, const char *value,
+    int *has_member, size_t max_bytes, lonejson_error *error) {
+  lonejson_status status;
+
+  if (value == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (*has_member) {
+    status = lonejson__oauth2_form_append_raw(out, ",", 1u, max_bytes, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  status = lonejson__m2m_append_json_string(out, key, max_bytes, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oauth2_form_append_raw(out, ":", 1u, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_append_json_string(out, value, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    *has_member = 1;
+  }
+  return status;
+}
+
+static lonejson_status lonejson__m2m_build_record_json(
+    const char *client_id, const char *secret_salt, const char *secret_hash,
+    const char *api_key_salt, const char *api_key_hash, const char *claim_json,
+    size_t claim_len, size_t max_bytes, lonejson_owned_buffer *out,
+    lonejson_error *error) {
+  int has_member = 0;
+  lonejson_status status;
+
+  lonejson_owned_buffer_free(out);
+  status = lonejson__oauth2_form_append_raw(out, "{", 1u, max_bytes, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_append_member_string(out, "client_id", client_id,
+                                                &has_member, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_append_member_string(
+        out, "secret_salt", secret_salt, &has_member, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_append_member_string(
+        out, "secret_hash", secret_hash, &has_member, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_append_member_string(
+        out, "api_key_salt", api_key_salt, &has_member, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_append_member_string(
+        out, "api_key_hash", api_key_hash, &has_member, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status =
+        lonejson__oauth2_form_append_raw(out, ",\"claim\":", 9u, max_bytes,
+                                         error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oauth2_form_append_raw(out, claim_json, claim_len,
+                                              max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oauth2_form_append_raw(out, "}", 1u, max_bytes, error);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_owned_buffer_free(out);
+  }
+  return status;
+}
+
+static lonejson_status lonejson__m2m_parse_store(
+    lonejson *runtime, const lonejson_m2m_store *input,
+    lonejson__m2m_store_doc *store, lonejson_error *error) {
+  size_t max_bytes;
+  lonejson_status status;
+
+  if (input == NULL || input->json == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "M2M credential store JSON is required");
+  }
+  max_bytes = input->max_store_bytes == 0u ? 1024u * 1024u
+                                           : input->max_store_bytes;
+  if (input->len > max_bytes) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "M2M credential store exceeds configured limit");
+  }
+  memset(store, 0, sizeof(*store));
+  status = lonejson_parse_buffer(runtime, &lonejson__m2m_store_doc_map, store,
+                                 input->json, input->len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__m2m_store_cleanup(store);
+  }
+  return status;
+}
+
+void lonejson_m2m_credential_init(lonejson_m2m_credential *credential) {
+  if (credential != NULL) {
+    memset(credential, 0, sizeof(*credential));
+    lonejson_owned_buffer_init(&credential->record_json);
+  }
+}
+
+void lonejson_m2m_credential_cleanup(lonejson_m2m_credential *credential) {
+  if (credential != NULL) {
+    lonejson__owned_free(credential->client_id);
+    lonejson__owned_free(credential->client_secret);
+    lonejson__owned_free(credential->api_key);
+    lonejson_owned_buffer_free(&credential->record_json);
+    memset(credential, 0, sizeof(*credential));
+  }
+}
+
+lonejson_status lonejson_m2m_credential_generate(
+    lonejson *runtime, const lonejson_m2m_credential_request *request,
+    lonejson_m2m_credential *out, lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  const char *claim_json;
+  size_t claim_len;
+  size_t max_record_bytes;
+  unsigned modes;
+  char *secret_salt = NULL;
+  char *secret_hash = NULL;
+  char *api_key_salt = NULL;
+  char *api_key_hash = NULL;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (request == NULL || out == NULL || request->claim_json == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "M2M credential request is required");
+  }
+  lonejson_m2m_credential_cleanup(out);
+  claim_json = request->claim_json;
+  claim_len =
+      request->claim_len == 0u ? strlen(request->claim_json) : request->claim_len;
+  status = lonejson_validate_buffer(runtime, claim_json, claim_len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  modes = lonejson__m2m_modes_or_default(request->auth_modes);
+  if ((modes & ~LONEJSON_M2M_AUTH_DEFAULT) != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "unsupported M2M auth mode");
+  }
+  status = lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__m2m_random_token(runtime_state, 16u, &out->client_id,
+                                      error);
+  if (status == LONEJSON_STATUS_OK && (modes & LONEJSON_M2M_AUTH_BASIC) != 0u) {
+    status = lonejson__m2m_random_token(runtime_state, 32u, &out->client_secret,
+                                        error);
+  }
+  if (status == LONEJSON_STATUS_OK &&
+      (modes & LONEJSON_M2M_AUTH_BEARER) != 0u) {
+    status =
+        lonejson__m2m_random_token(runtime_state, 32u, &out->api_key, error);
+  }
+  if (status == LONEJSON_STATUS_OK && out->client_secret != NULL) {
+    status = lonejson__m2m_random_token(runtime_state, 16u, &secret_salt,
+                                        error);
+  }
+  if (status == LONEJSON_STATUS_OK && out->client_secret != NULL) {
+    status = lonejson__m2m_hash_secret(runtime_state, secret_salt,
+                                       out->client_secret, &secret_hash, error);
+  }
+  if (status == LONEJSON_STATUS_OK && out->api_key != NULL) {
+    status = lonejson__m2m_random_token(runtime_state, 16u, &api_key_salt,
+                                        error);
+  }
+  if (status == LONEJSON_STATUS_OK && out->api_key != NULL) {
+    status = lonejson__m2m_hash_secret(runtime_state, api_key_salt,
+                                       out->api_key, &api_key_hash, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    max_record_bytes =
+        request->max_record_bytes == 0u ? 64u * 1024u : request->max_record_bytes;
+    status = lonejson__m2m_build_record_json(
+        out->client_id, secret_salt, secret_hash, api_key_salt, api_key_hash,
+        claim_json, claim_len, max_record_bytes, &out->record_json, error);
+  }
+  lonejson__runtime_borrow_release(&borrow);
+  lonejson__owned_free(secret_salt);
+  lonejson__owned_free(secret_hash);
+  lonejson__owned_free(api_key_salt);
+  lonejson__owned_free(api_key_hash);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_m2m_credential_cleanup(out);
+  }
+  return status;
+}
+
+void lonejson_m2m_authentication_init(lonejson_m2m_authentication *auth) {
+  if (auth != NULL) {
+    memset(auth, 0, sizeof(*auth));
+    auth->failure = LONEJSON_AUTH_FAILURE_MISSING_CREDENTIALS;
+    lonejson_json_value_init(NULL, &auth->claim);
+  }
+}
+
+void lonejson_m2m_authentication_cleanup(lonejson_m2m_authentication *auth) {
+  if (auth != NULL) {
+    lonejson__owned_free(auth->client_id);
+    lonejson_json_value_cleanup(&auth->claim);
+    memset(auth, 0, sizeof(*auth));
+  }
+}
+
+static lonejson_status lonejson__m2m_extract_bearer(
+    const char *authorization_header, const char **token,
+    lonejson_error *error) {
+  const char *p;
+  const char *begin;
+
+  if (authorization_header == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
+                               0u, 0u, 0u, "Authorization header is required");
+  }
+  p = authorization_header;
+  while (*p == ' ' || *p == '\t') {
+    ++p;
+  }
+  if (!lonejson__m2m_ascii_scheme_prefix(p, "Bearer")) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "Authorization scheme is not Bearer");
+  }
+  p += strlen("Bearer");
+  if (*p != ' ' && *p != '\t') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "Bearer token separator is required");
+  }
+  while (*p == ' ' || *p == '\t') {
+    ++p;
+  }
+  begin = p;
+  while (*p != '\0' && *p != ' ' && *p != '\t') {
+    ++p;
+  }
+  while (*p == ' ' || *p == '\t') {
+    ++p;
+  }
+  if (begin == p || *p != '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "Bearer token is malformed");
+  }
+  *token = begin;
+  return LONEJSON_STATUS_OK;
+}
+
+static int lonejson__m2m_base64_value(unsigned char ch) {
+  if (ch >= (unsigned char)'A' && ch <= (unsigned char)'Z') {
+    return (int)(ch - (unsigned char)'A');
+  }
+  if (ch >= (unsigned char)'a' && ch <= (unsigned char)'z') {
+    return (int)(ch - (unsigned char)'a') + 26;
+  }
+  if (ch >= (unsigned char)'0' && ch <= (unsigned char)'9') {
+    return (int)(ch - (unsigned char)'0') + 52;
+  }
+  if (ch == (unsigned char)'+') {
+    return 62;
+  }
+  if (ch == (unsigned char)'/') {
+    return 63;
+  }
+  return -1;
+}
+
+static lonejson_status lonejson__m2m_basic_decode(
+    const char *authorization_header, char **client_id, char **client_secret,
+    lonejson_error *error) {
+  const char *p;
+  const char *encoded;
+  size_t len;
+  size_t out_cap;
+  unsigned char *decoded;
+  size_t i;
+  size_t out_len = 0u;
+  char *colon;
+
+  *client_id = NULL;
+  *client_secret = NULL;
+  if (authorization_header == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
+                               0u, 0u, 0u, "Authorization header is required");
+  }
+  p = authorization_header;
+  while (*p == ' ' || *p == '\t') {
+    ++p;
+  }
+  if (!lonejson__m2m_ascii_scheme_prefix(p, "Basic")) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "Authorization scheme is not Basic");
+  }
+  p += strlen("Basic");
+  if (*p != ' ' && *p != '\t') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "Basic credential separator is required");
+  }
+  while (*p == ' ' || *p == '\t') {
+    ++p;
+  }
+  encoded = p;
+  while (*p != '\0' && *p != ' ' && *p != '\t') {
+    ++p;
+  }
+  len = (size_t)(p - encoded);
+  while (*p == ' ' || *p == '\t') {
+    ++p;
+  }
+  if (len == 0u || *p != '\0' || (len & 3u) != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "Basic credentials are malformed");
+  }
+  out_cap = (len / 4u) * 3u + 1u;
+  decoded = (unsigned char *)lonejson__owned_malloc(NULL, out_cap);
+  if (decoded == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to allocate Basic credentials");
+  }
+  for (i = 0u; i < len; i += 4u) {
+    int v0 = lonejson__m2m_base64_value((unsigned char)encoded[i]);
+    int v1 = lonejson__m2m_base64_value((unsigned char)encoded[i + 1u]);
+    int v2 = encoded[i + 2u] == '='
+                 ? 0
+                 : lonejson__m2m_base64_value((unsigned char)encoded[i + 2u]);
+    int v3 = encoded[i + 3u] == '='
+                 ? 0
+                 : lonejson__m2m_base64_value((unsigned char)encoded[i + 3u]);
+    unsigned int bits;
+    if (v0 < 0 || v1 < 0 || v2 < 0 || v3 < 0 ||
+        (encoded[i + 2u] == '=' && encoded[i + 3u] != '=')) {
+      lonejson__owned_free(decoded);
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                                 0u, "Basic credentials are malformed");
+    }
+    bits = ((unsigned int)v0 << 18) | ((unsigned int)v1 << 12) |
+           ((unsigned int)v2 << 6) | (unsigned int)v3;
+    decoded[out_len++] = (unsigned char)((bits >> 16) & 0xffu);
+    if (encoded[i + 2u] != '=') {
+      decoded[out_len++] = (unsigned char)((bits >> 8) & 0xffu);
+    }
+    if (encoded[i + 3u] != '=') {
+      decoded[out_len++] = (unsigned char)(bits & 0xffu);
+    }
+  }
+  decoded[out_len] = '\0';
+  colon = strchr((char *)decoded, ':');
+  if (colon == NULL || colon == (char *)decoded || colon[1] == '\0') {
+    lonejson__owned_free(decoded);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "Basic credentials require client_id:secret");
+  }
+  *colon = '\0';
+  *client_id = lonejson__owned_strdup(NULL, (char *)decoded);
+  *client_secret = lonejson__owned_strdup(NULL, colon + 1);
+  lonejson__owned_free(decoded);
+  if (*client_id == NULL || *client_secret == NULL) {
+    lonejson__owned_free(*client_id);
+    lonejson__owned_free(*client_secret);
+    *client_id = NULL;
+    *client_secret = NULL;
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to copy Basic credentials");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_m2m_verify_authorization(
+    lonejson *runtime, const lonejson_m2m_verify_request *request,
+    lonejson_m2m_authentication *out, lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  lonejson__m2m_store_doc store;
+  unsigned modes;
+  lonejson_status status;
+  size_t i;
+
+  lonejson__clear_error(error);
+  if (request == NULL || out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "M2M verify request and output required");
+  }
+  lonejson_m2m_authentication_cleanup(out);
+  lonejson_m2m_authentication_init(out);
+  modes = lonejson__m2m_modes_or_default(request->allowed_auth_modes);
+  if ((modes & ~LONEJSON_M2M_AUTH_DEFAULT) != 0u) {
+    out->failure = LONEJSON_AUTH_FAILURE_MALFORMED_TOKEN;
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "unsupported M2M auth mode");
+  }
+  status = lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
+  if (status != LONEJSON_STATUS_OK) {
+    out->failure = LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE;
+    return status;
+  }
+  status = lonejson__m2m_parse_store(runtime, request->store, &store, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__runtime_borrow_release(&borrow);
+    out->failure = LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE;
+    return status;
+  }
+  if ((modes & LONEJSON_M2M_AUTH_BASIC) != 0u) {
+    char *client_id = NULL;
+    char *client_secret = NULL;
+    if (lonejson__m2m_basic_decode(request->authorization_header, &client_id,
+                                   &client_secret, NULL) ==
+        LONEJSON_STATUS_OK) {
+      for (i = 0u; i < store.credentials.count; ++i) {
+        lonejson__m2m_record *record =
+            &((lonejson__m2m_record *)store.credentials.items)[i];
+        int ok = 0;
+        if (record->revoked || record->client_id == NULL ||
+            strcmp(record->client_id, client_id) != 0 ||
+            record->secret_salt == NULL || record->secret_hash == NULL) {
+          continue;
+        }
+        (void)lonejson__m2m_verify_hash(runtime_state, record->secret_salt,
+                                        record->secret_hash, client_secret, &ok,
+                                        NULL);
+        if (ok) {
+          out->client_id = lonejson__owned_strdup(NULL, record->client_id);
+          out->auth_mode = LONEJSON_M2M_AUTH_BASIC;
+          status = lonejson_json_value_set_buffer(
+              &out->claim, record->claim.json, record->claim.len, error);
+          out->failure = status == LONEJSON_STATUS_OK
+                             ? LONEJSON_AUTH_FAILURE_NONE
+                             : LONEJSON_AUTH_FAILURE_CLAIMS_INVALID;
+          lonejson__owned_free(client_id);
+          lonejson__owned_free(client_secret);
+          lonejson__m2m_store_cleanup(&store);
+          lonejson__runtime_borrow_release(&borrow);
+          return status;
+        }
+      }
+    }
+    lonejson__owned_free(client_id);
+    lonejson__owned_free(client_secret);
+  }
+  if ((modes & LONEJSON_M2M_AUTH_BEARER) != 0u) {
+    const char *api_key = NULL;
+    if (lonejson__m2m_extract_bearer(request->authorization_header, &api_key,
+                                     NULL) == LONEJSON_STATUS_OK) {
+      for (i = 0u; i < store.credentials.count; ++i) {
+        lonejson__m2m_record *record =
+            &((lonejson__m2m_record *)store.credentials.items)[i];
+        int ok = 0;
+        if (record->revoked || record->client_id == NULL ||
+            record->api_key_salt == NULL || record->api_key_hash == NULL) {
+          continue;
+        }
+        (void)lonejson__m2m_verify_hash(runtime_state, record->api_key_salt,
+                                        record->api_key_hash, api_key, &ok,
+                                        NULL);
+        if (ok) {
+          out->client_id = lonejson__owned_strdup(NULL, record->client_id);
+          out->auth_mode = LONEJSON_M2M_AUTH_BEARER;
+          status = lonejson_json_value_set_buffer(
+              &out->claim, record->claim.json, record->claim.len, error);
+          out->failure = status == LONEJSON_STATUS_OK
+                             ? LONEJSON_AUTH_FAILURE_NONE
+                             : LONEJSON_AUTH_FAILURE_CLAIMS_INVALID;
+          lonejson__m2m_store_cleanup(&store);
+          lonejson__runtime_borrow_release(&borrow);
+          return status;
+        }
+      }
+    }
+  }
+  lonejson__m2m_store_cleanup(&store);
+  lonejson__runtime_borrow_release(&borrow);
+  out->failure = request->authorization_header == NULL
+                     ? LONEJSON_AUTH_FAILURE_MISSING_CREDENTIALS
+                     : LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE;
+  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                             "M2M credentials are not accepted");
+}
+
+void lonejson_m2m_signup_init(lonejson_m2m_signup *signup) {
+  if (signup != NULL) {
+    memset(signup, 0, sizeof(*signup));
+    lonejson_owned_buffer_init(&signup->query);
+    lonejson_owned_buffer_init(&signup->url);
+    lonejson_owned_buffer_init(&signup->record_json);
+  }
+}
+
+void lonejson_m2m_signup_cleanup(lonejson_m2m_signup *signup) {
+  if (signup != NULL) {
+    lonejson__owned_free(signup->signup_id);
+    lonejson__owned_free(signup->signup_secret);
+    lonejson_owned_buffer_free(&signup->query);
+    lonejson_owned_buffer_free(&signup->url);
+    lonejson_owned_buffer_free(&signup->record_json);
+    memset(signup, 0, sizeof(*signup));
+  }
+}
+
+static lonejson_status lonejson__m2m_build_signup_record_json(
+    const char *signup_id, const char *secret_salt, const char *secret_hash,
+    const char *claim_json, size_t claim_len, size_t max_bytes,
+    lonejson_owned_buffer *out, lonejson_error *error) {
+  int has_member = 0;
+  lonejson_status status;
+
+  lonejson_owned_buffer_free(out);
+  status = lonejson__oauth2_form_append_raw(out, "{", 1u, max_bytes, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_append_member_string(
+        out, "signup_id", signup_id, &has_member, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_append_member_string(
+        out, "secret_salt", secret_salt, &has_member, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_append_member_string(
+        out, "secret_hash", secret_hash, &has_member, max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status =
+        lonejson__oauth2_form_append_raw(out, ",\"claim\":", 9u, max_bytes,
+                                         error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oauth2_form_append_raw(out, claim_json, claim_len,
+                                              max_bytes, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oauth2_form_append_raw(out, "}", 1u, max_bytes, error);
+  }
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_owned_buffer_free(out);
+  }
+  return status;
+}
+
+lonejson_status lonejson_m2m_signup_generate(
+    lonejson *runtime, const lonejson_m2m_signup_request *request,
+    lonejson_m2m_signup *out, lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  const char *claim_json;
+  const char *secret_param;
+  const char *id_param;
+  char *secret_salt = NULL;
+  char *secret_hash = NULL;
+  size_t claim_len;
+  size_t max_url_bytes;
+  size_t max_record_bytes;
+  int has_pair = 0;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  if (request == NULL || out == NULL || request->claim_json == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "M2M signup request is required");
+  }
+  lonejson_m2m_signup_cleanup(out);
+  claim_json = request->claim_json;
+  claim_len =
+      request->claim_len == 0u ? strlen(request->claim_json) : request->claim_len;
+  status = lonejson_validate_buffer(runtime, claim_json, claim_len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status =
+      lonejson__m2m_random_token(runtime_state, 16u, &out->signup_id, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_random_token(runtime_state, 32u,
+                                        &out->signup_secret, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_random_token(runtime_state, 16u, &secret_salt,
+                                        error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__m2m_hash_secret(runtime_state, secret_salt,
+                                       out->signup_secret, &secret_hash, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    max_record_bytes =
+        request->max_record_bytes == 0u ? 64u * 1024u : request->max_record_bytes;
+    status = lonejson__m2m_build_signup_record_json(
+        out->signup_id, secret_salt, secret_hash, claim_json, claim_len,
+        max_record_bytes, &out->record_json, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    secret_param = request->secret_param != NULL ? request->secret_param
+                                                 : "signup_secret";
+    id_param = request->id_param != NULL ? request->id_param : "signup_id";
+    max_url_bytes =
+        request->max_url_bytes == 0u ? 4096u : request->max_url_bytes;
+    status = lonejson__oauth2_form_append_pair(
+        &out->query, id_param, out->signup_id, &has_pair, max_url_bytes, error);
+    if (status == LONEJSON_STATUS_OK) {
+      status = lonejson__oauth2_form_append_pair(
+          &out->query, secret_param, out->signup_secret, &has_pair,
+          max_url_bytes, error);
+    }
+    if (status == LONEJSON_STATUS_OK && request->base_url != NULL) {
+      const char *join = strchr(request->base_url, '?') == NULL ? "?" : "&";
+      status = lonejson__oauth2_form_append_raw(
+          &out->url, request->base_url, strlen(request->base_url),
+          max_url_bytes, error);
+      if (status == LONEJSON_STATUS_OK) {
+        status =
+            lonejson__oauth2_form_append_raw(&out->url, join, 1u,
+                                             max_url_bytes, error);
+      }
+      if (status == LONEJSON_STATUS_OK) {
+        status = lonejson__oauth2_form_append_raw(
+            &out->url, out->query.data, out->query.len, max_url_bytes, error);
+      }
+    }
+  }
+  lonejson__runtime_borrow_release(&borrow);
+  lonejson__owned_free(secret_salt);
+  lonejson__owned_free(secret_hash);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_m2m_signup_cleanup(out);
+  }
+  return status;
+}
+
+void lonejson_m2m_signup_complete_init(
+    lonejson_m2m_signup_completion *complete) {
+  if (complete != NULL) {
+    memset(complete, 0, sizeof(*complete));
+    lonejson_m2m_credential_init(&complete->credential);
+  }
+}
+
+void lonejson_m2m_signup_complete_cleanup(
+    lonejson_m2m_signup_completion *complete) {
+  if (complete != NULL) {
+    lonejson__owned_free(complete->signup_id);
+    lonejson__owned_free(complete->email);
+    lonejson_m2m_credential_cleanup(&complete->credential);
+    memset(complete, 0, sizeof(*complete));
+  }
+}
+
+lonejson_status lonejson_m2m_signup_complete(
+    lonejson *runtime, const lonejson_m2m_signup_complete_request *request,
+    lonejson_m2m_signup_completion *out, lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  lonejson__m2m_store_doc store;
+  size_t i;
+  lonejson_status status;
+  char *claim_copy = NULL;
+  size_t claim_len = 0u;
+
+  lonejson__clear_error(error);
+  if (request == NULL || out == NULL || request->signup_secret == NULL ||
+      request->email == NULL || request->email[0] == '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "M2M signup store, secret, email, and output "
+                               "are required");
+  }
+  lonejson_m2m_signup_complete_cleanup(out);
+  status = lonejson__m2m_require_crypto(runtime, &borrow, &runtime_state, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__m2m_parse_store(runtime, request->store, &store, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__runtime_borrow_release(&borrow);
+    return status;
+  }
+  for (i = 0u; i < store.signups.count; ++i) {
+    lonejson__m2m_signup_record *signup =
+        &((lonejson__m2m_signup_record *)store.signups.items)[i];
+    int ok = 0;
+    if (signup->revoked || signup->signup_id == NULL ||
+        signup->secret_salt == NULL || signup->secret_hash == NULL) {
+      continue;
+    }
+    if (request->signup_id != NULL &&
+        strcmp(request->signup_id, signup->signup_id) != 0) {
+      continue;
+    }
+    (void)lonejson__m2m_verify_hash(runtime_state, signup->secret_salt,
+                                    signup->secret_hash,
+                                    request->signup_secret, &ok, NULL);
+    if (ok) {
+      lonejson_m2m_credential_request credential_request;
+      claim_copy = (char *)lonejson__owned_malloc(NULL, signup->claim.len + 1u);
+      if (claim_copy == NULL) {
+        status = lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                     0u, 0u, 0u,
+                                     "failed to copy signup claim JSON");
+        lonejson__m2m_store_cleanup(&store);
+        lonejson__runtime_borrow_release(&borrow);
+        return status;
+      }
+      memcpy(claim_copy, signup->claim.json, signup->claim.len);
+      claim_copy[signup->claim.len] = '\0';
+      claim_len = signup->claim.len;
+      out->signup_id = lonejson__owned_strdup(NULL, signup->signup_id);
+      out->email = lonejson__owned_strdup(NULL, request->email);
+      lonejson__m2m_store_cleanup(&store);
+      lonejson__runtime_borrow_release(&borrow);
+      if (out->signup_id == NULL || out->email == NULL) {
+        lonejson__owned_free(claim_copy);
+        lonejson_m2m_signup_complete_cleanup(out);
+        return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                   0u, 0u, 0u,
+                                   "failed to copy signup completion data");
+      }
+      memset(&credential_request, 0, sizeof(credential_request));
+      credential_request.claim_json = claim_copy;
+      credential_request.claim_len = claim_len;
+      credential_request.auth_modes = request->credential_auth_modes;
+      status = lonejson_m2m_credential_generate(runtime, &credential_request,
+                                                &out->credential, error);
+      lonejson__owned_free(claim_copy);
+      if (status != LONEJSON_STATUS_OK) {
+        lonejson_m2m_signup_complete_cleanup(out);
+      }
+      return status;
+    }
+  }
+  lonejson__m2m_store_cleanup(&store);
+  lonejson__runtime_borrow_release(&borrow);
+  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                             "M2M signup secret is not accepted");
+}
 #endif
 #endif

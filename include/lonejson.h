@@ -1538,6 +1538,7 @@ typedef struct lonejson_oidc_bearer_validation {
   lonejson_jwt_claims claims;
   const lonejson_jwk *jwk;
 } lonejson_oidc_bearer_validation;
+
 #endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
@@ -2427,6 +2428,101 @@ struct lonejson_http_provider {
                              lonejson_error *error);
 };
 
+#define LONEJSON_M2M_AUTH_BASIC (1u << 0)
+#define LONEJSON_M2M_AUTH_BEARER (1u << 1)
+#define LONEJSON_M2M_AUTH_DEFAULT                                             \
+  (LONEJSON_M2M_AUTH_BASIC | LONEJSON_M2M_AUTH_BEARER)
+
+/** Generated confidential-client/API-key credential material.
+ *
+ * `client_secret` and `api_key` are shown once to the caller. `record_json`
+ * contains only salts and hashes plus the caller-supplied claim JSON and can be
+ * placed under a credential store's `credentials` array.
+ */
+typedef struct lonejson_m2m_credential {
+  char *client_id;
+  char *client_secret;
+  char *api_key;
+  lonejson_owned_buffer record_json;
+} lonejson_m2m_credential;
+
+/** M2M credential generation inputs. `claim_json` is embedded as raw JSON
+ * after validation. `auth_modes == 0` uses `LONEJSON_M2M_AUTH_DEFAULT`.
+ */
+typedef struct lonejson_m2m_credential_request {
+  const char *claim_json;
+  size_t claim_len;
+  unsigned auth_modes;
+  size_t max_record_bytes;
+} lonejson_m2m_credential_request;
+
+/** Caller-owned credential store JSON used by M2M verification helpers. */
+typedef struct lonejson_m2m_store {
+  const char *json;
+  size_t len;
+  size_t max_store_bytes;
+} lonejson_m2m_store;
+
+/** M2M Authorization header verification inputs. */
+typedef struct lonejson_m2m_verify_request {
+  const lonejson_m2m_store *store;
+  const char *authorization_header;
+  unsigned allowed_auth_modes;
+} lonejson_m2m_verify_request;
+
+/** Successful M2M authentication result. `claim` owns captured JSON. */
+typedef struct lonejson_m2m_authentication {
+  lonejson_auth_failure failure;
+  unsigned auth_mode;
+  char *client_id;
+  lonejson_json_value claim;
+} lonejson_m2m_authentication;
+
+/** Generated signup seed material.
+ *
+ * `signup_secret` is shown once to the inviter or encoded into a signup URL.
+ * `record_json` contains only salted/hashed secret material and claim JSON and
+ * can be placed under a credential store's `signups` array.
+ */
+typedef struct lonejson_m2m_signup {
+  char *signup_id;
+  char *signup_secret;
+  lonejson_owned_buffer query;
+  lonejson_owned_buffer url;
+  lonejson_owned_buffer record_json;
+} lonejson_m2m_signup;
+
+/** Signup seed generation inputs. */
+typedef struct lonejson_m2m_signup_request {
+  const char *base_url;
+  const char *secret_param;
+  const char *id_param;
+  const char *claim_json;
+  size_t claim_len;
+  size_t max_url_bytes;
+  size_t max_record_bytes;
+} lonejson_m2m_signup_request;
+
+/** Signup completion inputs. `email` is required by the helper so the handler
+ * can keep the first public signup flow intentionally small.
+ */
+typedef struct lonejson_m2m_signup_complete_request {
+  const lonejson_m2m_store *store;
+  const char *signup_id;
+  const char *signup_secret;
+  const char *email;
+  unsigned credential_auth_modes;
+} lonejson_m2m_signup_complete_request;
+
+/** Signup completion result. Remove `signup_id` from the caller-owned store
+ * after successful completion, then insert `credential.record_json`.
+ */
+typedef struct lonejson_m2m_signup_completion {
+  char *signup_id;
+  char *email;
+  lonejson_m2m_credential credential;
+} lonejson_m2m_signup_completion;
+
 /** Generic HTTP provider initializer config.
  *
  * The caller owns all referenced pointers and must keep them alive while the
@@ -2914,6 +3010,23 @@ struct lonejson {
       lonejson *runtime,
       const lonejson_oidc_bearer_validation_request *request,
       lonejson_oidc_bearer_validation *out, lonejson_error *error);
+  /** Generates one M2M credential record plus one-time secrets. */
+  lonejson_status (*m2m_credential_generate)(
+      lonejson *runtime, const lonejson_m2m_credential_request *request,
+      lonejson_m2m_credential *out, lonejson_error *error);
+  /** Verifies Basic client credentials or Bearer API key against a JSON store.
+   */
+  lonejson_status (*m2m_verify_authorization)(
+      lonejson *runtime, const lonejson_m2m_verify_request *request,
+      lonejson_m2m_authentication *out, lonejson_error *error);
+  /** Generates one signup seed record and optional URL/query values. */
+  lonejson_status (*m2m_signup_generate)(
+      lonejson *runtime, const lonejson_m2m_signup_request *request,
+      lonejson_m2m_signup *out, lonejson_error *error);
+  /** Completes one signup seed into a new M2M credential. */
+  lonejson_status (*m2m_signup_complete)(
+      lonejson *runtime, const lonejson_m2m_signup_complete_request *request,
+      lonejson_m2m_signup_completion *out, lonejson_error *error);
 #endif
   /** Installs or clears the runtime auth HTTP provider. */
   lonejson_status (*set_http_provider)(lonejson *runtime,
@@ -6299,6 +6412,40 @@ lonejson_status lonejson_oidc_authorization_bearer_token(
 lonejson_status lonejson_oidc_validate_bearer_token(
     lonejson *runtime, const lonejson_oidc_bearer_validation_request *request,
     lonejson_oidc_bearer_validation *out, lonejson_error *error);
+/** Initializes an M2M credential result for generation or cleanup. */
+void lonejson_m2m_credential_init(lonejson_m2m_credential *credential);
+/** Releases storage owned by an M2M credential result. */
+void lonejson_m2m_credential_cleanup(lonejson_m2m_credential *credential);
+/** Generates a store-ready M2M credential record and one-time clear secrets. */
+lonejson_status lonejson_m2m_credential_generate(
+    lonejson *runtime, const lonejson_m2m_credential_request *request,
+    lonejson_m2m_credential *out, lonejson_error *error);
+/** Initializes an M2M authentication result. */
+void lonejson_m2m_authentication_init(lonejson_m2m_authentication *auth);
+/** Releases storage owned by an M2M authentication result. */
+void lonejson_m2m_authentication_cleanup(lonejson_m2m_authentication *auth);
+/** Verifies an HTTP Authorization header against a JSON credential store. */
+lonejson_status lonejson_m2m_verify_authorization(
+    lonejson *runtime, const lonejson_m2m_verify_request *request,
+    lonejson_m2m_authentication *out, lonejson_error *error);
+/** Initializes an M2M signup seed result for generation or cleanup. */
+void lonejson_m2m_signup_init(lonejson_m2m_signup *signup);
+/** Releases storage owned by an M2M signup seed result. */
+void lonejson_m2m_signup_cleanup(lonejson_m2m_signup *signup);
+/** Generates a signup seed record plus optional query/URL values. */
+lonejson_status lonejson_m2m_signup_generate(
+    lonejson *runtime, const lonejson_m2m_signup_request *request,
+    lonejson_m2m_signup *out, lonejson_error *error);
+/** Initializes an M2M signup completion result for completion or cleanup. */
+void lonejson_m2m_signup_complete_init(
+    lonejson_m2m_signup_completion *complete);
+/** Releases storage owned by an M2M signup completion result. */
+void lonejson_m2m_signup_complete_cleanup(
+    lonejson_m2m_signup_completion *complete);
+/** Verifies a signup seed and returns a generated credential for the user. */
+lonejson_status lonejson_m2m_signup_complete(
+    lonejson *runtime, const lonejson_m2m_signup_complete_request *request,
+    lonejson_m2m_signup_completion *out, lonejson_error *error);
 #endif
 
 #ifdef LONEJSON_WITH_CURL
@@ -6720,6 +6867,11 @@ void lonejson_oidc_jwks_cache_parse_cleanup(
 #define LJ_FIELD_KIND_BOOL_ARRAY LONEJSON_FIELD_KIND_BOOL_ARRAY
 /** JSON array of nested objects stored in `lonejson_object_array`. */
 #define LJ_FIELD_KIND_OBJECT_ARRAY LONEJSON_FIELD_KIND_OBJECT_ARRAY
+#ifdef LONEJSON_WITH_OIDC
+#define LJ_M2M_AUTH_BASIC LONEJSON_M2M_AUTH_BASIC
+#define LJ_M2M_AUTH_BEARER LONEJSON_M2M_AUTH_BEARER
+#define LJ_M2M_AUTH_DEFAULT LONEJSON_M2M_AUTH_DEFAULT
+#endif
 
 /** No source configured. Serializes as JSON `null`. */
 #define LJ_SOURCE_NONE LONEJSON_SOURCE_NONE
@@ -7112,6 +7264,15 @@ typedef lonejson_auth_failure lj_auth_failure;
 typedef lonejson_oidc_bearer_validation_request
     lj_oidc_bearer_validation_request;
 typedef lonejson_oidc_bearer_validation lj_oidc_bearer_validation;
+typedef lonejson_m2m_credential lj_m2m_credential;
+typedef lonejson_m2m_credential_request lj_m2m_credential_request;
+typedef lonejson_m2m_store lj_m2m_store;
+typedef lonejson_m2m_verify_request lj_m2m_verify_request;
+typedef lonejson_m2m_authentication lj_m2m_authentication;
+typedef lonejson_m2m_signup lj_m2m_signup;
+typedef lonejson_m2m_signup_request lj_m2m_signup_request;
+typedef lonejson_m2m_signup_complete_request lj_m2m_signup_complete_request;
+typedef lonejson_m2m_signup_completion lj_m2m_signup_completion;
 #endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
@@ -9322,6 +9483,68 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_validate_bearer_token(
     lj *runtime, const lj_oidc_bearer_validation_request *request,
     lj_oidc_bearer_validation *out, lj_error *error) {
   return lonejson_oidc_validate_bearer_token(runtime, request, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_credential_init(lj_m2m_credential *credential) {
+  lonejson_m2m_credential_init(credential);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_credential_cleanup(lj_m2m_credential *credential) {
+  lonejson_m2m_credential_cleanup(credential);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_m2m_credential_generate(
+    lj *runtime, const lj_m2m_credential_request *request,
+    lj_m2m_credential *out, lj_error *error) {
+  return lonejson_m2m_credential_generate(runtime, request, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_authentication_init(lj_m2m_authentication *auth) {
+  lonejson_m2m_authentication_init(auth);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_authentication_cleanup(lj_m2m_authentication *auth) {
+  lonejson_m2m_authentication_cleanup(auth);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_m2m_verify_authorization(
+    lj *runtime, const lj_m2m_verify_request *request,
+    lj_m2m_authentication *out, lj_error *error) {
+  return lonejson_m2m_verify_authorization(runtime, request, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void lj_m2m_signup_init(lj_m2m_signup *signup) {
+  lonejson_m2m_signup_init(signup);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void lj_m2m_signup_cleanup(lj_m2m_signup *signup) {
+  lonejson_m2m_signup_cleanup(signup);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_m2m_signup_generate(
+    lj *runtime, const lj_m2m_signup_request *request, lj_m2m_signup *out,
+    lj_error *error) {
+  return lonejson_m2m_signup_generate(runtime, request, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_signup_complete_init(lj_m2m_signup_completion *complete) {
+  lonejson_m2m_signup_complete_init(complete);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_signup_complete_cleanup(lj_m2m_signup_completion *complete) {
+  lonejson_m2m_signup_complete_cleanup(complete);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_m2m_signup_complete(
+    lj *runtime, const lj_m2m_signup_complete_request *request,
+    lj_m2m_signup_completion *out, lj_error *error) {
+  return lonejson_m2m_signup_complete(runtime, request, out, error);
 }
 #endif
 #ifdef LONEJSON_WITH_CURL
