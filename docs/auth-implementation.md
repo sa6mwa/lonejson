@@ -663,6 +663,11 @@ OIDC/OAuth2 Lua facade:
 - `oidc_authorization_callback_parse_query`
 - `oidc_validate_bearer_token`
 
+The M2M credential and signup helpers are currently C-only. They are wired into
+the C runtime/free-function surface and short aliases, but there is no Lua
+facade yet for `m2m_credential_generate`, `m2m_verify_authorization`,
+`m2m_signup_generate`, or `m2m_signup_complete`.
+
 The functions are registered both on the module table and runtime userdata
 where applicable. Provider-backed helpers are runtime-only because they require
 the runtime's installed provider. Lua runtimes install the built-in OpenSSL auth
@@ -736,6 +741,14 @@ Implemented and tested invariants include:
 - Authorization callback state mismatch is rejected.
 - Authorization callback duplicate fields are rejected.
 - Authorization callback query size is bounded.
+- M2M credential records do not contain cleartext client secrets or API keys.
+- M2M Basic and Bearer verification both authenticate against the same
+  caller-owned JSON credential store.
+- M2M verification can disable Basic or Bearer per request.
+- M2M wrong-secret verification fails closed.
+- M2M signup records do not contain cleartext signup secrets.
+- M2M signup completion requires the signup secret and required email metadata.
+- M2M signup completion can issue Bearer-only credentials.
 
 ## Verification
 
@@ -773,6 +786,11 @@ The following are deliberate gaps or future work, not hidden behavior.
 - No built-in credential persistence, locking, or encryption helper. The m2m
   helpers generate store-ready JSON records and verify caller-owned JSON store
   bytes, but applications still own durable storage and concurrent updates.
+- No Lua facade for server-local M2M credential generation, M2M credential
+  verification, signup seed generation, or signup completion yet.
+- No e2e signup web-handler fixture yet. Signup flow behavior is covered by C
+  regression tests; the current M2M e2e fixture covers Basic and Bearer
+  credential verification from a non-lonejson client.
 - No complete browser-launch helper.
 - No localhost HTTP listener.
 - No random callback-path session object.

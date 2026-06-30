@@ -20,6 +20,12 @@ live in integration layers such as Vectis/Kore glue.
   command-line or desktop authentication.
 - Provide server-side helper primitives that make bearer-token validation easy
   to place before application logic.
+- Provide server-local machine-to-machine credential helpers for services that
+  want caller-owned JSON credential stores instead of a full external identity
+  provider.
+- Provide admin-seeded signup helper primitives that let an application issue a
+  one-time signup URL or query string, collect required user metadata, and turn
+  that seed into a generated API key or client credential.
 - Preserve the existing dependency posture: optional facades are opt-in at
   compile time and must not surprise normal consumers with unrelated dependency
   requirements.
@@ -30,6 +36,11 @@ live in integration layers such as Vectis/Kore glue.
 
 - Do not add Kore- or Vectis-specific public APIs to core lonejson.
 - Do not implement a full HTTP server in lonejson.
+- Do not implement durable credential storage, store locking, or credential
+  rotation policy in lonejson.
+- Do not decide endpoint, method, tool, tenant, or operation authorization from
+  authenticated M2M claims. lonejson returns authenticated facts; application
+  policy remains caller-owned.
 - Do not treat decoded JWT claims as trusted until validation policy succeeds.
 - Do not hide full-message materialization behind a streaming-looking API.
 - Do not silently accept weak or unspecified validation policy.
@@ -173,6 +184,32 @@ The helper should make transparent machine-to-machine protection easy for an
 application, while keeping request routing, response writing, and framework
 lifetime rules outside core lonejson.
 
+Server-local M2M support is a separate path from OIDC bearer validation. It is
+for services that want a small JSON credential store, with no external token
+issuer:
+
+- generate store-ready credential records containing hashes, salts, auth-mode
+  metadata, and caller-supplied opaque claim JSON,
+- return cleartext client secrets and API keys only once at generation time,
+- verify `Authorization: Basic <base64(client_id:client_secret)>`,
+- verify `Authorization: Bearer <api_key>`,
+- let callers opt out of either Basic or Bearer mode per verification request,
+- return authenticated `client_id`, selected auth mode, and opaque claim JSON,
+- keep persistence, locking, encryption, rotation, audit, and authorization
+  decisions outside lonejson.
+
+Signup support should compose with the same store shape:
+
+- generate one-time signup seeds with a signup ID, signup secret, optional
+  public URL/query string, and store-ready signup record,
+- keep the seed record under caller-owned `signups[]`,
+- let a web handler collect required user metadata, initially email address,
+- complete the seed into a generated credential record and returned one-time
+  credential material,
+- return the consumed signup ID so caller-owned storage can remove the seed,
+- never retain the signup secret or generated cleartext credential in generated
+  store records.
+
 ## Lua Facade
 
 The Lua binding should expose the same conceptual surface without implementing
@@ -183,6 +220,7 @@ and convert only normal Lua-facing values:
 - JWT validation result,
 - JWK/JWKS object handles or decoded tables,
 - OIDC session and token exchange helpers,
+- M2M credential verification and signup helpers,
 - structured errors.
 
 Lua must preserve the same distinction as C: parse is not trust, validation is
@@ -205,6 +243,15 @@ The implementation must test and enforce at least these invariants:
 - Network retrieval failures do not turn into successful validation.
 - Cache refresh failure does not silently accept a token that cannot be
   validated under the configured policy.
+- Generated M2M credential records do not contain cleartext client secrets or
+  API keys.
+- M2M verification rejects wrong secrets, wrong API keys, missing credentials,
+  malformed Authorization headers, and disallowed auth modes.
+- Signup records do not contain cleartext signup secrets.
+- Signup completion requires the configured signup secret and required email
+  metadata.
+- Signup completion returns the consumed signup ID so callers can invalidate the
+  seed in persistent storage.
 
 ## Suggested Implementation Slices
 
@@ -239,6 +286,18 @@ The implementation must test and enforce at least these invariants:
     classification, Lua facade, regression tests, ABI/package checks, and fuzz
     coverage are implemented. Request routing, response writing, cache refresh,
     and framework lifetime remain caller-owned.
+11. Add server-local M2M credential helpers. Store-ready credential generation,
+    Basic and Bearer Authorization verification, opaque claim return, auth-mode
+    opt-out, runtime method wiring, ABI/package checks, C regression tests, and
+    curl-driven fixture e2e coverage for Basic/Bearer request handling are
+    implemented. Persistent storage, locking, encryption, rotation, and
+    application authorization remain caller-owned.
+12. Add server-local signup seed helpers. Signup seed generation, optional
+    signup URL/query construction, signup completion with email metadata,
+    generated credential return, consumed-signup ID return, runtime method
+    wiring, ABI/package checks, and C regression tests are implemented.
+    Caller-owned web UX and persistent store mutation remain outside lonejson.
+    A Lua facade and e2e signup handler fixture remain future work.
 
 Each slice should include C tests, Lua tests when surfaced in Lua, negative
 regression cases, and fuzzing for attacker-controlled inputs.

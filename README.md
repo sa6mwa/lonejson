@@ -210,8 +210,8 @@ end, "my-product/1.0")
 Remaining auth DX gaps are explicit. lonejson does not provide a built-in HTTP
 server, browser launcher, localhost callback listener, refresh scheduler,
 credential-store persistence/locking, retry policy, proxy policy, redirect
-policy, or Kore/Vectis-specific handler wrapper. Those are application
-lifecycle concerns.
+policy, Lua facade for server-local M2M/signup helpers, or Kore/Vectis-specific
+handler wrapper. Those are application lifecycle concerns.
 Potential future simplifications would be an examples-level curl HTTP provider
 callback, an examples-level Kore/Vectis adapter, and a higher-level
 cache-refresh scheduler. Those should start as examples or application helpers
@@ -230,7 +230,9 @@ construction remains covered by the auth unit tests.
 
 `make test-m2m-e2e` starts a tiny lonejson-backed API fixture and uses `curl`
 as the non-lonejson client to verify Basic client credentials, Bearer API keys,
-missing credentials, and wrong-secret rejection.
+missing credentials, and wrong-secret rejection. Signup seed generation and
+completion are covered by C regression tests; a full signup web-handler e2e
+fixture is still future work.
 
 Short aliases are enabled by default. Disable them if they collide with another
 project:
