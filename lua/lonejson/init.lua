@@ -93,21 +93,55 @@ function M.chunks(spool, chunk_size)
   end
 end
 
-M.encode_json = core.encode_json
-M.encode_json_to_sink = core.encode_json_to_sink
-M.encode_value = core.encode_json
-M.encode_value_to_sink = core.encode_json_to_sink
-M.decode_json = core.decode_json
-M.decode_value = core.decode_json
-M.visit_path_value_string = core.visit_path_value_string
-M.visit_path_value_path = core.visit_path_value_path
-M.visit_path_value_file = core.visit_path_value_file
-M.visit_path_value_fd = core.visit_path_value_fd
-M.visit_candidates_string = core.visit_candidates_string
-M.visit_candidates_path = core.visit_candidates_path
-M.visit_candidates_file = core.visit_candidates_file
-M.visit_candidates_fd = core.visit_candidates_fd
-M.fixed_string_scratch = core.fixed_string_scratch
+local function export_core(name)
+  if core[name] ~= nil then
+    M[name] = core[name]
+  end
+end
+
+local core_exports = {
+  "encode_json",
+  "encode_json_to_sink",
+  "decode_json",
+  "base64_encode",
+  "base64_decode",
+  "visit_path_value_string",
+  "visit_path_value_path",
+  "visit_path_value_file",
+  "visit_path_value_fd",
+  "visit_candidates_string",
+  "visit_candidates_path",
+  "visit_candidates_file",
+  "visit_candidates_fd",
+  "fixed_string_scratch",
+  "jwt_parse_compact",
+  "jwt_decode_compact",
+  "jwt_validate_compact_claims",
+  "jwt_validate_compact_signature",
+  "jwk_parse_json",
+  "jwks_parse_json",
+  "jwks_select_json",
+  "oauth2_client_credentials_body",
+  "oauth2_refresh_token_body",
+  "oidc_authorization_code_token_body",
+  "oauth2_token_response_parse_json",
+  "oidc_pkce_challenge",
+  "oidc_pkce_generate",
+  "oidc_authorization_url",
+  "oidc_authorization_callback_parse_query",
+  "oidc_validate_bearer_token",
+  "oidc_discovery_url",
+  "oidc_discovery_parse_json",
+  "oidc_jwks_cache_select_json",
+}
+
+for _, name in ipairs(core_exports) do
+  export_core(name)
+end
+
+M.encode_value = M.encode_json
+M.encode_value_to_sink = M.encode_json_to_sink
+M.decode_value = M.decode_json
 M.core = core
 M.json_null = core.json_null()
 
@@ -126,6 +160,47 @@ local function runtime_method_args(runtime_facade, first, ...)
   end
   return first, ...
 end
+
+local function bind_runtime(obj, runtime, name)
+  if runtime[name] ~= nil then
+    obj[name] = function(first, ...)
+      return runtime[name](runtime, runtime_method_args(obj, first, ...))
+    end
+  end
+end
+
+local runtime_exports = {
+  "set_openssl_auth_provider",
+  "set_http_provider",
+  "jwt_parse_compact",
+  "jwt_decode_compact",
+  "jwt_validate_compact_claims",
+  "jwt_validate_compact_signature",
+  "jwk_parse_json",
+  "jwks_parse_json",
+  "jwks_select_json",
+  "oauth2_client_credentials_body",
+  "oauth2_refresh_token_body",
+  "oidc_authorization_code_token_body",
+  "oauth2_client_credentials_request",
+  "oauth2_refresh_token_request",
+  "oidc_authorization_code_token_request",
+  "oauth2_token_response_parse_json",
+  "oidc_pkce_challenge",
+  "oidc_pkce_generate",
+  "oidc_authorization_url",
+  "oidc_authorization_callback_parse_query",
+  "oidc_validate_bearer_token",
+  "oidc_discovery_url",
+  "oidc_discovery_parse_json",
+  "oidc_fetch_discovery",
+  "oidc_jwks_cache_select_json",
+  "oidc_jwks_cache_refresh",
+  "m2m_credential_generate",
+  "m2m_verify_authorization",
+  "m2m_signup_generate",
+  "m2m_signup_complete",
+}
 
 function M.new(config)
   local runtime = unwrap_runtime(core.new(config))
@@ -183,6 +258,12 @@ function M.new(config)
     return runtime:decode_json(json)
   end
   obj.decode_value = obj.decode_json
+  obj.base64_encode = function(first, ...)
+    return core.base64_encode(runtime_method_args(obj, first, ...))
+  end
+  obj.base64_decode = function(first, ...)
+    return core.base64_decode(runtime_method_args(obj, first, ...))
+  end
   obj.visit_path_value_string = function(first, ...)
     local json, callbacks = runtime_method_args(obj, first, ...)
     return runtime:visit_path_value_string(json, callbacks)
@@ -214,6 +295,10 @@ function M.new(config)
   obj.visit_candidates_fd = function(first, ...)
     local fd, options = runtime_method_args(obj, first, ...)
     return runtime:visit_candidates_fd(fd, options)
+  end
+
+  for _, name in ipairs(runtime_exports) do
+    bind_runtime(obj, runtime, name)
   end
 
   return obj

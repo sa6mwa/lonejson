@@ -238,9 +238,8 @@ static void ljlua_auth_read_authorization_code_token(
   lua_getfield(L, index, "redirect_uri");
   request->redirect_uri = luaL_checkstring(L, -1);
   lua_pop(L, 1);
-  lua_getfield(L, index, "code_verifier");
-  request->code_verifier = luaL_checkstring(L, -1);
-  lua_pop(L, 1);
+  request->code_verifier =
+      ljlua_auth_optional_table_string(L, index, "code_verifier");
   request->client_secret =
       ljlua_auth_optional_table_string(L, index, "client_secret");
   lua_getfield(L, index, "max_body_bytes");

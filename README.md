@@ -131,7 +131,11 @@ buffers, or the `_sink` variants when the encoded/decoded data should be
 streamed to a callback instead of materialized by the helper. Variants are
 explicit: `LONEJSON_BASE64_STANDARD`, `LONEJSON_BASE64_STANDARD_RAW`,
 `LONEJSON_BASE64_URL`, and `LONEJSON_BASE64_URL_RAW`. JWT/JWS segments use
-`LONEJSON_BASE64_URL_RAW`.
+`LONEJSON_BASE64_URL_RAW`. Lua exposes the materialized helpers as
+`lonejson.base64_encode(data, variant)` and
+`lonejson.base64_decode(text, variant)`, where `variant` is `"standard"`,
+`"standard_raw"`, `"url"`, or `"url_raw"`; `"jwt"` is accepted as an alias for
+`"url_raw"`.
 
 For command-line tools and services that already link curl, keep curl in the
 application and install a small HTTP provider callback. The callback receives a
@@ -290,6 +294,10 @@ if not auth.authorized then
 end
 -- auth.client_id and auth.claim are authenticated facts; app code authorizes.
 ```
+
+The Lua M2M/API-key methods are available when the Lua module is compiled with
+the OpenSSL auth provider, because generation and verification require random
+bytes and SHA-256 hashing.
 
 Lua signup helpers return store-ready JSON strings and one-time secrets:
 

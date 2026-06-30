@@ -120,6 +120,11 @@ Implemented public APIs:
 - short aliases `lj_base64_*`, `LJ_BASE64_URL_RAW`, and
   `lj_jwt_parse_compact`
 
+Lua exposes materialized base64 helpers as `base64_encode(data, variant)` and
+`base64_decode(text, variant)` on the module table and runtime userdata.
+Supported variant strings are `standard`, `standard_raw`, `url`, and `url_raw`;
+`jwt` aliases `url_raw`.
+
 `lonejson_jwt_parse_compact` validates compact serialization shape only:
 
 - exactly three compact JWT/JWS segments,
@@ -673,7 +678,10 @@ M2M/API-key Lua facade on runtime userdata:
 The Lua M2M facade accepts normal Lua values in `claim` and converts them to
 validated JSON before calling the C implementation. Callers that already own
 JSON may pass `claim_json`. Generated `record_json` values are returned as JSON
-strings because store persistence and mutation remain caller-owned.
+strings because store persistence and mutation remain caller-owned. These
+runtime methods are registered only when the Lua module is built with the
+OpenSSL auth provider, because the C M2M helpers require random bytes and
+SHA-256 hashing.
 
 The functions are registered both on the module table and runtime userdata
 where applicable. Provider-backed helpers are runtime-only because they require

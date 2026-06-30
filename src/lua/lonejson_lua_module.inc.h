@@ -121,6 +121,116 @@ static int ljlua_test_get_encode_stats_lua(lua_State *L) {
 }
 #endif
 
+static lonejson_base64_variant ljlua_base64_variant_arg(lua_State *L,
+                                                        int index) {
+  const char *variant;
+
+  if (lua_isnoneornil(L, index)) {
+    return LONEJSON_BASE64_STANDARD;
+  }
+  variant = luaL_checkstring(L, index);
+  if (strcmp(variant, "standard") == 0 || strcmp(variant, "std") == 0) {
+    return LONEJSON_BASE64_STANDARD;
+  }
+  if (strcmp(variant, "standard_raw") == 0 || strcmp(variant, "std_raw") == 0 ||
+      strcmp(variant, "raw") == 0) {
+    return LONEJSON_BASE64_STANDARD_RAW;
+  }
+  if (strcmp(variant, "url") == 0 || strcmp(variant, "base64url") == 0) {
+    return LONEJSON_BASE64_URL;
+  }
+  if (strcmp(variant, "url_raw") == 0 ||
+      strcmp(variant, "base64url_raw") == 0 || strcmp(variant, "jwt") == 0) {
+    return LONEJSON_BASE64_URL_RAW;
+  }
+  luaL_argerror(L, index,
+                "base64 variant must be standard, standard_raw, url, or "
+                "url_raw");
+  return LONEJSON_BASE64_STANDARD;
+}
+
+static int ljlua_base64_encode(lua_State *L) {
+  const char *data;
+  size_t len;
+  size_t needed;
+  char *out;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson_base64_variant variant;
+  int arg = 1;
+
+  if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
+    (void)ljlua_check_runtime(L, 1);
+    arg = 2;
+  }
+  data = luaL_checklstring(L, arg, &len);
+  variant = ljlua_base64_variant_arg(L, arg + 1);
+  lonejson_error_init(&error);
+  status = lonejson_base64_encoded_len(len, variant, &needed, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    return ljlua_push_status_result(L, status, &error);
+  }
+  out = (char *)malloc(needed == 0u ? 1u : needed);
+  if (out == NULL) {
+    lonejson_error_init(&error);
+    error.code = LONEJSON_STATUS_ALLOCATION_FAILED;
+    snprintf(error.message, sizeof(error.message),
+             "failed to allocate Lua base64 output");
+    return ljlua_push_status_result(L, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                    &error);
+  }
+  status =
+      lonejson_base64_encode(data, len, variant, out, needed, &needed, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    free(out);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushlstring(L, out, needed);
+  free(out);
+  return 1;
+}
+
+static int ljlua_base64_decode(lua_State *L) {
+  const char *data;
+  size_t len;
+  size_t needed;
+  unsigned char *out;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson_base64_variant variant;
+  int arg = 1;
+
+  if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
+    (void)ljlua_check_runtime(L, 1);
+    arg = 2;
+  }
+  data = luaL_checklstring(L, arg, &len);
+  variant = ljlua_base64_variant_arg(L, arg + 1);
+  lonejson_error_init(&error);
+  status = lonejson_base64_decoded_len(data, len, variant, &needed, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    return ljlua_push_status_result(L, status, &error);
+  }
+  out = (unsigned char *)malloc(needed == 0u ? 1u : needed);
+  if (out == NULL) {
+    lonejson_error_init(&error);
+    error.code = LONEJSON_STATUS_ALLOCATION_FAILED;
+    snprintf(error.message, sizeof(error.message),
+             "failed to allocate Lua base64 output");
+    return ljlua_push_status_result(L, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                    &error);
+  }
+  status =
+      lonejson_base64_decode(data, len, variant, out, needed, &needed, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    free(out);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushlstring(L, (const char *)out, needed);
+  free(out);
+  return 1;
+}
+
 static const luaL_Reg ljlua_runtime_methods[] = {
     {"schema", ljlua_schema_new},
     {"array_rewrite_string", ljlua_array_rewrite_string},
@@ -131,6 +241,8 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"encode_value_to_sink", ljlua_encode_json_to_sink},
     {"decode_json", ljlua_decode_json},
     {"decode_value", ljlua_decode_json},
+    {"base64_encode", ljlua_base64_encode},
+    {"base64_decode", ljlua_base64_decode},
     {"visit_path_value_string", ljlua_visit_path_value_string},
     {"visit_path_value_path", ljlua_visit_path_value_path},
     {"visit_path_value_file", ljlua_visit_path_value_file},
@@ -174,10 +286,12 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"oidc_fetch_discovery", ljlua_oidc_fetch_discovery},
     {"oidc_jwks_cache_select_json", ljlua_oidc_jwks_cache_select_json},
     {"oidc_jwks_cache_refresh", ljlua_oidc_jwks_cache_refresh},
+#ifdef LONEJSON_WITH_OPENSSL
     {"m2m_credential_generate", ljlua_m2m_credential_generate},
     {"m2m_verify_authorization", ljlua_m2m_verify_authorization},
     {"m2m_signup_generate", ljlua_m2m_signup_generate},
     {"m2m_signup_complete", ljlua_m2m_signup_complete},
+#endif
 #endif
 #endif
     {NULL, NULL}};
@@ -299,6 +413,8 @@ int luaopen_lonejson_core(lua_State *L) {
       {"encode_json", ljlua_encode_json},
       {"encode_json_to_sink", ljlua_encode_json_to_sink},
       {"decode_json", ljlua_decode_json},
+      {"base64_encode", ljlua_base64_encode},
+      {"base64_decode", ljlua_base64_decode},
       {"visit_path_value_string", ljlua_visit_path_value_string},
       {"visit_path_value_path", ljlua_visit_path_value_path},
       {"visit_path_value_file", ljlua_visit_path_value_file},

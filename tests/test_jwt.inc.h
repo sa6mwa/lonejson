@@ -1863,6 +1863,20 @@ static void test_m2m_basic_base64(char *out, size_t out_size, const char *id,
   out[o] = '\0';
 }
 
+static void
+test_m2m_revoked_store_json(lonejson_owned_buffer *out,
+                            const lonejson_m2m_credential *credential,
+                            lonejson_error *error) {
+  static const char suffix[] = ",\"revoked\":true}]}";
+  EXPECT(lonejson_owned_buffer_sink(out, "{\"credentials\":[", 16u, error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_owned_buffer_sink(out, credential->record_json.data,
+                                    credential->record_json.len - 1u,
+                                    error) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_owned_buffer_sink(out, suffix, sizeof(suffix) - 1u, error) ==
+         LONEJSON_STATUS_OK);
+}
+
 static void test_m2m_credential_store_auth(void) {
 #ifdef LONEJSON_WITH_OPENSSL
   lonejson_error error;
@@ -1872,6 +1886,7 @@ static void test_m2m_credential_store_auth(void) {
   lonejson_m2m_verify_request verify;
   lonejson_m2m_authentication auth;
   lonejson_owned_buffer store_json;
+  lonejson_owned_buffer revoked_store_json;
   char basic_payload[768];
   char header[1024];
 
@@ -1882,6 +1897,7 @@ static void test_m2m_credential_store_auth(void) {
   memset(&verify, 0, sizeof(verify));
   lonejson_m2m_authentication_init(&auth);
   lonejson_owned_buffer_init(&store_json);
+  lonejson_owned_buffer_init(&revoked_store_json);
 
   request.claim_json = "{\"scope\":[\"read\",\"write\"],\"tenant\":\"acme\"}";
   EXPECT(lonejson_m2m_credential_generate(test_default_runtime(), &request,
@@ -1948,7 +1964,20 @@ static void test_m2m_credential_store_auth(void) {
          LONEJSON_STATUS_TYPE_MISMATCH);
 
   lonejson_m2m_authentication_cleanup(&auth);
+  lonejson_m2m_authentication_init(&auth);
+  test_m2m_revoked_store_json(&revoked_store_json, &credential, &error);
+  store.json = revoked_store_json.data;
+  store.len = revoked_store_json.len;
+  snprintf(header, sizeof(header), "Bearer %s", credential.api_key);
+  verify.authorization_header = header;
+  EXPECT(lonejson_m2m_verify_authorization(test_default_runtime(), &verify,
+                                           &auth, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(auth.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+
+  lonejson_m2m_authentication_cleanup(&auth);
   lonejson_m2m_credential_cleanup(&credential);
+  lonejson_owned_buffer_free(&revoked_store_json);
   lonejson_owned_buffer_free(&store_json);
 #endif
 }

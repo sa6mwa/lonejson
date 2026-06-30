@@ -67,6 +67,16 @@ local function exists(path)
   return true
 end
 
+assert_eq(lonejson.base64_encode("Hello"), "SGVsbG8=")
+assert_eq(lonejson.base64_encode("\255", "url_raw"), "_w")
+assert_eq(lonejson.base64_decode("SGVsbG8="), "Hello")
+assert_eq(lj:base64_decode("_w", "jwt"), "\255")
+do
+  local bad_base64, bad_base64_err = lonejson.base64_decode("AA=", "url_raw")
+  assert_true(bad_base64 == nil)
+  assert_eq(bad_base64_err.status, "invalid_json")
+end
+
 local function build_test_schema(runtime, name)
   return runtime.schema(name, {
   lj.field("name", lj.string { required = true }),
@@ -560,6 +570,19 @@ if lonejson.jwt_parse_compact ~= nil then
         email = "user@example.com",
         credential_auth_modes = "bearer",
       })
+      local basic_credential = lj:m2m_credential_generate({
+        claim_json = '{"scope":["admin"],"tenant":"ops"}',
+        auth_modes = { "basic" },
+      })
+      local basic_store = '{"credentials":[' .. basic_credential.record_json .. ']}'
+      local basic_auth = lj:m2m_verify_authorization({
+        store_json = basic_store,
+        authorization_header = "Basic " ..
+            lonejson.base64_encode(
+                basic_credential.client_id .. ":" ..
+                basic_credential.client_secret),
+        allowed_auth_modes = { basic = true },
+      })
 
       assert_eq(api_credential.client_secret, nil)
       assert_true(api_credential.api_key ~= nil)
@@ -585,6 +608,12 @@ if lonejson.jwt_parse_compact ~= nil then
       assert_eq(completed_auth.claim.plan, "trial")
       assert_true(bad_signup == nil)
       assert_eq(bad_signup_err.status, "type_mismatch")
+      assert_true(basic_credential.client_secret ~= nil)
+      assert_eq(basic_credential.api_key, nil)
+      assert_true(basic_auth.authorized)
+      assert_eq(basic_auth.auth_mode, "basic")
+      assert_eq(basic_auth.claim.tenant, "ops")
+      assert_eq(basic_auth.claim.scope[1], "admin")
     end
   end
 

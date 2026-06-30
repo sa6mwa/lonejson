@@ -42,6 +42,8 @@ The current branch already implements the planned C baseline for:
 - OAuth2/OIDC discovery, JWKS cache, token endpoint helpers, refresh-token body
   construction, authorization-code with PKCE helpers, callback parsing, and
   bearer-token validation,
+- generic base64 helpers in C and Lua, including unpadded base64url for JWT/JWS
+  segments,
 - runtime HTTP provider callbacks with explicit user-agent configuration,
 - server-local M2M credential generation and Basic/Bearer verification against
   caller-owned JSON store bytes,
