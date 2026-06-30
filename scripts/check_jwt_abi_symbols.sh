@@ -115,6 +115,7 @@ for symbol in \
     lonejson_oauth2_token_response_init \
     lonejson_oauth2_token_response_cleanup \
     lonejson_oauth2_token_response_parse_json \
+    lonejson_oauth2_token_flow_assign \
     lonejson_oidc_pkce_init \
     lonejson_oidc_pkce_cleanup \
     lonejson_oidc_pkce_challenge \

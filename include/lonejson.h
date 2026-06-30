@@ -6708,6 +6708,17 @@ lonejson_status lonejson_oauth2_refresh_token_request(
 void lonejson_oauth2_token_flow_init(lonejson_oauth2_token_flow *flow);
 /** Releases all storage owned by a token flow. */
 void lonejson_oauth2_token_flow_cleanup(lonejson_oauth2_token_flow *flow);
+/** Copies borrowed or persisted token-flow fields into owned token-flow
+ * storage.
+ *
+ * This is the supported import path when loading a token flow from application
+ * storage, Lua tables, or other caller-owned memory. Existing storage in
+ * `flow` is released only after all replacement strings have been copied.
+ */
+lonejson_status
+lonejson_oauth2_token_flow_assign(lonejson_oauth2_token_flow *flow,
+                                  const lonejson_oauth2_token_flow *source,
+                                  lonejson_error *error);
 /** Returns non-zero when the flow has no usable access token at `now`.
  *
  * A zero `skew_seconds` applies the default 60-second refresh skew. Negative
@@ -9891,6 +9902,13 @@ lj_oauth2_token_flow_init(lj_oauth2_token_flow *flow) {
 LONEJSON_SHORT_ALIAS_INLINE void
 lj_oauth2_token_flow_cleanup(lj_oauth2_token_flow *flow) {
   lonejson_oauth2_token_flow_cleanup(flow);
+}
+/** Copies borrowed or persisted token-flow fields into owned storage. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oauth2_token_flow_assign(lj_oauth2_token_flow *flow,
+                            const lj_oauth2_token_flow *source,
+                            lj_error *error) {
+  return lonejson_oauth2_token_flow_assign(flow, source, error);
 }
 /** Returns non-zero when the flow has no usable access token at `now`. */
 LONEJSON_SHORT_ALIAS_INLINE int

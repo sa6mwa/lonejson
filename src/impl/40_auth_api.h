@@ -1826,6 +1826,49 @@ void lonejson_oauth2_token_flow_cleanup(lonejson_oauth2_token_flow *flow) {
   }
 }
 
+lonejson_status
+lonejson_oauth2_token_flow_assign(lonejson_oauth2_token_flow *flow,
+                                  const lonejson_oauth2_token_flow *source,
+                                  lonejson_error *error) {
+  lonejson_oauth2_token_flow next;
+
+  lonejson__clear_error(error);
+  if (flow == NULL || source == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OAuth2 token flow and source are required");
+  }
+  lonejson_oauth2_token_flow_init(&next);
+  if (source->access_token != NULL) {
+    next.access_token = lonejson__owned_strdup(NULL, source->access_token);
+  }
+  if (source->token_type != NULL) {
+    next.token_type = lonejson__owned_strdup(NULL, source->token_type);
+  }
+  if (source->refresh_token != NULL) {
+    next.refresh_token = lonejson__owned_strdup(NULL, source->refresh_token);
+  }
+  if (source->scope != NULL) {
+    next.scope = lonejson__owned_strdup(NULL, source->scope);
+  }
+  if (source->id_token != NULL) {
+    next.id_token = lonejson__owned_strdup(NULL, source->id_token);
+  }
+  if ((source->access_token != NULL && next.access_token == NULL) ||
+      (source->token_type != NULL && next.token_type == NULL) ||
+      (source->refresh_token != NULL && next.refresh_token == NULL) ||
+      (source->scope != NULL && next.scope == NULL) ||
+      (source->id_token != NULL && next.id_token == NULL)) {
+    lonejson_oauth2_token_flow_cleanup(&next);
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to copy OAuth2 token flow field");
+  }
+  next.expires_at = source->expires_at;
+  next.has_expires_at = source->has_expires_at;
+  lonejson_oauth2_token_flow_cleanup(flow);
+  *flow = next;
+  return LONEJSON_STATUS_OK;
+}
+
 int lonejson_oauth2_token_flow_is_expired(
     const lonejson_oauth2_token_flow *flow, lonejson_int64 now,
     lonejson_int64 skew_seconds) {

@@ -2159,6 +2159,7 @@ static void test_oauth2_token_flow_helpers(void) {
   test_oidc_http_provider_state state;
   lonejson_oauth2_token_response response;
   lonejson_oauth2_token_flow flow;
+  lonejson_oauth2_token_flow source;
   lonejson_oauth2_token_flow_policy policy;
   lonejson_oauth2_token_flow_result result;
   int before_requests;
@@ -2193,6 +2194,29 @@ static void test_oauth2_token_flow_helpers(void) {
   EXPECT(strcmp(flow.refresh_token, "refresh token") == 0);
   EXPECT(flow.has_expires_at && flow.expires_at == 1120);
   lonejson_oauth2_token_response_cleanup(&response);
+
+  memset(&source, 0, sizeof(source));
+  source.access_token = (char *)"initial";
+  source.token_type = (char *)"Bearer";
+  source.refresh_token = (char *)"refresh token";
+  source.scope = (char *)"read";
+  source.id_token = (char *)"id token";
+  source.expires_at = 1120;
+  source.has_expires_at = 1;
+  EXPECT(lonejson_oauth2_token_flow_assign(&flow, &source, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strcmp(flow.access_token, "initial") == 0);
+  EXPECT(strcmp(flow.token_type, "Bearer") == 0);
+  EXPECT(strcmp(flow.refresh_token, "refresh token") == 0);
+  EXPECT(strcmp(flow.scope, "read") == 0);
+  EXPECT(strcmp(flow.id_token, "id token") == 0);
+  EXPECT(flow.has_expires_at && flow.expires_at == 1120);
+  EXPECT(flow.access_token != source.access_token);
+  EXPECT(flow.refresh_token != source.refresh_token);
+  EXPECT(lj_oauth2_token_flow_assign(NULL, &source, &error) ==
+         LJ_STATUS_INVALID_ARGUMENT);
+  EXPECT(lj_oauth2_token_flow_assign(&flow, NULL, &error) ==
+         LJ_STATUS_INVALID_ARGUMENT);
 
   EXPECT(!lonejson_oauth2_token_flow_is_expired(&flow, 1001, 10));
   before_requests = state.requests;

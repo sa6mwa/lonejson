@@ -85,6 +85,7 @@ void lonejson_oauth2_client_credentials_request(void);
 void lonejson_oauth2_refresh_token_request(void);
 void lonejson_oauth2_token_flow_init(void);
 void lonejson_oauth2_token_flow_cleanup(void);
+void lonejson_oauth2_token_flow_assign(void);
 void lonejson_oauth2_token_flow_is_expired(void);
 void lonejson_oauth2_token_flow_update_response(void);
 void lonejson_oauth2_token_flow_ensure(void);
@@ -262,6 +263,9 @@ void lonejson_oauth2_token_flow_init(void) {
 }
 
 void lonejson_oauth2_token_flow_cleanup(void) {
+}
+
+void lonejson_oauth2_token_flow_assign(void) {
 }
 
 void lonejson_oauth2_token_flow_is_expired(void) {

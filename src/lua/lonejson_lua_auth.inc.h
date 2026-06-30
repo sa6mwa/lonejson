@@ -295,44 +295,55 @@ static const char *ljlua_auth_optional_table_string(lua_State *L, int index,
 static size_t ljlua_auth_optional_size_field(lua_State *L, int index,
                                              const char *field);
 
-static char *ljlua_auth_optional_owned_string(lua_State *L, int index,
-                                              const char *field) {
-  const char *value;
+static char *ljlua_auth_strdup(const char *value) {
+  size_t len;
   char *copy;
 
-  value = ljlua_auth_optional_table_string(L, index, field);
   if (value == NULL) {
     return NULL;
   }
-  copy = lonejson__owned_strdup(NULL, value);
+  len = strlen(value);
+  copy = (char *)malloc(len + 1u);
   if (copy == NULL) {
-    luaL_error(L, "failed to allocate OAuth2 token flow field");
+    return NULL;
   }
+  memcpy(copy, value, len + 1u);
   return copy;
 }
 
 static void ljlua_auth_read_token_flow(lua_State *L, int index,
                                        lonejson_oauth2_token_flow *flow) {
+  lonejson_oauth2_token_flow source;
+  lonejson_error error;
+  lonejson_status status;
   lua_Integer expires_at;
 
   lonejson_oauth2_token_flow_init(flow);
+  memset(&source, 0, sizeof(source));
   luaL_checktype(L, index, LUA_TTABLE);
   index = lua_absindex(L, index);
-  flow->access_token =
-      ljlua_auth_optional_owned_string(L, index, "access_token");
-  flow->token_type = ljlua_auth_optional_owned_string(L, index, "token_type");
-  flow->refresh_token =
-      ljlua_auth_optional_owned_string(L, index, "refresh_token");
-  flow->scope = ljlua_auth_optional_owned_string(L, index, "scope");
-  flow->id_token = ljlua_auth_optional_owned_string(L, index, "id_token");
+  source.access_token =
+      (char *)ljlua_auth_optional_table_string(L, index, "access_token");
+  source.token_type =
+      (char *)ljlua_auth_optional_table_string(L, index, "token_type");
+  source.refresh_token =
+      (char *)ljlua_auth_optional_table_string(L, index, "refresh_token");
+  source.scope = (char *)ljlua_auth_optional_table_string(L, index, "scope");
+  source.id_token =
+      (char *)ljlua_auth_optional_table_string(L, index, "id_token");
   lua_getfield(L, index, "expires_at");
   if (!lua_isnil(L, -1)) {
     expires_at = luaL_checkinteger(L, -1);
     luaL_argcheck(L, expires_at >= 0, index, "expires_at must be non-negative");
-    flow->expires_at = (lonejson_int64)expires_at;
-    flow->has_expires_at = 1;
+    source.expires_at = (lonejson_int64)expires_at;
+    source.has_expires_at = 1;
   }
   lua_pop(L, 1);
+  lonejson_error_init(&error);
+  status = lonejson_oauth2_token_flow_assign(flow, &source, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    luaL_error(L, "failed to copy OAuth2 token flow: %s", error.message);
+  }
 }
 
 static void
@@ -823,22 +834,6 @@ static int ljlua_set_openssl_auth_provider(lua_State *L) {
 #endif
 
 #ifdef LONEJSON_WITH_OIDC
-static char *ljlua_auth_strdup(const char *value) {
-  size_t len;
-  char *copy;
-
-  if (value == NULL) {
-    return NULL;
-  }
-  len = strlen(value);
-  copy = (char *)malloc(len + 1u);
-  if (copy == NULL) {
-    return NULL;
-  }
-  memcpy(copy, value, len + 1u);
-  return copy;
-}
-
 static void ljlua_auth_clear_http_provider(lua_State *L, ljlua_runtime_ud *ud) {
   lonejson_error error;
 
