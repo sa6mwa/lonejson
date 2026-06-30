@@ -663,10 +663,17 @@ OIDC/OAuth2 Lua facade:
 - `oidc_authorization_callback_parse_query`
 - `oidc_validate_bearer_token`
 
-The M2M credential and signup helpers are currently C-only. They are wired into
-the C runtime/free-function surface and short aliases, but there is no Lua
-facade yet for `m2m_credential_generate`, `m2m_verify_authorization`,
-`m2m_signup_generate`, or `m2m_signup_complete`.
+M2M/API-key Lua facade on runtime userdata:
+
+- `m2m_credential_generate`
+- `m2m_verify_authorization`
+- `m2m_signup_generate`
+- `m2m_signup_complete`
+
+The Lua M2M facade accepts normal Lua values in `claim` and converts them to
+validated JSON before calling the C implementation. Callers that already own
+JSON may pass `claim_json`. Generated `record_json` values are returned as JSON
+strings because store persistence and mutation remain caller-owned.
 
 The functions are registered both on the module table and runtime userdata
 where applicable. Provider-backed helpers are runtime-only because they require
@@ -786,10 +793,8 @@ The following are deliberate gaps or future work, not hidden behavior.
 - No built-in credential persistence, locking, or encryption helper. The m2m
   helpers generate store-ready JSON records and verify caller-owned JSON store
   bytes, but applications still own durable storage and concurrent updates.
-- No Lua facade for server-local M2M credential generation, M2M credential
-  verification, signup seed generation, or signup completion yet.
 - No e2e signup web-handler fixture yet. Signup flow behavior is covered by C
-  regression tests; the current M2M e2e fixture covers Basic and Bearer
+  and Lua regression tests; the current M2M e2e fixture covers Basic and Bearer
   credential verification from a non-lonejson client.
 - No complete browser-launch helper.
 - No localhost HTTP listener.

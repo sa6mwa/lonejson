@@ -314,6 +314,192 @@ ljlua_auth_read_jwks_cache_policy(lua_State *L, int index,
       lua_isnil(L, -1) ? 0u : (size_t)luaL_checkinteger(L, -1);
   lua_pop(L, 1);
 }
+
+static size_t ljlua_auth_optional_size_field(lua_State *L, int index,
+                                             const char *field) {
+  lua_Integer value;
+
+  lua_getfield(L, index, field);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    return 0u;
+  }
+  value = luaL_checkinteger(L, -1);
+  luaL_argcheck(L, value >= 0, index, "size fields must be non-negative");
+  lua_pop(L, 1);
+  return (size_t)value;
+}
+
+static unsigned ljlua_auth_mode_from_string(lua_State *L, const char *value,
+                                            int arg) {
+  if (strcmp(value, "basic") == 0) {
+    return LONEJSON_M2M_AUTH_BASIC;
+  }
+  if (strcmp(value, "bearer") == 0 || strcmp(value, "api_key") == 0 ||
+      strcmp(value, "api-key") == 0) {
+    return LONEJSON_M2M_AUTH_BEARER;
+  }
+  if (strcmp(value, "default") == 0) {
+    return LONEJSON_M2M_AUTH_DEFAULT;
+  }
+  return (unsigned)luaL_argerror(
+      L, arg, "auth mode must be 'basic', 'bearer', 'api_key', or 'default'");
+}
+
+static unsigned ljlua_auth_read_modes(lua_State *L, int index,
+                                      const char *field) {
+  unsigned modes = 0u;
+  int type;
+
+  lua_getfield(L, index, field);
+  type = lua_type(L, -1);
+  if (type == LUA_TNIL) {
+    lua_pop(L, 1);
+    return 0u;
+  }
+  if (type == LUA_TSTRING) {
+    modes = ljlua_auth_mode_from_string(L, lua_tostring(L, -1), index);
+    lua_pop(L, 1);
+    return modes;
+  }
+  if (type == LUA_TNUMBER) {
+    lua_Integer value = luaL_checkinteger(L, -1);
+    luaL_argcheck(L, value >= 0, index, "auth mode mask must be non-negative");
+    lua_pop(L, 1);
+    return (unsigned)value;
+  }
+  luaL_checktype(L, -1, LUA_TTABLE);
+  lua_getfield(L, -1, "basic");
+  if (!lua_isnil(L, -1) && lua_toboolean(L, -1)) {
+    modes |= LONEJSON_M2M_AUTH_BASIC;
+  }
+  lua_pop(L, 1);
+  lua_getfield(L, -1, "bearer");
+  if (!lua_isnil(L, -1) && lua_toboolean(L, -1)) {
+    modes |= LONEJSON_M2M_AUTH_BEARER;
+  }
+  lua_pop(L, 1);
+  lua_getfield(L, -1, "api_key");
+  if (!lua_isnil(L, -1) && lua_toboolean(L, -1)) {
+    modes |= LONEJSON_M2M_AUTH_BEARER;
+  }
+  lua_pop(L, 1);
+  if (modes == 0u) {
+    size_t i;
+    size_t n = (size_t)lua_rawlen(L, -1);
+    for (i = 1u; i <= n; ++i) {
+      lua_rawgeti(L, -1, (lua_Integer)i);
+      modes |= ljlua_auth_mode_from_string(L, luaL_checkstring(L, -1), index);
+      lua_pop(L, 1);
+    }
+  }
+  lua_pop(L, 1);
+  return modes;
+}
+
+static void ljlua_auth_encode_claim(lua_State *L, int index, const char **json,
+                                    size_t *len, ljlua_json_buf *buf) {
+  const void *visited[128];
+  ljlua_json_out out;
+
+  *json = NULL;
+  *len = 0u;
+  memset(buf, 0, sizeof(*buf));
+  lua_getfield(L, index, "claim_json");
+  if (!lua_isnil(L, -1)) {
+    *json = luaL_checklstring(L, -1, len);
+    buf->max_cap = SIZE_MAX;
+    return;
+  }
+  lua_pop(L, 1);
+  lua_getfield(L, index, "claim");
+  if (lua_isnil(L, -1)) {
+    *json = "null";
+    *len = 4u;
+    lua_pop(L, 1);
+    return;
+  }
+  memset(visited, 0, sizeof(visited));
+  out.sink = ljlua_json_buf_sink;
+  out.user = buf;
+  if (ljlua_encode_json_value(L, lua_gettop(L), &out, visited, 0u) == 0) {
+    free(buf->data);
+    buf->data = NULL;
+    luaL_error(L, "failed to encode M2M claim JSON");
+  }
+  lua_pop(L, 1);
+  *json = buf->data != NULL ? buf->data : "null";
+  *len = buf->data != NULL ? buf->len : 4u;
+}
+
+static void ljlua_auth_pop_claim_json(lua_State *L, ljlua_json_buf *buf) {
+  if (buf->max_cap == SIZE_MAX) {
+    lua_pop(L, 1);
+  }
+}
+
+static void
+ljlua_auth_push_m2m_credential(lua_State *L,
+                               const lonejson_m2m_credential *credential) {
+  lua_createtable(L, 0, 4);
+  ljlua_auth_push_optional_string(L, credential->client_id, "client_id");
+  ljlua_auth_push_optional_string(L, credential->client_secret,
+                                  "client_secret");
+  ljlua_auth_push_optional_string(L, credential->api_key, "api_key");
+  lua_pushlstring(
+      L,
+      credential->record_json.data != NULL ? credential->record_json.data : "",
+      credential->record_json.len);
+  lua_setfield(L, -2, "record_json");
+}
+
+static void
+ljlua_auth_push_m2m_authentication(lua_State *L,
+                                   const lonejson_m2m_authentication *auth) {
+  lua_createtable(L, 0, 5);
+  lua_pushboolean(L, auth->failure == LONEJSON_AUTH_FAILURE_NONE);
+  lua_setfield(L, -2, "authorized");
+  lua_pushstring(L, lonejson_auth_failure_string(auth->failure));
+  lua_setfield(L, -2, "failure");
+  if (auth->auth_mode == LONEJSON_M2M_AUTH_BASIC) {
+    lua_pushstring(L, "basic");
+    lua_setfield(L, -2, "auth_mode");
+  } else if (auth->auth_mode == LONEJSON_M2M_AUTH_BEARER) {
+    lua_pushstring(L, "bearer");
+    lua_setfield(L, -2, "auth_mode");
+  }
+  ljlua_auth_push_optional_string(L, auth->client_id, "client_id");
+  if (auth->claim.kind != LONEJSON_JSON_VALUE_NULL) {
+    ljlua_push_json_value(L, &auth->claim);
+    lua_setfield(L, -2, "claim");
+  }
+}
+
+static void ljlua_auth_push_m2m_signup(lua_State *L,
+                                       const lonejson_m2m_signup *signup) {
+  lua_createtable(L, 0, 5);
+  ljlua_auth_push_optional_string(L, signup->signup_id, "signup_id");
+  ljlua_auth_push_optional_string(L, signup->signup_secret, "signup_secret");
+  lua_pushlstring(L, signup->query.data != NULL ? signup->query.data : "",
+                  signup->query.len);
+  lua_setfield(L, -2, "query");
+  lua_pushlstring(L, signup->url.data != NULL ? signup->url.data : "",
+                  signup->url.len);
+  lua_setfield(L, -2, "url");
+  lua_pushlstring(
+      L, signup->record_json.data != NULL ? signup->record_json.data : "",
+      signup->record_json.len);
+  lua_setfield(L, -2, "record_json");
+}
+
+static void ljlua_auth_push_m2m_signup_completion(
+    lua_State *L, const lonejson_m2m_signup_completion *complete) {
+  lua_createtable(L, 0, 3);
+  ljlua_auth_push_optional_string(L, complete->signup_id, "signup_id");
+  ljlua_auth_push_optional_string(L, complete->email, "email");
+  ljlua_auth_push_m2m_credential(L, &complete->credential);
+  lua_setfield(L, -2, "credential");
+}
 #endif
 
 static lonejson *ljlua_auth_runtime_arg(lua_State *L, int *arg,
@@ -1138,6 +1324,165 @@ static int ljlua_oauth2_token_response_parse_json(lua_State *L) {
   }
   ljlua_auth_push_oauth2_token_response(L, &response);
   lonejson_oauth2_token_response_cleanup(&response);
+  return 1;
+}
+
+static int ljlua_m2m_credential_generate(lua_State *L) {
+  ljlua_runtime_ud *ud;
+  lonejson_m2m_credential_request request;
+  lonejson_m2m_credential credential;
+  lonejson_error error;
+  lonejson_status status;
+  ljlua_json_buf claim_buf;
+  int req_index;
+
+  ud = ljlua_check_runtime(L, 1);
+  luaL_checktype(L, 2, LUA_TTABLE);
+  req_index = lua_absindex(L, 2);
+  memset(&request, 0, sizeof(request));
+  request.auth_modes = ljlua_auth_read_modes(L, req_index, "auth_modes");
+  request.max_record_bytes =
+      ljlua_auth_optional_size_field(L, req_index, "max_record_bytes");
+  ljlua_auth_encode_claim(L, req_index, &request.claim_json, &request.claim_len,
+                          &claim_buf);
+  lonejson_m2m_credential_init(&credential);
+  lonejson_error_init(&error);
+  status = lonejson_m2m_credential_generate(ud->runtime, &request, &credential,
+                                            &error);
+  ljlua_auth_pop_claim_json(L, &claim_buf);
+  free(claim_buf.data);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_m2m_credential_cleanup(&credential);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_push_m2m_credential(L, &credential);
+  lonejson_m2m_credential_cleanup(&credential);
+  return 1;
+}
+
+static int ljlua_m2m_verify_authorization(lua_State *L) {
+  ljlua_runtime_ud *ud;
+  lonejson_m2m_store store;
+  lonejson_m2m_verify_request request;
+  lonejson_m2m_authentication auth;
+  lonejson_error error;
+  lonejson_status status;
+  size_t store_len;
+  int req_index;
+
+  ud = ljlua_check_runtime(L, 1);
+  luaL_checktype(L, 2, LUA_TTABLE);
+  req_index = lua_absindex(L, 2);
+  memset(&store, 0, sizeof(store));
+  memset(&request, 0, sizeof(request));
+  lua_getfield(L, req_index, "store_json");
+  store.json = luaL_checklstring(L, -1, &store_len);
+  store.len = store_len;
+  lua_pop(L, 1);
+  store.max_store_bytes =
+      ljlua_auth_optional_size_field(L, req_index, "max_store_bytes");
+  lua_getfield(L, req_index, "authorization_header");
+  request.authorization_header = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  request.store = &store;
+  request.allowed_auth_modes =
+      ljlua_auth_read_modes(L, req_index, "allowed_auth_modes");
+  lonejson_m2m_authentication_init(&auth);
+  lonejson_error_init(&error);
+  status =
+      lonejson_m2m_verify_authorization(ud->runtime, &request, &auth, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    const char *failure = lonejson_auth_failure_string(auth.failure);
+    lonejson_m2m_authentication_cleanup(&auth);
+    lua_pushnil(L);
+    ljlua_push_error(L, &error);
+    lua_pushstring(L, failure);
+    return 3;
+  }
+  ljlua_auth_push_m2m_authentication(L, &auth);
+  lonejson_m2m_authentication_cleanup(&auth);
+  return 1;
+}
+
+static int ljlua_m2m_signup_generate(lua_State *L) {
+  ljlua_runtime_ud *ud;
+  lonejson_m2m_signup_request request;
+  lonejson_m2m_signup signup;
+  lonejson_error error;
+  lonejson_status status;
+  ljlua_json_buf claim_buf;
+  int req_index;
+
+  ud = ljlua_check_runtime(L, 1);
+  luaL_checktype(L, 2, LUA_TTABLE);
+  req_index = lua_absindex(L, 2);
+  memset(&request, 0, sizeof(request));
+  request.base_url = ljlua_auth_optional_table_string(L, req_index, "base_url");
+  request.secret_param =
+      ljlua_auth_optional_table_string(L, req_index, "secret_param");
+  request.id_param = ljlua_auth_optional_table_string(L, req_index, "id_param");
+  request.max_url_bytes =
+      ljlua_auth_optional_size_field(L, req_index, "max_url_bytes");
+  request.max_record_bytes =
+      ljlua_auth_optional_size_field(L, req_index, "max_record_bytes");
+  ljlua_auth_encode_claim(L, req_index, &request.claim_json, &request.claim_len,
+                          &claim_buf);
+  lonejson_m2m_signup_init(&signup);
+  lonejson_error_init(&error);
+  status = lonejson_m2m_signup_generate(ud->runtime, &request, &signup, &error);
+  ljlua_auth_pop_claim_json(L, &claim_buf);
+  free(claim_buf.data);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_m2m_signup_cleanup(&signup);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_push_m2m_signup(L, &signup);
+  lonejson_m2m_signup_cleanup(&signup);
+  return 1;
+}
+
+static int ljlua_m2m_signup_complete(lua_State *L) {
+  ljlua_runtime_ud *ud;
+  lonejson_m2m_store store;
+  lonejson_m2m_signup_complete_request request;
+  lonejson_m2m_signup_completion complete;
+  lonejson_error error;
+  lonejson_status status;
+  size_t store_len;
+  int req_index;
+
+  ud = ljlua_check_runtime(L, 1);
+  luaL_checktype(L, 2, LUA_TTABLE);
+  req_index = lua_absindex(L, 2);
+  memset(&store, 0, sizeof(store));
+  memset(&request, 0, sizeof(request));
+  lua_getfield(L, req_index, "store_json");
+  store.json = luaL_checklstring(L, -1, &store_len);
+  store.len = store_len;
+  lua_pop(L, 1);
+  store.max_store_bytes =
+      ljlua_auth_optional_size_field(L, req_index, "max_store_bytes");
+  request.store = &store;
+  request.signup_id =
+      ljlua_auth_optional_table_string(L, req_index, "signup_id");
+  lua_getfield(L, req_index, "signup_secret");
+  request.signup_secret = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  lua_getfield(L, req_index, "email");
+  request.email = luaL_checkstring(L, -1);
+  lua_pop(L, 1);
+  request.credential_auth_modes =
+      ljlua_auth_read_modes(L, req_index, "credential_auth_modes");
+  lonejson_m2m_signup_complete_init(&complete);
+  lonejson_error_init(&error);
+  status =
+      lonejson_m2m_signup_complete(ud->runtime, &request, &complete, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_m2m_signup_complete_cleanup(&complete);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  ljlua_auth_push_m2m_signup_completion(L, &complete);
+  lonejson_m2m_signup_complete_cleanup(&complete);
   return 1;
 }
 

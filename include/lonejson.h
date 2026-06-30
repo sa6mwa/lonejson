@@ -2448,9 +2448,11 @@ struct lonejson_http_provider {
 
 /** Generated confidential-client/API-key credential material.
  *
- * `client_secret` and `api_key` are shown once to the caller. `record_json`
- * contains only salts and hashes plus the caller-supplied claim JSON and can be
- * placed under a credential store's `credentials` array.
+ * `client_secret` and `api_key` are shown once to the caller according to the
+ * requested auth modes. `record_json` contains only salts and hashes plus the
+ * caller-supplied claim JSON and can be placed under a credential store's
+ * `credentials` array. Store persistence, locking, rotation, revocation, and
+ * audit policy are caller-owned.
  */
 typedef struct lonejson_m2m_credential {
   char *client_id;
@@ -2459,8 +2461,13 @@ typedef struct lonejson_m2m_credential {
   lonejson_owned_buffer record_json;
 } lonejson_m2m_credential;
 
-/** M2M credential generation inputs. `claim_json` is embedded as raw JSON
- * after validation. `auth_modes == 0` uses `LONEJSON_M2M_AUTH_DEFAULT`.
+/** M2M/API-key credential generation inputs.
+ *
+ * `claim_json` is embedded as raw JSON after validation. Use
+ * `LONEJSON_M2M_AUTH_BEARER` to generate an API-key-only credential for
+ * `Authorization: Bearer <api_key>`, `LONEJSON_M2M_AUTH_BASIC` for
+ * client-id/client-secret Basic auth, or both. `auth_modes == 0` uses
+ * `LONEJSON_M2M_AUTH_DEFAULT`.
  */
 typedef struct lonejson_m2m_credential_request {
   const char *claim_json;
@@ -2469,21 +2476,40 @@ typedef struct lonejson_m2m_credential_request {
   size_t max_record_bytes;
 } lonejson_m2m_credential_request;
 
-/** Caller-owned credential store JSON used by M2M verification helpers. */
+/** Caller-owned credential store JSON used by M2M verification helpers.
+ *
+ * The expected shape is an object with optional `credentials[]` and `signups[]`
+ * arrays containing records returned by lonejson generation helpers. To revoke
+ * or rotate, update this caller-owned JSON store: remove a record, set its
+ * `revoked` field, or insert a replacement generated credential.
+ */
 typedef struct lonejson_m2m_store {
   const char *json;
   size_t len;
   size_t max_store_bytes;
 } lonejson_m2m_store;
 
-/** M2M Authorization header verification inputs. */
+/** M2M/API-key Authorization header verification inputs.
+ *
+ * `authorization_header` is the raw HTTP `Authorization` header value. Bearer
+ * mode verifies `Authorization: Bearer <api_key>`. Basic mode verifies
+ * `Authorization: Basic <base64(client_id:client_secret)>`.
+ * `allowed_auth_modes == 0` accepts modes present in the credential record.
+ */
 typedef struct lonejson_m2m_verify_request {
   const lonejson_m2m_store *store;
   const char *authorization_header;
   unsigned allowed_auth_modes;
 } lonejson_m2m_verify_request;
 
-/** Successful M2M authentication result. `claim` owns captured JSON. */
+/** M2M/API-key authentication result.
+ *
+ * On success, `failure` is `LONEJSON_AUTH_FAILURE_NONE`, `auth_mode`
+ * identifies Basic or Bearer, `client_id` owns the authenticated credential id,
+ * and `claim` owns the captured caller-supplied JSON. lonejson authenticates
+ * and returns facts; endpoint, method, tenant, tool, and operation
+ * authorization remain application-owned decisions.
+ */
 typedef struct lonejson_m2m_authentication {
   lonejson_auth_failure failure;
   unsigned auth_mode;
@@ -2495,7 +2521,9 @@ typedef struct lonejson_m2m_authentication {
  *
  * `signup_secret` is shown once to the inviter or encoded into a signup URL.
  * `record_json` contains only salted/hashed secret material and claim JSON and
- * can be placed under a credential store's `signups` array.
+ * can be placed under a credential store's `signups` array. The caller owns
+ * delivery of `query`/`url`, storage mutation, expiry policy, and removal of
+ * consumed or revoked signup seeds.
  */
 typedef struct lonejson_m2m_signup {
   char *signup_id;
@@ -2505,7 +2533,13 @@ typedef struct lonejson_m2m_signup {
   lonejson_owned_buffer record_json;
 } lonejson_m2m_signup;
 
-/** Signup seed generation inputs. */
+/** Signup seed generation inputs.
+ *
+ * `base_url`, when present, is combined with generated query parameters to
+ * produce `url`. `secret_param` and `id_param` override the default query
+ * names. `claim_json` is validated and copied into the signup record for later
+ * credential generation.
+ */
 typedef struct lonejson_m2m_signup_request {
   const char *base_url;
   const char *secret_param;
@@ -2516,8 +2550,11 @@ typedef struct lonejson_m2m_signup_request {
   size_t max_record_bytes;
 } lonejson_m2m_signup_request;
 
-/** Signup completion inputs. `email` is required by the helper so the handler
- * can keep the first public signup flow intentionally small.
+/** Signup completion inputs.
+ *
+ * `email` is required by the helper so the handler can keep the first public
+ * signup flow intentionally small. `credential_auth_modes` controls the
+ * generated credential; use `LONEJSON_M2M_AUTH_BEARER` for API-key-only signup.
  */
 typedef struct lonejson_m2m_signup_complete_request {
   const lonejson_m2m_store *store;
@@ -6129,6 +6166,11 @@ void *lonejson_record_object_array_append_slot(lonejson *runtime,
                                                lonejson_error *error);
 
 /** Computes the encoded byte length for `len` raw bytes and base64 `variant`.
+ *
+ * Use `LONEJSON_BASE64_STANDARD` for padded RFC 4648 base64,
+ * `LONEJSON_BASE64_STANDARD_RAW` for unpadded standard base64,
+ * `LONEJSON_BASE64_URL` for padded base64url, and
+ * `LONEJSON_BASE64_URL_RAW` for unpadded JWT/JWS-style base64url segments.
  */
 lonejson_status lonejson_base64_encoded_len(size_t len,
                                             lonejson_base64_variant variant,
@@ -6144,7 +6186,11 @@ lonejson_status lonejson_base64_encode(const void *data, size_t len,
                                        lonejson_base64_variant variant,
                                        char *out, size_t capacity,
                                        size_t *needed, lonejson_error *error);
-/** Encodes raw bytes as base64 and streams encoded chunks to `sink`. */
+/** Encodes raw bytes as base64 and streams encoded chunks to `sink`.
+ *
+ * This uses bounded internal chunks and does not require the caller to
+ * allocate the complete encoded output.
+ */
 lonejson_status lonejson_base64_encode_sink(const void *data, size_t len,
                                             lonejson_base64_variant variant,
                                             lonejson_sink_fn sink, void *user,
@@ -6168,7 +6214,11 @@ lonejson_status lonejson_base64_decode(const char *data, size_t len,
                                        lonejson_base64_variant variant,
                                        unsigned char *out, size_t capacity,
                                        size_t *needed, lonejson_error *error);
-/** Decodes one base64 value and streams decoded chunks to `sink`. */
+/** Decodes one base64 value and streams decoded chunks to `sink`.
+ *
+ * The decoder validates the selected alphabet and padding policy before
+ * emitting bytes. It does not materialize the complete decoded value.
+ */
 lonejson_status lonejson_base64_decode_sink(const char *data, size_t len,
                                             lonejson_base64_variant variant,
                                             lonejson_sink_fn sink, void *user,

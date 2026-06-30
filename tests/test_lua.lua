@@ -516,6 +516,76 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_true(bad == nil)
     assert_eq(err.status, "type_mismatch")
     assert_eq(failure, "issuer_mismatch")
+
+    if lj.set_openssl_auth_provider ~= nil and lj.m2m_credential_generate ~= nil then
+      local api_credential = lj:m2m_credential_generate({
+        claim = { scope = { "read" }, tenant = "acme" },
+        auth_modes = "bearer",
+      })
+      local api_store = '{"credentials":[' .. api_credential.record_json .. ']}'
+      local api_auth = lj:m2m_verify_authorization({
+        store_json = api_store,
+        authorization_header = "Bearer " .. api_credential.api_key,
+        allowed_auth_modes = "bearer",
+      })
+      local wrong_api, wrong_api_err, wrong_api_failure =
+          lj:m2m_verify_authorization({
+            store_json = api_store,
+            authorization_header = "Bearer wrong-api-key",
+            allowed_auth_modes = "bearer",
+          })
+      local signup = lj:m2m_signup_generate({
+        base_url = "https://app.example/signup",
+        claim = { scope = { "write" }, plan = "trial" },
+      })
+      local signup_store = '{"signups":[' .. signup.record_json .. ']}'
+      local complete = lj:m2m_signup_complete({
+        store_json = signup_store,
+        signup_id = signup.signup_id,
+        signup_secret = signup.signup_secret,
+        email = "user@example.com",
+        credential_auth_modes = "bearer",
+      })
+      local completed_store =
+          '{"credentials":[' .. complete.credential.record_json .. ']}'
+      local completed_auth = lj:m2m_verify_authorization({
+        store_json = completed_store,
+        authorization_header = "Bearer " .. complete.credential.api_key,
+        allowed_auth_modes = { api_key = true },
+      })
+      local bad_signup, bad_signup_err = lj:m2m_signup_complete({
+        store_json = signup_store,
+        signup_id = signup.signup_id,
+        signup_secret = "wrong-secret",
+        email = "user@example.com",
+        credential_auth_modes = "bearer",
+      })
+
+      assert_eq(api_credential.client_secret, nil)
+      assert_true(api_credential.api_key ~= nil)
+      assert_true(api_credential.record_json:find(api_credential.api_key, 1, true) == nil)
+      assert_true(api_auth.authorized)
+      assert_eq(api_auth.auth_mode, "bearer")
+      assert_eq(api_auth.client_id, api_credential.client_id)
+      assert_eq(api_auth.claim.tenant, "acme")
+      assert_eq(api_auth.claim.scope[1], "read")
+      assert_true(wrong_api == nil)
+      assert_eq(wrong_api_err.status, "type_mismatch")
+      assert_eq(wrong_api_failure, "invalid_signature")
+      assert_true(signup.signup_id ~= nil)
+      assert_true(signup.signup_secret ~= nil)
+      assert_true(signup.url:find("signup_id=", 1, true) ~= nil)
+      assert_true(signup.url:find("signup_secret=", 1, true) ~= nil)
+      assert_true(signup.record_json:find(signup.signup_secret, 1, true) == nil)
+      assert_eq(complete.signup_id, signup.signup_id)
+      assert_eq(complete.email, "user@example.com")
+      assert_eq(complete.credential.client_secret, nil)
+      assert_true(complete.credential.api_key ~= nil)
+      assert_true(completed_auth.authorized)
+      assert_eq(completed_auth.claim.plan, "trial")
+      assert_true(bad_signup == nil)
+      assert_eq(bad_signup_err.status, "type_mismatch")
+    end
   end
 
   bad, err = lj:jwt_validate_compact_claims(jwt_token, {

@@ -125,6 +125,14 @@ claims with an explicit `lonejson_jwt_claim_policy`. The OpenSSL provider
 supports `RS256`, `PS256`, `ES256`, and `EdDSA` for Ed25519 OKP keys.
 `alg: none` is rejected; `HS256` and Ed448 are not implemented.
 
+Base64 helpers are available independently of JWT. Use
+`lonejson_base64_encode()`/`lonejson_base64_decode()` for caller-provided
+buffers, or the `_sink` variants when the encoded/decoded data should be
+streamed to a callback instead of materialized by the helper. Variants are
+explicit: `LONEJSON_BASE64_STANDARD`, `LONEJSON_BASE64_STANDARD_RAW`,
+`LONEJSON_BASE64_URL`, and `LONEJSON_BASE64_URL_RAW`. JWT/JWS segments use
+`LONEJSON_BASE64_URL_RAW`.
+
 For command-line tools and services that already link curl, keep curl in the
 application and install a small HTTP provider callback. The callback receives a
 bounded `lonejson_http_request`, performs the GET or POST with the
@@ -157,6 +165,11 @@ this keeps TLS trust roots, proxies, redirects, retry policy, and advanced curl
 options in application code. Use the lower-level curl parse adapters for
 general large JSON response streaming.
 
+For dev-only HTTPS test providers with self-signed certificates, put
+`CURLOPT_SSL_VERIFYPEER = 0` and `CURLOPT_SSL_VERIFYHOST = 0` in the caller's
+HTTP provider callback. Do not put that policy in lonejson configuration; TLS
+verification remains transport-owned.
+
 For server-local machine-to-machine credentials,
 `lonejson_m2m_credential_generate()` creates one-time client secrets/API keys
 and a store-ready JSON record containing only salts, hashes, and an opaque claim
@@ -167,6 +180,53 @@ API keys against caller-owned store JSON and returns the authenticated
 `lonejson_m2m_signup_complete()` support admin-seeded signup links where the
 handler collects an email address, issues credentials once, and then removes
 the consumed signup seed from caller-owned storage.
+
+Use Bearer-only mode when the endpoint is just an API-key gate:
+
+```c
+lonejson_m2m_credential_request create = {
+    .claim_json = "{\"scope\":[\"read\"],\"tenant\":\"acme\"}",
+    .auth_modes = LONEJSON_M2M_AUTH_BEARER
+};
+lonejson_m2m_credential credential;
+
+lonejson_m2m_credential_init(&credential);
+lonejson_m2m_credential_generate(lj, &create, &credential, &error);
+/* Show credential.api_key once. Store credential.record_json under credentials[]. */
+```
+
+In a web handler, verify the raw `Authorization` header before application
+logic:
+
+```c
+lonejson_m2m_store store = {
+    .json = credential_store_json,
+    .len = credential_store_len
+};
+lonejson_m2m_verify_request verify = {
+    .store = &store,
+    .authorization_header = authorization_header,
+    .allowed_auth_modes = LONEJSON_M2M_AUTH_BEARER
+};
+lonejson_m2m_authentication auth;
+
+lonejson_m2m_authentication_init(&auth);
+status = lonejson_m2m_verify_authorization(lj, &verify, &auth, &error);
+if (status != LONEJSON_STATUS_OK ||
+    auth.failure != LONEJSON_AUTH_FAILURE_NONE) {
+    /* framework code returns 401/403 here */
+}
+/* auth.client_id and auth.claim are authenticated facts. App code decides
+ * whether this client may use this endpoint/method/tenant/operation. */
+lonejson_m2m_authentication_cleanup(&auth);
+```
+
+Credential store mutation is deliberately caller-owned. The intended persistent
+shape is a JSON object containing `credentials[]` and, when signup is used,
+`signups[]`. To rotate an API key, generate a replacement credential, insert
+the new `record_json`, and remove or mark the old record as revoked. To revoke,
+remove the record or set its `revoked` field. lonejson does not lock files,
+encrypt stores, keep audit history, or decide access policy from claims.
 
 For Kore, Vectis, or another C web framework, keep lonejson at the auth
 boundary instead of adding framework-specific dependencies. Refresh discovery
@@ -207,11 +267,55 @@ lj:set_http_provider(function(request)
 end, "my-product/1.0")
 ```
 
+Lua M2M/API-key usage mirrors C while keeping storage explicit:
+
+```lua
+local lj = lonejson.new()
+lj:set_openssl_auth_provider()
+
+local credential = lj:m2m_credential_generate({
+  claim = { scope = { "read" }, tenant = "acme" },
+  auth_modes = "bearer",
+})
+-- Show credential.api_key once. Store credential.record_json under credentials[].
+
+local store_json = '{"credentials":[' .. credential.record_json .. ']}'
+local auth = lj:m2m_verify_authorization({
+  store_json = store_json,
+  authorization_header = "Bearer " .. credential.api_key,
+  allowed_auth_modes = "bearer",
+})
+if not auth.authorized then
+  -- framework code returns 401/403 here
+end
+-- auth.client_id and auth.claim are authenticated facts; app code authorizes.
+```
+
+Lua signup helpers return store-ready JSON strings and one-time secrets:
+
+```lua
+local signup = lj:m2m_signup_generate({
+  base_url = "https://app.example/signup",
+  claim = { scope = { "write" }, plan = "trial" },
+})
+-- Send signup.url to the recipient and store signup.record_json under signups[].
+
+local complete = lj:m2m_signup_complete({
+  store_json = '{"signups":[' .. signup.record_json .. ']}',
+  signup_id = signup.signup_id,
+  signup_secret = signup.signup_secret,
+  email = "user@example.com",
+  credential_auth_modes = "bearer",
+})
+-- Show complete.credential.api_key once, insert complete.credential.record_json
+-- under credentials[], and remove complete.signup_id from signups[].
+```
+
 Remaining auth DX gaps are explicit. lonejson does not provide a built-in HTTP
 server, browser launcher, localhost callback listener, refresh scheduler,
 credential-store persistence/locking, retry policy, proxy policy, redirect
-policy, Lua facade for server-local M2M/signup helpers, or Kore/Vectis-specific
-handler wrapper. Those are application lifecycle concerns.
+policy, or Kore/Vectis-specific handler wrapper. Those are application
+lifecycle concerns.
 Potential future simplifications would be an examples-level curl HTTP provider
 callback, an examples-level Kore/Vectis adapter, and a higher-level
 cache-refresh scheduler. Those should start as examples or application helpers

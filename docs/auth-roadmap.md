@@ -27,8 +27,8 @@ glue.
 - Core lonejson must not add Kore- or Vectis-specific public APIs.
 - Large or attacker-controlled inputs must stay bounded; APIs must not hide
   full-message materialization behind streaming-looking names.
-- Lua should facade C behavior, not reimplement independent crypto or protocol
-  logic in Lua.
+- Lua should facade C behavior, not reimplement independent crypto, storage, or
+  protocol logic in Lua.
 
 ## Implemented Baseline
 
@@ -47,6 +47,8 @@ The current branch already implements the planned C baseline for:
   caller-owned JSON store bytes,
 - server-local signup seed generation and signup completion into generated M2M
   credentials,
+- Lua facades for JWT/JWK/JWKS, OIDC/OAuth2, M2M credential verification, and
+  signup helpers,
 - C runtime/free-function/short-alias surfaces, ABI/package checks, fuzz gates,
   and targeted e2e fixtures for OIDC bearer and M2M Basic/Bearer verification.
 
@@ -54,20 +56,6 @@ For exact API behavior and known implementation gaps, use
 `docs/auth-implementation.md`.
 
 ## Remaining Work
-
-### Lua M2M Facade
-
-Expose the server-local M2M credential and signup helpers through Lua by calling
-the C implementation directly:
-
-- `m2m_credential_generate`,
-- `m2m_verify_authorization`,
-- `m2m_signup_generate`,
-- `m2m_signup_complete`.
-
-The Lua facade should preserve C semantics: generated secrets are returned once,
-store records contain only hashes/salts/opaque claim JSON, verification returns
-authenticated facts, and authorization decisions remain application-owned.
 
 ### Signup E2E Fixture
 

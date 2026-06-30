@@ -174,6 +174,10 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"oidc_fetch_discovery", ljlua_oidc_fetch_discovery},
     {"oidc_jwks_cache_select_json", ljlua_oidc_jwks_cache_select_json},
     {"oidc_jwks_cache_refresh", ljlua_oidc_jwks_cache_refresh},
+    {"m2m_credential_generate", ljlua_m2m_credential_generate},
+    {"m2m_verify_authorization", ljlua_m2m_verify_authorization},
+    {"m2m_signup_generate", ljlua_m2m_signup_generate},
+    {"m2m_signup_complete", ljlua_m2m_signup_complete},
 #endif
 #endif
     {NULL, NULL}};
