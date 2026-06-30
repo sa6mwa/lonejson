@@ -50,6 +50,98 @@ print(value)
 ' "$field"
 }
 
+client_credentials_token() {
+  local client_id=$1
+  local response
+  response="$(
+    curl -fsS --max-time 10 --cacert "$ca_file" -X POST "$token_endpoint" \
+      -H 'Content-Type: application/x-www-form-urlencoded' \
+      --data-urlencode 'grant_type=client_credentials' \
+      --data-urlencode "client_id=$client_id" \
+      --data-urlencode 'client_secret=lonejson-secret' \
+      --data-urlencode 'scope=openid profile' \
+      --data-urlencode "audience=$audience"
+  )"
+  printf '%s' "$response" | json_field access_token
+}
+
+assert_protected_authorized() {
+  local token=$1
+  local label=$2
+  curl -fsS --max-time 5 "http://127.0.0.1:$server_port/protected" \
+    -H "Authorization: Bearer $token" \
+    | python3 -c '
+import json
+import sys
+label = sys.argv[1]
+value = json.load(sys.stdin)
+if value.get("ok") is not True or value.get("authorized") is not True:
+    raise SystemExit(f"{label}: lonejson fixture server did not authorize token")
+' "$label"
+}
+
+assert_protected_rejected() {
+  local token=$1
+  local expected_failure=$2
+  local label=$3
+  local body
+  local response
+  local status
+  response="$(
+    curl -sS --max-time 5 -w '\n%{http_code}' \
+      "http://127.0.0.1:$server_port/protected" \
+      -H "Authorization: Bearer $token"
+  )"
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [[ "$status" != 401 ]]; then
+    printf '%s: expected HTTP 401, got %s\n' "$label" "$status" >&2
+    printf '%s\n' "$body" >&2
+    exit 1
+  fi
+  printf '%s' "$body" | python3 -c '
+import json
+import sys
+label = sys.argv[1]
+expected = sys.argv[2]
+value = json.load(sys.stdin)
+if value.get("ok") is not False or value.get("authorized") is not False:
+    raise SystemExit(f"{label}: rejection body did not mark request unauthorized")
+if value.get("failure") != expected:
+    raise SystemExit(
+        f"{label}: expected failure {expected!r}, got {value.get('failure')!r}"
+    )
+' "$label" "$expected_failure"
+}
+
+assert_protected_missing_bearer_rejected() {
+  local body
+  local response
+  local status
+  response="$(
+    curl -sS --max-time 5 -w '\n%{http_code}' \
+      "http://127.0.0.1:$server_port/protected"
+  )"
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [[ "$status" != 401 ]]; then
+    printf 'missing bearer: expected HTTP 401, got %s\n' "$status" >&2
+    printf '%s\n' "$body" >&2
+    exit 1
+  fi
+  printf '%s' "$body" | python3 -c '
+import json
+import sys
+value = json.load(sys.stdin)
+if value.get("ok") is not False or value.get("authorized") is not False:
+    raise SystemExit("missing bearer: rejection body did not mark request unauthorized")
+if value.get("failure") != "missing_credentials":
+    raise SystemExit(
+        f"missing bearer: expected failure 'missing_credentials', got {value.get('failure')!r}"
+    )
+'
+}
+
 require_command curl
 require_command python3
 
@@ -76,6 +168,12 @@ token_json="$(
     --data-urlencode "audience=$audience"
 )"
 access_token="$(printf '%s' "$token_json" | json_field access_token)"
+multi_audience_token="$(client_credentials_token lonejson-good-multi-aud)"
+scp_array_token="$(client_credentials_token lonejson-scp-array)"
+wrong_audience_token="$(client_credentials_token lonejson-wrong-audience)"
+missing_scope_token="$(client_credentials_token lonejson-missing-scope)"
+wrong_azp_token="$(client_credentials_token lonejson-wrong-azp)"
+missing_azp_token="$(client_credentials_token lonejson-missing-azp)"
 
 authorization_location="$(
   curl -fsS --max-time 10 --cacert "$ca_file" -D - -o /dev/null \
@@ -143,7 +241,7 @@ fi
 
 LONEJSON_OIDC_E2E_CAINFO="$ca_file" \
   "$repo_root/build/host-curl/lonejson_oidc_fixture_server" \
-  "$issuer" "$audience" "$server_port" 4 \
+  "$issuer" "$audience" "$server_port" 10 \
   "$authorization_access_token" "$rotated_refresh_token" \
   >"$repo_root/build/host-curl/oidc-fixture-server.log" 2>&1 &
 server_pid=$!
@@ -161,30 +259,16 @@ if [[ "$ready" != 1 ]]; then
   exit 1
 fi
 
-if curl -fsS --max-time 5 "http://127.0.0.1:$server_port/protected" >/dev/null 2>&1; then
-  printf 'protected endpoint accepted missing bearer token\n' >&2
-  exit 1
-fi
+assert_protected_missing_bearer_rejected
 
-curl -fsS --max-time 5 "http://127.0.0.1:$server_port/protected" \
-  -H "Authorization: Bearer $access_token" \
-  | python3 -c '
-import json
-import sys
-value = json.load(sys.stdin)
-if value.get("ok") is not True or value.get("authorized") is not True:
-    raise SystemExit("lonejson fixture server did not authorize token")
-'
-
-curl -fsS --max-time 5 "http://127.0.0.1:$server_port/protected" \
-  -H "Authorization: Bearer $refreshed_access_token" \
-  | python3 -c '
-import json
-import sys
-value = json.load(sys.stdin)
-if value.get("ok") is not True or value.get("authorized") is not True:
-    raise SystemExit("lonejson fixture server did not authorize refreshed token")
-'
+assert_protected_authorized "$access_token" default-client-credentials
+assert_protected_authorized "$refreshed_access_token" refreshed-token
+assert_protected_authorized "$multi_audience_token" multi-audience-with-azp
+assert_protected_authorized "$scp_array_token" scp-array-scopes
+assert_protected_rejected "$wrong_audience_token" audience_mismatch wrong-audience
+assert_protected_rejected "$missing_scope_token" claims_invalid missing-scope
+assert_protected_rejected "$wrong_azp_token" claims_invalid wrong-azp
+assert_protected_rejected "$missing_azp_token" claims_invalid missing-azp
 
 wait "$server_pid"
 server_pid=

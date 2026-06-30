@@ -6,6 +6,82 @@
       "issuerId": "default",
       "requestMappings": [
         {
+          "requestParam": "client_id",
+          "match": "lonejson-good-multi-aud",
+          "claims": {
+            "sub": "${client_id}",
+            "azp": "lonejson-m2m",
+            "aud": [
+              "lonejson-api",
+              "other-api"
+            ],
+            "scope": "openid profile"
+          }
+        },
+        {
+          "requestParam": "client_id",
+          "match": "lonejson-scp-array",
+          "claims": {
+            "sub": "${client_id}",
+            "azp": "lonejson-m2m",
+            "aud": [
+              "lonejson-api"
+            ],
+            "scp": [
+              "openid",
+              "profile"
+            ]
+          }
+        },
+        {
+          "requestParam": "client_id",
+          "match": "lonejson-wrong-audience",
+          "claims": {
+            "sub": "${client_id}",
+            "azp": "lonejson-m2m",
+            "aud": [
+              "other-api"
+            ],
+            "scope": "openid profile"
+          }
+        },
+        {
+          "requestParam": "client_id",
+          "match": "lonejson-missing-scope",
+          "claims": {
+            "sub": "${client_id}",
+            "azp": "lonejson-m2m",
+            "aud": [
+              "lonejson-api"
+            ],
+            "scope": "openid"
+          }
+        },
+        {
+          "requestParam": "client_id",
+          "match": "lonejson-wrong-azp",
+          "claims": {
+            "sub": "${client_id}",
+            "azp": "other-client",
+            "aud": [
+              "lonejson-api"
+            ],
+            "scope": "openid profile"
+          }
+        },
+        {
+          "requestParam": "client_id",
+          "match": "lonejson-missing-azp",
+          "claims": {
+            "sub": "${client_id}",
+            "aud": [
+              "lonejson-api",
+              "other-api"
+            ],
+            "scope": "openid profile"
+          }
+        },
+        {
           "requestParam": "grant_type",
           "match": "client_credentials",
           "claims": {

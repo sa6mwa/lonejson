@@ -359,18 +359,21 @@ and API fixture. `make test-oidc-e2e` starts the compose stack, obtains a token
 from the mock provider using `curl` rather than lonejson, starts the
 lonejson-backed fixture server, and verifies discovery, JWKS refresh, token
 introspection, UserInfo, revocation, bearer rejection, and bearer acceptance
-against the live endpoints. Compose commands prefer `nerdctl compose` and fall
-back to `docker compose`. The e2e also exercises refresh-token grant exchange
-against the mock provider and requires a returned access token.
+against the live endpoints. The same e2e checks fail-closed bearer behavior for
+missing credentials, wrong audience, missing scope, wrong/missing `azp`, and
+acceptance for strict multi-audience tokens and `scp` array scopes. Compose
+commands prefer `nerdctl compose` and fall back to `docker compose`. The e2e
+also exercises refresh-token grant exchange against the mock provider and
+requires a returned access token.
 
 `make test-m2m-e2e` starts a tiny lonejson-backed API fixture and uses `curl`
 as the non-lonejson client to verify Basic client credentials, Bearer API keys,
 missing credentials, wrong-secret rejection, signup completion with email
 metadata, consumed-signup rejection, and use of signup-generated Basic and
 Bearer credentials. Detailed JOSE policy branches such as `crit`, `key_ops`,
-strict multi-audience policy, and `x5c` certificate-chain/thumbprint failure
-modes are covered by C/Lua regression tests and JWT fuzz seeds rather than by a
-separate live OIDC e2e scenario for each branch.
+and `x5c` certificate-chain/thumbprint failure modes are covered by C/Lua
+regression tests and JWT fuzz seeds rather than by a separate live OIDC e2e
+scenario for each branch.
 
 Short aliases are enabled by default. Disable them if they collide with another
 project:

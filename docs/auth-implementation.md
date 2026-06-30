@@ -896,15 +896,20 @@ branch. `make test-oidc-e2e` uses the local compose OIDC/OAuth2 provider,
 `curl` as the non-lonejson client, and a lonejson-backed fixture server to
 exercise discovery, JWKS refresh, bearer validation, authorization-code token
 exchange, refresh-token exchange, token-flow refresh, token introspection,
-token revocation, and UserInfo. `make test-m2m-e2e` uses `curl` against a
-lonejson-backed fixture server to exercise Basic credentials, Bearer API keys,
-missing/wrong credentials, signup completion, consumed-signup rejection, and
-signup-generated Basic/Bearer credentials.
+token revocation, and UserInfo. The same live bearer endpoint also verifies
+fail-closed rejection for missing bearer credentials, wrong audience, missing
+scope, wrong `azp`, and missing `azp`, plus acceptance for strict
+multi-audience tokens with the expected `azp` and `scp` array scope tokens.
+`make test-m2m-e2e` uses `curl` against a lonejson-backed fixture server to
+exercise Basic credentials, Bearer API keys, missing/wrong credentials, signup
+completion, consumed-signup rejection, and signup-generated Basic/Bearer
+credentials.
 
-Detailed JOSE policy invariants such as fail-closed `crit`, JWK `key_ops`,
-strict multi-audience policy, and `x5c` certificate-chain/thumbprint failure
-modes are covered by C unit/regression tests, Lua facade tests where exposed,
-and JWT fuzz seeds rather than by dedicated live OIDC e2e scenarios.
+Detailed JOSE policy invariants that require custom token/JWK construction,
+such as fail-closed `crit`, JWK `key_ops`, and `x5c`
+certificate-chain/thumbprint failure modes, are covered by C unit/regression
+tests, Lua facade tests where exposed, and JWT fuzz seeds rather than by
+dedicated live OIDC e2e scenarios.
 
 The standard auth verification path for the current branch is:
 

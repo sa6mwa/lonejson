@@ -254,7 +254,11 @@ static void handle_client(fixture_server *server, int client_fd) {
       validation.failure == LONEJSON_AUTH_FAILURE_NONE) {
     respond_json(client_fd, 200, "{\"ok\":true,\"authorized\":true}");
   } else {
-    respond_json(client_fd, 401, "{\"ok\":false,\"authorized\":false}");
+    char body[160];
+    snprintf(body, sizeof(body),
+             "{\"ok\":false,\"authorized\":false,\"failure\":\"%s\"}",
+             lonejson_auth_failure_string(validation.failure));
+    respond_json(client_fd, 401, body);
   }
   lonejson_oidc_bearer_validation_cleanup(&validation);
 }

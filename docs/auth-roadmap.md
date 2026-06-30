@@ -86,16 +86,19 @@ Implementation evidence is split by layer:
 - `make test-oidc-e2e` covers live local OIDC discovery, JWKS refresh, bearer
   validation, authorization-code token exchange, refresh-token exchange,
   token-flow refresh, introspection, revocation, and UserInfo through a
-  lonejson-backed fixture server plus `curl` as the non-lonejson client.
+  lonejson-backed fixture server plus `curl` as the non-lonejson client. It
+  also covers bearer-policy accept/reject behavior for missing credentials,
+  wrong audience, missing scope, wrong/missing `azp`, strict multi-audience
+  acceptance with expected `azp`, and `scp` array scopes.
 - `make test-m2m-e2e` covers Basic credentials, Bearer API keys, missing and
   wrong credentials, signup completion, consumed-signup rejection, and
   signup-generated Basic/Bearer credentials through a lonejson-backed fixture
   server plus `curl`.
 
 The e2e layer intentionally does not duplicate every JOSE invariant. `crit`,
-`key_ops`, strict multi-audience policy, and `x5c` certificate-chain/thumbprint
-failure modes are covered by C/Lua/fuzz tests rather than by a separate live
-OIDC provider scenario for each invariant.
+`key_ops`, and `x5c` certificate-chain/thumbprint failure modes are covered by
+C/Lua/fuzz tests rather than by a separate live OIDC provider scenario for each
+invariant.
 
 ### JOSE/JWK Compliance Completion
 
