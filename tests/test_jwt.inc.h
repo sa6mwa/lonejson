@@ -905,6 +905,38 @@ static void test_jwt_validate_recommended_signatures(void) {
     EXPECT(lonejson_jwt_validate_signature_with_runtime(
                test_default_runtime(), &compact, &header, &jwk, &error) ==
            LONEJSON_STATUS_OK);
+    if (strcmp(header.alg, "ES256") == 0) {
+      char *jwk_x = jwk.x;
+      char *jwk_y = jwk.y;
+
+      jwk.x = NULL;
+      EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk,
+                                             &error) ==
+             LONEJSON_STATUS_TYPE_MISMATCH);
+      EXPECT(lonejson_jwt_validate_signature_with_runtime(
+                 test_default_runtime(), &compact, &header, &jwk, &error) ==
+             LONEJSON_STATUS_TYPE_MISMATCH);
+      jwk.x = jwk_x;
+      jwk.y = NULL;
+      EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk,
+                                             &error) ==
+             LONEJSON_STATUS_TYPE_MISMATCH);
+      EXPECT(lonejson_jwt_validate_signature_with_runtime(
+                 test_default_runtime(), &compact, &header, &jwk, &error) ==
+             LONEJSON_STATUS_TYPE_MISMATCH);
+      jwk.y = jwk_y;
+    } else if (strcmp(header.alg, "EdDSA") == 0) {
+      char *jwk_x = jwk.x;
+
+      jwk.x = NULL;
+      EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk,
+                                             &error) ==
+             LONEJSON_STATUS_TYPE_MISMATCH);
+      EXPECT(lonejson_jwt_validate_signature_with_runtime(
+                 test_default_runtime(), &compact, &header, &jwk, &error) ==
+             LONEJSON_STATUS_TYPE_MISMATCH);
+      jwk.x = jwk_x;
+    }
     lonejson_jwk_cleanup(&jwk);
     lonejson_jwt_header_cleanup(&header);
     lonejson_jwt_claims_cleanup(&claims);

@@ -4276,6 +4276,12 @@ static EVP_PKEY *lonejson__jwt_ec_public_key_from_jwk(const lonejson_jwk *jwk,
                               "ES256 requires a P-256 JWK");
     return NULL;
   }
+  if (jwk->x == NULL || jwk->x[0] == '\0' || jwk->y == NULL ||
+      jwk->y[0] == '\0') {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                              "ES256 JWK coordinates are required");
+    return NULL;
+  }
   x = lonejson__jwt_decode_base64url_alloc(jwk->x, strlen(jwk->x), &x_len,
                                            "JWK x coordinate", error);
   y = lonejson__jwt_decode_base64url_alloc(jwk->y, strlen(jwk->y), &y_len,
@@ -4470,6 +4476,10 @@ lonejson__jwt_validate_eddsa_signature(const lonejson_jwt_compact *jwt,
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                "EdDSA requires an Ed25519 JWK");
   }
+  if (jwk->x == NULL || jwk->x[0] == '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "Ed25519 JWK x coordinate is required");
+  }
   x = lonejson__jwt_decode_base64url_alloc(jwk->x, strlen(jwk->x), &x_len,
                                            "JWK x coordinate", error);
   signature = lonejson__jwt_decode_base64url_alloc(
@@ -4529,6 +4539,11 @@ static EVP_PKEY *lonejson__jwt_eddsa_public_key_from_jwk(const lonejson_jwk *jwk
   if (!lonejson__auth_streq(jwk->crv, "Ed25519")) {
     (void)lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                               "EdDSA requires an Ed25519 JWK");
+    return NULL;
+  }
+  if (jwk->x == NULL || jwk->x[0] == '\0') {
+    (void)lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                              "Ed25519 JWK x coordinate is required");
     return NULL;
   }
   x = lonejson__jwt_decode_base64url_alloc(jwk->x, strlen(jwk->x), &x_len,
