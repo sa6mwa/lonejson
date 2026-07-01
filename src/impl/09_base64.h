@@ -400,7 +400,7 @@ lonejson_status lonejson_base64_decode(const char *data, size_t len,
                                        size_t *needed, lonejson_error *error) {
   lonejson__base64_decode_buffer_sink sink;
   lonejson_status status;
-  size_t decoded_len;
+  size_t decoded_len = 0u;
 
   lonejson__clear_error(error);
   if (needed == NULL) {
