@@ -2694,6 +2694,7 @@ static void test_oidc_validate_bearer_token_failures(void) {
   lonejson_oidc_jwks_cache_cleanup(&cache);
 }
 
+#ifdef LONEJSON_WITH_OPENSSL
 static void test_m2m_basic_base64(char *out, size_t out_size, const char *id,
                                   const char *secret) {
   static const char alphabet[] =
@@ -2735,6 +2736,7 @@ test_m2m_revoked_store_json(lonejson_owned_buffer *out,
   EXPECT(lonejson_owned_buffer_sink(out, suffix, sizeof(suffix) - 1u, error) ==
          LONEJSON_STATUS_OK);
 }
+#endif
 
 static void test_m2m_credential_store_auth(void) {
 #ifdef LONEJSON_WITH_OPENSSL
