@@ -337,6 +337,19 @@ static const char test_jwt_rs256_other_kid_jwks_json[] =
     "YoQ\","
     "\"e\":\"AQAB\"}]}";
 
+static const char test_jwt_rs256_same_kid_wrong_alg_first_jwks_json[] =
+    "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"rsa-test\",\"use\":\"sig\","
+    "\"alg\":\"PS256\",\"n\":\"AQIDBA\",\"e\":\"AQAB\"},"
+    "{\"kty\":\"RSA\",\"kid\":\"rsa-test\",\"use\":\"sig\","
+    "\"alg\":\"RS256\","
+    "\"n\":\"nGFfcf9mkkjv4XoIzgmENq-A3pTE4uT7gzmYMDB4_xwXvHaTogDTrduaIKcd-"
+    "oziNa6mM1HXGk-4q8084Wvvz44ZTyRlaVKm2eRHPqjJ1hmxB80nG7iWEkORAKazobRfB8"
+    "g7fGXZWhL0JsWqd51igefciKMefuvjs-2_JvusIF6uXu3jSCVRsqXkoZGnYsauGUq4Gcsp"
+    "GtCHe5M4oie5kJrfbwcZgajJp4HS-ZUd4m1q12BPSuUSqi5Vb3wS6fLdVsQjxZXVqyk1O"
+    "gnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWy"
+    "YoQ\","
+    "\"e\":\"AQAB\"}]}";
+
 static const char test_jwt_rs256_minimal_jwks_json[] =
     "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"rsa-test\","
     "\"n\":\"nGFfcf9mkkjv4XoIzgmENq-A3pTE4uT7gzmYMDB4_xwXvHaTogDTrduaIKcd-"
@@ -1221,12 +1234,20 @@ static void test_jwt_decode_claim_failures(void) {
       "eyJhbGciOiJSUzI1NiIsImNyaXQiOls0Ml19."
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
       "c2ln";
+  static const char crit_string[] =
+      "eyJhbGciOiJSUzI1NiIsImNyaXQiOiJleHAtdGVzdCJ9."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
   static const char bad_scp_item[] =
       "eyJhbGciOiJSUzI1NiJ9."
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJzY3AiOls0Ml0sImV4cCI6MjAwMH0."
       "c2ln";
   static const char bad_x5c[] =
       "eyJhbGciOiJSUzI1NiIsIng1YyI6WyJAQCJdfQ."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char x5c_string[] =
+      "eyJhbGciOiJSUzI1NiIsIng1YyI6IkFBPT0ifQ."
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
       "c2ln";
   static const char root_array[] =
@@ -1273,6 +1294,10 @@ static void test_jwt_decode_claim_failures(void) {
                                      strlen(bad_crit_item), &policy, &header,
                                      &claims,
                                      &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), crit_string,
+                                     strlen(crit_string), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_TYPE_MISMATCH);
   EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), bad_scp_item,
                                      strlen(bad_scp_item), &policy, &header,
                                      &claims,
@@ -1280,6 +1305,10 @@ static void test_jwt_decode_claim_failures(void) {
   EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), bad_x5c,
                                      strlen(bad_x5c), &policy, &header, &claims,
                                      &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), x5c_string,
+                                     strlen(x5c_string), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_TYPE_MISMATCH);
   EXPECT(lonejson_jwt_decode_compact(
              test_default_runtime(), root_array, strlen(root_array), &policy,
              &header, &claims, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
@@ -2649,6 +2678,30 @@ static void test_oidc_validate_bearer_token(void) {
   lonejson_oidc_bearer_validation_init(&validation);
   EXPECT(lonejson_oidc_jwks_cache_update_json(
              test_default_runtime(), &cache, &cache_policy,
+             test_jwt_rs256_same_kid_wrong_alg_first_jwks_json,
+             strlen(test_jwt_rs256_same_kid_wrong_alg_first_jwks_json),
+             &error) == LONEJSON_STATUS_OK);
+  request.jwks_cache = &cache;
+#ifdef LONEJSON_WITH_OPENSSL
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation,
+                                             &error) == LONEJSON_STATUS_OK);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_NONE);
+  EXPECT(validation.jwk != NULL);
+  EXPECT(strcmp(validation.jwk->alg, "RS256") == 0);
+#else
+  EXPECT(lonejson_oidc_validate_bearer_token(test_default_runtime(), &request,
+                                             &validation, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(validation.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+#endif
+  lonejson_oidc_bearer_validation_cleanup(&validation);
+  lonejson_oidc_jwks_cache_cleanup(&cache);
+
+  lonejson_oidc_jwks_cache_init(&cache);
+  lonejson_oidc_bearer_validation_init(&validation);
+  EXPECT(lonejson_oidc_jwks_cache_update_json(
+             test_default_runtime(), &cache, &cache_policy,
              test_jwt_rs256_minimal_jwks_json,
              strlen(test_jwt_rs256_minimal_jwks_json),
              &error) == LONEJSON_STATUS_OK);
@@ -2847,6 +2900,8 @@ static void test_m2m_credential_store_auth(void) {
   lonejson_owned_buffer revoked_store_json;
   char basic_payload[768];
   char header[1024];
+  size_t fail_after;
+  lonejson_status alloc_status;
 
   lonejson_error_init(&error);
   memset(&request, 0, sizeof(request));
@@ -2941,6 +2996,42 @@ static void test_m2m_credential_store_auth(void) {
                                            &auth,
                                            &error) == LONEJSON_STATUS_OK);
   EXPECT(auth.auth_mode == LONEJSON_M2M_AUTH_BEARER);
+
+  for (fail_after = 0u; fail_after < 256u; ++fail_after) {
+    lonejson_m2m_authentication_cleanup(&auth);
+    lonejson_m2m_authentication_init(&auth);
+    test_m2m_basic_base64(basic_payload, sizeof(basic_payload),
+                          credential.client_id, credential.client_secret);
+    snprintf(header, sizeof(header), "Basic %s", basic_payload);
+    verify.authorization_header = header;
+    test_lonejson_fail_alloc_after(fail_after);
+    alloc_status = lonejson_m2m_verify_authorization(test_default_runtime(),
+                                                     &verify, &auth, &error);
+    test_lonejson_fail_alloc_clear();
+    if (alloc_status == LONEJSON_STATUS_OK) {
+      EXPECT(auth.failure == LONEJSON_AUTH_FAILURE_NONE);
+      EXPECT(auth.client_id != NULL);
+      EXPECT(auth.claim.kind == LONEJSON_JSON_VALUE_BUFFER);
+    } else if (alloc_status == LONEJSON_STATUS_ALLOCATION_FAILED) {
+      EXPECT(auth.failure != LONEJSON_AUTH_FAILURE_NONE);
+    }
+
+    lonejson_m2m_authentication_cleanup(&auth);
+    lonejson_m2m_authentication_init(&auth);
+    snprintf(header, sizeof(header), "Bearer %s", credential.api_key);
+    verify.authorization_header = header;
+    test_lonejson_fail_alloc_after(fail_after);
+    alloc_status = lonejson_m2m_verify_authorization(test_default_runtime(),
+                                                     &verify, &auth, &error);
+    test_lonejson_fail_alloc_clear();
+    if (alloc_status == LONEJSON_STATUS_OK) {
+      EXPECT(auth.failure == LONEJSON_AUTH_FAILURE_NONE);
+      EXPECT(auth.client_id != NULL);
+      EXPECT(auth.claim.kind == LONEJSON_JSON_VALUE_BUFFER);
+    } else if (alloc_status == LONEJSON_STATUS_ALLOCATION_FAILED) {
+      EXPECT(auth.failure != LONEJSON_AUTH_FAILURE_NONE);
+    }
+  }
 
   lonejson_m2m_authentication_cleanup(&auth);
   lonejson_m2m_authentication_init(&auth);

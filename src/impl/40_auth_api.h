@@ -2906,6 +2906,47 @@ lonejson_oidc_jwks_cache_select(const lonejson_oidc_jwks_cache *cache,
   return lonejson_jwks_select(&cache->jwks, options, out, error);
 }
 
+static int lonejson__jwk_match_optional_declared(const char *value,
+                                                 const char *required) {
+  return required == NULL || value == NULL || strcmp(value, required) == 0;
+}
+
+static lonejson_status lonejson__oidc_jwks_cache_select_bearer_key(
+    const lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy, const char *kid,
+    const char *kty, const char *alg, const lonejson_jwk **out,
+    lonejson_error *error) {
+  lonejson_status status;
+  size_t i;
+
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OIDC JWKS selected key output is required");
+  }
+  *out = NULL;
+  status = lonejson__oidc_jwks_cache_validate_policy(policy, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (!lonejson__oidc_jwks_cache_matches_policy(cache, policy)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "OIDC JWKS cache is missing or stale");
+  }
+  for (i = 0u; i < cache->jwks.keys.count; ++i) {
+    const lonejson_jwk *jwk =
+        &((const lonejson_jwk *)cache->jwks.keys.items)[i];
+    if (!lonejson__jwk_match_filter(jwk->kid, kid) ||
+        !lonejson__jwk_match_filter(jwk->kty, kty) ||
+        !lonejson__jwk_match_optional_declared(jwk->alg, alg) ||
+        !lonejson__jwk_match_optional_declared(jwk->use, "sig")) {
+      continue;
+    }
+    *out = jwk;
+    return LONEJSON_STATUS_OK;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 #ifdef LONEJSON_WITH_CURL
 lonejson_status lonejson_oidc_jwks_cache_parse_init(
     lonejson_oidc_jwks_cache_parse *ctx, lonejson *runtime,
@@ -3213,6 +3254,10 @@ lonejson__jwt_claim_string_begin(void *user, const lonejson_value_path *path,
       return lonejson__jwt_begin_string_field(state,
                                               LONEJSON__JWT_FIELD_HEADER_TYP,
                                               &state->seen_typ, "typ", error);
+    }
+    if (lonejson__jwt_path_is(path, "crit") ||
+        lonejson__jwt_path_is(path, "x5c")) {
+      return lonejson__jwt_claim_type_error(error, "registered");
     }
     if (lonejson__jwt_path_is_array_item(path, "crit")) {
       state->active = LONEJSON__JWT_FIELD_HEADER_CRIT_ITEM;
@@ -5300,9 +5345,9 @@ lonejson_status lonejson_oidc_validate_bearer_token(
                  ? "EC"
                  : (lonejson__auth_streq(out->header.alg, "EdDSA") ? "OKP"
                                                                    : NULL));
-  status =
-      lonejson_oidc_jwks_cache_select(request->jwks_cache, request->jwks_policy,
-                                      &select_options, &selected, error);
+  status = lonejson__oidc_jwks_cache_select_bearer_key(
+      request->jwks_cache, request->jwks_policy, select_options.kid,
+      select_options.kty, out->header.alg, &selected, error);
   if (status != LONEJSON_STATUS_OK) {
     return lonejson__oidc_bearer_fail(
         out, LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE, status, error,
@@ -6060,6 +6105,16 @@ lonejson_status lonejson_m2m_verify_authorization(
                                         NULL);
         if (ok) {
           out->client_id = lonejson__owned_strdup(NULL, record->client_id);
+          if (out->client_id == NULL) {
+            out->failure = LONEJSON_AUTH_FAILURE_CLAIMS_INVALID;
+            lonejson__owned_free(client_id);
+            lonejson__owned_free(client_secret);
+            lonejson__m2m_store_cleanup(&store);
+            lonejson__runtime_borrow_release(&borrow);
+            return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                       0u, 0u, 0u,
+                                       "failed to copy authenticated client id");
+          }
           out->auth_mode = LONEJSON_M2M_AUTH_BASIC;
           status = lonejson_json_value_set_buffer(
               &out->claim, record->claim.json, record->claim.len, error);
@@ -6094,6 +6149,15 @@ lonejson_status lonejson_m2m_verify_authorization(
                                         NULL);
         if (ok) {
           out->client_id = lonejson__owned_strdup(NULL, record->client_id);
+          if (out->client_id == NULL) {
+            out->failure = LONEJSON_AUTH_FAILURE_CLAIMS_INVALID;
+            lonejson__owned_free(api_key);
+            lonejson__m2m_store_cleanup(&store);
+            lonejson__runtime_borrow_release(&borrow);
+            return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                       0u, 0u, 0u,
+                                       "failed to copy authenticated client id");
+          }
           out->auth_mode = LONEJSON_M2M_AUTH_BEARER;
           status = lonejson_json_value_set_buffer(
               &out->claim, record->claim.json, record->claim.len, error);

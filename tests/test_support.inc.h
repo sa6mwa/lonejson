@@ -28,6 +28,9 @@ static alloc_record g_alloc_records[8192];
 static size_t g_alloc_record_count = 0u;
 static size_t g_lonejson_alloc_calls = 0u;
 static size_t g_lonejson_free_calls = 0u;
+static int g_lonejson_fail_alloc_enabled = 0;
+static size_t g_lonejson_fail_alloc_calls = 0u;
+static size_t g_lonejson_fail_alloc_after = 0u;
 
 #if LONEJSON_TEST_HAS_PTHREAD
 static pthread_mutex_t g_alloc_stats_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -65,7 +68,15 @@ static void track_free_ptr_locked(void *ptr) {
 }
 
 static void *test_lonejson_malloc(size_t size) {
-  void *ptr = malloc(size);
+  void *ptr;
+
+  if (g_lonejson_fail_alloc_enabled) {
+    if (g_lonejson_fail_alloc_calls >= g_lonejson_fail_alloc_after) {
+      return NULL;
+    }
+    ++g_lonejson_fail_alloc_calls;
+  }
+  ptr = malloc(size);
   if (ptr != NULL) {
     TEST_ALLOC_STATS_LOCK();
     ++g_lonejson_alloc_calls;
@@ -78,6 +89,12 @@ static void *test_lonejson_malloc(size_t size) {
 static void *test_lonejson_realloc(void *ptr, size_t size) {
   void *next;
 
+  if (g_lonejson_fail_alloc_enabled) {
+    if (g_lonejson_fail_alloc_calls >= g_lonejson_fail_alloc_after) {
+      return NULL;
+    }
+    ++g_lonejson_fail_alloc_calls;
+  }
   if (ptr == NULL) {
     next = realloc(NULL, size);
     if (next != NULL) {
@@ -117,6 +134,18 @@ static void reset_lonejson_alloc_stats(void) {
   g_lonejson_alloc_calls = 0u;
   g_lonejson_free_calls = 0u;
   TEST_ALLOC_STATS_UNLOCK();
+}
+
+static void test_lonejson_fail_alloc_after(size_t successful_calls) {
+  g_lonejson_fail_alloc_calls = 0u;
+  g_lonejson_fail_alloc_after = successful_calls;
+  g_lonejson_fail_alloc_enabled = 1;
+}
+
+static void test_lonejson_fail_alloc_clear(void) {
+  g_lonejson_fail_alloc_enabled = 0;
+  g_lonejson_fail_alloc_calls = 0u;
+  g_lonejson_fail_alloc_after = 0u;
 }
 
 #if defined(LONEJSON_TEST_RUNTIME_HANDLE_CACHE_DRAIN)

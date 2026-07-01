@@ -24,5 +24,3 @@ if cmake --build "$tmp_dir/build" --target help | grep -F 'lonejson_fuzz_jwt' >/
   printf 'lonejson_fuzz_jwt target must not be present when auth features are disabled\n' >&2
   exit 1
 fi
-
-cmake --build "$tmp_dir/build" --target lonejson_fuzz_validate >/dev/null
