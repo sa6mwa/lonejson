@@ -1136,6 +1136,8 @@ static void test_jwt_claim_validation_failures(void) {
   const char *bad_issuer = "other";
   const char *bad_audience = "other";
   const char *none_alg = "none";
+  const char *required_sub = "sub";
+  const char *required_nonce = "nonce";
 
   lonejson_error_init(&error);
   lonejson_jwt_header_init(&header);
@@ -1160,6 +1162,14 @@ static void test_jwt_claim_validation_failures(void) {
   policy.allowed_clock_skew = -1;
   EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
+  policy = test_jwt_policy();
+  policy.required_claims = &required_sub;
+  policy.required_claim_count = 1u;
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_OK);
+  policy.required_claims = &required_nonce;
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_MISSING_REQUIRED_FIELD);
   lonejson_jwt_header_cleanup(&header);
   lonejson_jwt_claims_cleanup(&claims);
 
@@ -2309,6 +2319,21 @@ static void test_oauth2_token_flow_helpers(void) {
   EXPECT(result.attempts == 1u);
   policy.disable_retry = 0;
 
+  policy.now = 1180;
+  policy.token_endpoint = NULL;
+  EXPECT(lonejson_oauth2_token_flow_ensure(runtime, &flow, &policy, &result,
+                                           &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(result.state == LONEJSON_OAUTH2_TOKEN_FLOW_FAILED);
+  EXPECT(result.attempts == 0u);
+  policy.token_endpoint = "https://issuer.example/token";
+  policy.client_id = NULL;
+  EXPECT(lonejson_oauth2_token_flow_ensure(runtime, &flow, &policy, &result,
+                                           &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(result.state == LONEJSON_OAUTH2_TOKEN_FLOW_FAILED);
+  policy.client_id = "client";
+
   lonejson_oauth2_token_flow_cleanup(&flow);
   EXPECT(lonejson_oauth2_token_flow_ensure(runtime, &flow, &policy, &result,
                                            &error) == LONEJSON_STATUS_OK);
@@ -2498,6 +2523,19 @@ static void test_oidc_authorization_callback_parse(void) {
              "error=access_denied&state=state",
              strlen("error=access_denied&state=state"), "state", 0u, &callback,
              &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(callback.error == NULL);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "error=access_denied&error=server_error&state=state",
+             strlen("error=access_denied&error=server_error&state=state"),
+             "state", 0u, &callback, &error) ==
+         LONEJSON_STATUS_DUPLICATE_FIELD);
+  EXPECT(lonejson_oidc_authorization_callback_parse_query(
+             "error=access_denied&error_uri=https%3A%2F%2Fid.example%2Fe&"
+             "error_uri=https%3A%2F%2Fid.example%2Ff&state=state",
+             strlen("error=access_denied&error_uri=https%3A%2F%2Fid.example%"
+                    "2Fe&error_uri=https%3A%2F%2Fid.example%2Ff&state=state"),
+             "state", 0u, &callback, &error) ==
+         LONEJSON_STATUS_DUPLICATE_FIELD);
   EXPECT(lonejson_oidc_authorization_callback_parse_query(
              "code=abc&code=def&state=state",
              strlen("code=abc&code=def&state=state"), "state", 0u, &callback,
@@ -2801,6 +2839,7 @@ static void test_m2m_credential_store_auth(void) {
   lonejson_error error;
   lonejson_m2m_credential_request request;
   lonejson_m2m_credential credential;
+  lonejson_m2m_credential bad_credential;
   lonejson_m2m_store store;
   lonejson_m2m_verify_request verify;
   lonejson_m2m_authentication auth;
@@ -2812,6 +2851,7 @@ static void test_m2m_credential_store_auth(void) {
   lonejson_error_init(&error);
   memset(&request, 0, sizeof(request));
   lonejson_m2m_credential_init(&credential);
+  lonejson_m2m_credential_init(&bad_credential);
   memset(&store, 0, sizeof(store));
   memset(&verify, 0, sizeof(verify));
   lonejson_m2m_authentication_init(&auth);
@@ -2828,6 +2868,12 @@ static void test_m2m_credential_store_auth(void) {
   EXPECT(strstr(credential.record_json.data, credential.client_secret) == NULL);
   EXPECT(strstr(credential.record_json.data, credential.api_key) == NULL);
 
+  request.claim_json = "{\"scope\":[\"read\"";
+  EXPECT(lonejson_m2m_credential_generate(test_default_runtime(), &request,
+                                          &bad_credential, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  request.claim_json = "{\"scope\":[\"read\",\"write\"],\"tenant\":\"acme\"}";
+
   EXPECT(lonejson_owned_buffer_sink(&store_json, "{\"credentials\":[", 16u,
                                     &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_owned_buffer_sink(&store_json, credential.record_json.data,
@@ -2838,6 +2884,39 @@ static void test_m2m_credential_store_auth(void) {
   store.json = store_json.data;
   store.len = store_json.len;
   verify.store = &store;
+
+  verify.authorization_header = NULL;
+  EXPECT(lonejson_m2m_verify_authorization(test_default_runtime(), &verify,
+                                           &auth, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(auth.failure == LONEJSON_AUTH_FAILURE_MISSING_CREDENTIALS);
+
+  lonejson_m2m_authentication_cleanup(&auth);
+  lonejson_m2m_authentication_init(&auth);
+  verify.authorization_header = "Bearer";
+  EXPECT(lonejson_m2m_verify_authorization(test_default_runtime(), &verify,
+                                           &auth, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(auth.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+
+  lonejson_m2m_authentication_cleanup(&auth);
+  lonejson_m2m_authentication_init(&auth);
+  verify.authorization_header = "Basic !!!";
+  EXPECT(lonejson_m2m_verify_authorization(test_default_runtime(), &verify,
+                                           &auth, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(auth.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
+
+  lonejson_m2m_authentication_cleanup(&auth);
+  lonejson_m2m_authentication_init(&auth);
+  store.json = "{\"credentials\":{}}";
+  store.len = strlen(store.json);
+  EXPECT(lonejson_m2m_verify_authorization(test_default_runtime(), &verify,
+                                           &auth, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  EXPECT(auth.failure == LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE);
+  store.json = store_json.data;
+  store.len = store_json.len;
 
   test_m2m_basic_base64(basic_payload, sizeof(basic_payload),
                         credential.client_id, credential.client_secret);
@@ -2904,6 +2983,7 @@ static void test_m2m_credential_store_auth(void) {
   EXPECT(auth.failure == LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE);
 
   lonejson_m2m_authentication_cleanup(&auth);
+  lonejson_m2m_credential_cleanup(&bad_credential);
   lonejson_m2m_credential_cleanup(&credential);
   lonejson_owned_buffer_free(&revoked_store_json);
   lonejson_owned_buffer_free(&store_json);
@@ -2915,6 +2995,7 @@ static void test_m2m_signup_flow(void) {
   lonejson_error error;
   lonejson_m2m_signup_request signup_request;
   lonejson_m2m_signup signup;
+  lonejson_m2m_signup bad_signup;
   lonejson_m2m_store store;
   lonejson_m2m_signup_complete_request complete_request;
   lonejson_m2m_signup_completion complete;
@@ -2923,6 +3004,7 @@ static void test_m2m_signup_flow(void) {
   lonejson_error_init(&error);
   memset(&signup_request, 0, sizeof(signup_request));
   lonejson_m2m_signup_init(&signup);
+  lonejson_m2m_signup_init(&bad_signup);
   memset(&store, 0, sizeof(store));
   memset(&complete_request, 0, sizeof(complete_request));
   lonejson_m2m_signup_complete_init(&complete);
@@ -2938,6 +3020,17 @@ static void test_m2m_signup_flow(void) {
   EXPECT(strstr(signup.url.data, "signup_secret=") != NULL);
   EXPECT(strstr(signup.record_json.data, signup.signup_secret) == NULL);
 
+  signup_request.max_url_bytes = 8u;
+  EXPECT(lonejson_m2m_signup_generate(test_default_runtime(), &signup_request,
+                                      &bad_signup, &error) ==
+         LONEJSON_STATUS_OVERFLOW);
+  signup_request.max_url_bytes = 0u;
+  signup_request.claim_json = "[";
+  EXPECT(lonejson_m2m_signup_generate(test_default_runtime(), &signup_request,
+                                      &bad_signup, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  signup_request.claim_json = "{\"scope\":[\"read\"],\"plan\":\"trial\"}";
+
   EXPECT(lonejson_owned_buffer_sink(&store_json, "{\"signups\":[", 12u,
                                     &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_owned_buffer_sink(&store_json, signup.record_json.data,
@@ -2950,6 +3043,11 @@ static void test_m2m_signup_flow(void) {
   complete_request.store = &store;
   complete_request.signup_id = signup.signup_id;
   complete_request.signup_secret = signup.signup_secret;
+  complete_request.email = NULL;
+  EXPECT(lonejson_m2m_signup_complete(test_default_runtime(), &complete_request,
+                                      &complete,
+                                      &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
   complete_request.email = "user@example.com";
   complete_request.credential_auth_modes = LONEJSON_M2M_AUTH_BEARER;
   EXPECT(test_default_runtime()->m2m_signup_complete != NULL);
@@ -2970,6 +3068,7 @@ static void test_m2m_signup_flow(void) {
                                       &error) == LONEJSON_STATUS_TYPE_MISMATCH);
 
   lonejson_m2m_signup_complete_cleanup(&complete);
+  lonejson_m2m_signup_cleanup(&bad_signup);
   lonejson_m2m_signup_cleanup(&signup);
   lonejson_owned_buffer_free(&store_json);
 #endif

@@ -976,6 +976,9 @@ if(LONEJSON_BUILD_BENCHMARKS)
     COMMAND ${CMAKE_COMMAND}
       -DLONEJSON_BENCH_EXE=$<TARGET_FILE:lonejson_bench>
       -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_bench_gate.cmake)
+  set_tests_properties(lonejson_bench_gate_tests PROPERTIES
+    LABELS local
+    TIMEOUT 120)
 endif()
 
 if(LONEJSON_BUILD_FUZZERS)

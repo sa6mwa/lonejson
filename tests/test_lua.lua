@@ -459,6 +459,15 @@ if lonejson.jwt_parse_compact ~= nil then
       max_response_bytes = 4096,
       disable_retry = true,
     })
+    local bad_ensured_flow, bad_ensured_flow_err =
+        provider_lj:oauth2_token_flow_ensure({
+          access_token = "old-token",
+          refresh_token = "r+e&f",
+          expires_at = 1000,
+        }, {
+          client_id = "client id",
+          now = 1001,
+        })
     local requested_introspection = provider_lj:oauth2_introspect_token_request(
         "https://id.example/introspect", {
           token = "access",
@@ -567,6 +576,8 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(ensured_flow_result.state, "refreshed")
     assert_true(ensured_flow_result.refreshed)
     assert_eq(ensured_flow_result.attempts, 1)
+    assert_true(bad_ensured_flow == nil)
+    assert_eq(bad_ensured_flow_err.status, "invalid_argument")
     assert_true(requested_introspection.active)
     assert_eq(requested_introspection.sub, "subject")
     assert_true(revoked)
@@ -667,6 +678,10 @@ if lonejson.jwt_parse_compact ~= nil then
         "code=abc&state=state%00extra", "state")
     assert_true(bad == nil)
     assert_eq(err.status, "invalid_json")
+    bad, err = lonejson.oidc_authorization_callback_parse_query(
+        "error=access_denied&error=server_error&state=state", "state")
+    assert_true(bad == nil)
+    assert_eq(err.status, "duplicate_field")
 
     bad, err = lj:oidc_jwks_cache_select_json(jwks_json, {
       issuer = "https://id.example/tenant",
@@ -723,6 +738,21 @@ if lonejson.jwt_parse_compact ~= nil then
             authorization_header = "Bearer wrong-api-key",
             allowed_auth_modes = "bearer",
           })
+      local missing_api, missing_api_err, missing_api_failure =
+          lj:m2m_verify_authorization({
+            store_json = api_store,
+            allowed_auth_modes = "bearer",
+          })
+      local malformed_api, malformed_api_err, malformed_api_failure =
+          lj:m2m_verify_authorization({
+            store_json = api_store,
+            authorization_header = "Basic !!!",
+          })
+      local malformed_store, malformed_store_err, malformed_store_failure =
+          lj:m2m_verify_authorization({
+            store_json = '{"credentials":{}}',
+            authorization_header = "Bearer wrong-api-key",
+          })
       local signup = lj:m2m_signup_generate({
         base_url = "https://app.example/signup",
         claim = { scope = { "write" }, plan = "trial" },
@@ -774,6 +804,15 @@ if lonejson.jwt_parse_compact ~= nil then
       assert_true(wrong_api == nil)
       assert_eq(wrong_api_err.status, "type_mismatch")
       assert_eq(wrong_api_failure, "invalid_signature")
+      assert_true(missing_api == nil)
+      assert_eq(missing_api_err.status, "type_mismatch")
+      assert_eq(missing_api_failure, "missing_credentials")
+      assert_true(malformed_api == nil)
+      assert_eq(malformed_api_err.status, "type_mismatch")
+      assert_eq(malformed_api_failure, "invalid_signature")
+      assert_true(malformed_store == nil)
+      assert_eq(malformed_store_err.status, "type_mismatch")
+      assert_eq(malformed_store_failure, "cache_unavailable")
       assert_true(signup.signup_id ~= nil)
       assert_true(signup.signup_secret ~= nil)
       assert_true(signup.url:find("signup_id=", 1, true) ~= nil)
@@ -809,6 +848,16 @@ if lonejson.jwt_parse_compact ~= nil then
   bad, err = lj:jwt_validate_compact_claims(nonce_token, nonce_policy)
   assert_true(bad == nil)
   assert_eq(err.status, "type_mismatch")
+
+  bad, err = lj:jwt_validate_compact_claims(jwt_token, {
+    accepted_algs = { "RS256" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api" },
+    required_claims = { "nonce" },
+    now = 1000,
+  })
+  assert_true(bad == nil)
+  assert_eq(err.status, "missing_required_field")
 
   bad, err = lonejson.jwt_validate_compact_signature(
       signed_token:sub(1, -2) .. (signed_token:sub(-1) == "A" and "B" or "A"),
