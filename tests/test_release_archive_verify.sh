@@ -407,6 +407,7 @@ Name: lonejson
 Description: lonejson archive verifier fixture
 Version: 9.9.9
 Libs: -L${libdir} -llonejson
+Libs.private: -lcrypto
 Cflags: -I${includedir}
 EOF
 
@@ -415,6 +416,11 @@ add_library(lonejson::lonejson SHARED IMPORTED)
 set_target_properties(lonejson::lonejson PROPERTIES
   IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/../../liblonejson.so"
   INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include")
+add_library(lonejson::lonejson_static STATIC IMPORTED)
+set_target_properties(lonejson::lonejson_static PROPERTIES
+  IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/../../liblonejson.a"
+  INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include"
+  INTERFACE_LINK_LIBRARIES crypto)
 EOF
 
 cat >"$package_root/lib/cmake/lonejson/lonejsonConfigVersion.cmake" <<'EOF'
@@ -489,6 +495,48 @@ if "$repo_root/scripts/verify_release_archives.sh" \
   exit 1
 fi
 grep -F 'missing required file:' "$missing_metadata_log" >/dev/null
+
+missing_pkg_crypto_dist_dir="$tmp_dir/missing-pkg-crypto-dist"
+missing_pkg_crypto_package_dir="$tmp_dir/missing-pkg-crypto-package"
+missing_pkg_crypto_root="$missing_pkg_crypto_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$missing_pkg_crypto_dist_dir"
+cp -R "$tmp_dir/package" "$missing_pkg_crypto_package_dir"
+sed -i '/^Libs\.private: -lcrypto$/d' \
+  "$missing_pkg_crypto_root/lib/pkgconfig/lonejson.pc"
+tar -C "$missing_pkg_crypto_package_dir" -czf \
+  "$missing_pkg_crypto_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$missing_pkg_crypto_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+missing_pkg_crypto_log="$tmp_dir/missing-pkg-crypto.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$missing_pkg_crypto_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$missing_pkg_crypto_log" 2>&1; then
+  printf 'expected archive verification to fail when pkg-config omits static libcrypto\n' >&2
+  exit 1
+fi
+grep -F 'missing static libcrypto pkg-config dependency' "$missing_pkg_crypto_log" >/dev/null
+
+missing_cmake_crypto_dist_dir="$tmp_dir/missing-cmake-crypto-dist"
+missing_cmake_crypto_package_dir="$tmp_dir/missing-cmake-crypto-package"
+missing_cmake_crypto_root="$missing_cmake_crypto_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$missing_cmake_crypto_dist_dir"
+cp -R "$tmp_dir/package" "$missing_cmake_crypto_package_dir"
+sed -i '/INTERFACE_LINK_LIBRARIES crypto/d' \
+  "$missing_cmake_crypto_root/lib/cmake/lonejson/lonejsonConfig.cmake"
+tar -C "$missing_cmake_crypto_package_dir" -czf \
+  "$missing_cmake_crypto_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$missing_cmake_crypto_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+missing_cmake_crypto_log="$tmp_dir/missing-cmake-crypto.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$missing_cmake_crypto_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$missing_cmake_crypto_log" 2>&1; then
+  printf 'expected archive verification to fail when CMake omits static libcrypto\n' >&2
+  exit 1
+fi
+grep -F 'missing static libcrypto CMake link dependency' "$missing_cmake_crypto_log" >/dev/null
 
 openssl_metadata_dist_dir="$tmp_dir/openssl-metadata-dist"
 openssl_metadata_package_dir="$tmp_dir/openssl-metadata-package"

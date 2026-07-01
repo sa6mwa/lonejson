@@ -334,8 +334,10 @@ Signature validation enforces:
 
 The OpenSSL provider verifies `x5c` chains against
 `lonejson_openssl_auth_provider_config.x509_store` when supplied, otherwise
-against a temporary store using OpenSSL default verify paths. The caller owns
-the store object and must keep it alive while any runtime can use the provider.
+against a temporary store using OpenSSL default verify paths. The provider
+copies the `x509_store` pointer value during init; the config object may go out
+of scope after init, but the caller owns the store object and must keep it alive
+while any runtime can use the provider.
 Without `LONEJSON_WITH_OPENSSL`, JWK certificate fields are parsed and syntax
 checked only; no certificate trust decision is available from the built-in
 provider surface.
@@ -508,7 +510,9 @@ optional `token_type_hint`, and support optional `client_id`/`client_secret`
 for `client_secret_post`; `client_id` is required when `client_secret` is
 supplied. Set `use_basic_auth` to use `client_secret_basic` in provider-backed
 requests. In that mode the form body omits `client_id` and `client_secret`, and
-the helper sends `Authorization: Basic <base64(client_id:client_secret)>`.
+the helper sends `Authorization: Basic <base64(form(client_id):form(client_secret))>`,
+where each credential component is encoded with OAuth2
+`application/x-www-form-urlencoded` rules before joining with `:`.
 
 `lonejson_oidc_authorization_code_token_body` builds an authorization-code
 token exchange body with `grant_type=authorization_code`, required `client_id`,

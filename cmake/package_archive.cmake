@@ -118,6 +118,7 @@ Name: lonejson
 Description: Strict C89 JSON parser, serializer, and streaming toolkit
 Version: ${LONEJSON_VERSION}
 Libs: -L\${libdir} -llonejson
+Libs.private: -lcrypto
 Cflags: -I\${includedir}
 ")
 
@@ -138,6 +139,7 @@ if(NOT TARGET lonejson::lonejson_static)
   set_target_properties(lonejson::lonejson_static PROPERTIES
     IMPORTED_LOCATION \"\${_lonejson_prefix}/lib/${LONEJSON_STATIC_LIB_NAME}\"
     INTERFACE_INCLUDE_DIRECTORIES \"\${_lonejson_prefix}/include\"
+    INTERFACE_LINK_LIBRARIES crypto
   )
 endif()
 

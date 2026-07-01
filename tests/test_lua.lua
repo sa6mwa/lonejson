@@ -361,7 +361,7 @@ if lonejson.jwt_parse_compact ~= nil then
     local token_flow_expired = lonejson.oauth2_token_flow_is_expired(
         token_flow, 4550, 60)
     local introspection_response = lj:oauth2_introspection_response_parse_json(
-        '{"active":true,"scope":"read write","client_id":"client","sub":"sub","exp":123}')
+        '{"active":true,"scope":"read write","client_id":"client","sub":"sub","aud":"api","exp":123}')
     local userinfo_response = lonejson.oidc_userinfo_response_parse_json(
         '{"sub":"sub","email":"user@example.com","email_verified":true,"extra":1}')
     local pkce_challenge = lonejson.oidc_pkce_challenge(
@@ -529,6 +529,7 @@ if lonejson.jwt_parse_compact ~= nil then
     assert_eq(introspection_response.scope, "read write")
     assert_eq(introspection_response.client_id, "client")
     assert_eq(introspection_response.sub, "sub")
+    assert_eq(introspection_response.aud, "api")
     assert_eq(introspection_response.exp, 123)
     assert_eq(userinfo_response.sub, "sub")
     assert_eq(userinfo_response.email, "user@example.com")

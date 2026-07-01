@@ -1388,10 +1388,12 @@ struct lonejson_auth_provider {
 #ifdef LONEJSON_WITH_OPENSSL
 /** Optional OpenSSL provider configuration. NULL fields use OpenSSL defaults.
  *
- * `x509_store` may point to an OpenSSL `X509_STORE` owned by the caller. When
- * NULL, the OpenSSL provider uses a temporary store with OpenSSL default verify
- * paths. The caller must keep non-NULL pointed-to objects alive until no runtime
- * using the provider can call auth APIs.
+ * `x509_store` may point to an OpenSSL `X509_STORE` owned by the caller. The
+ * OpenSSL adapter copies this pointer value into `lonejson_auth_provider`, but
+ * does not take ownership of the store object. When NULL, the OpenSSL provider
+ * uses a temporary store with OpenSSL default verify paths. The caller must keep
+ * a non-NULL store object alive until no runtime using the provider can call
+ * auth APIs.
  */
 typedef struct lonejson_openssl_auth_provider_config {
   void *libctx;
@@ -6468,8 +6470,10 @@ lonejson_set_auth_provider(lonejson *runtime,
  *
  * The adapter verifies JWT/JWS signatures and, when a selected JWK includes an
  * `x5c` chain, validates the leaf certificate thumbprints, checks that the leaf
- * public key matches the JWK, and verifies the chain against `config->x509_store`
- * or OpenSSL's default verify paths.
+ * public key matches the JWK, and verifies the chain against
+ * `config->x509_store` or OpenSSL's default verify paths. The provider copies
+ * the `x509_store` pointer value; the config object itself only needs to remain
+ * valid for this call.
  */
 lonejson_status lonejson_auth_provider_init_openssl(
     lonejson_auth_provider *provider,

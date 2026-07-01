@@ -19,10 +19,14 @@ missing_root_build_dir="$tmp_dir/missing-root-build"
 missing_config_build_dir="$tmp_dir/missing-config-build"
 missing_openssl_config_build_dir="$tmp_dir/missing-openssl-config-build"
 jwt_without_openssl_build_dir="$tmp_dir/jwt-without-openssl-build"
+jwt_partial_abi_build_dir="$tmp_dir/jwt-partial-abi-build"
+oidc_without_curl_abi_build_dir="$tmp_dir/oidc-without-curl-abi-build"
+lua_openssl_without_jwt_build_dir="$tmp_dir/lua-openssl-without-jwt-build"
 missing_config_root="$tmp_dir/missing-config-root"
 missing_openssl_config_root="$tmp_dir/missing-openssl-config-root"
 
 mkdir -p "$fake_root/include" "$fake_root/lib/cmake/CURL" "$fake_root/lib/cmake/OpenSSL"
+touch "$fake_root/include/lua.h" "$fake_root/lib/liblua.so"
 cat >"$fake_root/lib/cmake/CURL/CURLConfig.cmake" <<'EOF'
 get_filename_component(_fake_curl_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 set(CURL_FOUND TRUE)
@@ -261,3 +265,56 @@ cmake -S "$repo_root" -B "$jwt_without_openssl_build_dir" \
   >"$tmp_dir/jwt-without-openssl.log" 2>&1
 cmake --build "$jwt_without_openssl_build_dir" --target lonejson_static \
   >>"$tmp_dir/jwt-without-openssl.log" 2>&1
+
+cmake -S "$repo_root" -B "$jwt_partial_abi_build_dir" \
+  -G Ninja \
+  -D CMAKE_MODULE_PATH="$fake_modules" \
+  -D LONEJSON_BUILD_WITH_JWT=ON \
+  -D LONEJSON_BUILD_TESTS=ON \
+  -D LONEJSON_BUILD_EXAMPLES=OFF \
+  >"$tmp_dir/jwt-partial-abi.log" 2>&1
+ctest --test-dir "$jwt_partial_abi_build_dir" -N \
+  >>"$tmp_dir/jwt-partial-abi.log" 2>&1
+if grep -F 'lonejson_build_tree_jwt_abi_tests' \
+    "$tmp_dir/jwt-partial-abi.log" >/dev/null; then
+  printf 'JWT ABI CTest should not be registered without full release auth surface\n' >&2
+  exit 1
+fi
+
+cmake -S "$repo_root" -B "$oidc_without_curl_abi_build_dir" \
+  -G Ninja \
+  -D CMAKE_MODULE_PATH="$fake_modules" \
+  -D LONEJSON_BUILD_WITH_JWT=ON \
+  -D LONEJSON_BUILD_WITH_OIDC=ON \
+  -D LONEJSON_BUILD_WITH_CURL=OFF \
+  -D LONEJSON_BUILD_TESTS=ON \
+  -D LONEJSON_BUILD_EXAMPLES=OFF \
+  >"$tmp_dir/oidc-without-curl-abi.log" 2>&1
+ctest --test-dir "$oidc_without_curl_abi_build_dir" -N \
+  >>"$tmp_dir/oidc-without-curl-abi.log" 2>&1
+if grep -F 'lonejson_build_tree_jwt_abi_tests' \
+    "$tmp_dir/oidc-without-curl-abi.log" >/dev/null; then
+  printf 'JWT ABI CTest should not be registered without CURL-backed auth surface\n' >&2
+  exit 1
+fi
+
+cmake -S "$repo_root" -B "$lua_openssl_without_jwt_build_dir" \
+  -G Ninja \
+  -D CMAKE_TOOLCHAIN_FILE="$fake_toolchain" \
+  -D LONEJSON_BUILD_WITH_OPENSSL=ON \
+  -D LONEJSON_BUILD_WITH_JWT=OFF \
+  -D LONEJSON_C_PKT_SYSTEMS_ROOT="$fake_root" \
+  -D LONEJSON_BUILD_TESTS=ON \
+  -D LONEJSON_BUILD_EXAMPLES=OFF \
+  >"$tmp_dir/lua-openssl-without-jwt.log" 2>&1
+if ! grep -F 'lonejson_lua_target_core' \
+    "$lua_openssl_without_jwt_build_dir/build.ninja" >/dev/null; then
+  printf 'expected target Lua module to be configured for feature-guard test\n' >&2
+  exit 1
+fi
+if grep -F -- '-DLONEJSON_WITH_OPENSSL' \
+    "$lua_openssl_without_jwt_build_dir/build.ninja" | \
+    grep -F 'lonejson_lua_target_core' >/dev/null; then
+  printf 'target Lua module must not define LONEJSON_WITH_OPENSSL without JWT\n' >&2
+  exit 1
+fi

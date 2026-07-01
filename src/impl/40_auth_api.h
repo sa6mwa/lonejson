@@ -752,8 +752,8 @@ lonejson_status lonejson_oidc_discovery_url(const char *issuer,
   static const char well_known[] = "/.well-known/openid-configuration";
   size_t issuer_len;
   size_t authority_end;
-  size_t trim_len;
   size_t path_len;
+  size_t trim_len;
   size_t total_len;
   lonejson_allocator allocator;
   char *data;
@@ -773,7 +773,7 @@ lonejson_status lonejson_oidc_discovery_url(const char *issuer,
   while (trim_len > authority_end && issuer[trim_len - 1u] == '/') {
     --trim_len;
   }
-  path_len = trim_len > authority_end ? trim_len - authority_end : 0u;
+  path_len = trim_len - authority_end;
   if (authority_end > SIZE_MAX - (sizeof(well_known) - 1u) ||
       authority_end + (sizeof(well_known) - 1u) > SIZE_MAX - path_len - 1u) {
     return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
@@ -788,10 +788,8 @@ lonejson_status lonejson_oidc_discovery_url(const char *issuer,
   }
   memcpy(data, issuer, authority_end);
   memcpy(data + authority_end, well_known, sizeof(well_known) - 1u);
-  if (path_len != 0u) {
-    memcpy(data + authority_end + (sizeof(well_known) - 1u),
-           issuer + authority_end, path_len);
-  }
+  memcpy(data + authority_end + (sizeof(well_known) - 1u),
+         issuer + authority_end, path_len);
   data[total_len] = '\0';
   lonejson_owned_buffer_free(out);
   out->data = data;
@@ -1576,6 +1574,141 @@ void lonejson_oauth2_introspection_response_cleanup(
   }
 }
 
+typedef struct lonejson__oauth2_introspection_aud_visit {
+  char *buffer;
+  size_t len;
+  size_t capacity;
+  int active;
+  int seen;
+  char **aud;
+} lonejson__oauth2_introspection_aud_visit;
+
+static int lonejson__oauth2_path_is_aud(const lonejson_value_path *path) {
+  static const char name[] = "aud";
+  return path != NULL && path->segment_count == 1u &&
+         path->segments[0].len == sizeof(name) - 1u &&
+         memcmp(path->segments[0].data, name, sizeof(name) - 1u) == 0;
+}
+
+static lonejson_status lonejson__oauth2_aud_append(
+    lonejson__oauth2_introspection_aud_visit *state, const char *data,
+    size_t len, lonejson_error *error) {
+  char *next;
+  size_t next_cap;
+
+  if (len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->len > SIZE_MAX - len - 1u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "OAuth2 introspection aud is too large");
+  }
+  if (state->len + len + 1u > state->capacity) {
+    next_cap = state->capacity == 0u ? 32u : state->capacity;
+    while (next_cap < state->len + len + 1u) {
+      if (next_cap > SIZE_MAX / 2u) {
+        next_cap = state->len + len + 1u;
+        break;
+      }
+      next_cap *= 2u;
+    }
+    next = (char *)lonejson__owned_realloc(NULL, state->buffer, next_cap);
+    if (next == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate OAuth2 introspection aud");
+    }
+    state->buffer = next;
+    state->capacity = next_cap;
+  }
+  memcpy(state->buffer + state->len, data, len);
+  state->len += len;
+  state->buffer[state->len] = '\0';
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__oauth2_aud_string_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  lonejson__oauth2_introspection_aud_visit *state =
+      (lonejson__oauth2_introspection_aud_visit *)user;
+
+  if (!lonejson__oauth2_path_is_aud(path)) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->seen) {
+    return lonejson__set_error(error, LONEJSON_STATUS_DUPLICATE_FIELD, 0u, 0u,
+                               0u, "duplicate OAuth2 introspection aud");
+  }
+  state->active = 1;
+  state->len = 0u;
+  if (state->buffer != NULL) {
+    state->buffer[0] = '\0';
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__oauth2_aud_string_chunk(
+    void *user, const lonejson_value_path *path, const char *data, size_t len,
+    lonejson_error *error) {
+  lonejson__oauth2_introspection_aud_visit *state =
+      (lonejson__oauth2_introspection_aud_visit *)user;
+  (void)path;
+  if (!state->active) {
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson__oauth2_aud_append(state, data, len, error);
+}
+
+static lonejson_status lonejson__oauth2_aud_string_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  lonejson__oauth2_introspection_aud_visit *state =
+      (lonejson__oauth2_introspection_aud_visit *)user;
+  char *copy;
+  (void)path;
+
+  if (!state->active) {
+    return LONEJSON_STATUS_OK;
+  }
+  state->active = 0;
+  state->seen = 1;
+  if (state->buffer == NULL) {
+    state->buffer = (char *)lonejson__owned_malloc(NULL, 1u);
+    if (state->buffer == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate OAuth2 introspection aud");
+    }
+    state->buffer[0] = '\0';
+    state->capacity = 1u;
+  }
+  copy = state->buffer;
+  state->buffer = NULL;
+  state->len = 0u;
+  state->capacity = 0u;
+  lonejson__owned_free(*state->aud);
+  *state->aud = copy;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__oauth2_introspection_capture_aud(
+    lonejson *runtime, const char *json, size_t len,
+    lonejson_oauth2_introspection_response *out, lonejson_error *error) {
+  lonejson__oauth2_introspection_aud_visit state;
+  lonejson_path_value_visitor visitor;
+  lonejson_status status;
+
+  memset(&state, 0, sizeof(state));
+  memset(&visitor, 0, sizeof(visitor));
+  state.aud = &out->aud;
+  visitor.string_begin = lonejson__oauth2_aud_string_begin;
+  visitor.string_chunk = lonejson__oauth2_aud_string_chunk;
+  visitor.string_end = lonejson__oauth2_aud_string_end;
+  status = lonejson_visit_path_value_buffer(runtime, json, len, &visitor,
+                                            &state, error);
+  lonejson__owned_free(state.buffer);
+  return status;
+}
+
 lonejson_status lonejson_oauth2_introspection_response_parse_json(
     lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
     lonejson_oauth2_introspection_response *out, lonejson_error *error) {
@@ -1608,6 +1741,12 @@ lonejson_status lonejson_oauth2_introspection_response_parse_json(
     lonejson_oauth2_introspection_response_cleanup(out);
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
                                "OAuth2 introspection response requires active");
+  }
+  status = lonejson__oauth2_introspection_capture_aud(runtime, json, len, out,
+                                                      error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_oauth2_introspection_response_cleanup(out);
+    return status;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -1901,10 +2040,11 @@ lonejson_status lonejson_oauth2_token_flow_update_response(
 
   lonejson__clear_error(error);
   if (flow == NULL || response == NULL || response->access_token == NULL ||
-      response->token_type == NULL) {
+      response->token_type == NULL || now < 0) {
     return lonejson__set_error(
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "OAuth2 token flow and successful token response are required");
+        "OAuth2 token flow, successful token response, and non-negative "
+        "current time are required");
   }
   if (response->has_expires_in) {
     if (response->expires_in >
@@ -2125,13 +2265,15 @@ static lonejson_status lonejson__oauth2_basic_authorization(
   }
   lonejson_owned_buffer_init(&credentials);
   lonejson_owned_buffer_free(out);
-  status = lonejson_owned_buffer_sink(&credentials, client_id, id_len, error);
+  status =
+      lonejson__oauth2_form_append_component(&credentials, client_id, SIZE_MAX,
+                                             error);
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson_owned_buffer_sink(&credentials, ":", 1u, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson_owned_buffer_sink(&credentials, client_secret, secret_len,
-                                        error);
+    status = lonejson__oauth2_form_append_component(
+        &credentials, client_secret, SIZE_MAX, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson_base64_encoded_len(
@@ -4584,9 +4726,8 @@ static EVP_PKEY *lonejson__jwt_public_key_from_jwk_for_alg(
 }
 
 static lonejson_status lonejson__jwt_validate_jwk_x5c(
-    const lonejson_openssl_auth_provider_config *config,
-    const lonejson_jwt_header *header, const lonejson_jwk *jwk,
-    lonejson_error *error) {
+    void *x509_store, const lonejson_jwt_header *header,
+    const lonejson_jwk *jwk, lonejson_error *error) {
   STACK_OF(X509) *chain = NULL;
   X509 *leaf = NULL;
   X509 *cert = NULL;
@@ -4674,8 +4815,8 @@ static lonejson_status lonejson__jwt_validate_jwk_x5c(
                                  "JWK public key does not match x5c leaf");
     goto done;
   }
-  if (config != NULL && config->x509_store != NULL) {
-    store = (X509_STORE *)config->x509_store;
+  if (x509_store != NULL) {
+    store = (X509_STORE *)x509_store;
   } else {
     store = X509_STORE_new();
     owns_store = 1;
@@ -4720,7 +4861,6 @@ lonejson__openssl_auth_verify_jws(void *user_data,
   const lonejson_jwt_compact *jwt;
   const lonejson_jwt_header *header;
   const lonejson_jwk *jwk;
-  const lonejson_openssl_auth_provider_config *config;
   lonejson_status status;
 
   if (request == NULL || request->jwt == NULL || request->header == NULL ||
@@ -4731,8 +4871,7 @@ lonejson__openssl_auth_verify_jws(void *user_data,
   jwt = request->jwt;
   header = request->header;
   jwk = request->jwk;
-  config = (const lonejson_openssl_auth_provider_config *)user_data;
-  status = lonejson__jwt_validate_jwk_x5c(config, header, jwk, error);
+  status = lonejson__jwt_validate_jwk_x5c(user_data, header, jwk, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -4819,7 +4958,7 @@ lonejson_status lonejson_auth_provider_init_openssl(
                                "OpenSSL provider config fields are reserved");
   }
   memset(provider, 0, sizeof(*provider));
-  provider->user_data = (void *)config;
+  provider->user_data = config != NULL ? config->x509_store : NULL;
   provider->verify_jws = lonejson__openssl_auth_verify_jws;
   provider->random_bytes = lonejson__openssl_auth_random_bytes;
   provider->sha256 = lonejson__openssl_auth_sha256;
@@ -5724,10 +5863,14 @@ void lonejson_m2m_authentication_cleanup(lonejson_m2m_authentication *auth) {
 
 static lonejson_status
 lonejson__m2m_extract_bearer(const char *authorization_header,
-                             const char **token, lonejson_error *error) {
+                             char **token, lonejson_error *error) {
   const char *p;
   const char *begin;
+  const char *end;
+  size_t len;
+  char *copy;
 
+  *token = NULL;
   if (authorization_header == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
                                0u, 0u, 0u, "Authorization header is required");
@@ -5752,14 +5895,23 @@ lonejson__m2m_extract_bearer(const char *authorization_header,
   while (*p != '\0' && *p != ' ' && *p != '\t') {
     ++p;
   }
+  end = p;
   while (*p == ' ' || *p == '\t') {
     ++p;
   }
-  if (begin == p || *p != '\0') {
+  if (begin == end || *p != '\0') {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
                                "Bearer token is malformed");
   }
-  *token = begin;
+  len = (size_t)(end - begin);
+  copy = (char *)lonejson__owned_malloc(NULL, len + 1u);
+  if (copy == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                               0u, "failed to copy Bearer token");
+  }
+  memcpy(copy, begin, len);
+  copy[len] = '\0';
+  *token = copy;
   return LONEJSON_STATUS_OK;
 }
 
@@ -5926,7 +6078,7 @@ lonejson_status lonejson_m2m_verify_authorization(
     lonejson__owned_free(client_secret);
   }
   if ((modes & LONEJSON_M2M_AUTH_BEARER) != 0u) {
-    const char *api_key = NULL;
+    char *api_key = NULL;
     if (lonejson__m2m_extract_bearer(request->authorization_header, &api_key,
                                      NULL) == LONEJSON_STATUS_OK) {
       for (i = 0u; i < store.credentials.count; ++i) {
@@ -5948,11 +6100,13 @@ lonejson_status lonejson_m2m_verify_authorization(
           out->failure = status == LONEJSON_STATUS_OK
                              ? LONEJSON_AUTH_FAILURE_NONE
                              : LONEJSON_AUTH_FAILURE_CLAIMS_INVALID;
+          lonejson__owned_free(api_key);
           lonejson__m2m_store_cleanup(&store);
           lonejson__runtime_borrow_release(&borrow);
           return status;
         }
       }
+      lonejson__owned_free(api_key);
     }
   }
   lonejson__m2m_store_cleanup(&store);

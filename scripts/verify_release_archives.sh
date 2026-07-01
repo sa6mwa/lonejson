@@ -219,7 +219,7 @@ require_archive_contract() {
   require_file "$package_root/lib/cmake/lonejson/lonejsonConfigVersion.cmake"
   dependency_manifest="$package_root/share/lonejson/dependencies.json"
   require_file "$dependency_manifest"
-  if grep -RE 'libcurl|libssl|libcrypto|OpenSSL|c\.pkt\.systems|\.deps/|/home/|/build/' \
+  if grep -RE 'libcurl|libssl|c\.pkt\.systems|\.deps/|/home/|/build/' \
       "$package_root/lib/pkgconfig/lonejson.pc" \
       "$package_root/lib/cmake/lonejson" >/dev/null; then
     printf 'forbidden dependency or path leak in release metadata for %s\n' "$archive" >&2
@@ -227,6 +227,15 @@ require_archive_contract() {
   fi
   if grep -Eq '^(Requires|Requires.private):.*(curl|ssl|crypto|openssl|OpenSSL)' "$package_root/lib/pkgconfig/lonejson.pc"; then
     printf 'unexpected curl/OpenSSL pkg-config dependency in %s\n' "$archive" >&2
+    exit 1
+  fi
+  if ! grep -Eq '^Libs\.private:.*[[:space:]]-lcrypto([[:space:]]|$)' "$package_root/lib/pkgconfig/lonejson.pc"; then
+    printf 'missing static libcrypto pkg-config dependency in %s\n' "$archive" >&2
+    exit 1
+  fi
+  if ! grep -F 'INTERFACE_LINK_LIBRARIES crypto' \
+      "$package_root/lib/cmake/lonejson/lonejsonConfig.cmake" >/dev/null; then
+    printf 'missing static libcrypto CMake link dependency in %s\n' "$archive" >&2
     exit 1
   fi
   if grep -E '\.deps/|/home/|/build/|file://' "$dependency_manifest" >/dev/null; then

@@ -405,7 +405,11 @@ if(LONEJSON_BUILD_TESTS)
       LABELS "packaging;smoke;local"
       TIMEOUT 20)
   endif()
-  if(LONEJSON_BUILD_WITH_JWT AND LONEJSON_TARGET_ID IN_LIST LONEJSON_RELEASE_TARGET_IDS)
+  if(LONEJSON_BUILD_WITH_CURL
+      AND LONEJSON_BUILD_WITH_OPENSSL
+      AND LONEJSON_BUILD_WITH_JWT
+      AND LONEJSON_BUILD_WITH_OIDC
+      AND LONEJSON_TARGET_ID IN_LIST LONEJSON_RELEASE_TARGET_IDS)
     add_test(NAME lonejson_build_tree_jwt_abi_tests
       COMMAND bash
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_jwt_abi_symbols.sh"
@@ -582,7 +586,7 @@ if(LONEJSON_BUILD_TESTS)
       lonejson_target_include_curl(lonejson_lua_target_core)
       target_link_libraries(lonejson_lua_target_core PRIVATE CURL::libcurl)
     endif()
-    if(LONEJSON_BUILD_WITH_OPENSSL)
+    if(LONEJSON_BUILD_WITH_OPENSSL AND LONEJSON_BUILD_WITH_JWT)
       target_compile_definitions(lonejson_lua_target_core PRIVATE
         LONEJSON_WITH_OPENSSL)
     endif()
