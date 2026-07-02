@@ -487,5 +487,11 @@ while read -r _hash artifact; do
   verified=$((verified + 1))
 done <"$checksums"
 
+if [[ "$verified" -eq 0 ]]; then
+  printf 'release archive verification failed: no binary SDK archives listed in %s\n' \
+    "$checksums" >&2
+  exit 1
+fi
+
 printf 'release archive verification passed: %s (%d binary SDK archive(s))\n' \
   "$checksums" "$verified"

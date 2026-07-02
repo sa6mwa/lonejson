@@ -227,7 +227,7 @@ help:
 		'make build-host             Configure and build the host-native release preset.' \
 		'make build-release          Configure and build the full shipped release test matrix.' \
 		'make package                Build all release packages through make release.' \
-		'make prerelease-artifacts   Build and verify current-version source, single-header, and Lua release artifacts from a clean dist/.' \
+		'make prerelease-artifacts   Compatibility alias for make release-matrix.' \
 		'make package-source         Build the source-only release tarball in dist/.' \
 		'make package-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make package-checksums      Generate release checksums for existing dist artifacts.' \
@@ -236,7 +236,7 @@ help:
 		'make verify-release-privacy Alias for make package-verify.' \
 		'make prerelease             Run the standard local pre-release confidence gate.' \
 		'make prerelease-live        Refuse live external-provider release checks unless explicitly enabled.' \
-		'make prerelease-hardening   Run the clean release gate.' \
+		'make prerelease-hardening   Run test-all, then the clean release gate.' \
 		'make release-matrix         Build, test, package, checksum, and verify every release target without cleaning first.' \
 		'make release                Clean generated state, then run the release matrix and package generation.' \
 		'make release-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
@@ -374,14 +374,7 @@ release-darwin-smoke-bundle: deps-arm64-apple-darwin
 	cmake --preset arm64-apple-darwin-release
 	cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
 
-prerelease-artifacts:
-	cmake --preset $(HOST_PRESET)
-	cmake --build --preset package-clean-dist
-	cmake --build --preset package-single-header
-	cmake --build --preset package-source
-	$(MAKE) release-lua-artifacts
-	cmake --build --preset package-checksums
-	$(MAKE) package-verify
+prerelease-artifacts: release-matrix
 
 package-verify:
 	./scripts/verify_release_artifacts.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
@@ -391,12 +384,14 @@ verify-release-archives: package-verify
 
 verify-release-privacy: package-verify
 
-prerelease: test-all prerelease-artifacts
+prerelease: test-all release-matrix
 
 prerelease-live:
 	@test "$${LONEJSON_ENABLE_LIVE_TESTS:-}" = "1" || (printf '%s\n' 'Set LONEJSON_ENABLE_LIVE_TESTS=1 to run live prerelease checks; no live prerelease checks are currently defined.' >&2; exit 1)
 
-prerelease-hardening: release
+prerelease-hardening:
+	$(MAKE) test-all
+	$(MAKE) release
 
 release-matrix:
 	./scripts/run_release_matrix.sh

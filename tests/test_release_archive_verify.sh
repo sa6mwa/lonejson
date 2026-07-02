@@ -35,6 +35,20 @@ mkdir -p \
   "$package_root/share/lonejson" \
   "$package_root/share/doc/liblonejson"
 
+no_binary_dist_dir="$tmp_dir/no-binary-dist"
+mkdir -p "$no_binary_dist_dir"
+printf 'header\n' | gzip -9 >"$no_binary_dist_dir/lonejson-9.9.9.h.gz"
+(cd "$no_binary_dist_dir" && sha256sum lonejson-9.9.9.h.gz >lonejson-9.9.9-CHECKSUMS)
+no_binary_log="$tmp_dir/no-binary.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$no_binary_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$no_binary_log" 2>&1; then
+  printf 'expected archive verification to fail with no binary SDK archives\n' >&2
+  exit 1
+fi
+grep -F 'no binary SDK archives listed' "$no_binary_log" >/dev/null
+
 cat >"$package_root/include/lonejson.h" <<'EOF'
 #ifndef LONEJSON_H
 #define LONEJSON_H
