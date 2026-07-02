@@ -1146,6 +1146,7 @@ static void test_jwt_claim_validation_failures(void) {
   lonejson_jwt_claims claims;
   lonejson_jwt_claim_policy policy;
   lonejson_error error;
+  lonejson_int64 min_i64 = -((lonejson_int64)(LONEJSON_UINT64_MAX >> 1)) - 1;
   const char *bad_issuer = "other";
   const char *bad_audience = "other";
   const char *none_alg = "none";
@@ -1203,6 +1204,17 @@ static void test_jwt_claim_validation_failures(void) {
          LONEJSON_STATUS_TYPE_MISMATCH);
   lonejson_jwt_header_cleanup(&header);
   lonejson_jwt_claims_cleanup(&claims);
+
+  memset(&header, 0, sizeof(header));
+  memset(&claims, 0, sizeof(claims));
+  policy = test_jwt_policy();
+  header.alg = (char *)"RS256";
+  claims.iss = (char *)"issuer";
+  claims.aud = (char *)"api";
+  claims.exp = min_i64;
+  claims.has_exp = 1;
+  EXPECT(lonejson_jwt_validate_claims(&header, &claims, &policy, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
 }
 
 static void test_jwt_decode_claim_failures(void) {
@@ -2542,6 +2554,10 @@ static void test_oidc_authorization_url(void) {
   request.authorization_endpoint = "http://id.example/auth";
   EXPECT(lonejson_oidc_authorization_url(&request, &url, &error) ==
          LONEJSON_STATUS_INVALID_JSON);
+  request.authorization_endpoint = "https://id.example/auth#fragment";
+  EXPECT(lonejson_oidc_authorization_url(&request, &url, &error) ==
+         LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(url.data == NULL);
 }
 
 static void test_oidc_authorization_callback_parse(void) {

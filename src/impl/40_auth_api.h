@@ -2499,6 +2499,11 @@ lonejson_status lonejson_oidc_authorization_url(
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
+  if (strchr(request->authorization_endpoint, '#') != NULL) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+        "OIDC authorization_endpoint must not contain a fragment");
+  }
   max_bytes = request->max_url_bytes == 0u
                   ? LONEJSON__OIDC_DEFAULT_MAX_AUTH_URL_BYTES
                   : request->max_url_bytes;
@@ -3977,6 +3982,24 @@ lonejson__jwt_all_audiences_accepted(const lonejson_jwt_claims *claims,
   return lonejson__jwt_claim_audience_count(claims) != 0u;
 }
 
+static int lonejson__jwt_numeric_date_at_least_delta(lonejson_int64 later,
+                                                     lonejson_int64 earlier,
+                                                     lonejson_int64 delta) {
+  lonejson_int64 max_i64 = (lonejson_int64)(LONEJSON_UINT64_MAX >> 1);
+  lonejson_int64 min_i64 = -max_i64 - 1;
+
+  if (later < earlier || delta < 0) {
+    return 0;
+  }
+  if (earlier < 0 && later > max_i64 + earlier) {
+    return 1;
+  }
+  if (earlier > 0 && later < min_i64 + earlier) {
+    return 0;
+  }
+  return later - earlier >= delta;
+}
+
 static int lonejson__jwt_scope_list_has(const char *scope_list,
                                         const char *required) {
   const char *cursor;
@@ -4157,8 +4180,8 @@ lonejson_status lonejson_jwt_validate_claims(
     }
   }
   skew = policy->allowed_clock_skew;
-  if (claims->has_exp && policy->now >= claims->exp &&
-      policy->now - claims->exp >= skew) {
+  if (claims->has_exp && lonejson__jwt_numeric_date_at_least_delta(
+                             policy->now, claims->exp, skew)) {
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                "JWT is expired");
   }
@@ -5276,8 +5299,8 @@ static lonejson_auth_failure lonejson__oidc_bearer_classify_claim_failure(
     return LONEJSON_AUTH_FAILURE_AUDIENCE_MISMATCH;
   }
   skew = policy->allowed_clock_skew;
-  if (claims->has_exp && policy->now >= claims->exp &&
-      policy->now - claims->exp >= skew) {
+  if (claims->has_exp && lonejson__jwt_numeric_date_at_least_delta(
+                             policy->now, claims->exp, skew)) {
     return LONEJSON_AUTH_FAILURE_EXPIRED_TOKEN;
   }
   if ((claims->has_nbf && policy->now < claims->nbf &&
