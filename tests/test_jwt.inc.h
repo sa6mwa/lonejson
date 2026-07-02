@@ -2222,6 +2222,20 @@ static void test_oauth2_token_response_parse(void) {
   EXPECT(introspection.has_iat && introspection.iat == 2);
   EXPECT(introspection.has_nbf && introspection.nbf == 1);
   lonejson_oauth2_introspection_response_cleanup(&introspection);
+  EXPECT(introspection.aud == NULL);
+
+  reset_lonejson_alloc_stats();
+  lonejson_oauth2_introspection_response_init(&introspection);
+  EXPECT(lj_oauth2_introspection_response_parse_json(
+             test_default_runtime(), introspection_json,
+             strlen(introspection_json), 0u, &introspection,
+             &error) == LJ_STATUS_OK);
+  EXPECT(introspection.aud != NULL);
+  EXPECT(g_alloc_record_count > 0u);
+  lonejson_oauth2_introspection_response_cleanup(&introspection);
+  EXPECT(introspection.aud == NULL);
+  EXPECT(g_alloc_record_count == 0u);
+  reset_lonejson_alloc_stats();
 
   lonejson_oidc_userinfo_response_init(&userinfo);
   EXPECT(lj_oidc_userinfo_response_parse_json(

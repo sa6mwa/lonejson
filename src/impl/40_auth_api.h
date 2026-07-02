@@ -1569,6 +1569,8 @@ void lonejson_oauth2_introspection_response_init(
 void lonejson_oauth2_introspection_response_cleanup(
     lonejson_oauth2_introspection_response *response) {
   if (response != NULL) {
+    lonejson__owned_free(response->aud);
+    response->aud = NULL;
     lonejson_cleanup(&lonejson__oauth2_introspection_response_map, response);
     memset(response, 0, sizeof(*response));
   }
