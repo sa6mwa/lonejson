@@ -3,6 +3,7 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+host_policy_ctest_exclude='lonejson_(make_lifecycle_aliases_tests|discover_target_tools_tests|darwin_macho_metadata_tests|darwin_linker_route_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|cmake_c_pkt_systems_root_tests|test_all_clang_optional_tests|check_clang_sanitizer_support_tests|cmake_fuzz_sanitizer_conflict_tests|cmake_fuzz_auth_optional_tests|release_werror_tests|source_release_tarball_tests|lua_src_rock_privacy_tests|lua_public_boundary_tests|lua_surface_coverage_tests|lua_source_stage_manifest_tests|release_artifact_verify_tests|release_archive_verify_tests|lua_native_test_target_filter_tests|run_release_matrix_darwin_target_tests|release_checksum_manifest_tests|ctest_metadata_tests|short_names_tests|short_names_disabled_tests|single_header_strict_warning_tests|single_header_strict_warning_build_tests|single_header_strict_clang_build_tests|single_header_config_default|single_header_config_omit_protocol|single_header_config_lj_implementation|single_header_config_lj_config_aliases|single_header_config_short_names_disabled|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|bench_gate_tests)'
 
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -44,11 +45,16 @@ run_target() {
     preset="$1"
     target_id="$2"
     package_preset="$3"
+    ctest_mode="${4:-target}"
 
     printf '\n== %s ==\n' "$preset"
     configure_release_target "$preset" "$target_id"
     cmake --build --preset "$preset"
-    ctest --preset "$preset"
+    if [ "$ctest_mode" = "full" ]; then
+        ctest --preset "$preset"
+    else
+        ctest --preset "$preset" -E "$host_policy_ctest_exclude"
+    fi
     cmake --build --preset "$package_preset"
 }
 
@@ -92,7 +98,7 @@ cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aa
 cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aarch64-linux-musl -P cmake/fetch_c_pkt_systems.cmake
 cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
 cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-musl -P cmake/fetch_c_pkt_systems.cmake
-run_target linux-gnu-release x86_64-linux-gnu package-archive-linux-gnu
+run_target linux-gnu-release x86_64-linux-gnu package-archive-linux-gnu full
 run_target linux-musl-release x86_64-linux-musl package-archive-linux-musl
 run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu
 run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl

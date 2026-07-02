@@ -55,6 +55,9 @@ printf '%s\n' "$matrix_script" | grep -F -- 'missing c.pkt.systems OpenSSL CMake
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OPENSSL=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_JWT=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OIDC=ON' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'host_policy_ctest_exclude=' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'run_target linux-gnu-release x86_64-linux-gnu package-archive-linux-gnu full' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset" -E "$host_policy_ctest_exclude"' >/dev/null
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OPENSSL=${LONEJSON_BUILD_WITH_OPENSSL}' >/dev/null
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_JWT=${LONEJSON_BUILD_WITH_JWT}' >/dev/null
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OIDC=${LONEJSON_BUILD_WITH_OIDC}' >/dev/null

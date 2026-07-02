@@ -1259,15 +1259,20 @@ The standard verification commands are:
 
 ```sh
 make test
-make test-all-bindings
+make test-all
+make cross-sanitizers
 make asan
 make bench-gate
 make lua-bench-gate
 make fuzz
 ```
 
-`make test-all` is the C-centric aggregate suite. Use
-`make test-all-bindings` when you also want the optional Lua binding tests.
+`make test-all` is the broader local confidence gate: debug, host, curl/auth
+host, cross presets, cross sanitizer matrices under QEMU, host sanitizers,
+benchmark checks, and fuzz smoke. `make release` is the final clean release
+gate: it cleans generated state, runs `prerelease`, then builds, checksums, and
+verifies the release matrix. `make test-all-bindings` is a compatibility alias
+for the Lua binding suite; it no longer expands to the full world gate.
 
 ## License
 

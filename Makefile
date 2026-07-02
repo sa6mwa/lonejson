@@ -137,6 +137,8 @@ LUA_ROCK_LIBLONEJSON_SOURCES := \
 	$(wildcard src/impl/*.h)
 
 SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_confirm_tests|lua_legacy_uservalue_tests|lua_schema_cache_tests|lua_encode_stats_tests|lua_external_liblonejson_tests|lua_target_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|run_release_matrix_darwin_target_tests)
+HOST_POLICY_CTEST_EXCLUDE := lonejson_(make_lifecycle_aliases_tests|discover_target_tools_tests|darwin_macho_metadata_tests|darwin_linker_route_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|cmake_c_pkt_systems_root_tests|test_all_clang_optional_tests|check_clang_sanitizer_support_tests|cmake_fuzz_sanitizer_conflict_tests|cmake_fuzz_auth_optional_tests|release_werror_tests|source_release_tarball_tests|lua_src_rock_privacy_tests|lua_public_boundary_tests|lua_surface_coverage_tests|lua_source_stage_manifest_tests|release_artifact_verify_tests|release_archive_verify_tests|lua_native_test_target_filter_tests|run_release_matrix_darwin_target_tests|release_checksum_manifest_tests|ctest_metadata_tests|short_names_tests|short_names_disabled_tests|single_header_strict_warning_tests|single_header_strict_warning_build_tests|single_header_strict_clang_build_tests|single_header_config_default|single_header_config_omit_protocol|single_header_config_lj_implementation|single_header_config_lj_config_aliases|single_header_config_short_names_disabled|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|bench_gate_tests)
+SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUDE)
 
 .PHONY: \
 	help \
@@ -180,6 +182,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	test-host \
 	test-host-curl \
 	test-cross \
+	cross-sanitizers \
 	test-all \
 	test-all-bindings \
 	test-install-tree \
@@ -234,9 +237,9 @@ help:
 		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
 		'make verify-release-archives Alias for make package-verify.' \
 		'make verify-release-privacy Alias for make package-verify.' \
-		'make prerelease             Run the standard local pre-release confidence gate.' \
+		'make prerelease             Run the deterministic local pre-release confidence gate.' \
 		'make prerelease-live        Refuse live external-provider release checks unless explicitly enabled.' \
-		'make prerelease-hardening   Run test-all, then the clean release gate.' \
+		'make prerelease-hardening   Run prerelease, then the release-matrix rehearsal.' \
 		'make release-matrix         Build, test, package, checksum, and verify every release target without cleaning first.' \
 		'make release                Clean generated state, then run the release matrix and package generation.' \
 		'make release-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
@@ -259,8 +262,9 @@ help:
 		'make test-host              Build and run the host-native test preset.' \
 		'make test-host-curl         Build and run the host-native curl-enabled test preset.' \
 		'make test-cross             Configure, build, and run all cross release test presets serially.' \
-		'make test-all               Run debug, host, host-curl, cross, ASan, benchmark gates, and fuzz-smoke serially; TSan/MSan are included when clang is available.' \
-		'make test-all-bindings      Run test-all plus the optional Lua binding suite.' \
+		'make cross-sanitizers       Build and run ASan/TSan/MSan test matrices for Linux cross targets under QEMU.' \
+		'make test-all               Run debug, host, host-curl, cross, cross sanitizers, host sanitizers, benchmark gates, and fuzz-smoke serially.' \
+		'make test-all-bindings      Compatibility alias for make lua-test; binding coverage is no longer a full world gate.' \
 		'make test-install-tree      Verify checksum-listed SDK archives through installed CMake and pkg-config consumers.' \
 		'make example-smoke-local    Build and stage standalone local examples.' \
 		'make asan                   Build and run the ASan/UBSan preset.' \
@@ -384,20 +388,21 @@ verify-release-archives: package-verify
 
 verify-release-privacy: package-verify
 
-prerelease: test-all release-matrix
+prerelease: test-all
 
 prerelease-live:
 	@test "$${LONEJSON_ENABLE_LIVE_TESTS:-}" = "1" || (printf '%s\n' 'Set LONEJSON_ENABLE_LIVE_TESTS=1 to run live prerelease checks; no live prerelease checks are currently defined.' >&2; exit 1)
 
 prerelease-hardening:
-	$(MAKE) test-all
-	$(MAKE) release
+	$(MAKE) prerelease
+	$(MAKE) release-matrix
 
 release-matrix:
 	./scripts/run_release_matrix.sh
 
 release:
 	./scripts/clean.sh
+	$(MAKE) prerelease
 	$(MAKE) release-matrix
 
 bench:
@@ -471,7 +476,6 @@ test-debug: test
 
 test-host: build-host
 	ctest --preset $(HOST_PRESET)
-	$(MAKE) lua-test
 
 test-host-curl: deps-host
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
@@ -482,14 +486,18 @@ test-cross: deps-cross
 	@set -e; for preset in $(CROSS_RELEASE_PRESETS); do \
 		cmake --preset "$$preset"; \
 		cmake --build --preset "$$preset"; \
-		ctest --preset "$$preset" --output-on-failure; \
+		ctest --preset "$$preset" --output-on-failure -E "$(HOST_POLICY_CTEST_EXCLUDE)"; \
 	done
+
+cross-sanitizers: deps-cross
+	./scripts/run_cross_sanitizer_matrix.sh
 
 test-all:
 	$(MAKE) test
 	$(MAKE) test-host
 	$(MAKE) test-host-curl
 	$(MAKE) test-cross
+	$(MAKE) cross-sanitizers
 	$(MAKE) asan
 ifeq ($(LONEJSON_HAVE_TSAN),1)
 	$(MAKE) tsan
@@ -505,7 +513,6 @@ endif
 	$(MAKE) fuzz-smoke
 
 test-all-bindings:
-	$(MAKE) test-all
 	$(MAKE) lua-test
 
 test-install-tree: package-verify

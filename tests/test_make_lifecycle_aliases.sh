@@ -27,7 +27,8 @@ for target in \
   dev-down \
   dev-reset \
   dev-logs \
-  test-debug; do
+  test-debug \
+  cross-sanitizers; do
   if ! printf '%s\n' "$help_text" | grep -F "make $target" >/dev/null; then
     printf 'make help is missing target: %s\n' "$target" >&2
     exit 1
@@ -61,6 +62,24 @@ check_make_database_contains() {
 check_dry_run_contains build-debug 'cmake --preset debug'
 cmake --list-presets -S "$repo_root" | grep -F '"debug-lua"' >/dev/null
 check_dry_run_contains test-debug 'ctest --preset debug'
+check_dry_run_contains test-all 'make test'
+check_dry_run_contains test-all 'make test-host'
+check_dry_run_contains test-all 'make test-host-curl'
+check_dry_run_contains test-all 'make test-cross'
+check_dry_run_contains test-all 'make cross-sanitizers'
+check_dry_run_contains test-all 'make asan'
+check_dry_run_contains test-all 'make bench-check'
+check_dry_run_contains test-all 'make fuzz-smoke'
+check_dry_run_contains cross-sanitizers 'scripts/run_cross_sanitizer_matrix.sh'
+check_dry_run_contains test-all-bindings 'make lua-test'
+if make -C "$repo_root" -n test-host 2>&1 | grep -F 'make lua-test' >/dev/null; then
+  printf 'make test-host must not rerun lua-test; make test already owns native Lua binding coverage\n' >&2
+  exit 1
+fi
+if make -C "$repo_root" -n test-all-bindings 2>&1 | grep -F 'make test-all' >/dev/null; then
+  printf 'make test-all-bindings must not expand to test-all\n' >&2
+  exit 1
+fi
 check_dry_run_contains finalize-slice 'make format'
 check_dry_run_contains finalize-slice 'make test-debug'
 check_dry_run_contains package-source 'cmake --build --preset package-source'
@@ -71,12 +90,16 @@ check_dry_run_contains verify-release-archives 'scripts/verify_release_artifacts
 check_dry_run_contains verify-release-archives 'scripts/verify_release_archives.sh'
 check_dry_run_contains verify-release-privacy 'scripts/verify_release_artifacts.sh'
 check_dry_run_contains verify-release-privacy 'scripts/verify_release_archives.sh'
-check_make_database_contains prerelease 'prerelease: test-all release-matrix'
+check_make_database_contains prerelease 'prerelease: test-all'
 check_dry_run_contains prerelease-live 'LONEJSON_ENABLE_LIVE_TESTS=1'
-check_dry_run_contains prerelease-hardening 'make test-all'
-check_dry_run_contains prerelease-hardening 'make release'
-check_dry_run_contains prerelease-hardening 'scripts/clean.sh'
+check_dry_run_contains prerelease-hardening 'make prerelease'
+check_dry_run_contains prerelease-hardening 'make release-matrix'
+if make -C "$repo_root" -n prerelease-hardening 2>&1 | grep -F 'scripts/clean.sh' >/dev/null; then
+  printf 'make prerelease-hardening must not run the clean final release gate; make release owns that\n' >&2
+  exit 1
+fi
 check_dry_run_contains release 'scripts/clean.sh'
+check_dry_run_contains release 'make prerelease'
 check_dry_run_contains release 'make release-matrix'
 check_dry_run_contains release-matrix 'scripts/run_release_matrix.sh'
 check_dry_run_contains test-install-tree 'scripts/verify_release_archives.sh'
