@@ -314,6 +314,54 @@ if lonejson.jwt_parse_compact ~= nil then
         jwks_json, cache_policy, { kid = "rsa1", kty = "RSA", alg = "RS256", use = "sig" })
     local cache_missing = lonejson.oidc_jwks_cache_select_json(
         jwks_json, cache_policy, { kid = "missing" })
+    local runtime_only_auth_methods = {
+      "jwt_parse_compact",
+      "jwt_decode_compact",
+      "jwt_validate_compact_claims",
+      "jwt_validate_compact_signature",
+      "jwk_parse_json",
+      "jwks_parse_json",
+      "jwks_select_json",
+      "oauth2_client_credentials_body",
+      "oauth2_refresh_token_body",
+      "oauth2_token_introspection_body",
+      "oauth2_token_revocation_body",
+      "oidc_authorization_code_token_body",
+      "oauth2_client_credentials_request",
+      "oauth2_refresh_token_request",
+      "oauth2_token_flow_ensure",
+      "oauth2_introspect_token_request",
+      "oauth2_revoke_token_request",
+      "oidc_userinfo_request",
+      "oidc_authorization_code_token_request",
+      "oauth2_token_response_parse_json",
+      "oauth2_introspection_response_parse_json",
+      "oidc_userinfo_response_parse_json",
+      "oidc_validate_bearer_token",
+      "oidc_discovery_parse_json",
+      "oidc_jwks_cache_select_json",
+    }
+    local free_only_auth_helpers = {
+      "oauth2_token_flow_update_response",
+      "oauth2_token_flow_is_expired",
+      "oidc_pkce_challenge",
+      "oidc_pkce_generate",
+      "oidc_authorization_url",
+      "oidc_authorization_callback_parse_query",
+      "oidc_discovery_url",
+    }
+    local raw_lj = assert(lonejson.core.new())
+    for _, name in ipairs(runtime_only_auth_methods) do
+      if lonejson[name] ~= nil then
+        assert_eq(type(lj[name]), "function")
+        assert_eq(type(raw_lj[name]), "function")
+      end
+    end
+    for _, name in ipairs(free_only_auth_helpers) do
+      assert_eq(type(lonejson[name]), "function")
+      assert_eq(lj[name], nil)
+      assert_eq(raw_lj[name], nil)
+    end
     local token_body = lj:oauth2_client_credentials_body({
       client_id = "client id",
       client_secret = "s+e&c=r%t",
