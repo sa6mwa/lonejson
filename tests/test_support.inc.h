@@ -20,6 +20,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#if defined(LONEJSON_WITH_JWT) && defined(LONEJSON_WITH_OPENSSL)
+#define LONEJSON_TEST_ENABLE_FAIL_ALLOC 1
+#else
+#define LONEJSON_TEST_ENABLE_FAIL_ALLOC 0
+#endif
+
 typedef struct alloc_record {
   void *ptr;
 } alloc_record;
@@ -28,9 +34,11 @@ static alloc_record g_alloc_records[8192];
 static size_t g_alloc_record_count = 0u;
 static size_t g_lonejson_alloc_calls = 0u;
 static size_t g_lonejson_free_calls = 0u;
+#if LONEJSON_TEST_ENABLE_FAIL_ALLOC
 static int g_lonejson_fail_alloc_enabled = 0;
 static size_t g_lonejson_fail_alloc_calls = 0u;
 static size_t g_lonejson_fail_alloc_after = 0u;
+#endif
 
 #if LONEJSON_TEST_HAS_PTHREAD
 static pthread_mutex_t g_alloc_stats_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -70,12 +78,14 @@ static void track_free_ptr_locked(void *ptr) {
 static void *test_lonejson_malloc(size_t size) {
   void *ptr;
 
+#if LONEJSON_TEST_ENABLE_FAIL_ALLOC
   if (g_lonejson_fail_alloc_enabled) {
     if (g_lonejson_fail_alloc_calls >= g_lonejson_fail_alloc_after) {
       return NULL;
     }
     ++g_lonejson_fail_alloc_calls;
   }
+#endif
   ptr = malloc(size);
   if (ptr != NULL) {
     TEST_ALLOC_STATS_LOCK();
@@ -89,12 +99,14 @@ static void *test_lonejson_malloc(size_t size) {
 static void *test_lonejson_realloc(void *ptr, size_t size) {
   void *next;
 
+#if LONEJSON_TEST_ENABLE_FAIL_ALLOC
   if (g_lonejson_fail_alloc_enabled) {
     if (g_lonejson_fail_alloc_calls >= g_lonejson_fail_alloc_after) {
       return NULL;
     }
     ++g_lonejson_fail_alloc_calls;
   }
+#endif
   if (ptr == NULL) {
     next = realloc(NULL, size);
     if (next != NULL) {
@@ -136,6 +148,7 @@ static void reset_lonejson_alloc_stats(void) {
   TEST_ALLOC_STATS_UNLOCK();
 }
 
+#if LONEJSON_TEST_ENABLE_FAIL_ALLOC
 static void test_lonejson_fail_alloc_after(size_t successful_calls) {
   g_lonejson_fail_alloc_calls = 0u;
   g_lonejson_fail_alloc_after = successful_calls;
@@ -147,6 +160,7 @@ static void test_lonejson_fail_alloc_clear(void) {
   g_lonejson_fail_alloc_calls = 0u;
   g_lonejson_fail_alloc_after = 0u;
 }
+#endif
 
 #if defined(LONEJSON_TEST_RUNTIME_HANDLE_CACHE_DRAIN)
 static void lonejson__runtime_handle_cache_drain(void);

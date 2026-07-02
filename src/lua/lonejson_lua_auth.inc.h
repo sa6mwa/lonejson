@@ -1937,9 +1937,8 @@ static int ljlua_m2m_verify_authorization(lua_State *L) {
   lua_pop(L, 1);
   store.max_store_bytes =
       ljlua_auth_optional_size_field(L, req_index, "max_store_bytes");
-  lua_getfield(L, req_index, "authorization_header");
-  request.authorization_header = luaL_checkstring(L, -1);
-  lua_pop(L, 1);
+  request.authorization_header =
+      ljlua_auth_optional_table_string(L, req_index, "authorization_header");
   request.store = &store;
   request.allowed_auth_modes =
       ljlua_auth_read_modes(L, req_index, "allowed_auth_modes");

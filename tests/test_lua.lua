@@ -738,11 +738,13 @@ if lonejson.jwt_parse_compact ~= nil then
             authorization_header = "Bearer wrong-api-key",
             allowed_auth_modes = "bearer",
           })
-      local missing_api, missing_api_err, missing_api_failure =
-          lj:m2m_verify_authorization({
-            store_json = api_store,
-            allowed_auth_modes = "bearer",
-          })
+      local missing_api_ok, missing_api, missing_api_err, missing_api_failure =
+          pcall(function()
+            return lj:m2m_verify_authorization({
+              store_json = api_store,
+              allowed_auth_modes = "bearer",
+            })
+          end)
       local malformed_api, malformed_api_err, malformed_api_failure =
           lj:m2m_verify_authorization({
             store_json = api_store,
@@ -804,6 +806,7 @@ if lonejson.jwt_parse_compact ~= nil then
       assert_true(wrong_api == nil)
       assert_eq(wrong_api_err.status, "type_mismatch")
       assert_eq(wrong_api_failure, "invalid_signature")
+      assert_true(missing_api_ok)
       assert_true(missing_api == nil)
       assert_eq(missing_api_err.status, "type_mismatch")
       assert_eq(missing_api_failure, "missing_credentials")
