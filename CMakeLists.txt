@@ -119,7 +119,7 @@ function(lonejson_configure_lua_c_target target)
   endif()
   if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(${target} PRIVATE
-      -std=c99
+      -std=gnu89
       -Wall
       -Wextra
       $<$<CONFIG:Release>:-Werror>)

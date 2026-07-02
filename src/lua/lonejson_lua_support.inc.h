@@ -115,6 +115,7 @@ struct ljlua_schema {
   char *name;
   size_t record_size;
   size_t record_align;
+  size_t record_offset;
   size_t field_count;
   int has_json_value;
   int needs_record_init;

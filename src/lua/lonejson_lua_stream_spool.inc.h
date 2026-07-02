@@ -204,13 +204,13 @@ static int ljlua_array_stream_next(lua_State *L) {
     }
     if (ljlua_schema_has_json_value(ud->schema)) {
       if (ud->clear_destination) {
-        lonejson_reset(ud->schema->runtime, &ud->schema->map, record_ud->data);
+        lonejson_reset(ud->schema->runtime, &ud->schema->map, ljlua_record_data(record_ud));
       }
-      ljlua_prepare_record_json_value_capture(L, ud->schema, record_ud->data,
+      ljlua_prepare_record_json_value_capture(L, ud->schema, ljlua_record_data(record_ud),
                                               ud->clear_destination ? 0 : 1);
     }
     result = lonejson_array_stream_next(ud->stream, &ud->schema->map,
-                                        record_ud->data, &error);
+                                        ljlua_record_data(record_ud), &error);
     if (result == LONEJSON_ARRAY_STREAM_ITEM) {
       record_ud->cleared = 0;
       lua_pushvalue(L, 2);
@@ -316,12 +316,12 @@ static int ljlua_stream_next(lua_State *L) {
     }
     if (ljlua_schema_has_json_value(ud->schema)) {
       if (ud->clear_destination) {
-        lonejson_reset(ud->schema->runtime, &ud->schema->map, record_ud->data);
+        lonejson_reset(ud->schema->runtime, &ud->schema->map, ljlua_record_data(record_ud));
       }
-      ljlua_prepare_record_json_value_capture(L, ud->schema, record_ud->data,
+      ljlua_prepare_record_json_value_capture(L, ud->schema, ljlua_record_data(record_ud),
                                               ud->clear_destination ? 0 : 1);
     }
-    result = lonejson_stream_next(ud->stream, record_ud->data, &error);
+    result = lonejson_stream_next(ud->stream, ljlua_record_data(record_ud), &error);
     if (result == LONEJSON_STREAM_OBJECT) {
       record_ud->cleared = 0;
       lua_pushvalue(L, 2);

@@ -36,6 +36,11 @@ if [ "$configure_line" -ge "$build_line" ]; then
   printf 'lua-rock builds debug liblonejson before configuring debug\n' >&2
   exit 1
 fi
+if ! printf '%s\n' "$dry_run" | grep -F -- '-std=gnu89' >/dev/null; then
+  printf '%s\n' "$dry_run" >&2
+  printf 'lua-rock must compile the binding with the same C standard as liblonejson\n' >&2
+  exit 1
+fi
 
 mkdir -p "$lua_rock_tree"
 touch "$lua_rockspec" "$lua_stamp"

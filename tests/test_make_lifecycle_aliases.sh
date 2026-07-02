@@ -62,6 +62,16 @@ check_make_database_contains() {
 check_dry_run_contains build-debug 'cmake --preset debug'
 cmake --list-presets -S "$repo_root" | grep -F '"debug-lua"' >/dev/null
 check_dry_run_contains test-debug 'ctest --preset debug'
+for cache_entry in \
+  '"LONEJSON_ENABLE_ASAN": "OFF"' \
+  '"LONEJSON_ENABLE_TSAN": "OFF"' \
+  '"LONEJSON_ENABLE_MSAN": "OFF"' \
+  '"LONEJSON_BUILD_WITH_CURL": "OFF"' \
+  '"LONEJSON_BUILD_WITH_OPENSSL": "OFF"' \
+  '"LONEJSON_BUILD_WITH_JWT": "OFF"' \
+  '"LONEJSON_BUILD_WITH_OIDC": "OFF"'; do
+  grep -F "$cache_entry" "$repo_root/CMakePresets.json" >/dev/null
+done
 check_dry_run_contains test-all 'make test'
 check_dry_run_contains test-all 'make test-host'
 check_dry_run_contains test-all 'make test-host-curl'

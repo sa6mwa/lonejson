@@ -14,7 +14,14 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "LONEJSON_BUILD_TESTS": "ON",
-        "LONEJSON_BUILD_EXAMPLES": "ON"
+        "LONEJSON_BUILD_EXAMPLES": "ON",
+        "LONEJSON_ENABLE_ASAN": "OFF",
+        "LONEJSON_ENABLE_TSAN": "OFF",
+        "LONEJSON_ENABLE_MSAN": "OFF",
+        "LONEJSON_BUILD_WITH_CURL": "OFF",
+        "LONEJSON_BUILD_WITH_OPENSSL": "OFF",
+        "LONEJSON_BUILD_WITH_JWT": "OFF",
+        "LONEJSON_BUILD_WITH_OIDC": "OFF"
       }
     },
     {

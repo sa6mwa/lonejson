@@ -552,6 +552,8 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
     }
   }
   schema->record_size = ljlua_align(offset, schema->record_align);
+  schema->record_offset =
+      ljlua_align(offsetof(ljlua_record_ud, data), schema->record_align);
   schema->map.name = schema->name;
   schema->map.struct_size = schema->record_size;
   schema->map.field_count = schema->field_count;
@@ -711,6 +713,13 @@ static ljlua_record_ud *ljlua_check_record(lua_State *L, int index) {
     return ud;
   }
   return (ljlua_record_ud *)luaL_checkudata(L, index, LJLUA_RECORD_MT);
+}
+
+static unsigned char *ljlua_record_data(ljlua_record_ud *record) {
+  if (record == NULL || record->schema == NULL) {
+    return NULL;
+  }
+  return (unsigned char *)record + record->schema->record_offset;
 }
 
 static ljlua_stream_ud *ljlua_check_stream(lua_State *L, int index) {
