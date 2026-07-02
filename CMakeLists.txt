@@ -359,6 +359,11 @@ endforeach()
 if(LONEJSON_BUILD_WITH_OPENSSL AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   target_link_options(lonejson_shared PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  target_link_options(lonejson_shared PRIVATE
+    "LINKER:-exported_symbol,_lonejson_*"
+    "LINKER:-exported_symbol,_lj_*")
+endif()
 
 if(LONEJSON_BUILD_FUZZERS)
   if(LONEJSON_ENABLE_TSAN OR LONEJSON_ENABLE_MSAN)

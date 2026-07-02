@@ -11,6 +11,14 @@ version="$("${repo_root}/scripts/release_version.sh")"
 archive="${repo_root}/dist/liblonejson-${version}-arm64-apple-darwin.tar.gz"
 smoke_dir="${build_dir}/darwin-smoke"
 
+cache_value() {
+    var_name=$1
+    if [ ! -f "${build_dir}/CMakeCache.txt" ]; then
+        return 1
+    fi
+    sed -n "s/^${var_name}:[^=]*=//p" "${build_dir}/CMakeCache.txt" | sed -n '1p'
+}
+
 eval "$("${repo_root}/scripts/discover_target_tools.sh" \
     --build-dir "$build_dir" \
     --target-id arm64-apple-darwin)"
@@ -33,6 +41,14 @@ require_file "$ld"
 require_file "$otool"
 require_file "$ar"
 require_file "$archive"
+
+cpkt_root="${LONEJSON_C_PKT_SYSTEMS_ROOT:-$(cache_value LONEJSON_C_PKT_SYSTEMS_ROOT || true)}"
+if [ -z "$cpkt_root" ]; then
+    printf 'missing LONEJSON_C_PKT_SYSTEMS_ROOT for Darwin static smoke link\n' >&2
+    exit 1
+fi
+crypto_static="${cpkt_root}/lib/libcrypto.a"
+require_file "$crypto_static"
 
 dylib="$(find "$build_dir" -maxdepth 1 -type f -name 'liblonejson*.dylib' | sort | head -n 1)"
 static_lib="${build_dir}/liblonejson.a"
@@ -87,6 +103,7 @@ fi
     "-mmacosx-version-min=${deployment_target}" "-fuse-ld=${ld}" \
     "${repo_root}/tests/test_link_consumer.c" \
     "${package_root}/lib/liblonejson.a" \
+    "$crypto_static" \
     -o "${smoke_dir}/bin/static-link-smoke"
 "$cc" -std=c89 -Wall -Wextra -Werror -Wno-fuse-ld-path -I "${package_root}/include" \
     "-mmacosx-version-min=${deployment_target}" "-fuse-ld=${ld}" \
