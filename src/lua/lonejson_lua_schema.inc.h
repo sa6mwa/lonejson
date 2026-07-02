@@ -1,5 +1,72 @@
 static void ljlua_schema_destroy(ljlua_schema *schema);
 
+typedef struct ljlua_align_char_ptr_probe {
+  char c;
+  char *value;
+} ljlua_align_char_ptr_probe;
+
+typedef struct ljlua_align_i64_probe {
+  char c;
+  lonejson_int64 value;
+} ljlua_align_i64_probe;
+
+typedef struct ljlua_align_u64_probe {
+  char c;
+  lonejson_uint64 value;
+} ljlua_align_u64_probe;
+
+typedef struct ljlua_align_f64_probe {
+  char c;
+  double value;
+} ljlua_align_f64_probe;
+
+typedef struct ljlua_align_bool_probe {
+  char c;
+  bool value;
+} ljlua_align_bool_probe;
+
+typedef struct ljlua_align_spooled_probe {
+  char c;
+  lonejson_spooled value;
+} ljlua_align_spooled_probe;
+
+typedef struct ljlua_align_json_value_probe {
+  char c;
+  lonejson_json_value value;
+} ljlua_align_json_value_probe;
+
+typedef struct ljlua_align_string_array_probe {
+  char c;
+  lonejson_string_array value;
+} ljlua_align_string_array_probe;
+
+typedef struct ljlua_align_i64_array_probe {
+  char c;
+  lonejson_i64_array value;
+} ljlua_align_i64_array_probe;
+
+typedef struct ljlua_align_u64_array_probe {
+  char c;
+  lonejson_u64_array value;
+} ljlua_align_u64_array_probe;
+
+typedef struct ljlua_align_f64_array_probe {
+  char c;
+  lonejson_f64_array value;
+} ljlua_align_f64_array_probe;
+
+typedef struct ljlua_align_bool_array_probe {
+  char c;
+  lonejson_bool_array value;
+} ljlua_align_bool_array_probe;
+
+typedef struct ljlua_align_object_array_probe {
+  char c;
+  lonejson_object_array value;
+} ljlua_align_object_array_probe;
+
+static size_t ljlua_max_size(size_t a, size_t b) { return a > b ? a : b; }
+
 static lonejson_uint64 ljlua_next_map_cookie(void) {
   static unsigned int counter = 1u;
   unsigned int value;
@@ -67,6 +134,63 @@ static size_t ljlua_fixed_array_elem_size(const ljlua_field_meta *meta) {
     return meta->subschema ? meta->subschema->record_size : 0u;
   default:
     return 0u;
+  }
+}
+
+static size_t ljlua_member_align_for_kind(const ljlua_field_meta *meta) {
+  switch (meta->lua_kind) {
+  case LJLUA_FIELD_STRING:
+    return (meta->field.storage == LONEJSON_STORAGE_FIXED)
+               ? 1u
+               : offsetof(ljlua_align_char_ptr_probe, value);
+  case LJLUA_FIELD_SPOOLED_TEXT:
+  case LJLUA_FIELD_SPOOLED_BYTES:
+    return offsetof(ljlua_align_spooled_probe, value);
+  case LJLUA_FIELD_JSON_VALUE:
+    return offsetof(ljlua_align_json_value_probe, value);
+  case LJLUA_FIELD_I64:
+    return offsetof(ljlua_align_i64_probe, value);
+  case LJLUA_FIELD_U64:
+    return offsetof(ljlua_align_u64_probe, value);
+  case LJLUA_FIELD_F64:
+    return offsetof(ljlua_align_f64_probe, value);
+  case LJLUA_FIELD_BOOL:
+    return offsetof(ljlua_align_bool_probe, value);
+  case LJLUA_FIELD_OBJECT:
+    return meta->subschema ? meta->subschema->record_align : 1u;
+  case LJLUA_FIELD_STRING_ARRAY:
+    return offsetof(ljlua_align_string_array_probe, value);
+  case LJLUA_FIELD_I64_ARRAY:
+    return offsetof(ljlua_align_i64_array_probe, value);
+  case LJLUA_FIELD_U64_ARRAY:
+    return offsetof(ljlua_align_u64_array_probe, value);
+  case LJLUA_FIELD_F64_ARRAY:
+    return offsetof(ljlua_align_f64_array_probe, value);
+  case LJLUA_FIELD_BOOL_ARRAY:
+    return offsetof(ljlua_align_bool_array_probe, value);
+  case LJLUA_FIELD_OBJECT_ARRAY:
+    return offsetof(ljlua_align_object_array_probe, value);
+  default:
+    return 1u;
+  }
+}
+
+static size_t ljlua_fixed_array_elem_align(const ljlua_field_meta *meta) {
+  switch (meta->lua_kind) {
+  case LJLUA_FIELD_STRING_ARRAY:
+    return offsetof(ljlua_align_char_ptr_probe, value);
+  case LJLUA_FIELD_I64_ARRAY:
+    return offsetof(ljlua_align_i64_probe, value);
+  case LJLUA_FIELD_U64_ARRAY:
+    return offsetof(ljlua_align_u64_probe, value);
+  case LJLUA_FIELD_F64_ARRAY:
+    return offsetof(ljlua_align_f64_probe, value);
+  case LJLUA_FIELD_BOOL_ARRAY:
+    return offsetof(ljlua_align_bool_probe, value);
+  case LJLUA_FIELD_OBJECT_ARRAY:
+    return meta->subschema ? meta->subschema->record_align : 1u;
+  default:
+    return 1u;
   }
 }
 
@@ -380,10 +504,11 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
 
   schema->has_json_value = 0;
   schema->needs_record_init = 0;
+  schema->record_align = 1u;
   offset = 0u;
   for (i = 0u; i < schema->field_count; ++i) {
     ljlua_field_meta *meta = &schema->metas[i];
-    size_t align = sizeof(void *);
+    size_t align = ljlua_member_align_for_kind(meta);
 
     if (meta->lua_kind == LJLUA_FIELD_JSON_VALUE ||
         ((meta->lua_kind == LJLUA_FIELD_OBJECT ||
@@ -399,11 +524,7 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
          meta->subschema->needs_record_init)) {
       schema->needs_record_init = 1;
     }
-    if (meta->member_size >= sizeof(void *)) {
-      align = sizeof(void *);
-    } else if (meta->member_size >= sizeof(double)) {
-      align = sizeof(double);
-    }
+    schema->record_align = ljlua_max_size(schema->record_align, align);
     offset = ljlua_align(offset, align);
     meta->field.struct_offset = offset;
     schema->fields[i] = meta->field;
@@ -416,8 +537,10 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
     if (meta->fixed_array_capacity != 0u) {
       size_t elem_size = ljlua_fixed_array_elem_size(meta);
       size_t bytes = elem_size * meta->fixed_array_capacity;
+      size_t elem_align = ljlua_fixed_array_elem_align(meta);
 
-      offset = ljlua_align(offset, sizeof(void *));
+      schema->record_align = ljlua_max_size(schema->record_align, elem_align);
+      offset = ljlua_align(offset, elem_align);
       meta->fixed_array_offset = offset;
       offset += bytes;
     }
@@ -428,7 +551,7 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
       offset += sizeof(int);
     }
   }
-  schema->record_size = ljlua_align(offset, sizeof(void *));
+  schema->record_size = ljlua_align(offset, schema->record_align);
   schema->map.name = schema->name;
   schema->map.struct_size = schema->record_size;
   schema->map.field_count = schema->field_count;

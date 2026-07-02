@@ -48,6 +48,7 @@ set(LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/single-h
 set(LONEJSON_GENERATED_FIXTURE_DIR "${LONEJSON_SHARED_BUILD_DIR}/generated/fixtures")
 set(LONEJSON_TEST_BUNDLE_ROOT "" CACHE PATH "Root directory for extracted c.pkt.systems dependency bundle content used by tests.")
 set(LONEJSON_C_PKT_SYSTEMS_ROOT "" CACHE PATH "Root directory for extracted c.pkt.systems dependency bundle content.")
+set(LONEJSON_TEST_TIMEOUT "120" CACHE STRING "Default timeout in seconds for CTest tests that do not set their own timeout.")
 set(LONEJSON_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "Artifact architecture name")
 set(LONEJSON_TARGET_OS "${CMAKE_SYSTEM_NAME}" CACHE STRING "Artifact operating system name")
 set(LONEJSON_TARGET_LIBC "" CACHE STRING "Artifact libc suffix for Linux targets (gnu, musl, or empty)")
@@ -912,7 +913,8 @@ if(LONEJSON_BUILD_TESTS)
     get_property(lonejson_test_has_timeout TEST
       "${lonejson_registered_test}" PROPERTY TIMEOUT SET)
     if(NOT lonejson_test_has_timeout)
-      set_property(TEST "${lonejson_registered_test}" PROPERTY TIMEOUT 120)
+      set_property(TEST "${lonejson_registered_test}" PROPERTY TIMEOUT
+        "${LONEJSON_TEST_TIMEOUT}")
     endif()
     get_property(lonejson_test_has_labels TEST
       "${lonejson_registered_test}" PROPERTY LABELS SET)

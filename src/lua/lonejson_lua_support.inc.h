@@ -114,6 +114,7 @@ struct ljlua_schema {
   lonejson_map map;
   char *name;
   size_t record_size;
+  size_t record_align;
   size_t field_count;
   int has_json_value;
   int needs_record_init;
@@ -1946,7 +1947,9 @@ static int ljlua_encode_json_table(lua_State *L, int index, ljlua_json_out *out,
       count++;
       lua_pop(L, 1);
     }
-    qsort(keys, count, sizeof(*keys), ljlua_json_key_compare);
+    if (count > 1u) {
+      qsort(keys, count, sizeof(*keys), ljlua_json_key_compare);
+    }
     ljlua_json_out_write(L, out, "{", 1u);
     for (i = 0u; i < count; ++i) {
       lonejson_error error;

@@ -1268,9 +1268,12 @@ make fuzz
 ```
 
 `make test-all` is the broader local confidence gate: debug, host, curl/auth
-host, cross presets, cross sanitizer matrices under QEMU, host sanitizers,
-benchmark checks, and fuzz smoke. `make release` is the final clean release
-gate: it cleans generated state, runs `prerelease`, then builds, checksums, and
+host, cross presets, host sanitizers, benchmark checks, and fuzz smoke.
+`make cross-sanitizers` is an extra hardening check for the currently supported
+QEMU sanitizer route, `armhf-linux-gnu` ASan/UBSan; it is intentionally outside
+the normal release gate because the other pkt.systems C projects run sanitizer
+coverage on host debug targets. `make release` is the final clean release gate:
+it cleans generated state, runs `prerelease`, then builds, checksums, and
 verifies the release matrix. `make test-all-bindings` is a compatibility alias
 for the Lua binding suite; it no longer expands to the full world gate.
 

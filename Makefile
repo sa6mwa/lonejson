@@ -262,8 +262,8 @@ help:
 		'make test-host              Build and run the host-native test preset.' \
 		'make test-host-curl         Build and run the host-native curl-enabled test preset.' \
 		'make test-cross             Configure, build, and run all cross release test presets serially.' \
-		'make cross-sanitizers       Build and run ASan/TSan/MSan test matrices for Linux cross targets under QEMU.' \
-		'make test-all               Run debug, host, host-curl, cross, cross sanitizers, host sanitizers, benchmark gates, and fuzz-smoke serially.' \
+		'make cross-sanitizers       Extra hardening: build and run the supported armhf-linux-gnu ASan/UBSan target under QEMU.' \
+		'make test-all               Run debug, host, host-curl, cross, host sanitizers, benchmark gates, and fuzz-smoke serially.' \
 		'make test-all-bindings      Compatibility alias for make lua-test; binding coverage is no longer a full world gate.' \
 		'make test-install-tree      Verify checksum-listed SDK archives through installed CMake and pkg-config consumers.' \
 		'make example-smoke-local    Build and stage standalone local examples.' \
@@ -497,7 +497,6 @@ test-all:
 	$(MAKE) test-host
 	$(MAKE) test-host-curl
 	$(MAKE) test-cross
-	$(MAKE) cross-sanitizers
 	$(MAKE) asan
 ifeq ($(LONEJSON_HAVE_TSAN),1)
 	$(MAKE) tsan

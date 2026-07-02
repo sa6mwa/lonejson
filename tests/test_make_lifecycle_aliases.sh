@@ -66,11 +66,14 @@ check_dry_run_contains test-all 'make test'
 check_dry_run_contains test-all 'make test-host'
 check_dry_run_contains test-all 'make test-host-curl'
 check_dry_run_contains test-all 'make test-cross'
-check_dry_run_contains test-all 'make cross-sanitizers'
 check_dry_run_contains test-all 'make asan'
 check_dry_run_contains test-all 'make bench-check'
 check_dry_run_contains test-all 'make fuzz-smoke'
 check_dry_run_contains cross-sanitizers 'scripts/run_cross_sanitizer_matrix.sh'
+if make -C "$repo_root" -n test-all 2>&1 | grep -F 'make cross-sanitizers' >/dev/null; then
+  printf 'make test-all must not run cross QEMU sanitizer extras\n' >&2
+  exit 1
+fi
 check_dry_run_contains test-all-bindings 'make lua-test'
 if make -C "$repo_root" -n test-host 2>&1 | grep -F 'make lua-test' >/dev/null; then
   printf 'make test-host must not rerun lua-test; make test already owns native Lua binding coverage\n' >&2
