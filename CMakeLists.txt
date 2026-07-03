@@ -698,6 +698,11 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_auth_optional.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_oidc_pkce_provider_no_openssl_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oidc_pkce_provider_no_openssl.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_release_werror_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_werror.sh"

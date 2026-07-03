@@ -454,9 +454,8 @@ lonejson__jwk_check_base64_member(const char *value, const char *member,
   if (value == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  status = lonejson_base64_decoded_len(value, strlen(value),
-                                       LONEJSON_BASE64_STANDARD, &decoded_len,
-                                       error);
+  status = lonejson_base64_decoded_len(
+      value, strlen(value), LONEJSON_BASE64_STANDARD, &decoded_len, error);
   if (status != LONEJSON_STATUS_OK) {
     if (error != NULL) {
       (void)snprintf(error->message, sizeof(error->message),
@@ -543,14 +542,12 @@ static lonejson_status lonejson__jwk_validate(lonejson_jwk *jwk,
     return status;
   }
   status =
-      lonejson__jwk_check_base64url_member(jwk->x5t_s256, "x5t#S256", 0,
-                                           error);
+      lonejson__jwk_check_base64url_member(jwk->x5t_s256, "x5t#S256", 0, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
   for (i = 0u; i < jwk->x5c.count; ++i) {
-    status = lonejson__jwk_check_base64_member(jwk->x5c.items[i], "x5c",
-                                               error);
+    status = lonejson__jwk_check_base64_member(jwk->x5c.items[i], "x5c", error);
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
@@ -1412,19 +1409,65 @@ void lonejson_oidc_pkce_cleanup(lonejson_oidc_pkce *pkce) {
   }
 }
 
-lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
-                                             lonejson_owned_buffer *out,
-                                             lonejson_error *error) {
+static lonejson_status lonejson__oidc_pkce_provider(
+    lonejson *runtime, int need_random, lonejson__runtime_borrow *borrow,
+    lonejson_auth_provider *fallback, const lonejson_auth_provider **provider,
+    lonejson_error *error) {
+  const lonejson_runtime *runtime_state;
+  const lonejson_auth_provider *candidate;
+
+  borrow->runtime = NULL;
+  borrow->handle = NULL;
+  *provider = NULL;
+  candidate = NULL;
+  if (runtime != NULL) {
+    runtime_state = lonejson__require_runtime_borrow(runtime, borrow, error);
+    if (runtime_state == NULL) {
+      return LONEJSON_STATUS_INVALID_ARGUMENT;
+    }
+    if (runtime_state->has_auth_provider) {
+      candidate = &runtime_state->auth_provider;
+    }
+  }
 #ifdef LONEJSON_WITH_OPENSSL
-  unsigned char digest[EVP_MAX_MD_SIZE];
-  unsigned int digest_len = 0u;
+  if (candidate == NULL) {
+    if (lonejson_auth_provider_init_openssl(fallback, NULL, error) !=
+        LONEJSON_STATUS_OK) {
+      lonejson__runtime_borrow_release(borrow);
+      return error != NULL ? error->code : LONEJSON_STATUS_INTERNAL_ERROR;
+    }
+    candidate = fallback;
+  }
 #else
-  unsigned char digest[32];
+  (void)fallback;
 #endif
+  if (candidate == NULL) {
+    lonejson__runtime_borrow_release(borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "PKCE requires an auth crypto provider");
+  }
+  if (candidate->sha256 == NULL) {
+    lonejson__runtime_borrow_release(borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "PKCE challenge requires auth provider sha256");
+  }
+  if (need_random && candidate->random_bytes == NULL) {
+    lonejson__runtime_borrow_release(borrow);
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "PKCE verifier generation requires auth provider random_bytes");
+  }
+  *provider = candidate;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__oidc_pkce_challenge_with_provider(
+    const lonejson_auth_provider *provider, const char *code_verifier,
+    lonejson_owned_buffer *out, lonejson_error *error) {
+  unsigned char digest[32];
   char *encoded;
   lonejson_status status;
 
-  lonejson__clear_error(error);
   if (out == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "PKCE challenge output is required");
@@ -1434,18 +1477,16 @@ lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
     return status;
   }
   lonejson_owned_buffer_free(out);
-#ifdef LONEJSON_WITH_OPENSSL
-  if (EVP_Digest(code_verifier, strlen(code_verifier), digest, &digest_len,
-                 EVP_sha256(), NULL) != 1) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
-                               0u, "failed to compute PKCE challenge");
+  if (provider == NULL || provider->sha256 == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                               "PKCE challenge requires auth provider sha256");
   }
-  encoded = lonejson__base64url_encode_alloc(digest, (size_t)digest_len, error);
-#else
-  (void)digest;
-  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                             "PKCE challenge requires an auth crypto provider");
-#endif
+  status = provider->sha256(provider->user_data, code_verifier,
+                            strlen(code_verifier), digest, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  encoded = lonejson__base64url_encode_alloc(digest, sizeof(digest), error);
   if (encoded == NULL) {
     return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
   }
@@ -1454,11 +1495,40 @@ lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
   return status;
 }
 
-lonejson_status lonejson_oidc_pkce_generate(size_t verifier_bytes,
-                                            lonejson_oidc_pkce *out,
-                                            lonejson_error *error) {
+lonejson_status lonejson_oidc_pkce_challenge_with_runtime(
+    lonejson *runtime, const char *code_verifier, lonejson_owned_buffer *out,
+    lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  lonejson_auth_provider fallback;
+  const lonejson_auth_provider *provider;
+  lonejson_status status;
+
+  lonejson__clear_error(error);
+  status = lonejson__oidc_pkce_provider(runtime, 0, &borrow, &fallback,
+                                        &provider, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__oidc_pkce_challenge_with_provider(
+        provider, code_verifier, out, error);
+  }
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
+}
+
+lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
+                                             lonejson_owned_buffer *out,
+                                             lonejson_error *error) {
+  return lonejson_oidc_pkce_challenge_with_runtime(NULL, code_verifier, out,
+                                                   error);
+}
+
+lonejson_status lonejson_oidc_pkce_generate_with_runtime(
+    lonejson *runtime, size_t verifier_bytes, lonejson_oidc_pkce *out,
+    lonejson_error *error) {
   unsigned char random_bytes[96];
   lonejson_owned_buffer challenge;
+  lonejson__runtime_borrow borrow;
+  lonejson_auth_provider fallback;
+  const lonejson_auth_provider *provider;
   size_t bytes;
   char *verifier;
   char *challenge_copy;
@@ -1476,22 +1546,26 @@ lonejson_status lonejson_oidc_pkce_generate(size_t verifier_bytes,
                                0u,
                                "PKCE verifier entropy bytes must be 32..96");
   }
-#ifdef LONEJSON_WITH_OPENSSL
-  if (RAND_bytes(random_bytes, (int)bytes) != 1) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
-                               0u, "failed to generate PKCE verifier");
+  status = lonejson__oidc_pkce_provider(runtime, 1, &borrow, &fallback,
+                                        &provider, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
   }
-#else
-  return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                             "PKCE verifier generation requires an auth "
-                             "crypto provider");
-#endif
+  status =
+      provider->random_bytes(provider->user_data, random_bytes, bytes, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__runtime_borrow_release(&borrow);
+    return status;
+  }
   verifier = lonejson__base64url_encode_alloc(random_bytes, bytes, error);
   if (verifier == NULL) {
+    lonejson__runtime_borrow_release(&borrow);
     return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
   }
   lonejson_owned_buffer_init(&challenge);
-  status = lonejson_oidc_pkce_challenge(verifier, &challenge, error);
+  status = lonejson__oidc_pkce_challenge_with_provider(provider, verifier,
+                                                       &challenge, error);
+  lonejson__runtime_borrow_release(&borrow);
   if (status != LONEJSON_STATUS_OK) {
     lonejson__owned_free(verifier);
     return status;
@@ -1507,6 +1581,13 @@ lonejson_status lonejson_oidc_pkce_generate(size_t verifier_bytes,
   out->code_verifier = verifier;
   out->code_challenge = challenge_copy;
   return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_oidc_pkce_generate(size_t verifier_bytes,
+                                            lonejson_oidc_pkce *out,
+                                            lonejson_error *error) {
+  return lonejson_oidc_pkce_generate_with_runtime(NULL, verifier_bytes, out,
+                                                  error);
 }
 
 lonejson_status lonejson_oauth2_token_response_parse_json(
@@ -1595,9 +1676,10 @@ static int lonejson__oauth2_path_is_aud(const lonejson_value_path *path) {
          memcmp(path->segments[0].data, name, sizeof(name) - 1u) == 0;
 }
 
-static lonejson_status lonejson__oauth2_aud_append(
-    lonejson__oauth2_introspection_aud_visit *state, const char *data,
-    size_t len, lonejson_error *error) {
+static lonejson_status
+lonejson__oauth2_aud_append(lonejson__oauth2_introspection_aud_visit *state,
+                            const char *data, size_t len,
+                            lonejson_error *error) {
   char *next;
   size_t next_cap;
 
@@ -1632,8 +1714,9 @@ static lonejson_status lonejson__oauth2_aud_append(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__oauth2_aud_string_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__oauth2_aud_string_begin(void *user, const lonejson_value_path *path,
+                                  lonejson_error *error) {
   lonejson__oauth2_introspection_aud_visit *state =
       (lonejson__oauth2_introspection_aud_visit *)user;
 
@@ -1652,9 +1735,10 @@ static lonejson_status lonejson__oauth2_aud_string_begin(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__oauth2_aud_string_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__oauth2_aud_string_chunk(void *user, const lonejson_value_path *path,
+                                  const char *data, size_t len,
+                                  lonejson_error *error) {
   lonejson__oauth2_introspection_aud_visit *state =
       (lonejson__oauth2_introspection_aud_visit *)user;
   (void)path;
@@ -1664,8 +1748,9 @@ static lonejson_status lonejson__oauth2_aud_string_chunk(
   return lonejson__oauth2_aud_append(state, data, len, error);
 }
 
-static lonejson_status lonejson__oauth2_aud_string_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__oauth2_aud_string_end(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
   lonejson__oauth2_introspection_aud_visit *state =
       (lonejson__oauth2_introspection_aud_visit *)user;
   char *copy;
@@ -2270,15 +2355,14 @@ static lonejson_status lonejson__oauth2_basic_authorization(
   }
   lonejson_owned_buffer_init(&credentials);
   lonejson_owned_buffer_free(out);
-  status =
-      lonejson__oauth2_form_append_component(&credentials, client_id, SIZE_MAX,
-                                             error);
+  status = lonejson__oauth2_form_append_component(&credentials, client_id,
+                                                  SIZE_MAX, error);
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson_owned_buffer_sink(&credentials, ":", 1u, error);
   }
   if (status == LONEJSON_STATUS_OK) {
-    status = lonejson__oauth2_form_append_component(
-        &credentials, client_secret, SIZE_MAX, error);
+    status = lonejson__oauth2_form_append_component(&credentials, client_secret,
+                                                    SIZE_MAX, error);
   }
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson_base64_encoded_len(
@@ -2634,8 +2718,9 @@ lonejson__oauth2_percent_decode(const char *data, size_t len,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__oidc_callback_reject_nul(
-    const char *value, size_t len, const char *kind, lonejson_error *error) {
+static lonejson_status
+lonejson__oidc_callback_reject_nul(const char *value, size_t len,
+                                   const char *kind, lonejson_error *error) {
   if (len != 0u && memchr(value, '\0', len) != NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
                                "%s contains a NUL byte", kind);
@@ -2743,30 +2828,22 @@ lonejson_status lonejson_oidc_authorization_callback_parse_query(
       break;
     }
     if (strcmp(key.data, "code") == 0) {
-      status = lonejson__oidc_callback_assign(&out->code,
-                                              value.data != NULL ? value.data
-                                                                 : "",
-                                              value.len, error);
+      status = lonejson__oidc_callback_assign(
+          &out->code, value.data != NULL ? value.data : "", value.len, error);
     } else if (strcmp(key.data, "state") == 0) {
-      status = lonejson__oidc_callback_assign(&out->state,
-                                              value.data != NULL ? value.data
-                                                                 : "",
-                                              value.len, error);
+      status = lonejson__oidc_callback_assign(
+          &out->state, value.data != NULL ? value.data : "", value.len, error);
     } else if (strcmp(key.data, "error") == 0) {
-      status = lonejson__oidc_callback_assign(&out->error,
-                                              value.data != NULL ? value.data
-                                                                 : "",
-                                              value.len, error);
+      status = lonejson__oidc_callback_assign(
+          &out->error, value.data != NULL ? value.data : "", value.len, error);
     } else if (strcmp(key.data, "error_description") == 0) {
-      status = lonejson__oidc_callback_assign(&out->error_description,
-                                              value.data != NULL ? value.data
-                                                                 : "",
-                                              value.len, error);
+      status = lonejson__oidc_callback_assign(
+          &out->error_description, value.data != NULL ? value.data : "",
+          value.len, error);
     } else if (strcmp(key.data, "error_uri") == 0) {
-      status = lonejson__oidc_callback_assign(&out->error_uri,
-                                              value.data != NULL ? value.data
-                                                                 : "",
-                                              value.len, error);
+      status = lonejson__oidc_callback_assign(
+          &out->error_uri, value.data != NULL ? value.data : "", value.len,
+          error);
     }
   }
   lonejson_owned_buffer_free(&key);
@@ -3104,8 +3181,8 @@ static int lonejson__jwt_path_is_aud_item(const lonejson_value_path *path) {
   return lonejson__jwt_path_is_array_item(path, "aud");
 }
 
-static int lonejson__jwt_path_is_registered_header(
-    const lonejson_value_path *path) {
+static int
+lonejson__jwt_path_is_registered_header(const lonejson_value_path *path) {
   return lonejson__jwt_path_is(path, "alg") ||
          lonejson__jwt_path_is(path, "kid") ||
          lonejson__jwt_path_is(path, "typ") ||
@@ -3117,8 +3194,8 @@ static int lonejson__jwt_path_is_registered_header(
          lonejson__jwt_path_is_array_item(path, "x5c");
 }
 
-static int lonejson__jwt_path_is_registered_claim(
-    const lonejson_value_path *path) {
+static int
+lonejson__jwt_path_is_registered_claim(const lonejson_value_path *path) {
   return lonejson__jwt_path_is(path, "iss") ||
          lonejson__jwt_path_is(path, "sub") ||
          lonejson__jwt_path_is(path, "nonce") ||
@@ -3281,8 +3358,8 @@ lonejson__jwt_claim_string_begin(void *user, const lonejson_value_path *path,
     }
     if (lonejson__jwt_path_is(path, "x5t#S256")) {
       return lonejson__jwt_begin_string_field(
-          state, LONEJSON__JWT_FIELD_HEADER_X5T_S256,
-          &state->seen_x5t_s256, "x5t#S256", error);
+          state, LONEJSON__JWT_FIELD_HEADER_X5T_S256, &state->seen_x5t_s256,
+          "x5t#S256", error);
     }
     if (lonejson__jwt_path_is_array_item(path, "x5c")) {
       state->active = LONEJSON__JWT_FIELD_HEADER_X5C_ITEM;
@@ -3398,8 +3475,8 @@ lonejson__jwt_claim_string_end(void *user, const lonejson_value_path *path,
       return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
                                  0u, 0u, "failed to allocate JWT claim value");
     }
-    if (lonejson__jwt_string_array_append(&state->header->crit, value,
-                                          error) != LONEJSON_STATUS_OK) {
+    if (lonejson__jwt_string_array_append(&state->header->crit, value, error) !=
+        LONEJSON_STATUS_OK) {
       lonejson__owned_free(value);
       return error != NULL ? error->code : LONEJSON_STATUS_ALLOCATION_FAILED;
     }
@@ -3688,7 +3765,8 @@ static lonejson_path_value_visitor lonejson__jwt_claim_visitor(void) {
   return visitor;
 }
 
-static void lonejson__jwt_owned_string_array_cleanup(lonejson_string_array *array) {
+static void
+lonejson__jwt_owned_string_array_cleanup(lonejson_string_array *array) {
   size_t i;
   if (array == NULL) {
     return;
@@ -3780,13 +3858,12 @@ lonejson__jwt_header_validate(const lonejson_jwt_header *header,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "JWT header is required");
   }
-  status =
-      lonejson__jwk_check_base64url_member(header->x5t, "x5t", 0, error);
+  status = lonejson__jwk_check_base64url_member(header->x5t, "x5t", 0, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson__jwk_check_base64url_member(header->x5t_s256, "x5t#S256",
-                                                0, error);
+  status = lonejson__jwk_check_base64url_member(header->x5t_s256, "x5t#S256", 0,
+                                                error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -4050,8 +4127,9 @@ static int lonejson__jwt_claim_has_scope(const lonejson_jwt_claims *claims,
   return 0;
 }
 
-static lonejson_status lonejson__jwt_validate_jwk_signature_use(
-    const lonejson_jwk *jwk, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_validate_jwk_signature_use(const lonejson_jwk *jwk,
+                                         lonejson_error *error) {
   if (jwk->use != NULL && strcmp(jwk->use, "sig") != 0) {
     return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
                                "JWT JWK use is not valid for signatures");
@@ -4163,9 +4241,9 @@ lonejson_status lonejson_jwt_validate_claims(
         !lonejson__jwt_string_in_list(header->crit.items[i],
                                       policy->accepted_crit,
                                       policy->accepted_crit_count)) {
-      return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                 0u,
-                                 "JWT critical header parameter is unsupported");
+      return lonejson__set_error(
+          error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+          "JWT critical header parameter is unsupported");
     }
   }
   for (i = 0u; i < policy->required_scope_count; ++i) {
@@ -4275,9 +4353,8 @@ static int lonejson__jwt_digest_matches_b64url(const char *encoded,
     return 1;
   }
   lonejson_error_init(&error);
-  decoded = lonejson__jwt_decode_base64url_alloc(encoded, strlen(encoded),
-                                                 &decoded_len, "thumbprint",
-                                                 &error);
+  decoded = lonejson__jwt_decode_base64url_alloc(
+      encoded, strlen(encoded), &decoded_len, "thumbprint", &error);
   if (decoded == NULL) {
     return 0;
   }
@@ -4745,8 +4822,9 @@ lonejson__jwt_validate_eddsa_signature(const lonejson_jwt_compact *jwt,
                              "JWT signature validation failed");
 }
 
-static EVP_PKEY *lonejson__jwt_eddsa_public_key_from_jwk(const lonejson_jwk *jwk,
-                                                         lonejson_error *error) {
+static EVP_PKEY *
+lonejson__jwt_eddsa_public_key_from_jwk(const lonejson_jwk *jwk,
+                                        lonejson_error *error) {
   EVP_PKEY *pkey;
   unsigned char *x = NULL;
   size_t x_len = 0u;
@@ -4781,9 +4859,10 @@ static EVP_PKEY *lonejson__jwt_eddsa_public_key_from_jwk(const lonejson_jwk *jwk
   return pkey;
 }
 
-static EVP_PKEY *lonejson__jwt_public_key_from_jwk_for_alg(
-    const lonejson_jwt_header *header, const lonejson_jwk *jwk,
-    lonejson_error *error) {
+static EVP_PKEY *
+lonejson__jwt_public_key_from_jwk_for_alg(const lonejson_jwt_header *header,
+                                          const lonejson_jwk *jwk,
+                                          lonejson_error *error) {
   if (strcmp(header->alg, "RS256") == 0 || strcmp(header->alg, "PS256") == 0) {
     return lonejson__jwt_rsa_public_key_from_jwk(jwk, error);
   }
@@ -4798,9 +4877,10 @@ static EVP_PKEY *lonejson__jwt_public_key_from_jwk_for_alg(
   return NULL;
 }
 
-static lonejson_status lonejson__jwt_validate_jwk_x5c(
-    void *x509_store, const lonejson_jwt_header *header,
-    const lonejson_jwk *jwk, lonejson_error *error) {
+static lonejson_status
+lonejson__jwt_validate_jwk_x5c(void *x509_store,
+                               const lonejson_jwt_header *header,
+                               const lonejson_jwk *jwk, lonejson_error *error) {
   STACK_OF(X509) *chain = NULL;
   X509 *leaf = NULL;
   X509 *cert = NULL;
@@ -4833,16 +4913,16 @@ static lonejson_status lonejson__jwt_validate_jwk_x5c(
       leaf = cert;
     } else if (!sk_X509_push(chain, cert)) {
       X509_free(cert);
-      status = lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
-                                   0u, 0u,
-                                   "failed to append JWK x5c certificate");
+      status =
+          lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                              0u, "failed to append JWK x5c certificate");
       goto done;
     }
     cert = NULL;
   }
   if (leaf == NULL) {
-    status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
-                                 "JWK x5c chain is empty");
+    status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                                 0u, "JWK x5c chain is empty");
     goto done;
   }
   if (X509_digest(leaf, EVP_sha1(), digest, &digest_len) != 1 ||
@@ -4853,9 +4933,9 @@ static lonejson_status lonejson__jwt_validate_jwk_x5c(
   }
   if (!lonejson__jwt_digest_matches_b64url(jwk->x5t, digest, digest_len) ||
       !lonejson__jwt_digest_matches_b64url(header->x5t, digest, digest_len)) {
-    status = lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                 0u,
-                                 "JWT x5t thumbprint does not match x5c leaf");
+    status =
+        lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                            "JWT x5t thumbprint does not match x5c leaf");
     goto done;
   }
   if (X509_digest(leaf, EVP_sha256(), digest, &digest_len) != 1 ||
@@ -4867,25 +4947,24 @@ static lonejson_status lonejson__jwt_validate_jwk_x5c(
   if (!lonejson__jwt_digest_matches_b64url(jwk->x5t_s256, digest, digest_len) ||
       !lonejson__jwt_digest_matches_b64url(header->x5t_s256, digest,
                                            digest_len)) {
-    status = lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                 0u,
-                                 "JWT x5t#S256 thumbprint does not match x5c leaf");
+    status =
+        lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                            "JWT x5t#S256 thumbprint does not match x5c leaf");
     goto done;
   }
   cert_key = X509_get_pubkey(leaf);
   jwk_key = lonejson__jwt_public_key_from_jwk_for_alg(header, jwk, error);
   if (cert_key == NULL || jwk_key == NULL) {
-    status = error != NULL && error->code != LONEJSON_STATUS_OK
-                 ? error->code
-                 : lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
-                                       0u, 0u,
-                                       "JWK x5c leaf public key is invalid");
+    status =
+        error != NULL && error->code != LONEJSON_STATUS_OK
+            ? error->code
+            : lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                                  0u, "JWK x5c leaf public key is invalid");
     goto done;
   }
   if (EVP_PKEY_eq(cert_key, jwk_key) != 1) {
     status = lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                 0u,
-                                 "JWK public key does not match x5c leaf");
+                                 0u, "JWK public key does not match x5c leaf");
     goto done;
   }
   if (x509_store != NULL) {
@@ -4894,24 +4973,25 @@ static lonejson_status lonejson__jwt_validate_jwk_x5c(
     store = X509_STORE_new();
     owns_store = 1;
     if (store == NULL || X509_STORE_set_default_paths(store) != 1) {
-      status = lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
-                                   0u, 0u,
-                                   "failed to initialize OpenSSL trust store");
+      status =
+          lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                              0u, "failed to initialize OpenSSL trust store");
       goto done;
     }
   }
   store_ctx = X509_STORE_CTX_new();
   if (store_ctx == NULL ||
       X509_STORE_CTX_init(store_ctx, store, leaf, chain) != 1) {
-    status = lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
-                                 0u, 0u,
-                                 "failed to initialize JWK x5c verifier");
+    status =
+        lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
+                            0u, "failed to initialize JWK x5c verifier");
     goto done;
   }
   ok = X509_verify_cert(store_ctx);
   if (ok != 1) {
-    status = lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                 0u, "JWK x5c certificate chain is not trusted");
+    status =
+        lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                            "JWK x5c certificate chain is not trusted");
     goto done;
   }
 
@@ -5935,8 +6015,8 @@ void lonejson_m2m_authentication_cleanup(lonejson_m2m_authentication *auth) {
 }
 
 static lonejson_status
-lonejson__m2m_extract_bearer(const char *authorization_header,
-                             char **token, lonejson_error *error) {
+lonejson__m2m_extract_bearer(const char *authorization_header, char **token,
+                             lonejson_error *error) {
   const char *p;
   const char *begin;
   const char *end;
@@ -6139,9 +6219,9 @@ lonejson_status lonejson_m2m_verify_authorization(
             lonejson__owned_free(client_secret);
             lonejson__m2m_store_cleanup(&store);
             lonejson__runtime_borrow_release(&borrow);
-            return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
-                                       0u, 0u, 0u,
-                                       "failed to copy authenticated client id");
+            return lonejson__set_error(
+                error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+                "failed to copy authenticated client id");
           }
           out->auth_mode = LONEJSON_M2M_AUTH_BASIC;
           status = lonejson_json_value_set_buffer(
@@ -6182,9 +6262,9 @@ lonejson_status lonejson_m2m_verify_authorization(
             lonejson__owned_free(api_key);
             lonejson__m2m_store_cleanup(&store);
             lonejson__runtime_borrow_release(&borrow);
-            return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
-                                       0u, 0u, 0u,
-                                       "failed to copy authenticated client id");
+            return lonejson__set_error(
+                error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+                "failed to copy authenticated client id");
           }
           out->auth_mode = LONEJSON_M2M_AUTH_BEARER;
           status = lonejson_json_value_set_buffer(

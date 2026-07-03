@@ -119,7 +119,9 @@ for symbol in \
     lonejson_oidc_pkce_init \
     lonejson_oidc_pkce_cleanup \
     lonejson_oidc_pkce_challenge \
+    lonejson_oidc_pkce_challenge_with_runtime \
     lonejson_oidc_pkce_generate \
+    lonejson_oidc_pkce_generate_with_runtime \
     lonejson_oidc_authorization_url \
     lonejson_oidc_authorization_callback_init \
     lonejson_oidc_authorization_callback_cleanup \

@@ -2478,14 +2478,52 @@ static void test_oauth2_token_response_failures(void) {
   lonejson_oidc_userinfo_response_cleanup(&userinfo);
 }
 
+static lonejson_status test_auth_provider_random_bytes(void *user,
+                                                       unsigned char *dst,
+                                                       size_t len,
+                                                       lonejson_error *error) {
+  size_t i;
+  (void)user;
+  (void)error;
+  for (i = 0u; i < len; ++i) {
+    dst[i] = (unsigned char)i;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_auth_provider_pkce_sha256(
+    void *user, const void *data, size_t len, unsigned char out[32],
+    lonejson_error *error) {
+  static const char verifier[] = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+  size_t i;
+  (void)error;
+  if (data != NULL && len == sizeof(verifier) - 1u &&
+      memcmp(data, verifier, sizeof(verifier) - 1u) == 0 && user != NULL) {
+    memcpy(out, user, 32u);
+    return LONEJSON_STATUS_OK;
+  }
+  for (i = 0u; i < 32u; ++i) {
+    out[i] = (unsigned char)i;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 static void test_oidc_pkce_challenge_and_generate(void) {
   static const char verifier[] = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+  static const unsigned char verifier_digest[32] = {
+      0x13u, 0xd3u, 0x1eu, 0x96u, 0x1au, 0x1au, 0xd8u, 0xecu,
+      0x2fu, 0x16u, 0xb1u, 0x0cu, 0x4cu, 0x98u, 0x2eu, 0x08u,
+      0x76u, 0xa8u, 0x78u, 0xadu, 0x6du, 0xf1u, 0x44u, 0x56u,
+      0x6eu, 0xe1u, 0x89u, 0x4au, 0xcbu, 0x70u, 0xf9u, 0xc3u};
   lonejson_owned_buffer challenge;
   lonejson_oidc_pkce pkce;
+  lonejson_auth_provider provider;
+  lonejson_auth_provider sha_only_provider;
+  lonejson_auth_provider random_only_provider;
+  lonejson_config config;
+  lonejson *runtime;
   lonejson_error error;
-#ifdef LONEJSON_WITH_OPENSSL
   size_t i;
-#endif
 
   lonejson_error_init(&error);
   lonejson_owned_buffer_init(&challenge);
@@ -2512,6 +2550,50 @@ static void test_oidc_pkce_challenge_and_generate(void) {
   lonejson_oidc_pkce_init(&pkce);
   EXPECT(lj_oidc_pkce_generate(0u, &pkce, &error) == LJ_STATUS_TYPE_MISMATCH);
 #endif
+
+  memset(&provider, 0, sizeof(provider));
+  provider.user_data = (void *)verifier_digest;
+  provider.random_bytes = test_auth_provider_random_bytes;
+  provider.sha256 = test_auth_provider_pkce_sha256;
+  config = lonejson_default_config();
+  config.auth_provider = &provider;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  EXPECT(runtime->oidc_pkce_challenge_with_runtime != NULL);
+  EXPECT(runtime->oidc_pkce_generate_with_runtime != NULL);
+  EXPECT(lonejson_oidc_pkce_challenge_with_runtime(runtime, verifier, &challenge,
+                                                   &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(challenge.data,
+                "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM") == 0);
+  lonejson_owned_buffer_free(&challenge);
+  lonejson_oidc_pkce_init(&pkce);
+  EXPECT(lj_oidc_pkce_generate_with_runtime(runtime, 32u, &pkce, &error) ==
+         LJ_STATUS_OK);
+  EXPECT(strcmp(pkce.code_verifier,
+                "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8") == 0);
+  EXPECT(strcmp(pkce.code_challenge,
+                "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8") == 0);
+  lonejson_oidc_pkce_cleanup(&pkce);
+  lonejson_free(runtime);
+
+  memset(&sha_only_provider, 0, sizeof(sha_only_provider));
+  sha_only_provider.sha256 = test_auth_provider_pkce_sha256;
+  config = lonejson_default_config();
+  config.auth_provider = &sha_only_provider;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(lonejson_oidc_pkce_generate_with_runtime(runtime, 32u, &pkce, &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_free(runtime);
+
+  memset(&random_only_provider, 0, sizeof(random_only_provider));
+  random_only_provider.random_bytes = test_auth_provider_random_bytes;
+  config = lonejson_default_config();
+  config.auth_provider = &random_only_provider;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(lonejson_oidc_pkce_challenge_with_runtime(runtime, verifier, &challenge,
+                                                   &error) ==
+         LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_free(runtime);
 
   EXPECT(lonejson_oidc_pkce_challenge("too-short", &challenge, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);

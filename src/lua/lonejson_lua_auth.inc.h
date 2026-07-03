@@ -2042,15 +2042,27 @@ static int ljlua_m2m_signup_complete(lua_State *L) {
 }
 
 static int ljlua_oidc_pkce_challenge(lua_State *L) {
+  lonejson *runtime;
+  lonejson *owned_runtime;
   lonejson_owned_buffer out;
   lonejson_error error;
   lonejson_status status;
   const char *verifier;
+  int arg;
 
-  verifier = luaL_checkstring(L, 1);
-  lonejson_owned_buffer_init(&out);
   lonejson_error_init(&error);
-  status = lonejson_oidc_pkce_challenge(verifier, &out, &error);
+  runtime = ljlua_auth_runtime_arg(L, &arg, &owned_runtime, &error);
+  if (runtime == NULL) {
+    return ljlua_push_status_result(L, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                    &error);
+  }
+  verifier = luaL_checkstring(L, arg);
+  lonejson_owned_buffer_init(&out);
+  status = lonejson_oidc_pkce_challenge_with_runtime(runtime, verifier, &out,
+                                                     &error);
+  if (owned_runtime != NULL) {
+    lonejson_free(owned_runtime);
+  }
   if (status != LONEJSON_STATUS_OK) {
     lonejson_owned_buffer_free(&out);
     return ljlua_push_status_result(L, status, &error);
@@ -2061,19 +2073,31 @@ static int ljlua_oidc_pkce_challenge(lua_State *L) {
 }
 
 static int ljlua_oidc_pkce_generate(lua_State *L) {
+  lonejson *runtime;
+  lonejson *owned_runtime;
   lonejson_oidc_pkce pkce;
   lonejson_error error;
   lonejson_status status;
   lua_Integer verifier_bytes = 0;
+  int arg;
 
-  if (!lua_isnoneornil(L, 1)) {
-    verifier_bytes = luaL_checkinteger(L, 1);
-    luaL_argcheck(L, verifier_bytes >= 0, 1,
+  lonejson_error_init(&error);
+  runtime = ljlua_auth_runtime_arg(L, &arg, &owned_runtime, &error);
+  if (runtime == NULL) {
+    return ljlua_push_status_result(L, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                    &error);
+  }
+  if (!lua_isnoneornil(L, arg)) {
+    verifier_bytes = luaL_checkinteger(L, arg);
+    luaL_argcheck(L, verifier_bytes >= 0, arg,
                   "verifier_bytes must be non-negative");
   }
   lonejson_oidc_pkce_init(&pkce);
-  lonejson_error_init(&error);
-  status = lonejson_oidc_pkce_generate((size_t)verifier_bytes, &pkce, &error);
+  status = lonejson_oidc_pkce_generate_with_runtime(
+      runtime, (size_t)verifier_bytes, &pkce, &error);
+  if (owned_runtime != NULL) {
+    lonejson_free(owned_runtime);
+  }
   if (status != LONEJSON_STATUS_OK) {
     lonejson_oidc_pkce_cleanup(&pkce);
     return ljlua_push_status_result(L, status, &error);

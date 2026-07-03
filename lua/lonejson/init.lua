@@ -197,6 +197,8 @@ local runtime_exports = {
   "oauth2_revoke_token_request",
   "oidc_userinfo_request",
   "oidc_authorization_code_token_request",
+  "oidc_pkce_challenge",
+  "oidc_pkce_generate",
   "oauth2_token_response_parse_json",
   "oauth2_introspection_response_parse_json",
   "oidc_userinfo_response_parse_json",

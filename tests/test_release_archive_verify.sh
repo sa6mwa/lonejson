@@ -119,7 +119,9 @@ void lonejson_oidc_userinfo_response_parse_json(void);
 void lonejson_oidc_pkce_init(void);
 void lonejson_oidc_pkce_cleanup(void);
 void lonejson_oidc_pkce_challenge(void);
+void lonejson_oidc_pkce_challenge_with_runtime(void);
 void lonejson_oidc_pkce_generate(void);
+void lonejson_oidc_pkce_generate_with_runtime(void);
 void lonejson_oidc_authorization_url(void);
 void lonejson_oidc_authorization_callback_init(void);
 void lonejson_oidc_authorization_callback_cleanup(void);
@@ -339,7 +341,13 @@ void lonejson_oidc_pkce_cleanup(void) {
 void lonejson_oidc_pkce_challenge(void) {
 }
 
+void lonejson_oidc_pkce_challenge_with_runtime(void) {
+}
+
 void lonejson_oidc_pkce_generate(void) {
+}
+
+void lonejson_oidc_pkce_generate_with_runtime(void) {
 }
 
 void lonejson_oidc_authorization_url(void) {

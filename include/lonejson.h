@@ -1391,9 +1391,9 @@ struct lonejson_auth_provider {
  * `x509_store` may point to an OpenSSL `X509_STORE` owned by the caller. The
  * OpenSSL adapter copies this pointer value into `lonejson_auth_provider`, but
  * does not take ownership of the store object. When NULL, the OpenSSL provider
- * uses a temporary store with OpenSSL default verify paths. The caller must keep
- * a non-NULL store object alive until no runtime using the provider can call
- * auth APIs.
+ * uses a temporary store with OpenSSL default verify paths. The caller must
+ * keep a non-NULL store object alive until no runtime using the provider can
+ * call auth APIs.
  */
 typedef struct lonejson_openssl_auth_provider_config {
   void *libctx;
@@ -3296,6 +3296,15 @@ struct lonejson {
   lonejson_status (*oidc_validate_bearer_token)(
       lonejson *runtime, const lonejson_oidc_bearer_validation_request *request,
       lonejson_oidc_bearer_validation *out, lonejson_error *error);
+  /** Computes a PKCE S256 challenge through this runtime's auth provider. */
+  lonejson_status (*oidc_pkce_challenge_with_runtime)(
+      lonejson *runtime, const char *code_verifier, lonejson_owned_buffer *out,
+      lonejson_error *error);
+  /** Generates a PKCE verifier through this runtime's auth provider. */
+  lonejson_status (*oidc_pkce_generate_with_runtime)(lonejson *runtime,
+                                                     size_t verifier_bytes,
+                                                     lonejson_oidc_pkce *out,
+                                                     lonejson_error *error);
   /** Generates one M2M credential record plus one-time secrets. */
   lonejson_status (*m2m_credential_generate)(
       lonejson *runtime, const lonejson_m2m_credential_request *request,
@@ -6547,8 +6556,8 @@ lonejson_status lonejson_jwt_validate_claims(
  * This is a trust decision for the JWS signature only. The caller must still
  * validate claims with `lonejson_jwt_validate_claims()`. The decoded header is
  * supplied explicitly so algorithm and key constraints are checked against the
- * same parsed header the caller will use for claim policy. With the OpenSSL auth
- * provider, selected JWK `x5c` chains are validated when present.
+ * same parsed header the caller will use for claim policy. With the OpenSSL
+ * auth provider, selected JWK `x5c` chains are validated when present.
  */
 lonejson_status
 lonejson_jwt_validate_signature(const lonejson_jwt_compact *jwt,
@@ -6790,18 +6799,45 @@ lonejson_status lonejson_oidc_authorization_code_token_request(
 void lonejson_oidc_pkce_init(lonejson_oidc_pkce *pkce);
 /** Releases all storage owned by a PKCE pair. */
 void lonejson_oidc_pkce_cleanup(lonejson_oidc_pkce *pkce);
-/** Computes a base64url S256 PKCE challenge for a caller-provided verifier. */
+/** Computes a base64url S256 PKCE challenge for a caller-provided verifier.
+ *
+ * This convenience helper uses lonejson's built-in OpenSSL adapter when
+ * compiled with `LONEJSON_WITH_OPENSSL`. Builds without that adapter should use
+ * `lonejson_oidc_pkce_challenge_with_runtime()` and install an auth provider
+ * with `sha256`.
+ */
 lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
                                              lonejson_owned_buffer *out,
                                              lonejson_error *error);
+/** Computes a PKCE S256 challenge through the runtime auth provider.
+ *
+ * The provider must implement `sha256`. OpenSSL-enabled builds fall back to the
+ * built-in adapter when the runtime has no provider.
+ */
+lonejson_status lonejson_oidc_pkce_challenge_with_runtime(
+    lonejson *runtime, const char *code_verifier, lonejson_owned_buffer *out,
+    lonejson_error *error);
 /** Generates a random PKCE verifier and matching S256 challenge.
  *
  * `verifier_bytes == 0` uses the default 32 random bytes. Valid non-zero
  * values are 32..96, producing RFC 7636 verifier lengths of 43..128 chars.
+ * This convenience helper uses lonejson's built-in OpenSSL adapter when
+ * compiled with `LONEJSON_WITH_OPENSSL`; otherwise use
+ * `lonejson_oidc_pkce_generate_with_runtime()` with an auth provider that
+ * implements `random_bytes` and `sha256`.
  */
 lonejson_status lonejson_oidc_pkce_generate(size_t verifier_bytes,
                                             lonejson_oidc_pkce *out,
                                             lonejson_error *error);
+/** Generates a PKCE verifier and matching challenge through the runtime auth
+ * provider.
+ *
+ * The provider must implement `random_bytes` and `sha256`. OpenSSL-enabled
+ * builds fall back to the built-in adapter when the runtime has no provider.
+ */
+lonejson_status lonejson_oidc_pkce_generate_with_runtime(
+    lonejson *runtime, size_t verifier_bytes, lonejson_oidc_pkce *out,
+    lonejson_error *error);
 /** Builds an authorization-code URL with PKCE S256 parameters. */
 lonejson_status lonejson_oidc_authorization_url(
     const lonejson_oidc_authorization_request *request,
@@ -9908,10 +9944,9 @@ lj_oauth2_token_flow_cleanup(lj_oauth2_token_flow *flow) {
   lonejson_oauth2_token_flow_cleanup(flow);
 }
 /** Copies borrowed or persisted token-flow fields into owned storage. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_oauth2_token_flow_assign(lj_oauth2_token_flow *flow,
-                            const lj_oauth2_token_flow *source,
-                            lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_flow_assign(
+    lj_oauth2_token_flow *flow, const lj_oauth2_token_flow *source,
+    lj_error *error) {
   return lonejson_oauth2_token_flow_assign(flow, source, error);
 }
 /** Returns non-zero when the flow has no usable access token at `now`. */
@@ -9995,10 +10030,23 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_pkce_challenge(
     const char *code_verifier, lj_owned_buffer *out, lj_error *error) {
   return lonejson_oidc_pkce_challenge(code_verifier, out, error);
 }
+/** Computes a PKCE S256 challenge through a runtime auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_pkce_challenge_with_runtime(lj *runtime, const char *code_verifier,
+                                    lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oidc_pkce_challenge_with_runtime(runtime, code_verifier, out,
+                                                   error);
+}
 /** Generates a random PKCE verifier and matching S256 challenge. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_pkce_generate(
     size_t verifier_bytes, lj_oidc_pkce *out, lj_error *error) {
   return lonejson_oidc_pkce_generate(verifier_bytes, out, error);
+}
+/** Generates a PKCE verifier through a runtime auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_pkce_generate_with_runtime(
+    lj *runtime, size_t verifier_bytes, lj_oidc_pkce *out, lj_error *error) {
+  return lonejson_oidc_pkce_generate_with_runtime(runtime, verifier_bytes, out,
+                                                  error);
 }
 /** Builds an authorization-code URL with PKCE S256 parameters. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status
