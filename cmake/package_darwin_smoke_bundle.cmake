@@ -49,7 +49,7 @@ if(NOT LONEJSON_MACOS_DEPLOYMENT_TARGET)
   set(LONEJSON_MACOS_DEPLOYMENT_TARGET "15.0")
 endif()
 if(NOT LONEJSON_ABI_VERSION)
-  set(LONEJSON_ABI_VERSION "19")
+  message(FATAL_ERROR "LONEJSON_ABI_VERSION is required for Darwin smoke bundle")
 endif()
 
 get_filename_component(_lonejson_compiler_dir "${CMAKE_C_COMPILER}" DIRECTORY)

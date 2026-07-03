@@ -25,6 +25,13 @@ printf '%s\n' "$matrix_script" | grep -F -- 'package-darwin-smoke-bundle' >/dev/
 printf '%s\n' "$matrix_script" | grep -F -- 'make package-verify' >/dev/null
 grep -F 'liblonejson.${LONEJSON_ABI_VERSION}.dylib' \
   "$darwin_smoke_script_path" >/dev/null
+grep -F 'LONEJSON_ABI_VERSION is required for Darwin smoke bundle' \
+  "$darwin_smoke_script_path" >/dev/null
+if grep -E 'set\(LONEJSON_ABI_VERSION "[0-9]+"\)' \
+    "$darwin_smoke_script_path" >/dev/null; then
+  printf 'Darwin smoke bundle must not hard-code an ABI fallback\n' >&2
+  exit 1
+fi
 printf '%s\n' "$darwin_smoke_script" | \
   grep -F -- 'lonejson_import_cache_path(LONEJSON_C_PKT_SYSTEMS_ROOT)' >/dev/null
 printf '%s\n' "$darwin_smoke_script" | \
