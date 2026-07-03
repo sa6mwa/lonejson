@@ -1343,7 +1343,7 @@ static void test_oidc_discovery_url(void) {
   EXPECT(lj_oidc_discovery_url("https://id.example/tenant/", &out, &error) ==
          LJ_STATUS_OK);
   EXPECT(strcmp(out.data,
-                "https://id.example/.well-known/openid-configuration/tenant") ==
+                "https://id.example/tenant/.well-known/openid-configuration") ==
          0);
   lonejson_owned_buffer_free(&out);
 
@@ -2511,7 +2511,9 @@ static void test_oidc_pkce_challenge_and_generate(void) {
   lonejson_config config;
   lonejson *runtime;
   lonejson_error error;
+#ifdef LONEJSON_WITH_OPENSSL
   size_t i;
+#endif
 
   lonejson_error_init(&error);
   lonejson_owned_buffer_init(&challenge);

@@ -749,7 +749,6 @@ lonejson_status lonejson_oidc_discovery_url(const char *issuer,
   static const char well_known[] = "/.well-known/openid-configuration";
   size_t issuer_len;
   size_t authority_end;
-  size_t path_len;
   size_t trim_len;
   size_t total_len;
   lonejson_allocator allocator;
@@ -770,23 +769,19 @@ lonejson_status lonejson_oidc_discovery_url(const char *issuer,
   while (trim_len > authority_end && issuer[trim_len - 1u] == '/') {
     --trim_len;
   }
-  path_len = trim_len - authority_end;
-  if (authority_end > SIZE_MAX - (sizeof(well_known) - 1u) ||
-      authority_end + (sizeof(well_known) - 1u) > SIZE_MAX - path_len - 1u) {
+  if (trim_len > SIZE_MAX - (sizeof(well_known) - 1u) - 1u) {
     return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                                "OIDC discovery URL is too large");
   }
-  total_len = authority_end + (sizeof(well_known) - 1u) + path_len;
+  total_len = trim_len + (sizeof(well_known) - 1u);
   allocator = lonejson_default_allocator();
   data = (char *)lonejson__buffer_alloc(&allocator, total_len + 1u);
   if (data == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
                                0u, "failed to allocate OIDC discovery URL");
   }
-  memcpy(data, issuer, authority_end);
-  memcpy(data + authority_end, well_known, sizeof(well_known) - 1u);
-  memcpy(data + authority_end + (sizeof(well_known) - 1u),
-         issuer + authority_end, path_len);
+  memcpy(data, issuer, trim_len);
+  memcpy(data + trim_len, well_known, sizeof(well_known) - 1u);
   data[total_len] = '\0';
   lonejson_owned_buffer_free(out);
   out->data = data;
@@ -1504,6 +1499,14 @@ lonejson_status lonejson_oidc_pkce_challenge_with_runtime(
   lonejson_status status;
 
   lonejson__clear_error(error);
+  if (out == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "PKCE challenge output is required");
+  }
+  status = lonejson__oidc_pkce_validate_verifier(code_verifier, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
   status = lonejson__oidc_pkce_provider(runtime, 0, &borrow, &fallback,
                                         &provider, error);
   if (status == LONEJSON_STATUS_OK) {

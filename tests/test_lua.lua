@@ -433,7 +433,7 @@ if lonejson.jwt_parse_compact ~= nil then
     local provider_ok = provider_lj:set_http_provider(function(request)
       http_requests[#http_requests + 1] = request
       assert_eq(request.user_agent, "lonejson-lua-test/1")
-      if request.url == "https://id.example/.well-known/openid-configuration/tenant" then
+      if request.url == "https://id.example/tenant/.well-known/openid-configuration" then
         assert_eq(request.method, "GET")
         return { status_code = 200, body = discovery_json }
       end
@@ -545,7 +545,7 @@ if lonejson.jwt_parse_compact ~= nil then
         }, 4096)
 
     assert_eq(lonejson.oidc_discovery_url("https://id.example/tenant/"),
-              "https://id.example/.well-known/openid-configuration/tenant")
+              "https://id.example/tenant/.well-known/openid-configuration")
     assert_eq(discovery.issuer, "https://id.example/tenant")
     assert_eq(discovery.token_endpoint, "https://id.example/token")
     assert_eq(discovery.jwks_uri, "https://id.example/jwks")

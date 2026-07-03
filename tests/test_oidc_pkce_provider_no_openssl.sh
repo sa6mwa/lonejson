@@ -69,6 +69,8 @@ int main(void) {
 
   lonejson_error_init(&error);
   lonejson_owned_buffer_init(&challenge);
+  EXPECT(lonejson_oidc_pkce_challenge("too-short", &challenge, &error) ==
+         LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(lonejson_oidc_pkce_challenge(verifier, &challenge, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
 

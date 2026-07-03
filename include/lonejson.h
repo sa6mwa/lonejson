@@ -6631,7 +6631,7 @@ void lonejson_oidc_discovery_cleanup(lonejson_oidc_discovery *discovery);
  *
  * Path-based issuers follow OpenID Connect Discovery placement:
  * `https://host/path` becomes
- * `https://host/.well-known/openid-configuration/path`.
+ * `https://host/path/.well-known/openid-configuration`.
  */
 lonejson_status lonejson_oidc_discovery_url(const char *issuer,
                                             lonejson_owned_buffer *out,
