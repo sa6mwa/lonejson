@@ -388,7 +388,7 @@ Implemented discovery fields:
 Path-based issuers follow OpenID Connect discovery placement:
 
 ```text
-https://host/path -> https://host/.well-known/openid-configuration/path
+https://host/path -> https://host/path/.well-known/openid-configuration
 ```
 
 Discovery parsing validates required metadata shape and HTTPS URL fields.

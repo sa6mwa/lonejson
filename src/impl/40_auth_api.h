@@ -595,6 +595,7 @@ lonejson_status lonejson_jwk_parse_json(lonejson *runtime, const char *json,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "JWK JSON input is required");
   }
+  lonejson_jwk_cleanup(out);
   status =
       lonejson_parse_buffer(runtime, &lonejson__jwk_map, out, json, len, error);
   if (status != LONEJSON_STATUS_OK) {
@@ -623,6 +624,7 @@ lonejson_status lonejson_jwks_parse_json(lonejson *runtime, const char *json,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "JWKS JSON input is required");
   }
+  lonejson_jwks_cleanup(out);
   status = lonejson_parse_buffer(runtime, &lonejson__jwks_map, out, json, len,
                                  error);
   if (status != LONEJSON_STATUS_OK) {
@@ -806,6 +808,7 @@ lonejson_status lonejson_oidc_discovery_parse_json(lonejson *runtime,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "OIDC discovery JSON input is required");
   }
+  lonejson_oidc_discovery_cleanup(out);
   status = lonejson_parse_buffer(runtime, &lonejson__oidc_discovery_map, out,
                                  json, len, error);
   if (status != LONEJSON_STATUS_OK) {

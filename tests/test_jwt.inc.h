@@ -151,11 +151,13 @@ static void test_jwk_parse_json_shapes(void) {
   EXPECT(strcmp(jwk.crv, "P-256") == 0);
   EXPECT(strcmp(jwk.x, "AAEC") == 0);
   EXPECT(strcmp(jwk.y, "AwQF") == 0);
-  lj_jwk_cleanup(&jwk);
 
   EXPECT(lonejson_jwk_parse_json(test_default_runtime(), oct, strlen(oct), &jwk,
                                  &error) == LONEJSON_STATUS_OK);
   EXPECT(strcmp(jwk.kty, "oct") == 0);
+  EXPECT(jwk.crv == NULL);
+  EXPECT(jwk.x == NULL);
+  EXPECT(jwk.y == NULL);
   EXPECT(strcmp(jwk.k, "c2VjcmV0") == 0);
   lonejson_jwk_cleanup(&jwk);
 }
@@ -205,6 +207,18 @@ static void test_jwks_parse_and_select(void) {
   EXPECT(lonejson_jwks_select(&jwks, &options, &selected, &error) ==
          LONEJSON_STATUS_OK);
   EXPECT(selected == NULL);
+
+  EXPECT(
+      lonejson_jwks_parse_json(
+          test_default_runtime(),
+          "{\"keys\":[{\"kty\":\"oct\",\"kid\":\"sym\",\"k\":\"c2VjcmV0\"}]}",
+          strlen("{\"keys\":[{\"kty\":\"oct\",\"kid\":\"sym\","
+                 "\"k\":\"c2VjcmV0\"}]}"),
+          &jwks, &error) == LONEJSON_STATUS_OK);
+  EXPECT(jwks.keys.count == 1u);
+  selected = &((const lonejson_jwk *)jwks.keys.items)[0];
+  EXPECT(strcmp(selected->kid, "sym") == 0);
+  EXPECT(strcmp(selected->kty, "oct") == 0);
 
   lonejson_jwks_cleanup(&jwks);
   EXPECT(jwks.keys.items == NULL);
@@ -1387,6 +1401,19 @@ static void test_oidc_discovery_parse_and_validate(void) {
                                                  &error) == LONEJSON_STATUS_OK);
   EXPECT(lj_oidc_discovery_validate_issuer(&discovery, "https://id.example",
                                            &error) == LJ_STATUS_TYPE_MISMATCH);
+  EXPECT(lonejson_oidc_discovery_parse_json(
+             test_default_runtime(),
+             "{\"issuer\":\"https://id.example/other\","
+             "\"token_endpoint\":\"https://id.example/token2\","
+             "\"jwks_uri\":\"https://id.example/jwks2\"}",
+             strlen("{\"issuer\":\"https://id.example/other\","
+                    "\"token_endpoint\":\"https://id.example/token2\","
+                    "\"jwks_uri\":\"https://id.example/jwks2\"}"),
+             &discovery, &error) == LONEJSON_STATUS_OK);
+  EXPECT(strcmp(discovery.issuer, "https://id.example/other") == 0);
+  EXPECT(discovery.authorization_endpoint == NULL);
+  EXPECT(strcmp(discovery.token_endpoint, "https://id.example/token2") == 0);
+  EXPECT(strcmp(discovery.jwks_uri, "https://id.example/jwks2") == 0);
   lj_oidc_discovery_cleanup(&discovery);
   EXPECT(discovery.issuer == NULL);
 }
