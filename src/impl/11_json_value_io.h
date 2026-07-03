@@ -239,9 +239,9 @@ lonejson__json_cursor_refill_getc(lonejson__json_io *io) {
     return lonejson__json_cursor_refill_source_getc(io);
   }
   for (;;) {
-    result = io->cursor->reader(io->cursor->reader_user,
-                                io->cursor->read_buffer,
-                                sizeof(io->cursor->read_buffer));
+    result =
+        io->cursor->reader(io->cursor->reader_user, io->cursor->read_buffer,
+                           sizeof(io->cursor->read_buffer));
     if (result.error_code != 0) {
       if (io->error != NULL) {
         io->error->system_errno = result.error_code;
@@ -386,8 +386,7 @@ lonejson__json_cursor_next_offset(const lonejson__json_cursor *cursor) {
   if (cursor->stream_offset >=
       (lonejson_uint64)(cursor->read_buffer_len - cursor->read_buffer_off)) {
     return cursor->stream_offset -
-           (lonejson_uint64)(cursor->read_buffer_len -
-                             cursor->read_buffer_off);
+           (lonejson_uint64)(cursor->read_buffer_len - cursor->read_buffer_off);
   }
   return 0u;
 }

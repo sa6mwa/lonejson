@@ -76,9 +76,10 @@ static void lonejson__value_rewrite_selector_cleanup(
   memset(selector, 0, sizeof(*selector));
 }
 
-static lonejson_status lonejson__value_rewrite_selector_add(
-    lonejson__value_rewrite_selector *selector, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__value_rewrite_selector_add(lonejson__value_rewrite_selector *selector,
+                                     const char *data, size_t len,
+                                     lonejson_error *error) {
   char **next_segments;
   char *copy;
   size_t next_cap;
@@ -131,8 +132,8 @@ static lonejson_status lonejson__value_rewrite_parse_selector(
   p = text;
   while (*p != '\0') {
     if (*p == '.') {
-      status = lonejson__value_rewrite_selector_add(
-          selector, segment.data, segment.len, error);
+      status = lonejson__value_rewrite_selector_add(selector, segment.data,
+                                                    segment.len, error);
       if (status != LONEJSON_STATUS_OK) {
         lonejson__byte_free(&segment, &selector->allocator);
         return status;
@@ -170,8 +171,7 @@ lonejson__value_rewrite_top(lonejson__value_rewrite_state *state) {
                                   : &state->frames[state->frame_count - 1u];
 }
 
-static size_t lonejson__value_rewrite_format_size(char *buffer,
-                                                  size_t capacity,
+static size_t lonejson__value_rewrite_format_size(char *buffer, size_t capacity,
                                                   size_t value) {
   char tmp[32];
   size_t len;
@@ -281,11 +281,12 @@ lonejson__value_rewrite_replace_with(lonejson__value_rewrite_state *state) {
                                "value rewrite replace callback is required");
   }
   return state->options.replace(&state->writer, &state->old_value,
-                               state->options.replace_user, state->error);
+                                state->options.replace_user, state->error);
 }
 
-static void lonejson__value_rewrite_begin_replace_with(
-    lonejson__value_rewrite_state *state, lonejson_value_type type) {
+static void
+lonejson__value_rewrite_begin_replace_with(lonejson__value_rewrite_state *state,
+                                           lonejson_value_type type) {
   memset(&state->old_value, 0, sizeof(state->old_value));
   state->old_value.present = 1;
   state->old_value.type = type;
@@ -318,9 +319,10 @@ static int lonejson__value_rewrite_parent_child_matches(
          0;
 }
 
-static lonejson_status lonejson__value_rewrite_push_frame(
-    lonejson__value_rewrite_state *state, lonejson__value_rewrite_frame_kind kind,
-    size_t path_len, int prefix_matches) {
+static lonejson_status
+lonejson__value_rewrite_push_frame(lonejson__value_rewrite_state *state,
+                                   lonejson__value_rewrite_frame_kind kind,
+                                   size_t path_len, int prefix_matches) {
   lonejson__value_rewrite_frame *next;
   size_t next_cap;
 
@@ -362,8 +364,7 @@ lonejson__value_rewrite_pop_frame(lonejson__value_rewrite_state *state) {
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status
-lonejson__value_rewrite_emit_missing_chain(
+static lonejson_status lonejson__value_rewrite_emit_missing_chain(
     lonejson__value_rewrite_state *state,
     lonejson__value_rewrite_frame *frame) {
   size_t i;
@@ -380,11 +381,9 @@ lonejson__value_rewrite_emit_missing_chain(
           state->options.target_segments[frame->path_len])) {
     return LONEJSON_STATUS_OK;
   }
-  status = lonejson_writer_key(&state->writer,
-                               state->options.target_segments[frame->path_len],
-                               strlen(state->options
-                                          .target_segments[frame->path_len]),
-                               state->error);
+  status = lonejson_writer_key(
+      &state->writer, state->options.target_segments[frame->path_len],
+      strlen(state->options.target_segments[frame->path_len]), state->error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -414,10 +413,9 @@ lonejson__value_rewrite_emit_missing_chain(
           "value rewrite cannot synthesize a missing array index");
     }
     if (i + 1u == state->options.target_segment_count) {
-      status = lonejson_writer_key(&state->writer,
-                                   state->options.target_segments[i],
-                                   strlen(state->options.target_segments[i]),
-                                   state->error);
+      status = lonejson_writer_key(
+          &state->writer, state->options.target_segments[i],
+          strlen(state->options.target_segments[i]), state->error);
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
@@ -434,10 +432,9 @@ lonejson__value_rewrite_emit_missing_chain(
       }
       break;
     }
-    status = lonejson_writer_key(&state->writer,
-                                 state->options.target_segments[i],
-                                 strlen(state->options.target_segments[i]),
-                                 state->error);
+    status = lonejson_writer_key(
+        &state->writer, state->options.target_segments[i],
+        strlen(state->options.target_segments[i]), state->error);
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
@@ -505,8 +502,8 @@ static lonejson_status lonejson__value_rewrite_before_value(
     }
     if (parent != NULL &&
         parent->kind == LONEJSON__VALUE_REWRITE_FRAME_OBJECT) {
-      status = lonejson_writer_key(&state->writer, parent->key,
-                                   parent->key_len, state->error);
+      status = lonejson_writer_key(&state->writer, parent->key, parent->key_len,
+                                   state->error);
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
@@ -523,8 +520,8 @@ static lonejson_status lonejson__value_rewrite_before_value(
     *emit_original = 1;
     if (parent != NULL &&
         parent->kind == LONEJSON__VALUE_REWRITE_FRAME_OBJECT) {
-      status = lonejson_writer_key(&state->writer, parent->key,
-                                   parent->key_len, state->error);
+      status = lonejson_writer_key(&state->writer, parent->key, parent->key_len,
+                                   state->error);
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
@@ -553,8 +550,8 @@ static lonejson_status lonejson__value_rewrite_object_begin(void *user,
     state->skip_depth++;
     return LONEJSON_STATUS_OK;
   }
-  status = lonejson__value_rewrite_before_value(
-      state, &emit_original, &prefix_matches, &path_len);
+  status = lonejson__value_rewrite_before_value(state, &emit_original,
+                                                &prefix_matches, &path_len);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -614,8 +611,7 @@ static lonejson_status lonejson__value_rewrite_object_end(void *user,
   frame = lonejson__value_rewrite_top(state);
   if (frame == NULL || frame->kind != LONEJSON__VALUE_REWRITE_FRAME_OBJECT) {
     return lonejson__set_error(state->error, LONEJSON_STATUS_INTERNAL_ERROR, 0u,
-                               0u, 0u,
-                               "value rewrite object frame mismatch");
+                               0u, 0u, "value rewrite object frame mismatch");
   }
   status = lonejson__value_rewrite_emit_missing_chain(state, frame);
   if (status != LONEJSON_STATUS_OK) {
@@ -648,8 +644,8 @@ static lonejson_status lonejson__value_rewrite_array_begin(void *user,
     state->skip_depth++;
     return LONEJSON_STATUS_OK;
   }
-  status = lonejson__value_rewrite_before_value(
-      state, &emit_original, &prefix_matches, &path_len);
+  status = lonejson__value_rewrite_before_value(state, &emit_original,
+                                                &prefix_matches, &path_len);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -808,8 +804,8 @@ static lonejson_status lonejson__value_rewrite_string_begin(void *user,
                    ? state->options.old_value_visitor->string_begin
                    : NULL);
   }
-  status = lonejson__value_rewrite_before_value(
-      state, &state->current_emit, &prefix_matches, &path_len);
+  status = lonejson__value_rewrite_before_value(state, &state->current_emit,
+                                                &prefix_matches, &path_len);
   (void)prefix_matches;
   (void)path_len;
   if (status != LONEJSON_STATUS_OK) {
@@ -892,8 +888,8 @@ static lonejson_status lonejson__value_rewrite_number_begin(void *user,
                    ? state->options.old_value_visitor->number_begin
                    : NULL);
   }
-  status = lonejson__value_rewrite_before_value(
-      state, &state->current_emit, &prefix_matches, &path_len);
+  status = lonejson__value_rewrite_before_value(state, &state->current_emit,
+                                                &prefix_matches, &path_len);
   (void)prefix_matches;
   (void)path_len;
   if (status == LONEJSON_STATUS_OK && state->current_replace) {
@@ -915,9 +911,9 @@ static lonejson_status lonejson__value_rewrite_number_chunk(void *user,
   lonejson_status status;
   (void)e;
   if (state->replacing) {
-    status = lonejson__byte_append(&state->number, data, len,
-                                   state->number_limit, &state->allocator,
-                                   state->error);
+    status =
+        lonejson__byte_append(&state->number, data, len, state->number_limit,
+                              &state->allocator, state->error);
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
@@ -931,9 +927,8 @@ static lonejson_status lonejson__value_rewrite_number_chunk(void *user,
   if (!state->current_emit) {
     return LONEJSON_STATUS_OK;
   }
-  return lonejson__byte_append(&state->number, data, len,
-                               state->number_limit, &state->allocator,
-                               state->error);
+  return lonejson__byte_append(&state->number, data, len, state->number_limit,
+                               &state->allocator, state->error);
 }
 
 static lonejson_status lonejson__value_rewrite_number_end(void *user,
@@ -983,8 +978,8 @@ static lonejson_status lonejson__value_rewrite_boolean(void *user, int value,
   if (state->replacing) {
     return lonejson__value_rewrite_visit_bool(state, value);
   }
-  status = lonejson__value_rewrite_before_value(
-      state, &emit_original, &prefix_matches, &path_len);
+  status = lonejson__value_rewrite_before_value(state, &emit_original,
+                                                &prefix_matches, &path_len);
   (void)prefix_matches;
   (void)path_len;
   if (status != LONEJSON_STATUS_OK) {
@@ -1022,8 +1017,8 @@ static lonejson_status lonejson__value_rewrite_null(void *user,
                    ? state->options.old_value_visitor->null_value
                    : NULL);
   }
-  status = lonejson__value_rewrite_before_value(
-      state, &emit_original, &prefix_matches, &path_len);
+  status = lonejson__value_rewrite_before_value(state, &emit_original,
+                                                &prefix_matches, &path_len);
   (void)prefix_matches;
   (void)path_len;
   if (status != LONEJSON_STATUS_OK) {
@@ -1062,9 +1057,10 @@ lonejson__value_rewrite_cleanup(lonejson__value_rewrite_state *state) {
   lonejson__byte_free(&state->number, &state->allocator);
 }
 
-static void lonejson__value_rewrite_resolve_limits(
-    const lonejson__parse_options *options, const lonejson_runtime *runtime,
-    lonejson__value_limits *limits) {
+static void
+lonejson__value_rewrite_resolve_limits(const lonejson__parse_options *options,
+                                       const lonejson_runtime *runtime,
+                                       lonejson__value_limits *limits) {
   *limits = runtime != NULL ? runtime->value_limits
                             : lonejson__default_value_limits();
   if (options != NULL && options->max_depth != 0u) {
@@ -1146,8 +1142,9 @@ static lonejson_status lonejson__value_rewrite_reader_with_options(
   }
   memset(&state, 0, sizeof(state));
   state.options = *options;
-  state.parse_options =
-      parse_options != NULL ? *parse_options : lonejson__default_parse_options();
+  state.parse_options = parse_options != NULL
+                            ? *parse_options
+                            : lonejson__default_parse_options();
   state.allocator = lonejson__allocator_resolve(state.parse_options.allocator);
   state.error = error;
   lonejson__clear_error(error);
@@ -1174,9 +1171,9 @@ static lonejson_status lonejson__value_rewrite_reader_with_options(
     lonejson__value_rewrite_resolve_limits(&state.parse_options, runtime,
                                            &limits);
     state.number_limit = limits.max_number_bytes;
-    status = lonejson__visit_value_reader_with_limits(
-        reader, reader_user, &visitor, &state, &limits, &state.allocator,
-        error);
+    status = lonejson__visit_value_reader_with_limits(reader, reader_user,
+                                                      &visitor, &state, &limits,
+                                                      &state.allocator, error);
   }
   if (status == LONEJSON_STATUS_OK && !state.found &&
       state.options.action != LONEJSON_VALUE_REWRITE_KEEP) {
@@ -1209,10 +1206,11 @@ lonejson_status lonejson_value_rewrite_reader(
   return status;
 }
 
-lonejson_status lonejson_value_rewrite_buffer(
-    lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
-    void *sink_user, const lonejson_value_rewrite_options *options,
-    lonejson_error *error) {
+lonejson_status
+lonejson_value_rewrite_buffer(lonejson *runtime, const void *data, size_t len,
+                              lonejson_sink_fn sink, void *sink_user,
+                              const lonejson_value_rewrite_options *options,
+                              lonejson_error *error) {
   lonejson_buffer_reader reader;
 
   if (data == NULL && len != 0u) {
@@ -1220,9 +1218,9 @@ lonejson_status lonejson_value_rewrite_buffer(
                                0u, "JSON buffer is required");
   }
   lonejson_buffer_reader_init(&reader, data, len);
-  return lonejson_value_rewrite_reader(
-      runtime, lonejson_buffer_reader_read, &reader, sink, sink_user, options,
-      error);
+  return lonejson_value_rewrite_reader(runtime, lonejson_buffer_reader_read,
+                                       &reader, sink, sink_user, options,
+                                       error);
 }
 
 lonejson_status lonejson_value_rewrite_filep(
@@ -1366,8 +1364,7 @@ lonejson_status lonejson_value_rewrite_selector_reader(
 
 lonejson_status lonejson_value_rewrite_selector_buffer(
     lonejson *runtime, const void *data, size_t len, lonejson_sink_fn sink,
-    void *sink_user,
-    const lonejson_value_rewrite_selector_options *options,
+    void *sink_user, const lonejson_value_rewrite_selector_options *options,
     lonejson_error *error) {
   lonejson_buffer_reader reader;
 

@@ -423,23 +423,20 @@ test_array_stream_reused_mapped_destination_resets_allocations(void) {
     return;
   }
 
-  result =
-      lonejson_array_stream_next(stream, &test_two_alloc_string_doc_map, &doc,
-                                 &error);
+  result = lonejson_array_stream_next(stream, &test_two_alloc_string_doc_map,
+                                      &doc, &error);
   EXPECT(result == LONEJSON_ARRAY_STREAM_ITEM);
   EXPECT(doc.first != NULL && strcmp(doc.first, "aaaaaaaa") == 0);
   EXPECT(doc.second != NULL && strcmp(doc.second, "bbbbbbbb") == 0);
 
-  result =
-      lonejson_array_stream_next(stream, &test_two_alloc_string_doc_map, &doc,
-                                 &error);
+  result = lonejson_array_stream_next(stream, &test_two_alloc_string_doc_map,
+                                      &doc, &error);
   EXPECT(result == LONEJSON_ARRAY_STREAM_ITEM);
   EXPECT(doc.first != NULL && strcmp(doc.first, "cc") == 0);
   EXPECT(doc.second != NULL && strcmp(doc.second, "dd") == 0);
 
-  result =
-      lonejson_array_stream_next(stream, &test_two_alloc_string_doc_map, &doc,
-                                 &error);
+  result = lonejson_array_stream_next(stream, &test_two_alloc_string_doc_map,
+                                      &doc, &error);
   EXPECT(result == LONEJSON_ARRAY_STREAM_EOF);
   EXPECT(error.code == LONEJSON_STATUS_OK);
 

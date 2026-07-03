@@ -1291,8 +1291,8 @@ lonejson_path_value_visitor lonejson_default_path_value_visitor(void) {
   return visitor;
 }
 
-lonejson_candidate_stream_options lonejson_default_candidate_stream_options(
-    void) {
+lonejson_candidate_stream_options
+lonejson_default_candidate_stream_options(void) {
   lonejson_candidate_stream_options options;
 
   memset(&options, 0, sizeof(options));

@@ -24,9 +24,9 @@ static void test_value_rewrite_replace_drop_and_root(void) {
   reader.json = "{\"user\":{\"name\":\"old\",\"id\":7},\"items\":[1,2,3]}";
   reader.offset = 0u;
   reader.chunk_size = 3u;
-  status = test_value_rewrite_reader(
-      test_state_reader, &reader, test_buffer_sink_write, &sink, &options,
-      &error);
+  status = test_value_rewrite_reader(test_state_reader, &reader,
+                                     test_buffer_sink_write, &sink, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out,
                 "{\"user\":{\"name\":\"Ada\",\"id\":7},\"items\":[1,2,3]}") ==
@@ -41,9 +41,9 @@ static void test_value_rewrite_replace_drop_and_root(void) {
   reader.json = "{\"items\":[1,2,3],\"tail\":true}";
   reader.offset = 0u;
   reader.chunk_size = 2u;
-  status = test_value_rewrite_reader(
-      test_state_reader, &reader, test_buffer_sink_write, &sink, &options,
-      &error);
+  status = test_value_rewrite_reader(test_state_reader, &reader,
+                                     test_buffer_sink_write, &sink, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out, "{\"items\":[1,3],\"tail\":true}") == 0);
 
@@ -57,9 +57,9 @@ static void test_value_rewrite_replace_drop_and_root(void) {
   reader.json = "[1,{\"ignored\":\"value\"}]";
   reader.offset = 0u;
   reader.chunk_size = 4u;
-  status = test_value_rewrite_reader(
-      test_state_reader, &reader, test_buffer_sink_write, &sink, &options,
-      &error);
+  status = test_value_rewrite_reader(test_state_reader, &reader,
+                                     test_buffer_sink_write, &sink, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out, "{\"ok\":true}") == 0);
   lonejson_json_value_cleanup(&replacement);
@@ -101,17 +101,17 @@ static void test_value_rewrite_runtime_json_value_limits(void) {
   reader.offset = 0u;
   reader.chunk_size = 2u;
 
-  status = lonejson_value_rewrite_reader(
-      limited_lj, test_state_reader, &reader, test_buffer_sink_write, &sink,
-      &options, &error);
+  status = lonejson_value_rewrite_reader(limited_lj, test_state_reader, &reader,
+                                         test_buffer_sink_write, &sink,
+                                         &options, &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
 
   reader.offset = 0u;
   sink.length = 0u;
   out[0] = '\0';
-  status = lonejson_value_rewrite_reader(
-      default_lj, test_state_reader, &reader, test_buffer_sink_write, &sink,
-      &options, &error);
+  status = lonejson_value_rewrite_reader(default_lj, test_state_reader, &reader,
+                                         test_buffer_sink_write, &sink,
+                                         &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out, "{\"tail\":1}") == 0);
 
@@ -157,9 +157,9 @@ static void test_value_rewrite_reader_rejects_would_block(void) {
   reader.json = json;
   reader.chunk_size = 10u;
   reader.block_after = 10u;
-  status = runtime->value_rewrite_reader(runtime, test_would_block_tripwire_reader,
-                                         &reader, test_buffer_sink_write,
-                                         &sink, &options, &error);
+  status = runtime->value_rewrite_reader(
+      runtime, test_would_block_tripwire_reader, &reader,
+      test_buffer_sink_write, &sink, &options, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(reader.blocked);
   EXPECT(!reader.reentered_after_block);
@@ -174,9 +174,9 @@ static void test_value_rewrite_reader_rejects_would_block(void) {
   reader.json = json;
   reader.chunk_size = 10u;
   reader.block_after = 10u;
-  status = test_value_rewrite_selector_reader(
-      test_would_block_tripwire_reader, &reader, test_buffer_sink_write, &sink,
-      &selector_options, &error);
+  status = test_value_rewrite_selector_reader(test_would_block_tripwire_reader,
+                                              &reader, test_buffer_sink_write,
+                                              &sink, &selector_options, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(reader.blocked);
   EXPECT(!reader.reentered_after_block);
@@ -203,16 +203,12 @@ typedef struct test_value_rewrite_increment {
   lonejson_int64 delta;
 } test_value_rewrite_increment;
 
-static lonejson_status
-test_value_rewrite_replace_with_increment(lonejson_writer *writer,
-                                          const lonejson_value_rewrite_old_value
-                                              *old_value,
-                                          void *user, lonejson_error *error);
-static lonejson_status
-test_value_rewrite_replace_with_object(lonejson_writer *writer,
-                                       const lonejson_value_rewrite_old_value
-                                           *old_value,
-                                       void *user, lonejson_error *error);
+static lonejson_status test_value_rewrite_replace_with_increment(
+    lonejson_writer *writer, const lonejson_value_rewrite_old_value *old_value,
+    void *user, lonejson_error *error);
+static lonejson_status test_value_rewrite_replace_with_object(
+    lonejson_writer *writer, const lonejson_value_rewrite_old_value *old_value,
+    void *user, lonejson_error *error);
 typedef struct test_value_rewrite_alloc_budget {
   size_t remaining_allocs;
 } test_value_rewrite_alloc_budget;
@@ -281,7 +277,8 @@ static void test_value_rewrite_callbacks_use_runtime_writer_policy(void) {
   lonejson_free(default_lj);
 }
 
-static void test_value_rewrite_path_rejects_invalid_runtime_without_truncating(void) {
+static void
+test_value_rewrite_path_rejects_invalid_runtime_without_truncating(void) {
   char input_path[] = "/tmp/lonejson-value-rewrite-in-XXXXXX";
   char output_path[] = "/tmp/lonejson-value-rewrite-out-XXXXXX";
   const char *input_json = "{\"keep\":1}";
@@ -326,9 +323,9 @@ static void test_value_rewrite_path_rejects_invalid_runtime_without_truncating(v
   unlink(output_path);
 }
 
-static lonejson_status
-test_value_rewrite_emit_dynamic(lonejson_writer *writer, void *user,
-                                lonejson_error *error) {
+static lonejson_status test_value_rewrite_emit_dynamic(lonejson_writer *writer,
+                                                       void *user,
+                                                       lonejson_error *error) {
   const char *label = (const char *)user;
   lonejson_status status;
 
@@ -396,20 +393,18 @@ static void test_value_rewrite_callback_replacement(void) {
   reader.json = "{\"payload\":null,\"tail\":false}";
   reader.offset = 0u;
   reader.chunk_size = 3u;
-  status = test_value_rewrite_reader(
-      test_state_reader, &reader, test_buffer_sink_write, &sink, &options,
-      &error);
+  status = test_value_rewrite_reader(test_state_reader, &reader,
+                                     test_buffer_sink_write, &sink, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out,
                 "{\"payload\":{\"label\":\"generated\",\"values\":[1,true]},"
                 "\"tail\":false}") == 0);
 }
 
-static lonejson_status
-test_value_rewrite_replace_with_increment(lonejson_writer *writer,
-                                          const lonejson_value_rewrite_old_value
-                                              *old_value,
-                                          void *user, lonejson_error *error) {
+static lonejson_status test_value_rewrite_replace_with_increment(
+    lonejson_writer *writer, const lonejson_value_rewrite_old_value *old_value,
+    void *user, lonejson_error *error) {
   test_value_rewrite_increment *ctx = (test_value_rewrite_increment *)user;
   char token[64];
   char *end = NULL;
@@ -461,22 +456,18 @@ static lonejson_status test_value_rewrite_count_key(void *user,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status
-test_value_rewrite_replace_with_null(lonejson_writer *writer,
-                                     const lonejson_value_rewrite_old_value
-                                         *old_value,
-                                     void *user, lonejson_error *error) {
+static lonejson_status test_value_rewrite_replace_with_null(
+    lonejson_writer *writer, const lonejson_value_rewrite_old_value *old_value,
+    void *user, lonejson_error *error) {
   (void)user;
   EXPECT(old_value->present != 0);
   EXPECT(old_value->type == LONEJSON_VALUE_OBJECT);
   return lonejson_writer_null(writer, error);
 }
 
-static lonejson_status
-test_value_rewrite_replace_with_object(lonejson_writer *writer,
-                                       const lonejson_value_rewrite_old_value
-                                           *old_value,
-                                       void *user, lonejson_error *error) {
+static lonejson_status test_value_rewrite_replace_with_object(
+    lonejson_writer *writer, const lonejson_value_rewrite_old_value *old_value,
+    void *user, lonejson_error *error) {
   lonejson_status status;
   (void)old_value;
   (void)user;
@@ -507,7 +498,8 @@ static void *test_value_rewrite_fail_malloc(void *ctx, size_t size) {
   return LONEJSON_MALLOC(size);
 }
 
-static void *test_value_rewrite_fail_realloc(void *ctx, void *ptr, size_t size) {
+static void *test_value_rewrite_fail_realloc(void *ctx, void *ptr,
+                                             size_t size) {
   test_value_rewrite_alloc_budget *budget =
       (test_value_rewrite_alloc_budget *)ctx;
 
@@ -551,7 +543,8 @@ static void test_value_rewrite_replace_with_and_buffer_adapters(void) {
       "{\"count\":7,\"tail\":true}", strlen("{\"count\":7,\"tail\":true}"),
       lonejson_owned_buffer_sink, &out, &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  EXPECT(out.data != NULL && strcmp(out.data, "{\"count\":12,\"tail\":true}") == 0);
+  EXPECT(out.data != NULL &&
+         strcmp(out.data, "{\"count\":12,\"tail\":true}") == 0);
   lonejson_owned_buffer_free(&out);
 
   lonejson_owned_buffer_init(&out);
@@ -659,15 +652,14 @@ static void test_value_rewrite_replace_with_old_value_metadata(void) {
     lonejson_value_type type;
     int boolean;
     size_t min_number_len;
-  } cases[] = {
-      {"{\"v\":\"x\"}", 1, LONEJSON_VALUE_STRING, 0, 0u},
-      {"{\"v\":-12.5}", 1, LONEJSON_VALUE_NUMBER, 0, 5u},
-      {"{\"v\":true}", 1, LONEJSON_VALUE_BOOL, 1, 0u},
-      {"{\"v\":false}", 1, LONEJSON_VALUE_BOOL, 0, 0u},
-      {"{\"v\":null}", 1, LONEJSON_VALUE_NULL, 0, 0u},
-      {"{\"v\":[1]}", 1, LONEJSON_VALUE_ARRAY, 0, 0u},
-      {"{\"v\":{\"a\":1}}", 1, LONEJSON_VALUE_OBJECT, 0, 0u},
-      {"{}", 0, LONEJSON_VALUE_ABSENT, 0, 0u}};
+  } cases[] = {{"{\"v\":\"x\"}", 1, LONEJSON_VALUE_STRING, 0, 0u},
+               {"{\"v\":-12.5}", 1, LONEJSON_VALUE_NUMBER, 0, 5u},
+               {"{\"v\":true}", 1, LONEJSON_VALUE_BOOL, 1, 0u},
+               {"{\"v\":false}", 1, LONEJSON_VALUE_BOOL, 0, 0u},
+               {"{\"v\":null}", 1, LONEJSON_VALUE_NULL, 0, 0u},
+               {"{\"v\":[1]}", 1, LONEJSON_VALUE_ARRAY, 0, 0u},
+               {"{\"v\":{\"a\":1}}", 1, LONEJSON_VALUE_OBJECT, 0, 0u},
+               {"{}", 0, LONEJSON_VALUE_ABSENT, 0, 0u}};
   lonejson_value_rewrite_options options;
   lonejson_owned_buffer out;
   lonejson_error error;
@@ -689,9 +681,9 @@ static void test_value_rewrite_replace_with_old_value_metadata(void) {
     options.action = LONEJSON_VALUE_REWRITE_REPLACE_WITH;
     options.replace = test_value_rewrite_expect_old_value;
     options.replace_user = &expect;
-    status = test_value_rewrite_buffer(
-        cases[i].input, strlen(cases[i].input), lonejson_owned_buffer_sink,
-        &out, &options, &error);
+    status = test_value_rewrite_buffer(cases[i].input, strlen(cases[i].input),
+                                       lonejson_owned_buffer_sink, &out,
+                                       &options, &error);
     EXPECT(status == LONEJSON_STATUS_OK);
     EXPECT(expect.calls == 1);
     EXPECT(out.data != NULL);
@@ -701,9 +693,10 @@ static void test_value_rewrite_replace_with_old_value_metadata(void) {
   }
 }
 
-static lonejson_status test_value_rewrite_no_value(
-    lonejson_writer *writer, const lonejson_value_rewrite_old_value *old_value,
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_no_value(lonejson_writer *writer,
+                            const lonejson_value_rewrite_old_value *old_value,
+                            void *user, lonejson_error *error) {
   (void)writer;
   (void)old_value;
   (void)user;
@@ -711,9 +704,10 @@ static lonejson_status test_value_rewrite_no_value(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_two_values(
-    lonejson_writer *writer, const lonejson_value_rewrite_old_value *old_value,
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_two_values(lonejson_writer *writer,
+                              const lonejson_value_rewrite_old_value *old_value,
+                              void *user, lonejson_error *error) {
   lonejson_status status;
   (void)old_value;
   (void)user;
@@ -734,8 +728,8 @@ static lonejson_status test_value_rewrite_partial_error(
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
-                             0u, "intentional replacement failure");
+  return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u, 0u,
+                             "intentional replacement failure");
 }
 
 static lonejson_status test_value_rewrite_unclosed_container(
@@ -758,39 +752,38 @@ static void test_value_rewrite_replace_with_callback_failures(void) {
   options.target_segment_count = 1u;
   options.action = LONEJSON_VALUE_REWRITE_REPLACE_WITH;
   EXPECT(test_value_rewrite_buffer("{\"v\":1}", strlen("{\"v\":1}"),
-                                       lonejson_owned_buffer_sink, &out,
-                                       &options, &error) ==
-         LONEJSON_STATUS_INVALID_ARGUMENT);
+                                   lonejson_owned_buffer_sink, &out, &options,
+                                   &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   lonejson_owned_buffer_init(&out);
   options.replace = test_value_rewrite_no_value;
   status = test_value_rewrite_buffer("{\"v\":1}", strlen("{\"v\":1}"),
-                                         lonejson_owned_buffer_sink, &out,
-                                         &options, &error);
+                                     lonejson_owned_buffer_sink, &out, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
   lonejson_owned_buffer_free(&out);
 
   lonejson_owned_buffer_init(&out);
   options.replace = test_value_rewrite_two_values;
   status = test_value_rewrite_buffer("{\"v\":1}", strlen("{\"v\":1}"),
-                                         lonejson_owned_buffer_sink, &out,
-                                         &options, &error);
+                                     lonejson_owned_buffer_sink, &out, &options,
+                                     &error);
   EXPECT(status != LONEJSON_STATUS_OK);
   lonejson_owned_buffer_free(&out);
 
   lonejson_owned_buffer_init(&out);
   options.replace = test_value_rewrite_partial_error;
   status = test_value_rewrite_buffer("{\"v\":1}", strlen("{\"v\":1}"),
-                                         lonejson_owned_buffer_sink, &out,
-                                         &options, &error);
+                                     lonejson_owned_buffer_sink, &out, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   lonejson_owned_buffer_free(&out);
 
   lonejson_owned_buffer_init(&out);
   options.replace = test_value_rewrite_unclosed_container;
   status = test_value_rewrite_buffer("{\"v\":1}", strlen("{\"v\":1}"),
-                                         lonejson_owned_buffer_sink, &out,
-                                         &options, &error);
+                                     lonejson_owned_buffer_sink, &out, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
   lonejson_owned_buffer_free(&out);
 }
@@ -813,43 +806,44 @@ typedef struct test_value_rewrite_visit_counts {
   int null_value;
 } test_value_rewrite_visit_counts;
 
-static lonejson_status test_value_rewrite_visit_object_begin(
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_object_begin(void *user, lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->object_begin++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_object_end(
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_object_end(void *user, lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->object_end++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_array_begin(
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_array_begin(void *user, lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->array_begin++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_array_end(
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_array_end(void *user, lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->array_end++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_key_begin(
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_key_begin(void *user, lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->key_begin++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_key_chunk(
-    void *user, const char *data, size_t len, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_key_chunk(void *user, const char *data, size_t len,
+                                   lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->key_chunk++;
   (void)data;
   (void)len;
@@ -857,22 +851,23 @@ static lonejson_status test_value_rewrite_visit_key_chunk(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_key_end(
-    void *user, lonejson_error *error) {
+static lonejson_status test_value_rewrite_visit_key_end(void *user,
+                                                        lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->key_end++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_string_begin(
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_string_begin(void *user, lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->string_begin++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_string_chunk(
-    void *user, const char *data, size_t len, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_string_chunk(void *user, const char *data, size_t len,
+                                      lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->string_chunk++;
   (void)data;
   (void)len;
@@ -880,22 +875,23 @@ static lonejson_status test_value_rewrite_visit_string_chunk(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_string_end(
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_string_end(void *user, lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->string_end++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_number_begin(
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_number_begin(void *user, lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->number_begin++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_number_chunk(
-    void *user, const char *data, size_t len, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_number_chunk(void *user, const char *data, size_t len,
+                                      lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->number_chunk++;
   (void)data;
   (void)len;
@@ -903,22 +899,22 @@ static lonejson_status test_value_rewrite_visit_number_chunk(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_number_end(
-    void *user, lonejson_error *error) {
+static lonejson_status
+test_value_rewrite_visit_number_end(void *user, lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->number_end++;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_bool(
-    void *user, int value, lonejson_error *error) {
+static lonejson_status test_value_rewrite_visit_bool(void *user, int value,
+                                                     lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->boolean_value += value ? 1 : 2;
   (void)error;
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_value_rewrite_visit_null(
-    void *user, lonejson_error *error) {
+static lonejson_status test_value_rewrite_visit_null(void *user,
+                                                     lonejson_error *error) {
   ((test_value_rewrite_visit_counts *)user)->null_value++;
   (void)error;
   return LONEJSON_STATUS_OK;
@@ -1036,10 +1032,9 @@ static void test_value_rewrite_old_value_visitor_failures(void) {
   visitor.object_begin = test_value_rewrite_fail_event;
   options.old_value_visitor = &visitor;
   lonejson_owned_buffer_init(&out);
-  status = test_value_rewrite_buffer("{\"v\":{\"a\":1}}",
-                                         strlen("{\"v\":{\"a\":1}}"),
-                                         lonejson_owned_buffer_sink, &out,
-                                         &options, &error);
+  status = test_value_rewrite_buffer(
+      "{\"v\":{\"a\":1}}", strlen("{\"v\":{\"a\":1}}"),
+      lonejson_owned_buffer_sink, &out, &options, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   lonejson_owned_buffer_free(&out);
 
@@ -1047,10 +1042,9 @@ static void test_value_rewrite_old_value_visitor_failures(void) {
   visitor.string_chunk = test_value_rewrite_fail_chunk;
   options.old_value_visitor = &visitor;
   lonejson_owned_buffer_init(&out);
-  status = test_value_rewrite_buffer("{\"v\":\"abc\"}",
-                                         strlen("{\"v\":\"abc\"}"),
-                                         lonejson_owned_buffer_sink, &out,
-                                         &options, &error);
+  status = test_value_rewrite_buffer(
+      "{\"v\":\"abc\"}", strlen("{\"v\":\"abc\"}"), lonejson_owned_buffer_sink,
+      &out, &options, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   lonejson_owned_buffer_free(&out);
 
@@ -1058,10 +1052,9 @@ static void test_value_rewrite_old_value_visitor_failures(void) {
   visitor.number_end = test_value_rewrite_fail_event;
   options.old_value_visitor = &visitor;
   lonejson_owned_buffer_init(&out);
-  status = test_value_rewrite_buffer("{\"v\":123}",
-                                         strlen("{\"v\":123}"),
-                                         lonejson_owned_buffer_sink, &out,
-                                         &options, &error);
+  status = test_value_rewrite_buffer("{\"v\":123}", strlen("{\"v\":123}"),
+                                     lonejson_owned_buffer_sink, &out, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   lonejson_owned_buffer_free(&out);
 
@@ -1069,10 +1062,9 @@ static void test_value_rewrite_old_value_visitor_failures(void) {
   visitor.boolean_value = test_value_rewrite_fail_bool;
   options.old_value_visitor = &visitor;
   lonejson_owned_buffer_init(&out);
-  status = test_value_rewrite_buffer("{\"v\":true}",
-                                         strlen("{\"v\":true}"),
-                                         lonejson_owned_buffer_sink, &out,
-                                         &options, &error);
+  status = test_value_rewrite_buffer("{\"v\":true}", strlen("{\"v\":true}"),
+                                     lonejson_owned_buffer_sink, &out, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   lonejson_owned_buffer_free(&out);
 
@@ -1080,10 +1072,9 @@ static void test_value_rewrite_old_value_visitor_failures(void) {
   visitor.null_value = test_value_rewrite_fail_event;
   options.old_value_visitor = &visitor;
   lonejson_owned_buffer_init(&out);
-  status = test_value_rewrite_buffer("{\"v\":null}",
-                                         strlen("{\"v\":null}"),
-                                         lonejson_owned_buffer_sink, &out,
-                                         &options, &error);
+  status = test_value_rewrite_buffer("{\"v\":null}", strlen("{\"v\":null}"),
+                                     lonejson_owned_buffer_sink, &out, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   lonejson_owned_buffer_free(&out);
 }
@@ -1123,16 +1114,16 @@ static void test_value_rewrite_adapter_and_sink_failures(void) {
 
   memset(&options, 0, sizeof(options));
   options.action = LONEJSON_VALUE_REWRITE_KEEP;
-  EXPECT(test_value_rewrite_buffer(
-             NULL, 3u, test_buffer_sink_write, &failing_sink, &options,
-             &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_value_rewrite_buffer(NULL, 3u, test_buffer_sink_write,
+                                   &failing_sink, &options,
+                                   &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(&failing_sink, 0, sizeof(failing_sink));
   failing_sink.fail_after = 2u;
   EXPECT(test_value_rewrite_buffer("{\"v\":1}", strlen("{\"v\":1}"),
-                                       test_failing_sink_write, &failing_sink,
-                                       &options, &error) ==
-         LONEJSON_STATUS_CALLBACK_FAILED);
+                                   test_failing_sink_write, &failing_sink,
+                                   &options,
+                                   &error) == LONEJSON_STATUS_CALLBACK_FAILED);
 
   lonejson_owned_buffer_init(&owned);
   owned.allocator = lonejson_default_allocator();
@@ -1146,10 +1137,9 @@ static void test_value_rewrite_adapter_and_sink_failures(void) {
   options.target_segment_count = 2u;
   options.action = LONEJSON_VALUE_REWRITE_REPLACE_WITH;
   options.replace = test_value_rewrite_no_value;
-  status = test_value_rewrite_buffer("{\"items\":[1]}",
-                                         strlen("{\"items\":[1]}"),
-                                         lonejson_owned_buffer_sink, &owned,
-                                         &options, &error);
+  status = test_value_rewrite_buffer(
+      "{\"items\":[1]}", strlen("{\"items\":[1]}"), lonejson_owned_buffer_sink,
+      &owned, &options, &error);
   EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
 }
 
@@ -1188,9 +1178,9 @@ static void test_value_rewrite_selector_and_source_base64(void) {
   reader.json = "{\"meta\":{\"payload.bytes\":null},\"tail\":1}";
   reader.offset = 0u;
   reader.chunk_size = 2u;
-  status = test_value_rewrite_selector_reader(
-      test_state_reader, &reader, test_buffer_sink_write, &sink, &options,
-      &error);
+  status = test_value_rewrite_selector_reader(test_state_reader, &reader,
+                                              test_buffer_sink_write, &sink,
+                                              &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out,
                 "{\"meta\":{\"payload.bytes\":\"AAF/\"},\"tail\":1}") == 0);
@@ -1224,9 +1214,9 @@ static void test_value_rewrite_missing_object_path_and_streaming_string(void) {
   reader.json = "{\"meta\":{\"ok\":true},\"tail\":null}";
   reader.offset = 0u;
   reader.chunk_size = 1u;
-  status = test_value_rewrite_reader(
-      test_state_reader, &reader, test_buffer_sink_write, &sink, &options,
-      &error);
+  status = test_value_rewrite_reader(test_state_reader, &reader,
+                                     test_buffer_sink_write, &sink, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out,
                 "{\"meta\":{\"ok\":true,\"request\":{\"id\":42}},"
@@ -1241,9 +1231,9 @@ static void test_value_rewrite_missing_object_path_and_streaming_string(void) {
   reader.json = "{\"text\":\"ab\\ncd\\\"ef\",\"n\":123}";
   reader.offset = 0u;
   reader.chunk_size = 2u;
-  status = test_value_rewrite_reader(
-      test_state_reader, &reader, test_buffer_sink_write, &sink, &options,
-      &error);
+  status = test_value_rewrite_reader(test_state_reader, &reader,
+                                     test_buffer_sink_write, &sink, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp((const char *)out, "{\"text\":\"ab\\ncd\\\"ef\",\"n\":123}") ==
          0);
@@ -1263,9 +1253,9 @@ static void test_value_rewrite_failures(void) {
   sink.buffer = out;
   sink.capacity = sizeof(out);
   memset(&options, 0, sizeof(options));
-  EXPECT(test_value_rewrite_reader(NULL, NULL, test_buffer_sink_write,
-                                       &sink, &options, &error) ==
-         LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_value_rewrite_reader(NULL, NULL, test_buffer_sink_write, &sink,
+                                   &options,
+                                   &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   EXPECT(test_value_rewrite_selector_reader(
              test_state_reader, &reader, test_buffer_sink_write, &sink, NULL,
@@ -1275,18 +1265,17 @@ static void test_value_rewrite_failures(void) {
   reader.json = "true";
   reader.offset = 0u;
   reader.chunk_size = 8u;
-  EXPECT(test_value_rewrite_reader(
-             test_state_reader, &reader, test_buffer_sink_write, &sink,
-             &options, &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(test_value_rewrite_reader(test_state_reader, &reader,
+                                   test_buffer_sink_write, &sink, &options,
+                                   &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(&options, 0, sizeof(options));
   options.action = LONEJSON_VALUE_REWRITE_REPLACE;
   options.replacement.emit = test_value_rewrite_emit_dynamic;
   options.replacement.json = (const lonejson_json_value *)1;
   EXPECT(test_value_rewrite_reader(test_state_reader, &reader,
-                                       test_buffer_sink_write, &sink, &options,
-                                       &error) ==
-         LONEJSON_STATUS_INVALID_ARGUMENT);
+                                   test_buffer_sink_write, &sink, &options,
+                                   &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
   memset(&options, 0, sizeof(options));
   options.target_segments = path_missing_array;
@@ -1295,8 +1284,8 @@ static void test_value_rewrite_failures(void) {
   reader.json = "{\"items\":[1]}";
   reader.offset = 0u;
   reader.chunk_size = 8u;
-  status = test_value_rewrite_reader(
-      test_state_reader, &reader, test_buffer_sink_write, &sink, &options,
-      &error);
+  status = test_value_rewrite_reader(test_state_reader, &reader,
+                                     test_buffer_sink_write, &sink, &options,
+                                     &error);
   EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
 }

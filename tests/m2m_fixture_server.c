@@ -205,8 +205,8 @@ static void handle_signup(m2m_fixture_server *server, int client_fd,
   request.signup_secret = values.signup_secret;
   request.email = values.email;
   request.credential_auth_modes = LONEJSON_M2M_AUTH_DEFAULT;
-  status =
-      lonejson_m2m_signup_complete(server->runtime, &request, &complete, &error);
+  status = lonejson_m2m_signup_complete(server->runtime, &request, &complete,
+                                        &error);
   if (status != LONEJSON_STATUS_OK) {
     fprintf(stderr, "signup completion failed: %s\n", error.message);
     lonejson_m2m_signup_complete_cleanup(&complete);
@@ -404,9 +404,9 @@ int main(int argc, char **argv) {
       "{\"client_id\":\"%s\",\"client_secret\":\"%s\",\"api_key\":\"%s\","
       "\"signup_url\":\"%s\",\"signup_id\":\"%s\",\"signup_secret\":\"%s\"}\n",
       server.initial_credential.client_id,
-      server.initial_credential.client_secret, server.initial_credential.api_key,
-      server.signup.url.data, server.signup.signup_id,
-      server.signup.signup_secret);
+      server.initial_credential.client_secret,
+      server.initial_credential.api_key, server.signup.url.data,
+      server.signup.signup_id, server.signup.signup_secret);
   fclose(secrets);
 
   status = (lonejson_status)run_server(&server);

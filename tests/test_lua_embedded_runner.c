@@ -1,7 +1,7 @@
 #include <stdio.h>
 
-#include <lua.h>
 #include <lauxlib.h>
+#include <lua.h>
 #include <lualib.h>
 
 static int set_package_field(lua_State *L, const char *field,
@@ -71,8 +71,7 @@ int main(int argc, char **argv) {
   }
 
   luaL_openlibs(L);
-  lua_pushfstring(L, "%s/lua/?.lua;%s/lua/?/init.lua", source_dir,
-                  source_dir);
+  lua_pushfstring(L, "%s/lua/?.lua;%s/lua/?/init.lua", source_dir, source_dir);
   rc = set_package_field(L, "path", lua_tostring(L, -1));
   lua_pop(L, 1);
   if (rc == 0) {

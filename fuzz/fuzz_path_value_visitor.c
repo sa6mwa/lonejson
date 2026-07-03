@@ -107,8 +107,7 @@ static void fuzz_before_value(fuzz_path_state *state) {
                      (unsigned long)frame->next_index);
   fuzz_abort_if(written < 0 || (size_t)written >= sizeof(index_text));
   fuzz_push_segment(state, (size_t)written,
-                    fuzz_hash_bytes(2166136261u, index_text,
-                                    (size_t)written));
+                    fuzz_hash_bytes(2166136261u, index_text, (size_t)written));
 }
 
 static void fuzz_complete_value(fuzz_path_state *state) {
@@ -220,8 +219,7 @@ static lonejson_status fuzz_key_chunk(void *user,
   frame = &state->containers[state->container_depth - 1u];
   fuzz_abort_if(frame->type != FUZZ_CONTAINER_OBJECT);
   frame->pending_key_len += len;
-  frame->pending_key_hash =
-      fuzz_hash_bytes(frame->pending_key_hash, data, len);
+  frame->pending_key_hash = fuzz_hash_bytes(frame->pending_key_hash, data, len);
   state->key_bytes += len;
   return fuzz_maybe_fail(state, error);
 }

@@ -691,12 +691,12 @@ static int ljlua_assign_spool_from_lua(lua_State *L, lonejson_spooled *spool,
   data = luaL_checklstring(L, index, &len);
   if (kind == LJLUA_FIELD_SPOOLED_TEXT) {
     if (lonejson_spooled_append(spool, (const unsigned char *)data, len,
-                                 &error) != LONEJSON_STATUS_OK) {
+                                &error) != LONEJSON_STATUS_OK) {
       return luaL_error(L, "%s", error.message);
     }
   } else {
     if (lonejson_spooled_append(spool, (const unsigned char *)data, len,
-                                 &error) != LONEJSON_STATUS_OK) {
+                                &error) != LONEJSON_STATUS_OK) {
       return luaL_error(L, "%s", error.message);
     }
   }
@@ -731,9 +731,8 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
     size_t len;
     const char *text = luaL_checklstring(L, value_index, &len);
 
-    status = lonejson_record_assign_string(schema->runtime, &schema->map,
-                                           record, &meta->field, text, len,
-                                           &error);
+    status = lonejson_record_assign_string(
+        schema->runtime, &schema->map, record, &meta->field, text, len, &error);
     if (status != LONEJSON_STATUS_OK) {
       return luaL_error(L, "%s", error.message);
     }
@@ -806,9 +805,9 @@ static int ljlua_assign_field_from_lua(lua_State *L, ljlua_schema *schema,
     luaL_checktype(L, value_index, LUA_TTABLE);
     for (i = 1u; i <= (size_t)lua_rawlen(L, value_index); ++i) {
       lua_rawgeti(L, value_index, (lua_Integer)i);
-      status = lonejson_record_array_append_u64(
-          schema->runtime, &schema->map, record, &meta->field, arr,
-          ljlua_check_u64(L, -1), &error);
+      status = lonejson_record_array_append_u64(schema->runtime, &schema->map,
+                                                record, &meta->field, arr,
+                                                ljlua_check_u64(L, -1), &error);
       if (status != LONEJSON_STATUS_OK) {
         lua_pop(L, 1);
         return luaL_error(L, "%s", error.message);

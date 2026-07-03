@@ -677,9 +677,8 @@ lonejson__begin_array_value(lonejson_parser *parser) {
           lonejson_mapped_array_stream *stream =
               (lonejson_mapped_array_stream *)lonejson__field_ptr(object_ptr,
                                                                   field);
-          status =
-              lonejson__mapped_array_stream_require_handler(parser, field,
-                                                            stream);
+          status = lonejson__mapped_array_stream_require_handler(parser, field,
+                                                                 stream);
           if (status != LONEJSON_STATUS_OK) {
             return status;
           }
@@ -801,12 +800,10 @@ lonejson__finalize_object(lonejson_parser *parser) {
   }
 
   if (parser->json_stream_active) {
-    status =
-        lonejson__json_value_parse_visitor_active(parser)
-            ? lonejson__json_value_object_end(parser)
-            : lonejson__json_value_emit(parser, "}", 1u);
-    if (status != LONEJSON_STATUS_OK &&
-        status != LONEJSON_STATUS_TRUNCATED) {
+    status = lonejson__json_value_parse_visitor_active(parser)
+                 ? lonejson__json_value_object_end(parser)
+                 : lonejson__json_value_emit(parser, "}", 1u);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
   }
@@ -828,12 +825,10 @@ static LONEJSON__INLINE lonejson_status
 lonejson__finalize_array(lonejson_parser *parser) {
   lonejson_frame *frame = &parser->frames[parser->frame_count - 1u];
   if (parser->json_stream_active) {
-    lonejson_status status =
-        lonejson__json_value_parse_visitor_active(parser)
-            ? lonejson__json_value_array_end(parser)
-            : lonejson__json_value_emit(parser, "]", 1u);
-    if (status != LONEJSON_STATUS_OK &&
-        status != LONEJSON_STATUS_TRUNCATED) {
+    lonejson_status status = lonejson__json_value_parse_visitor_active(parser)
+                                 ? lonejson__json_value_array_end(parser)
+                                 : lonejson__json_value_emit(parser, "]", 1u);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
   }
@@ -876,9 +871,8 @@ static int lonejson__mapped_numeric_target(const lonejson_frame *frame) {
   return 0;
 }
 
-static LONEJSON__INLINE lonejson_status
-lonejson__deliver_key_text(lonejson_parser *parser, const char *key,
-                           size_t key_len) {
+static LONEJSON__INLINE lonejson_status lonejson__deliver_key_text(
+    lonejson_parser *parser, const char *key, size_t key_len) {
   lonejson_frame *frame = (parser->frame_count != 0u)
                               ? &parser->frames[parser->frame_count - 1u]
                               : NULL;
@@ -959,8 +953,7 @@ lonejson__deliver_token(lonejson_parser *parser, lonejson_lex_mode mode) {
           status = lonejson__json_value_emit(parser, "null", 4u);
         }
         if (status != LONEJSON_STATUS_OK &&
-            (!allow_truncated_status ||
-             status != LONEJSON_STATUS_TRUNCATED)) {
+            (!allow_truncated_status || status != LONEJSON_STATUS_TRUNCATED)) {
           return status;
         }
         lonejson__parser_clear_json_stream_value(parser);

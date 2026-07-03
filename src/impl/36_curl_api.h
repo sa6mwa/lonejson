@@ -128,8 +128,8 @@ static void lonejson__curl_upload_assign_methods(lonejson_curl_upload *ctx) {
 }
 
 #ifdef LONEJSON_WITH_OIDC
-static void lonejson__oidc_jwks_cache_assign_methods(
-    lonejson_oidc_jwks_cache_parse *ctx) {
+static void
+lonejson__oidc_jwks_cache_assign_methods(lonejson_oidc_jwks_cache_parse *ctx) {
   if (ctx == NULL) {
     return;
   }

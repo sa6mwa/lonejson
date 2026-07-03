@@ -210,8 +210,8 @@ static lonejson_status test_path_visit_append(test_path_visit_state *state,
   return copy_len == len ? LONEJSON_STATUS_OK : LONEJSON_STATUS_TRUNCATED;
 }
 
-static lonejson_status
-test_path_visit_append_cstr(test_path_visit_state *state, const char *text) {
+static lonejson_status test_path_visit_append_cstr(test_path_visit_state *state,
+                                                   const char *text) {
   return test_path_visit_append(state, text, strlen(text));
 }
 
@@ -241,8 +241,8 @@ test_path_visit_format_path(char *out, size_t out_size,
     }
     out[len++] = '/';
     out[len] = '\0';
-    written = snprintf(out + len, out_size - len, "%lu:",
-                       (unsigned long)path->segments[i].len);
+    written = snprintf(out + len, out_size - len,
+                       "%lu:", (unsigned long)path->segments[i].len);
     if (written < 0 || (size_t)written >= out_size - len) {
       return LONEJSON_STATUS_TRUNCATED;
     }
@@ -257,9 +257,8 @@ test_path_visit_format_path(char *out, size_t out_size,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status
-test_path_visit_maybe_fail(test_path_visit_state *state,
-                           lonejson_error *error) {
+static lonejson_status test_path_visit_maybe_fail(test_path_visit_state *state,
+                                                  lonejson_error *error) {
   ++state->callback_count;
   if (state->fail_after != 0u && state->callback_count >= state->fail_after) {
     return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
@@ -268,10 +267,10 @@ test_path_visit_maybe_fail(test_path_visit_state *state,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_path_visit_event_log(test_path_visit_state *state,
-                                                 const char *name,
-                                                 const lonejson_value_path *path,
-                                                 lonejson_error *error) {
+static lonejson_status
+test_path_visit_event_log(test_path_visit_state *state, const char *name,
+                          const lonejson_value_path *path,
+                          lonejson_error *error) {
   char path_text[256];
   lonejson_status status;
 
@@ -296,42 +295,46 @@ static lonejson_status test_path_visit_event_log(test_path_visit_state *state,
   return status;
 }
 
-static lonejson_status test_path_visit_object_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_path_visit_object_begin(void *user, const lonejson_value_path *path,
+                             lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user, "{", path,
                                    error);
 }
 
-static lonejson_status test_path_visit_object_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_path_visit_object_end(void *user, const lonejson_value_path *path,
+                           lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user, "}", path,
                                    error);
 }
 
-static lonejson_status test_path_visit_array_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_path_visit_array_begin(void *user, const lonejson_value_path *path,
+                            lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user, "[", path,
                                    error);
 }
 
-static lonejson_status test_path_visit_array_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_path_visit_array_end(void *user, const lonejson_value_path *path,
+                          lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user, "]", path,
                                    error);
 }
 
-static lonejson_status test_path_visit_key_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_path_visit_key_begin(void *user, const lonejson_value_path *path,
+                          lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user, "K<", path,
                                    error);
 }
 
-static lonejson_status test_path_visit_key_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+test_path_visit_key_chunk(void *user, const lonejson_value_path *path,
+                          const char *data, size_t len, lonejson_error *error) {
   test_path_visit_state *state = (test_path_visit_state *)user;
-  lonejson_status status =
-      test_path_visit_event_log(state, "K", path, error);
+  lonejson_status status = test_path_visit_event_log(state, "K", path, error);
   if (status == LONEJSON_STATUS_OK) {
     status = test_path_visit_append_cstr(state, "=");
   }
@@ -341,27 +344,29 @@ static lonejson_status test_path_visit_key_chunk(
   return status;
 }
 
-static lonejson_status test_path_visit_key_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status test_path_visit_key_end(void *user,
+                                               const lonejson_value_path *path,
+                                               lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user, "K>", path,
                                    error);
 }
 
-static lonejson_status test_path_visit_string_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_path_visit_string_begin(void *user, const lonejson_value_path *path,
+                             lonejson_error *error) {
   test_path_visit_state *state = (test_path_visit_state *)user;
-  lonejson_status status =
-      test_path_visit_format_path(state->active_string_path,
-                                  sizeof(state->active_string_path), path);
+  lonejson_status status = test_path_visit_format_path(
+      state->active_string_path, sizeof(state->active_string_path), path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
   return test_path_visit_event_log(state, "S<", path, error);
 }
 
-static lonejson_status test_path_visit_string_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+test_path_visit_string_chunk(void *user, const lonejson_value_path *path,
+                             const char *data, size_t len,
+                             lonejson_error *error) {
   test_path_visit_state *state = (test_path_visit_state *)user;
   char path_text[256];
   lonejson_status status =
@@ -383,27 +388,29 @@ static lonejson_status test_path_visit_string_chunk(
   return status;
 }
 
-static lonejson_status test_path_visit_string_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_path_visit_string_end(void *user, const lonejson_value_path *path,
+                           lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user, "S>", path,
                                    error);
 }
 
-static lonejson_status test_path_visit_number_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_path_visit_number_begin(void *user, const lonejson_value_path *path,
+                             lonejson_error *error) {
   test_path_visit_state *state = (test_path_visit_state *)user;
-  lonejson_status status =
-      test_path_visit_format_path(state->active_number_path,
-                                  sizeof(state->active_number_path), path);
+  lonejson_status status = test_path_visit_format_path(
+      state->active_number_path, sizeof(state->active_number_path), path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
   return test_path_visit_event_log(state, "N<", path, error);
 }
 
-static lonejson_status test_path_visit_number_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+test_path_visit_number_chunk(void *user, const lonejson_value_path *path,
+                             const char *data, size_t len,
+                             lonejson_error *error) {
   test_path_visit_state *state = (test_path_visit_state *)user;
   char path_text[256];
   lonejson_status status =
@@ -425,28 +432,29 @@ static lonejson_status test_path_visit_number_chunk(
   return status;
 }
 
-static lonejson_status test_path_visit_number_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_path_visit_number_end(void *user, const lonejson_value_path *path,
+                           lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user, "N>", path,
                                    error);
 }
 
-static lonejson_status test_path_visit_bool(
-    void *user, const lonejson_value_path *path, int value,
-    lonejson_error *error) {
+static lonejson_status test_path_visit_bool(void *user,
+                                            const lonejson_value_path *path,
+                                            int value, lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user,
                                    value ? "T" : "F", path, error);
 }
 
-static lonejson_status test_path_visit_null(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status test_path_visit_null(void *user,
+                                            const lonejson_value_path *path,
+                                            lonejson_error *error) {
   return test_path_visit_event_log((test_path_visit_state *)user, "Z", path,
                                    error);
 }
 
 static lonejson_path_value_visitor test_path_value_visitor(void) {
-  lonejson_path_value_visitor visitor =
-      lonejson_default_path_value_visitor();
+  lonejson_path_value_visitor visitor = lonejson_default_path_value_visitor();
   visitor.object_begin = test_path_visit_object_begin;
   visitor.object_end = test_path_visit_object_end;
   visitor.object_key_begin = test_path_visit_key_begin;
@@ -566,8 +574,8 @@ static void test_path_value_visitor_failure_cleans_state(void) {
   base_live = alloc.stats.bytes_live;
   memset(&state, 0, sizeof(state));
   state.fail_after = 7u;
-  status = lonejson_visit_path_value_cstr(runtime, json, &visitor, &state,
-                                          &error);
+  status =
+      lonejson_visit_path_value_cstr(runtime, json, &visitor, &state, &error);
   EXPECT(status == LONEJSON_STATUS_CALLBACK_FAILED);
   EXPECT(alloc.stats.bytes_live == base_live);
   lonejson_free(runtime);
@@ -596,8 +604,8 @@ static void test_path_value_visitor_short_keys_do_not_allocate_per_event(void) {
   base_alloc_calls = alloc.stats.alloc_calls;
   base_live = alloc.stats.bytes_live;
   memset(&state, 0, sizeof(state));
-  status = lonejson_visit_path_value_cstr(runtime, json, &visitor, &state,
-                                          &error);
+  status =
+      lonejson_visit_path_value_cstr(runtime, json, &visitor, &state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(alloc.stats.alloc_calls == base_alloc_calls + 2u);
   EXPECT(state.callback_count > 2u);
@@ -1053,9 +1061,8 @@ static void test_path_value_visitor_source_entry_points_and_args(void) {
   reader_state.offset = 0u;
   reader_state.chunk_size = 2u;
   memset(&state, 0, sizeof(state));
-  status = runtime->visit_path_value_reader(runtime, test_state_reader,
-                                            &reader_state, &visitor, &state,
-                                            &error);
+  status = runtime->visit_path_value_reader(
+      runtime, test_state_reader, &reader_state, &visitor, &state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
 
@@ -1166,8 +1173,8 @@ static void test_path_value_visitor_limit_failures_cleanup(void) {
   }
   base_live = alloc.stats.bytes_live;
   memset(&state, 0, sizeof(state));
-  status = lonejson_visit_path_value_cstr(runtime, deep, &visitor, &state,
-                                          &error);
+  status =
+      lonejson_visit_path_value_cstr(runtime, deep, &visitor, &state, &error);
   EXPECT(status == LONEJSON_STATUS_OVERFLOW);
   EXPECT(alloc.stats.bytes_live == base_live);
   lonejson_free(runtime);

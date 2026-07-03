@@ -185,8 +185,7 @@ static void fuzz_configure_value_visitor(lonejson_value_visitor *visitor) {
   visitor->null_value = fuzz_event;
 }
 
-static void
-fuzz_configure_path_visitor(lonejson_path_value_visitor *visitor) {
+static void fuzz_configure_path_visitor(lonejson_path_value_visitor *visitor) {
   memset(visitor, 0, sizeof(*visitor));
   visitor->object_begin = fuzz_path_event;
   visitor->object_end = fuzz_path_event;
@@ -240,7 +239,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   state.fail_after_first = (unsigned)((data[1] & 0x80u) != 0u);
   options = lonejson_default_candidate_stream_options();
   options.framing = (lonejson_candidate_framing)(data[1] & 0x03u);
-  options.capture_mode = (lonejson_candidate_capture_mode)((data[1] >> 2) & 0x03u);
+  options.capture_mode =
+      (lonejson_candidate_capture_mode)((data[1] >> 2) & 0x03u);
   options.max_memory_payload_bytes =
       (data[0] & 0x20u) != 0u ? (size_t)(data[0] & 0x0fu) : 0u;
   if (options.capture_mode == LONEJSON_CANDIDATE_CAPTURE_SINK) {

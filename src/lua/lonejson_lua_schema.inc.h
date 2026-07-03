@@ -239,8 +239,9 @@ static int ljlua_check_fd_like(lua_State *L, int index) {
   return fileno(ljlua_check_file(L, index));
 }
 
-static int ljlua_compile_nested_schema(lua_State *L, ljlua_runtime_ud *runtime_ud,
-                                       int index, ljlua_schema **out_schema) {
+static int ljlua_compile_nested_schema(lua_State *L,
+                                       ljlua_runtime_ud *runtime_ud, int index,
+                                       ljlua_schema **out_schema) {
   ljlua_schema *schema;
   size_t count;
   size_t i;
@@ -282,8 +283,7 @@ static int ljlua_compile_nested_schema(lua_State *L, ljlua_runtime_ud *runtime_u
 }
 
 static int ljlua_compile_field(lua_State *L, ljlua_runtime_ud *runtime_ud,
-                               int index,
-                               ljlua_field_meta *meta) {
+                               int index, ljlua_field_meta *meta) {
   const char *kind_name;
   int nullable;
   size_t i;

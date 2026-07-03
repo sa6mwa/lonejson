@@ -65,9 +65,9 @@ static int ljlua_schema_new_record(lua_State *L) {
   ljlua_record_ud *record_ud;
   size_t record_bytes;
 
-  record_bytes = schema_ud->schema->record_offset + schema_ud->schema->record_size;
-  record_ud = (ljlua_record_ud *)ljlua_newuserdata_slots(
-      L, record_bytes, 0);
+  record_bytes =
+      schema_ud->schema->record_offset + schema_ud->schema->record_size;
+  record_ud = (ljlua_record_ud *)ljlua_newuserdata_slots(L, record_bytes, 0);
   memset(record_ud, 0, record_bytes);
   record_ud->magic = LJLUA_RECORD_MAGIC;
   record_ud->schema = schema_ud->schema;
@@ -117,7 +117,8 @@ static int ljlua_record_index(lua_State *L) {
   }
   if (compiled != NULL && compiled->step_count == 1u &&
       compiled->steps[0].index == 0u) {
-    return ljlua_push_compiled_path_value(L, ljlua_record_data(ud), compiled, 1);
+    return ljlua_push_compiled_path_value(L, ljlua_record_data(ud), compiled,
+                                          1);
   }
   lua_pushnil(L);
   return 1;
@@ -225,8 +226,8 @@ static int ljlua_path_get(lua_State *L) {
   if (path_ud->schema != record_ud->schema) {
     return luaL_error(L, "path belongs to a different schema");
   }
-  return ljlua_push_compiled_path_value(L, ljlua_record_data(record_ud), path_ud->compiled,
-                                        2);
+  return ljlua_push_compiled_path_value(L, ljlua_record_data(record_ud),
+                                        path_ud->compiled, 2);
 }
 
 static int ljlua_path_count(lua_State *L) {
@@ -243,7 +244,8 @@ static int ljlua_path_count(lua_State *L) {
     return luaL_error(L, "count path must reference a top-level array field");
   }
   meta = path_ud->compiled->steps[0].meta;
-  ptr = (unsigned char *)ljlua_record_data(record_ud) + meta->field.struct_offset;
+  ptr =
+      (unsigned char *)ljlua_record_data(record_ud) + meta->field.struct_offset;
   switch (meta->lua_kind) {
   case LJLUA_FIELD_STRING_ARRAY:
     lua_pushinteger(L, (lua_Integer)((lonejson_string_array *)ptr)->count);
@@ -276,8 +278,8 @@ static int ljlua_getter_call(lua_State *L) {
   if (path_ud == NULL || path_ud->schema != record_ud->schema) {
     return luaL_error(L, "path belongs to a different schema");
   }
-  return ljlua_push_compiled_path_value(L, ljlua_record_data(record_ud), path_ud->compiled,
-                                        1);
+  return ljlua_push_compiled_path_value(L, ljlua_record_data(record_ud),
+                                        path_ud->compiled, 1);
 }
 
 static int ljlua_counter_call(lua_State *L) {
@@ -295,7 +297,8 @@ static int ljlua_counter_call(lua_State *L) {
     return luaL_error(L, "count path must reference a top-level array field");
   }
   meta = path_ud->compiled->steps[0].meta;
-  ptr = (unsigned char *)ljlua_record_data(record_ud) + meta->field.struct_offset;
+  ptr =
+      (unsigned char *)ljlua_record_data(record_ud) + meta->field.struct_offset;
   switch (meta->lua_kind) {
   case LJLUA_FIELD_STRING_ARRAY:
     lua_pushinteger(L, (lua_Integer)((lonejson_string_array *)ptr)->count);
@@ -320,15 +323,14 @@ static int ljlua_counter_call(lua_State *L) {
   }
 }
 
-static int
-ljlua_schema_decode_into_buffer(lua_State *L, ljlua_schema *schema,
-                                void *record, const char *json, size_t len,
-                                lonejson *runtime) {
+static int ljlua_schema_decode_into_buffer(lua_State *L, ljlua_schema *schema,
+                                           void *record, const char *json,
+                                           size_t len, lonejson *runtime) {
   lonejson_error error;
   lonejson_status status;
 
-  status = lonejson_parse_buffer(runtime, &schema->map, record, json, len,
-                                 &error);
+  status =
+      lonejson_parse_buffer(runtime, &schema->map, record, json, len, &error);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     ljlua_push_error(L, &error);
     return 0;
@@ -365,8 +367,9 @@ static int ljlua_schema_decode_into(lua_State *L) {
       runtime = schema_ud->schema->runtime_ud->capture_runtime;
     }
   }
-  if (!ljlua_schema_decode_into_buffer(L, schema_ud->schema, ljlua_record_data(record_ud),
-                                       json, len, runtime)) {
+  if (!ljlua_schema_decode_into_buffer(L, schema_ud->schema,
+                                       ljlua_record_data(record_ud), json, len,
+                                       runtime)) {
     return 2;
   }
   record_ud->cleared = 0;
@@ -524,9 +527,8 @@ static int ljlua_schema_decode(lua_State *L) {
     runtime = schema_ud->schema->runtime_ud->capture_runtime;
     {
       lonejson_error error;
-      lonejson_status status =
-          lonejson_parse_buffer(runtime, &schema_ud->schema->map, record, json,
-                                len, &error);
+      lonejson_status status = lonejson_parse_buffer(
+          runtime, &schema_ud->schema->map, record, json, len, &error);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         ljlua_decode_context_cleanup(&ctx);
         ljlua_cleanup_record_storage(schema_ud->schema, record);
@@ -565,7 +567,8 @@ static int ljlua_schema_assign(lua_State *L) {
   lonejson_reset(schema_ud->schema->runtime, &schema_ud->schema->map,
                  ljlua_record_data(record_ud));
   record_ud->cleared = 1;
-  ljlua_assign_table_to_record(L, schema_ud->schema, ljlua_record_data(record_ud), 3);
+  ljlua_assign_table_to_record(L, schema_ud->schema,
+                               ljlua_record_data(record_ud), 3);
   record_ud->cleared = 0;
   lua_pushvalue(L, 2);
   return 1;
@@ -655,8 +658,8 @@ static int ljlua_schema_encode(lua_State *L) {
     if (record_ud->schema != schema_ud->schema) {
       return luaL_error(L, "record belongs to a different schema");
     }
-    json =
-        ljlua_serialize_value(L, schema_ud->schema, ljlua_record_data(record_ud), &out_len);
+    json = ljlua_serialize_value(L, schema_ud->schema,
+                                 ljlua_record_data(record_ud), &out_len);
   } else {
     int owned_record;
     unsigned char *record =
@@ -684,9 +687,9 @@ static int ljlua_schema_write_path(lua_State *L) {
   ljlua_reject_legacy_options(L, 4, "schema:write_path");
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
-    status = lonejson_serialize_path(schema_ud->schema->runtime,
-                                     &schema_ud->schema->map, ljlua_record_data(record_ud),
-                                     path, &error);
+    status = lonejson_serialize_path(
+        schema_ud->schema->runtime, &schema_ud->schema->map,
+        ljlua_record_data(record_ud), path, &error);
   } else {
     int owned_record;
     unsigned char *record =
@@ -696,9 +699,9 @@ static int ljlua_schema_write_path(lua_State *L) {
     }
     ljlua_prepare_record_storage(schema_ud->schema, record);
     ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
-    status = lonejson_serialize_path(schema_ud->schema->runtime,
-                                     &schema_ud->schema->map, record, path,
-                                     &error);
+    status =
+        lonejson_serialize_path(schema_ud->schema->runtime,
+                                &schema_ud->schema->map, record, path, &error);
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
   }
@@ -719,8 +722,8 @@ static int ljlua_schema_write_file(lua_State *L) {
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
     status = lonejson_serialize_filep(schema_ud->schema->runtime,
-                                      &schema_ud->schema->map, ljlua_record_data(record_ud),
-                                      fp, &error);
+                                      &schema_ud->schema->map,
+                                      ljlua_record_data(record_ud), fp, &error);
   } else {
     int owned_record;
     unsigned char *record =
@@ -730,9 +733,9 @@ static int ljlua_schema_write_file(lua_State *L) {
     }
     ljlua_prepare_record_storage(schema_ud->schema, record);
     ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
-    status = lonejson_serialize_filep(schema_ud->schema->runtime,
-                                      &schema_ud->schema->map, record, fp,
-                                      &error);
+    status =
+        lonejson_serialize_filep(schema_ud->schema->runtime,
+                                 &schema_ud->schema->map, record, fp, &error);
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
   }
@@ -755,8 +758,8 @@ static int ljlua_schema_write_fd(lua_State *L) {
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
     status = lonejson_serialize_filep(schema_ud->schema->runtime,
-                                      &schema_ud->schema->map, ljlua_record_data(record_ud),
-                                      fp, &error);
+                                      &schema_ud->schema->map,
+                                      ljlua_record_data(record_ud), fp, &error);
   } else {
     int owned_record;
     unsigned char *record =
@@ -766,9 +769,9 @@ static int ljlua_schema_write_fd(lua_State *L) {
     }
     ljlua_prepare_record_storage(schema_ud->schema, record);
     ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
-    status = lonejson_serialize_filep(schema_ud->schema->runtime,
-                                      &schema_ud->schema->map, record, fp,
-                                      &error);
+    status =
+        lonejson_serialize_filep(schema_ud->schema->runtime,
+                                 &schema_ud->schema->map, record, fp, &error);
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
   }
@@ -808,8 +811,8 @@ static int ljlua_schema_stream_path(lua_State *L) {
     runtime = schema_ud->schema->runtime_ud->capture_runtime;
   }
   ud->magic = LJLUA_STREAM_MAGIC;
-  ud->stream = lonejson_stream_open_path(runtime, &schema_ud->schema->map, path,
-                                         &error);
+  ud->stream =
+      lonejson_stream_open_path(runtime, &schema_ud->schema->map, path, &error);
   if (ud->stream == NULL) {
     return ljlua_push_error(L, &error);
   }

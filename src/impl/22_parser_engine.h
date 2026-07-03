@@ -446,9 +446,8 @@ lonejson__consume_string_direct_fast(lonejson_parser *parser,
       pos++;
     }
     if (pos != start) {
-      lonejson_status status =
-          lonejson__direct_string_append_bytes(parser, bytes + start,
-                                               pos - start);
+      lonejson_status status = lonejson__direct_string_append_bytes(
+          parser, bytes + start, pos - start);
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
