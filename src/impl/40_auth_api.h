@@ -1044,8 +1044,11 @@ lonejson__oauth2_form_append_pair(lonejson_owned_buffer *out, const char *key,
       return status;
     }
   }
-  status =
-      lonejson__oauth2_form_append_raw(out, key, strlen(key), max_bytes, error);
+  if (key == NULL || key[0] == '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "OAuth2 form parameter name is required");
+  }
+  status = lonejson__oauth2_form_append_component(out, key, max_bytes, error);
   if (status == LONEJSON_STATUS_OK) {
     status = lonejson__oauth2_form_append_raw(out, "=", 1u, max_bytes, error);
   }

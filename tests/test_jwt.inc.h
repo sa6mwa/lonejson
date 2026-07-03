@@ -3141,6 +3141,23 @@ static void test_m2m_signup_flow(void) {
   EXPECT(strstr(signup.url.data, "signup_secret=") != NULL);
   EXPECT(strstr(signup.record_json.data, signup.signup_secret) == NULL);
 
+  lonejson_m2m_signup_cleanup(&bad_signup);
+  signup_request.id_param = "signup id";
+  signup_request.secret_param = "signup&secret=token";
+  EXPECT(lonejson_m2m_signup_generate(test_default_runtime(), &signup_request,
+                                      &bad_signup, &error) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(strstr(bad_signup.query.data, "signup+id=") != NULL);
+  EXPECT(strstr(bad_signup.query.data, "signup%26secret%3Dtoken=") != NULL);
+  EXPECT(strstr(bad_signup.query.data, "signup id=") == NULL);
+  EXPECT(strstr(bad_signup.query.data, "signup&secret=token=") == NULL);
+  EXPECT(strstr(bad_signup.url.data, "signup+id=") != NULL);
+  EXPECT(strstr(bad_signup.url.data, "signup%26secret%3Dtoken=") != NULL);
+  EXPECT(strstr(bad_signup.url.data, "&secret=token=") == NULL);
+  lonejson_m2m_signup_cleanup(&bad_signup);
+  signup_request.id_param = NULL;
+  signup_request.secret_param = NULL;
+
   signup_request.max_url_bytes = 8u;
   EXPECT(lonejson_m2m_signup_generate(test_default_runtime(), &signup_request,
                                       &bad_signup, &error) ==
