@@ -9,7 +9,7 @@ not an external C comparator.
 
 Files:
 
-* `latest.json` stores the most recent benchmark run as one JSON object and is committed so `bench-compare` works from the repo checkout.
+* `latest.json` stores the most recent benchmark run as one JSON object and is ignored because it is local run output.
 * `history.jsonl` appends every benchmark run as compact JSONL.
 * `baseline.json` stores a frozen run copied from the last history entry and is committed as the comparison baseline.
 * `runs/<timestamp_epoch_ns>.json` stores archived benchmark reports.
@@ -44,7 +44,8 @@ Methodology:
   * it fails if the benchmark configuration differs from the baseline
   * it fails if the baseline is missing any current benchmark lanes
   * it fails on any material negative throughput regression
-* `bench-check`, as used by `test-all`, reruns a failed C or Lua benchmark gate
+* `bench-check`, as used by `test-all`, writes temporary result files instead
+  of updating `latest.json`, then reruns a failed C or Lua benchmark gate
   once into a separate result file before failing. This keeps transient host
   scheduling noise from breaking the full test suite while still requiring
   reproducible material regressions to fail.
