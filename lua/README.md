@@ -92,6 +92,61 @@ initialization rule as the rest of lonejson: instantiate one runtime with
 `lonejson_new()`/`lonejson_default_config()` and use the public `*_init`
 helpers for public structs instead of manual `memset` or `{0}`.
 
+## Auth facade
+
+When the Lua module is built with JWT/OIDC support, auth helpers are a facade
+over the C implementation. Lua does not reimplement crypto, HTTP transfer, or
+credential storage. A runtime owns the installed auth and HTTP providers:
+
+```lua
+local lonejson = require("lonejson")
+local lj = lonejson.new()
+
+lj:set_openssl_auth_provider()
+lj:set_http_provider(function(request)
+  -- Call curl, a framework HTTP client, or test transport here.
+  return {
+    status_code = 200,
+    content_type = "application/json",
+    body = "{}",
+  }
+end, "my-product/1.0")
+```
+
+Runtime methods use the runtime providers. For example,
+`lj:jwt_validate_compact_signature(...)` uses the installed auth provider, and
+`lj:oauth2_client_credentials_request(...)` uses the installed HTTP provider.
+`lj:oidc_pkce_challenge(verifier)` requires provider SHA-256, while
+`lj:oidc_pkce_generate()` requires provider random bytes and SHA-256. With the
+built-in OpenSSL adapter installed, those are provided by OpenSSL; embeddings
+that compile without OpenSSL can still supply equivalent C provider callbacks
+before calling through Lua.
+
+M2M/API-key helpers return store-ready JSON strings. Store persistence,
+locking, rotation, revocation, and endpoint authorization remain application
+logic:
+
+```lua
+local credential = lj:m2m_credential_generate({
+  claim = { scope = { "read" }, tenant = "acme" },
+  auth_modes = "bearer",
+})
+
+local store_json = '{"credentials":[' .. credential.record_json .. ']}'
+local auth = lj:m2m_verify_authorization({
+  store_json = store_json,
+  authorization_header = "Bearer " .. credential.api_key,
+  allowed_auth_modes = "bearer",
+})
+
+if auth.authorized then
+  -- auth.client_id and auth.claim are authenticated facts.
+end
+```
+
+The top-level README and `docs/auth-implementation.md` describe the complete C
+auth surface, policy fields, e2e coverage, and deliberate non-goals.
+
 ## The schema DSL
 
 The binding starts with a schema description. A schema is a name plus a list of

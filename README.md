@@ -117,6 +117,9 @@ JWT, JWK, and JWKS parsing plus explicit claim validation. Build with
 signature validation, PKCE hashing, and random verifier generation. Build with
 `LONEJSON_WITH_OIDC` for discovery, JWKS cache, OAuth2 token exchange helpers,
 PKCE authorization URLs, callback parsing, and bearer-token validation.
+JWT/OIDC builds without OpenSSL are valid: install a runtime
+`lonejson_auth_provider` when signature validation, PKCE SHA-256, or random
+PKCE verifier generation is needed.
 
 The auth design is provider-backed. Parsing a JWT is never a trust decision:
 decode with `lonejson_jwt_decode_compact()`, select a JWK from a trusted JWKS
@@ -129,6 +132,10 @@ JWT header, and requires the leaf certificate public key to match the JWK. Pass
 an OpenSSL `X509_STORE *` through `lonejson_openssl_auth_provider_config` for
 private CA/test roots; otherwise OpenSSL default verify paths are used.
 `alg: none` is rejected; `HS256`, Ed448, and JWE are not implemented.
+Compatibility helpers such as `lonejson_jwt_validate_signature()` and
+`lonejson_oidc_pkce_generate()` use the built-in OpenSSL adapter only when the
+library was compiled with `LONEJSON_WITH_OPENSSL`; provider-independent builds
+should call the runtime-backed helpers.
 
 Base64 helpers are available independently of JWT. Use
 `lonejson_base64_encode()`/`lonejson_base64_decode()` for caller-provided
@@ -293,6 +300,8 @@ Lua M2M/API-key usage mirrors C while keeping storage explicit:
 ```lua
 local lj = lonejson.new()
 lj:set_openssl_auth_provider()
+
+local pkce = lj:oidc_pkce_generate()
 
 local credential = lj:m2m_credential_generate({
   claim = { scope = { "read" }, tenant = "acme" },

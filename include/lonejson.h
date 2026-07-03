@@ -1371,8 +1371,15 @@ struct lonejson_jws_verify_request {
   const lonejson_jwk *jwk;
 };
 
-/** Auth provider vtable. The caller owns `user_data` and must keep it alive
- * until no runtime using this provider can call auth APIs.
+/** Auth provider vtable for provider-backed JWT/OIDC/M2M helpers.
+ *
+ * The caller owns `user_data` and must keep it alive until no runtime using
+ * this provider can call auth APIs. `verify_jws` is required for runtime JWT
+ * signature validation, `sha256` is required for PKCE challenge computation,
+ * and both `random_bytes` and `sha256` are required for PKCE generation and
+ * M2M credential/signup helpers. Callback implementations may delegate to
+ * OpenSSL, another crypto stack, or test fixtures; lonejson only depends on
+ * this narrow public surface.
  */
 struct lonejson_auth_provider {
   void *user_data;
@@ -1688,13 +1695,23 @@ typedef struct lonejson_oidc_userinfo_response {
   int has_email_verified;
 } lonejson_oidc_userinfo_response;
 
-/** Generated OIDC/OAuth2 PKCE verifier and S256 challenge pair. */
+/** Generated OIDC/OAuth2 PKCE verifier and S256 challenge pair.
+ *
+ * Both strings are lonejson-owned and must be released with
+ * `lonejson_oidc_pkce_cleanup()`.
+ */
 typedef struct lonejson_oidc_pkce {
   char *code_verifier;
   char *code_challenge;
 } lonejson_oidc_pkce;
 
-/** OIDC/OAuth2 authorization-code request URL inputs. */
+/** OIDC/OAuth2 authorization-code request URL inputs.
+ *
+ * The helper builds an HTTPS authorization URL with PKCE S256 parameters.
+ * `authorization_endpoint`, `client_id`, `redirect_uri`, `state`, `nonce`, and
+ * `code_challenge` are required. Fragment-bearing endpoints are rejected so
+ * generated OAuth parameters cannot be placed after `#`.
+ */
 typedef struct lonejson_oidc_authorization_request {
   const char *authorization_endpoint;
   const char *client_id;
@@ -1708,7 +1725,12 @@ typedef struct lonejson_oidc_authorization_request {
   size_t max_url_bytes;
 } lonejson_oidc_authorization_request;
 
-/** Parsed authorization-code callback query. */
+/** Parsed authorization-code callback query.
+ *
+ * Returned strings are lonejson-owned. Parsing rejects duplicate known fields,
+ * malformed percent encoding, decoded NUL bytes, provider error callbacks, and
+ * state mismatches.
+ */
 typedef struct lonejson_oidc_authorization_callback {
   char *code;
   char *state;
@@ -3296,11 +3318,20 @@ struct lonejson {
   lonejson_status (*oidc_validate_bearer_token)(
       lonejson *runtime, const lonejson_oidc_bearer_validation_request *request,
       lonejson_oidc_bearer_validation *out, lonejson_error *error);
-  /** Computes a PKCE S256 challenge through this runtime's auth provider. */
+  /** Computes a PKCE S256 challenge through this runtime's auth provider.
+   *
+   * Requires provider `sha256`. OpenSSL-enabled builds fall back to the
+   * built-in OpenSSL adapter when this runtime has no provider installed.
+   */
   lonejson_status (*oidc_pkce_challenge_with_runtime)(
       lonejson *runtime, const char *code_verifier, lonejson_owned_buffer *out,
       lonejson_error *error);
-  /** Generates a PKCE verifier through this runtime's auth provider. */
+  /** Generates a PKCE verifier through this runtime's auth provider.
+   *
+   * Requires provider `random_bytes` and `sha256`. OpenSSL-enabled builds fall
+   * back to the built-in OpenSSL adapter when this runtime has no provider
+   * installed.
+   */
   lonejson_status (*oidc_pkce_generate_with_runtime)(lonejson *runtime,
                                                      size_t verifier_bytes,
                                                      lonejson_oidc_pkce *out,

@@ -54,9 +54,12 @@ lonejson_set_auth_provider(runtime, &provider, &error);
 ```
 
 The provider vtable is receiver-style and narrow: verify one JWS, produce
-random bytes, and compute SHA-256. Downstream projects that already own
-OpenSSL can use the OpenSSL initializer. Projects using another crypto stack can
-provide equivalent callbacks without exposing that stack through `lonejson.h`.
+random bytes, and compute SHA-256. Signature validation uses `verify_jws`;
+PKCE challenge generation uses `sha256`; PKCE verifier generation and M2M
+credential/signup helpers use both `random_bytes` and `sha256`. Downstream
+projects that already own OpenSSL can use the OpenSSL initializer. Projects
+using another crypto stack can provide equivalent callbacks without exposing
+that stack through `lonejson.h`.
 Runtime userdata also exposes method pointers for runtime-backed auth helpers,
 including JWT decode/signature verification, JWK/JWKS parsing, OIDC discovery
 fetch/parse, JWKS cache update/refresh, OAuth2 token response parsing and
@@ -212,13 +215,20 @@ Decoded header fields:
 
 - `alg`,
 - `kid`,
-- `typ`.
+- `typ`,
+- `crit`,
+- `x5t`,
+- `x5t#S256`,
+- `x5c`.
 
 Decoded claim fields:
 
 - `iss`,
 - `sub`,
 - `nonce`,
+- `azp`,
+- `scope`,
+- `scp`,
 - `aud` as string,
 - `aud` as array of strings,
 - `exp`,
@@ -267,6 +277,11 @@ Required trust-policy members:
 Optional policy members:
 
 - expected nonce,
+- expected authorized party (`azp`),
+- accepted critical JOSE header names,
+- required OAuth2 scopes,
+- require `azp` for multi-audience tokens,
+- require every JWT audience to be accepted,
 - required claims,
 - maximum token bytes,
 - maximum decoded header bytes,
@@ -279,6 +294,11 @@ Claim validation enforces:
 - issuer must match an accepted issuer,
 - string or array audience must include an accepted audience,
 - nonce must match the expected nonce when configured,
+- `azp` must match the expected authorized party when configured,
+- every critical JOSE header must be explicitly accepted,
+- required OAuth2 scopes must appear in `scope` or `scp`,
+- multi-audience tokens must include `azp` when configured,
+- every audience must be accepted when strict multi-audience policy is enabled,
 - required claims must be present,
 - expired tokens fail,
 - not-yet-valid tokens fail,
@@ -627,11 +647,20 @@ PKCE support:
 
 - computes S256 challenge from a caller-provided verifier,
 - validates verifier length and allowed characters,
-- generates random verifiers with OpenSSL `RAND_bytes`,
+- generates random verifiers through the runtime auth provider,
 - uses 32 random bytes by default,
 - allows verifier byte counts that produce RFC 7636 verifier lengths of
   43..128 characters,
 - base64url encodes without padding.
+
+The compatibility free functions `lonejson_oidc_pkce_challenge()` and
+`lonejson_oidc_pkce_generate()` use lonejson's built-in OpenSSL adapter when
+compiled with `LONEJSON_WITH_OPENSSL`. Builds without that adapter should call
+`lonejson_oidc_pkce_challenge_with_runtime()` or
+`lonejson_oidc_pkce_generate_with_runtime()` after installing an auth provider.
+`sha256` is required for challenge computation; both `random_bytes` and
+`sha256` are required for verifier generation. OpenSSL-enabled runtime helpers
+fall back to the built-in adapter only when the runtime has no provider.
 
 Authorization URL construction requires:
 
@@ -782,6 +811,13 @@ OIDC/OAuth2 Lua facade:
 - `oidc_authorization_callback_parse_query`
 - `oidc_validate_bearer_token`
 
+`oidc_pkce_challenge` and `oidc_pkce_generate` are also available on runtime
+userdata. Runtime form uses the installed auth provider, so Lua builds without
+the OpenSSL adapter can still support PKCE when the embedding application
+installs provider callbacks. Calls without an explicit runtime use a temporary
+runtime and therefore rely on the built-in OpenSSL adapter fallback for
+cryptographic work when no provider is installed.
+
 M2M/API-key Lua facade on runtime userdata:
 
 - `m2m_credential_generate`
@@ -802,15 +838,18 @@ where applicable. Provider-backed helpers are runtime-only because they require
 the runtime's installed provider. Lua runtimes install the built-in OpenSSL auth
 provider with `runtime:set_openssl_auth_provider()` when the OpenSSL adapter is
 compiled. Runtime-form `runtime:jwt_validate_compact_signature(...)` uses that
-runtime auth provider; module-form `lonejson.jwt_validate_compact_signature`
-keeps the compatibility free-function behavior. Lua runtimes install the HTTP
-provider with `runtime:set_http_provider(callback, user_agent)`. The callback
-receives a bounded request table containing `method`, `url`, optional
-`content_type`, optional `user_agent`, optional `body`, `body_len`, and
-`max_response_bytes`, and returns a response table with `status_code` and
-optional `body`. The Lua binding does not implement HTTP transfer itself; the
-callback is the caller-owned transport boundary while C still performs URL/body
-construction, response-size enforcement, JSON parsing, and validation.
+runtime auth provider; runtime-form PKCE helpers use the same provider's
+`sha256`/`random_bytes` callbacks. Module-table calls may also receive a
+runtime as their first argument; otherwise they use a temporary runtime and keep
+the C compatibility fallback behavior. Lua runtimes install the HTTP provider
+with `runtime:set_http_provider(callback, user_agent)`. The callback receives a
+bounded request table containing `method`, `url`, optional `content_type`,
+optional `authorization`, optional `user_agent`, optional `body`, `body_len`,
+and `max_response_bytes`, and returns a response table with `status_code` and
+optional `content_type`/`body`. The Lua binding does not implement HTTP
+transfer itself; the callback is the caller-owned transport boundary while C
+still performs URL/body construction, response-size enforcement, JSON parsing,
+and validation.
 
 Lua policy tables map directly to the C policy concepts:
 
@@ -1036,7 +1075,9 @@ CLI or desktop authorization-code with PKCE:
 
 1. Fetch and validate OIDC discovery metadata with
    `lonejson_oidc_fetch_discovery` and a configured HTTP provider.
-2. Generate PKCE with `lonejson_oidc_pkce_generate`.
+2. Generate PKCE with `lonejson_oidc_pkce_generate_with_runtime` on a runtime
+   with an auth provider, or with `lonejson_oidc_pkce_generate` when using the
+   built-in OpenSSL adapter fallback.
 3. Build the authorization URL with `lonejson_oidc_authorization_url`.
 4. Open the browser using caller-owned platform code.
 5. Receive callback query through caller-owned local HTTP code.
