@@ -1382,12 +1382,16 @@ struct lonejson_jws_verify_request {
  * this narrow public surface.
  */
 struct lonejson_auth_provider {
+  /** Caller-owned provider context passed to auth callbacks. */
   void *user_data;
+  /** Verifies one JWS signature against the selected JWK. */
   lonejson_status (*verify_jws)(void *user_data,
                                 const lonejson_jws_verify_request *request,
                                 lonejson_error *error);
+  /** Fills `dst` with cryptographically strong random bytes. */
   lonejson_status (*random_bytes)(void *user_data, unsigned char *dst,
                                   size_t len, lonejson_error *error);
+  /** Computes SHA-256 over `data` into the 32-byte output buffer. */
   lonejson_status (*sha256)(void *user_data, const void *data, size_t len,
                             unsigned char out[32], lonejson_error *error);
 };
@@ -1403,8 +1407,11 @@ struct lonejson_auth_provider {
  * call auth APIs.
  */
 typedef struct lonejson_openssl_auth_provider_config {
+  /** Optional OpenSSL library context. */
   void *libctx;
+  /** Optional OpenSSL property query string. */
   const char *propq;
+  /** Optional caller-owned `X509_STORE *` trust store. */
   void *x509_store;
 } lonejson_openssl_auth_provider_config;
 #endif
@@ -1415,8 +1422,9 @@ typedef struct lonejson_http_response lonejson_http_response;
 typedef struct lonejson_http_provider_config lonejson_http_provider_config;
 /** Parsed OpenID Connect discovery metadata retained by lonejson.
  *
- * This object is metadata only. Fetching remains caller-owned; pair this with
- * the curl adapter APIs when parsing bytes from a curl transfer.
+ * This object is metadata only. Fetching is normally performed through a
+ * caller-installed HTTP provider via `lonejson_oidc_fetch_discovery()`, or by
+ * caller-owned HTTP code followed by `lonejson_oidc_discovery_parse_json()`.
  */
 typedef struct lonejson_oidc_discovery {
   /** Discovery issuer. Required and must match the expected issuer before use.
@@ -1456,12 +1464,19 @@ typedef struct lonejson_oidc_jwks_cache_policy {
  * curl adapters provide JWKS JSON bytes explicitly.
  */
 typedef struct lonejson_oidc_jwks_cache {
+  /** Issuer this cache was installed for. */
   char *issuer;
+  /** JWKS URI this cache was installed from. */
   char *jwks_uri;
+  /** Fetch/install time in seconds since Unix epoch. */
   lonejson_int64 fetched_at;
+  /** Expiry time in seconds since Unix epoch. */
   lonejson_int64 expires_at;
+  /** Maximum JWKS JSON bytes accepted when the cache was installed. */
   size_t max_jwks_bytes;
+  /** Non-zero when `jwks` contains an installed key set. */
   int has_jwks;
+  /** Parsed key set owned by this cache. */
   lonejson_jwks jwks;
 } lonejson_oidc_jwks_cache;
 
@@ -1561,15 +1576,27 @@ typedef struct lonejson_oidc_authorization_code_token {
  * are responsible for storage, logging, and lifetime policy.
  */
 typedef struct lonejson_oauth2_token_response {
+  /** Bearer access token returned by the token endpoint. Required on success.
+   */
   char *access_token;
+  /** Token type, normally `Bearer`. Required on success. */
   char *token_type;
+  /** Optional refresh token for later transparent refresh. */
   char *refresh_token;
+  /** Granted or narrowed OAuth2 scope. */
   char *scope;
+  /** Optional OIDC ID token. */
   char *id_token;
+  /** OAuth2 error code when parsing an error-shaped response. */
   char *error;
+  /** Optional provider diagnostic for `error`. */
   char *error_description;
+  /** Optional provider documentation URI for `error`. */
   char *error_uri;
+  /** Access-token lifetime in seconds, meaningful when `has_expires_in != 0`.
+   */
   lonejson_int64 expires_in;
+  /** Non-zero when `expires_in` was present. */
   int has_expires_in;
 } lonejson_oauth2_token_response;
 
@@ -1652,21 +1679,37 @@ typedef struct lonejson_oauth2_token_flow_result {
  * fields are optional provider facts; applications still own authorization.
  */
 typedef struct lonejson_oauth2_introspection_response {
+  /** RFC 7662 active flag. Required in valid introspection responses. */
   int active;
+  /** Non-zero when `active` was present. */
   int has_active;
+  /** Optional space-delimited scope string. */
   char *scope;
+  /** Optional client identifier associated with the token. */
   char *client_id;
+  /** Optional provider username associated with the token. */
   char *username;
+  /** Optional token type. */
   char *token_type;
+  /** Optional subject claim. */
   char *sub;
+  /** Optional audience value retained as a string when present. */
   char *aud;
+  /** Optional issuer value. */
   char *iss;
+  /** Optional token identifier. */
   char *jti;
+  /** Optional expiration time seconds since Unix epoch. */
   lonejson_int64 exp;
+  /** Non-zero when `exp` was present. */
   int has_exp;
+  /** Optional issued-at time seconds since Unix epoch. */
   lonejson_int64 iat;
+  /** Non-zero when `iat` was present. */
   int has_iat;
+  /** Optional not-before time seconds since Unix epoch. */
   lonejson_int64 nbf;
+  /** Non-zero when `nbf` was present. */
   int has_nbf;
 } lonejson_oauth2_introspection_response;
 
@@ -1685,13 +1728,22 @@ typedef struct lonejson_oidc_userinfo_request {
  * remain available in `json`.
  */
 typedef struct lonejson_oidc_userinfo_response {
+  /** Exact bounded JSON response bytes retained for provider-specific claims.
+   */
   char *json;
+  /** Number of bytes in `json`. */
   size_t len;
+  /** Optional subject claim. */
   char *sub;
+  /** Optional display name claim. */
   char *name;
+  /** Optional preferred username claim. */
   char *preferred_username;
+  /** Optional email claim. */
   char *email;
+  /** Optional email verification flag. */
   int email_verified;
+  /** Non-zero when `email_verified` was present. */
   int has_email_verified;
 } lonejson_oidc_userinfo_response;
 
@@ -1713,15 +1765,25 @@ typedef struct lonejson_oidc_pkce {
  * generated OAuth parameters cannot be placed after `#`.
  */
 typedef struct lonejson_oidc_authorization_request {
+  /** HTTPS authorization endpoint. Required and must not contain a fragment. */
   const char *authorization_endpoint;
+  /** OAuth2 client identifier. Required. */
   const char *client_id;
+  /** Redirect URI registered with the authorization server. Required. */
   const char *redirect_uri;
+  /** Optional OAuth2/OIDC scope string. */
   const char *scope;
+  /** Opaque CSRF state value. Required. */
   const char *state;
+  /** OIDC nonce value. Required. */
   const char *nonce;
+  /** PKCE S256 code challenge. Required. */
   const char *code_challenge;
+  /** Optional provider-specific audience parameter. */
   const char *audience;
+  /** Optional RFC 8707 resource indicator. */
   const char *resource;
+  /** Maximum generated URL bytes. Zero means the default limit. */
   size_t max_url_bytes;
 } lonejson_oidc_authorization_request;
 
@@ -1732,10 +1794,15 @@ typedef struct lonejson_oidc_authorization_request {
  * state mismatches.
  */
 typedef struct lonejson_oidc_authorization_callback {
+  /** Authorization code returned by the provider on success. */
   char *code;
+  /** State value returned by the provider. */
   char *state;
+  /** OAuth2/OIDC error code for error callbacks. */
   char *error;
+  /** Optional provider diagnostic for `error`. */
   char *error_description;
+  /** Optional provider documentation URI for `error`. */
   char *error_uri;
 } lonejson_oidc_authorization_callback;
 
@@ -1762,9 +1829,13 @@ typedef enum lonejson_auth_failure {
  * network code, and an explicit JWT claim policy.
  */
 typedef struct lonejson_oidc_bearer_validation_request {
+  /** Raw HTTP Authorization header value. Required. */
   const char *authorization_header;
+  /** Fresh caller-owned JWKS cache. Required. */
   const lonejson_oidc_jwks_cache *jwks_cache;
+  /** Policy matching `jwks_cache`. Required. */
   const lonejson_oidc_jwks_cache_policy *jwks_policy;
+  /** Explicit JWT claim policy. Required. */
   const lonejson_jwt_claim_policy *claim_policy;
 } lonejson_oidc_bearer_validation_request;
 
@@ -1775,9 +1846,13 @@ typedef struct lonejson_oidc_bearer_validation_request {
  * denial and the remaining fields are cleared.
  */
 typedef struct lonejson_oidc_bearer_validation {
+  /** Failure classification, or `LONEJSON_AUTH_FAILURE_NONE` on success. */
   lonejson_auth_failure failure;
+  /** Validated JOSE header on success. */
   lonejson_jwt_header header;
+  /** Validated JWT claims on success. */
   lonejson_jwt_claims claims;
+  /** Selected JWK inside the caller-owned JWKS cache on success. */
   const lonejson_jwk *jwk;
 } lonejson_oidc_bearer_validation;
 
@@ -2635,20 +2710,31 @@ typedef struct lonejson_owned_buffer {
  * helper-specific default limit.
  */
 struct lonejson_http_request {
+  /** HTTP method such as `GET` or `POST`. */
   const char *method;
+  /** Absolute HTTPS URL for the provider to request. */
   const char *url;
+  /** Optional request content type for `body`. */
   const char *content_type;
+  /** Optional Authorization header value. */
   const char *authorization;
+  /** Optional User-Agent header value from the installed provider. */
   const char *user_agent;
+  /** Optional request body bytes. */
   const void *body;
+  /** Number of bytes in `body`. */
   size_t body_len;
+  /** Maximum accepted response body bytes. Zero means helper default. */
   size_t max_response_bytes;
 };
 
 /** Bounded materialized HTTP response populated by auth HTTP providers. */
 struct lonejson_http_response {
+  /** HTTP status code returned by the provider. */
   long status_code;
+  /** Optional response content type owned by this response. */
   char *content_type;
+  /** Response body bytes owned by this response. */
   lonejson_owned_buffer body;
 };
 
@@ -2666,8 +2752,11 @@ struct lonejson_http_response {
  * request boundary and enforce their own TLS/proxy/redirect policy.
  */
 struct lonejson_http_provider {
+  /** Caller-owned provider context passed to `request`. */
   void *user_data;
+  /** Optional default User-Agent copied into provider-backed requests. */
   const char *user_agent;
+  /** Caller-owned HTTP transfer callback. */
   lonejson_status (*request)(void *user_data,
                              const lonejson_http_request *request,
                              lonejson_http_response *response,
@@ -2688,9 +2777,13 @@ struct lonejson_http_provider {
  * audit policy are caller-owned.
  */
 typedef struct lonejson_m2m_credential {
+  /** Generated client identifier shown to the caller. */
   char *client_id;
+  /** Generated one-time client secret when Basic auth is enabled. */
   char *client_secret;
+  /** Generated one-time API key when Bearer auth is enabled. */
   char *api_key;
+  /** Store-ready credential record containing only salts, hashes, and claim. */
   lonejson_owned_buffer record_json;
 } lonejson_m2m_credential;
 
@@ -2703,9 +2796,13 @@ typedef struct lonejson_m2m_credential {
  * `LONEJSON_M2M_AUTH_DEFAULT`.
  */
 typedef struct lonejson_m2m_credential_request {
+  /** Caller-supplied JSON claim embedded into the generated record. */
   const char *claim_json;
+  /** Number of bytes in `claim_json`. */
   size_t claim_len;
+  /** Bitmask of `LONEJSON_M2M_AUTH_*`; zero uses the default modes. */
   unsigned auth_modes;
+  /** Maximum generated record bytes. Zero means the default limit. */
   size_t max_record_bytes;
 } lonejson_m2m_credential_request;
 
@@ -2719,8 +2816,11 @@ typedef struct lonejson_m2m_credential_request {
  * mutations with their own file, database, lock, and audit model.
  */
 typedef struct lonejson_m2m_store {
+  /** Credential-store JSON object bytes. */
   const char *json;
+  /** Number of bytes in `json`. */
   size_t len;
+  /** Maximum store JSON bytes. Zero means the default limit. */
   size_t max_store_bytes;
 } lonejson_m2m_store;
 
@@ -2732,8 +2832,11 @@ typedef struct lonejson_m2m_store {
  * `allowed_auth_modes == 0` accepts modes present in the credential record.
  */
 typedef struct lonejson_m2m_verify_request {
+  /** Caller-owned credential store. Required. */
   const lonejson_m2m_store *store;
+  /** Raw HTTP Authorization header value. Required. */
   const char *authorization_header;
+  /** Allowed `LONEJSON_M2M_AUTH_*` modes; zero uses record modes. */
   unsigned allowed_auth_modes;
 } lonejson_m2m_verify_request;
 
@@ -2746,9 +2849,13 @@ typedef struct lonejson_m2m_verify_request {
  * authorization remain application-owned decisions.
  */
 typedef struct lonejson_m2m_authentication {
+  /** Failure classification, or `LONEJSON_AUTH_FAILURE_NONE` on success. */
   lonejson_auth_failure failure;
+  /** Auth mode that matched the credential on success. */
   unsigned auth_mode;
+  /** Authenticated client identifier owned by this result. */
   char *client_id;
+  /** Caller-supplied claim JSON captured from the credential record. */
   lonejson_json_value claim;
 } lonejson_m2m_authentication;
 
@@ -2761,10 +2868,16 @@ typedef struct lonejson_m2m_authentication {
  * consumed or revoked signup seeds.
  */
 typedef struct lonejson_m2m_signup {
+  /** Generated signup identifier. */
   char *signup_id;
+  /** Generated one-time signup secret. */
   char *signup_secret;
+  /** URL query component carrying signup id and secret. */
   lonejson_owned_buffer query;
+  /** Full signup URL when `base_url` was supplied. */
   lonejson_owned_buffer url;
+  /** Store-ready signup record containing only salted/hashed secret material.
+   */
   lonejson_owned_buffer record_json;
 } lonejson_m2m_signup;
 
@@ -2776,12 +2889,19 @@ typedef struct lonejson_m2m_signup {
  * credential generation.
  */
 typedef struct lonejson_m2m_signup_request {
+  /** Optional base URL used to build `url`. */
   const char *base_url;
+  /** Optional query parameter name for the signup secret. */
   const char *secret_param;
+  /** Optional query parameter name for the signup id. */
   const char *id_param;
+  /** Caller-supplied JSON claim embedded into the signup record. */
   const char *claim_json;
+  /** Number of bytes in `claim_json`. */
   size_t claim_len;
+  /** Maximum generated URL bytes. Zero means the default limit. */
   size_t max_url_bytes;
+  /** Maximum generated record bytes. Zero means the default limit. */
   size_t max_record_bytes;
 } lonejson_m2m_signup_request;
 
@@ -2792,10 +2912,15 @@ typedef struct lonejson_m2m_signup_request {
  * generated credential; use `LONEJSON_M2M_AUTH_BEARER` for API-key-only signup.
  */
 typedef struct lonejson_m2m_signup_complete_request {
+  /** Caller-owned credential store containing the signup seed. Required. */
   const lonejson_m2m_store *store;
+  /** Signup identifier supplied by the user/link. Required. */
   const char *signup_id;
+  /** Signup secret supplied by the user/link. Required. */
   const char *signup_secret;
+  /** User email captured by the signup handler. Required. */
   const char *email;
+  /** Auth modes for the generated credential; zero uses defaults. */
   unsigned credential_auth_modes;
 } lonejson_m2m_signup_complete_request;
 
@@ -2803,8 +2928,11 @@ typedef struct lonejson_m2m_signup_complete_request {
  * after successful completion, then insert `credential.record_json`.
  */
 typedef struct lonejson_m2m_signup_completion {
+  /** Consumed signup identifier. */
   char *signup_id;
+  /** Email copied from the completion request. */
   char *email;
+  /** Generated credential to insert after removing the signup record. */
   lonejson_m2m_credential credential;
 } lonejson_m2m_signup_completion;
 
@@ -2821,8 +2949,11 @@ typedef struct lonejson_m2m_signup_completion {
  * this provider boundary for the actual transfer.
  */
 struct lonejson_http_provider_config {
+  /** Caller-owned provider context passed to `request`. */
   void *user_data;
+  /** Optional default User-Agent copied into provider-backed requests. */
   const char *user_agent;
+  /** Caller-owned HTTP transfer callback. */
   lonejson_status (*request)(void *user_data,
                              const lonejson_http_request *request,
                              lonejson_http_response *response,

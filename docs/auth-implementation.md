@@ -183,10 +183,10 @@ Implemented JWK shape checks:
 
 - `kty` is required.
 - RSA keys require valid base64url `n` and `e`.
-- EC keys require valid base64url `crv`, `x`, and `y`.
+- EC keys require `crv` and valid base64url `x` and `y`.
+- OKP keys require `crv` and valid base64url `x`.
 - symmetric keys require valid base64url `k`.
-- JWKS documents require a `keys` array.
-- JWKS documents with no keys are rejected where used for cache installation.
+- JWKS documents require a non-empty `keys` array.
 
 `lonejson_jwks_select` selects the first key matching all non-NULL filters in
 `lonejson_jwk_select_options`:
@@ -382,7 +382,10 @@ Implemented discovery fields:
 - `issuer`,
 - `authorization_endpoint`,
 - `token_endpoint`,
-- `jwks_uri`.
+- `jwks_uri`,
+- `introspection_endpoint`,
+- `revocation_endpoint`,
+- `userinfo_endpoint`.
 
 `lonejson_oidc_discovery_url` builds the discovery URL for HTTPS issuers.
 Path-based issuers follow OpenID Connect discovery placement:
@@ -478,6 +481,7 @@ Implemented public APIs:
 - `lonejson_oauth2_refresh_token_request`
 - `lonejson_oauth2_token_flow_init`
 - `lonejson_oauth2_token_flow_cleanup`
+- `lonejson_oauth2_token_flow_assign`
 - `lonejson_oauth2_token_flow_is_expired`
 - `lonejson_oauth2_token_flow_update_response`
 - `lonejson_oauth2_token_flow_ensure`
@@ -1014,9 +1018,9 @@ validation, structured failure classification, and facades that are easy for
 framework-specific code to compose.
 
 OAuth2 device authorization is a specific grant type for browser-constrained
-devices. It is distinct from the planned token-flow state helper that tracks
-where a supported OAuth2/OIDC flow is and decides whether to refresh, retry, or
-return a clear "cannot continue" state.
+devices. It is distinct from lonejson's implemented token-flow state helper,
+which tracks bearer-token state for supported OAuth2/OIDC flows and decides
+whether to refresh, retry, or return a clear "cannot continue" state.
 
 The remaining encryption-specific JOSE target is JWE. It is intentionally not
 part of the current OIDC/JWT/JWK completion target.
