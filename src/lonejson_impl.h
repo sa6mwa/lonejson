@@ -1,4 +1,5 @@
 #include "impl/00_prelude.h"
+#include "impl/09_base64.h"
 #include "impl/10_source_runtime.h"
 #include "impl/11_json_value_io.h"
 #include "impl/12_json_value_parse.h"
@@ -21,3 +22,4 @@
 #include "impl/37_array_rewrite_api.h"
 #include "impl/38_writer_api.h"
 #include "impl/39_value_rewrite_api.h"
+#include "impl/40_auth_api.h"

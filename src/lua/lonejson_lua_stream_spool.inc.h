@@ -18,8 +18,8 @@ static int ljlua_schema_stream_string(lua_State *L) {
   ud->input = (const unsigned char *)json;
   ud->input_len = len;
   ljlua_set_uservalue_ref(L, -1, 2, 2);
-  ud->stream = lonejson_stream_open_reader(
-      runtime, &schema_ud->schema->map, ljlua_stream_mem_read, ud, &error);
+  ud->stream = lonejson_stream_open_reader(runtime, &schema_ud->schema->map,
+                                           ljlua_stream_mem_read, ud, &error);
   if (ud->stream == NULL) {
     ud->input = NULL;
     return ljlua_push_error(L, &error);
@@ -204,13 +204,15 @@ static int ljlua_array_stream_next(lua_State *L) {
     }
     if (ljlua_schema_has_json_value(ud->schema)) {
       if (ud->clear_destination) {
-        lonejson_reset(ud->schema->runtime, &ud->schema->map, record_ud->data);
+        lonejson_reset(ud->schema->runtime, &ud->schema->map,
+                       ljlua_record_data(record_ud));
       }
-      ljlua_prepare_record_json_value_capture(L, ud->schema, record_ud->data,
+      ljlua_prepare_record_json_value_capture(L, ud->schema,
+                                              ljlua_record_data(record_ud),
                                               ud->clear_destination ? 0 : 1);
     }
     result = lonejson_array_stream_next(ud->stream, &ud->schema->map,
-                                        record_ud->data, &error);
+                                        ljlua_record_data(record_ud), &error);
     if (result == LONEJSON_ARRAY_STREAM_ITEM) {
       record_ud->cleared = 0;
       lua_pushvalue(L, 2);
@@ -316,12 +318,15 @@ static int ljlua_stream_next(lua_State *L) {
     }
     if (ljlua_schema_has_json_value(ud->schema)) {
       if (ud->clear_destination) {
-        lonejson_reset(ud->schema->runtime, &ud->schema->map, record_ud->data);
+        lonejson_reset(ud->schema->runtime, &ud->schema->map,
+                       ljlua_record_data(record_ud));
       }
-      ljlua_prepare_record_json_value_capture(L, ud->schema, record_ud->data,
+      ljlua_prepare_record_json_value_capture(L, ud->schema,
+                                              ljlua_record_data(record_ud),
                                               ud->clear_destination ? 0 : 1);
     }
-    result = lonejson_stream_next(ud->stream, record_ud->data, &error);
+    result =
+        lonejson_stream_next(ud->stream, ljlua_record_data(record_ud), &error);
     if (result == LONEJSON_STREAM_OBJECT) {
       record_ud->cleared = 0;
       lua_pushvalue(L, 2);
@@ -593,7 +598,8 @@ static int ljlua_array_rewrite_validate_json_table(lua_State *L, int index,
 
       if (lua_type(L, -2) != LUA_TSTRING) {
         lua_pop(L, 2);
-        ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,                             "JSON object keys must be strings");
+        ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                        "JSON object keys must be strings");
         return 0;
       }
       ok = ljlua_array_rewrite_validate_json_value(L, lua_gettop(L), visited,
@@ -632,7 +638,8 @@ static int ljlua_array_rewrite_validate_json_value(lua_State *L, int index,
   size_t i;
 
   if (depth > 128u) {
-    ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,                         "JSON value nesting exceeds Lua binding limit");
+    ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                    "JSON value nesting exceeds Lua binding limit");
     return 0;
   }
   index = lua_absindex(L, index);
@@ -652,7 +659,8 @@ static int ljlua_array_rewrite_validate_json_value(lua_State *L, int index,
     }
 #endif
     if (!ljlua_is_finite_f64((double)lua_tonumber(L, index))) {
-      ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,                           "JSON numbers must be finite");
+      ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                      "JSON numbers must be finite");
       return 0;
     }
     return 1;
@@ -661,7 +669,8 @@ static int ljlua_array_rewrite_validate_json_value(lua_State *L, int index,
 
     for (i = 0u; i < depth; ++i) {
       if (visited[i] == ptr) {
-        ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,                             "cyclic Lua tables cannot be encoded as JSON");
+        ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                        "cyclic Lua tables cannot be encoded as JSON");
         return 0;
       }
     }
@@ -670,7 +679,8 @@ static int ljlua_array_rewrite_validate_json_value(lua_State *L, int index,
                                                    error);
   }
   default:
-    ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,                         "unsupported Lua type for JSON value");
+    ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                    "unsupported Lua type for JSON value");
     return 0;
   }
 }
@@ -707,7 +717,8 @@ static lonejson_status ljlua_array_rewrite_lua_error(lua_State *L,
   if (message == NULL) {
     message = "Lua callback failed";
   }
-  return ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,                              "%s: %s", prefix, message);
+  return ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, "%s: %s",
+                         prefix, message);
 }
 
 static void ljlua_array_rewrite_push_context(lua_State *L,
@@ -748,8 +759,8 @@ ljlua_array_rewrite_parse_action(lua_State *L, int index,
     action = lua_tostring(L, index);
   }
   if (action == NULL) {
-    return ljlua_set_error(
-        error, LONEJSON_STATUS_CALLBACK_FAILED, "array rewrite action must be a string or table");
+    return ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                           "array rewrite action must be a string or table");
   }
   if (strcmp(action, "keep") == 0) {
     *out = LONEJSON_ARRAY_REWRITE_KEEP;
@@ -764,8 +775,8 @@ ljlua_array_rewrite_parse_action(lua_State *L, int index,
   } else if (strcmp(action, "replace_and_insert_after") == 0) {
     *out = LONEJSON_ARRAY_REWRITE_REPLACE_AND_INSERT_AFTER;
   } else {
-    return ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, "unsupported array rewrite action '%s'",
-                               action);
+    return ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                           "unsupported array rewrite action '%s'", action);
   }
   return LONEJSON_STATUS_OK;
 }
@@ -1063,7 +1074,8 @@ static int ljlua_array_rewrite_path(lua_State *L) {
     input = fopen(input_path, "rb");
     if (input == NULL) {
       error.system_errno = errno;
-      ljlua_set_error(&error, LONEJSON_STATUS_IO_ERROR,                           "failed to open rewrite input path");
+      ljlua_set_error(&error, LONEJSON_STATUS_IO_ERROR,
+                      "failed to open rewrite input path");
       ljlua_array_rewrite_ctx_cleanup(&ctx);
       lua_pushnil(L);
       ljlua_push_error(L, &error);
@@ -1072,7 +1084,8 @@ static int ljlua_array_rewrite_path(lua_State *L) {
     output = fopen(output_path, "wb");
     if (output == NULL) {
       error.system_errno = errno;
-      ljlua_set_error(&error, LONEJSON_STATUS_IO_ERROR,                           "failed to open rewrite output path");
+      ljlua_set_error(&error, LONEJSON_STATUS_IO_ERROR,
+                      "failed to open rewrite output path");
       fclose(input);
       ljlua_array_rewrite_ctx_cleanup(&ctx);
       lua_pushnil(L);
@@ -1084,7 +1097,8 @@ static int ljlua_array_rewrite_path(lua_State *L) {
         ljlua_file_sink, output, &options, &error);
     if (fclose(output) != 0 && status == LONEJSON_STATUS_OK) {
       error.system_errno = errno;
-      status = ljlua_set_error(&error, LONEJSON_STATUS_IO_ERROR,                                    "failed to close rewrite output path");
+      status = ljlua_set_error(&error, LONEJSON_STATUS_IO_ERROR,
+                               "failed to close rewrite output path");
     }
     fclose(input);
   }

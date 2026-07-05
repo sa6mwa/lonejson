@@ -625,9 +625,8 @@ lonejson__array_stream_start_mapped_value(lonejson__array_stream_state *stream,
       stream->value_prepared_dst = NULL;
     }
     lonejson__parser_init_state(
-        &stream->value_parser, map, dst, &stream->options, stream->runtime,
-        0, 0, 0, 0u, stream->value_workspace,
-        sizeof(stream->value_workspace));
+        &stream->value_parser, map, dst, &stream->options, stream->runtime, 0,
+        0, 0, 0u, stream->value_workspace, sizeof(stream->value_workspace));
     stream->value_parser_initialized = 1;
   }
 

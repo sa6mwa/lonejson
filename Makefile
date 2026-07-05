@@ -52,6 +52,7 @@ PERF_ITERATIONS ?= 40
 LUA_PERF_ITERATIONS ?= 30
 FUZZ_TIME ?= 30
 FUZZ_LONG_TIME ?= 300
+FUZZ_BASE64_MAX_LEN ?= 65536
 FUZZ_VALIDATE_MAX_LEN ?= 131072
 FUZZ_MAPPED_MAX_LEN ?= 262144
 FUZZ_ARRAY_STREAM_MAX_LEN ?= 262144
@@ -67,11 +68,13 @@ FUZZ_PROTOCOL_FRAMING_MAX_LEN ?= 262144
 FUZZ_FIXED_STRING_PATHS_MAX_LEN ?= 65536
 FUZZ_ALLOC_CEILING_MAX_LEN ?= 65536
 FUZZ_PARSER_BOUNDARIES_MAX_LEN ?= 131072
+FUZZ_JWT_MAX_LEN ?= 65536
 FUZZ_LARGE_SEEDS := \
 	fuzz/corpus/mapped/person_large_payload.json \
 	fuzz/corpus/json_value/large_selector_payload.json \
 	fuzz/corpus/value_visitor/large_unicode_payload.json
 FUZZ_GENERATED_DIR := fuzz/generated
+FUZZ_BASE64_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/base64
 FUZZ_VALIDATE_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/validate
 FUZZ_MAPPED_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/mapped
 FUZZ_ARRAY_STREAM_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/array_stream
@@ -87,6 +90,8 @@ FUZZ_PROTOCOL_FRAMING_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/protocol_framing
 FUZZ_FIXED_STRING_PATHS_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/fixed_string_paths
 FUZZ_ALLOC_CEILING_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/alloc_ceiling
 FUZZ_PARSER_BOUNDARIES_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/parser_boundaries
+FUZZ_JWT_CORPUS_DIR := build/$(FUZZ_PRESET)/corpus/jwt
+FUZZ_BASE64_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/base64
 FUZZ_VALIDATE_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/validate
 FUZZ_MAPPED_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/mapped
 FUZZ_ARRAY_STREAM_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/array_stream
@@ -102,11 +107,12 @@ FUZZ_PROTOCOL_FRAMING_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/protocol_framing
 FUZZ_FIXED_STRING_PATHS_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/fixed_string_paths
 FUZZ_ALLOC_CEILING_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/alloc_ceiling
 FUZZ_PARSER_BOUNDARIES_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/parser_boundaries
+FUZZ_JWT_GENERATED_DIR := $(FUZZ_GENERATED_DIR)/jwt
 LUA_ROCK_TREE := build/luarocks
 LUA_ROCKSPEC := $(LUA_ROCK_TREE)/lonejson-$(RELEASE_VERSION)-1.rockspec
 LUA_ROCK_STAMP := $(LUA_ROCK_TREE)/.installed.stamp
 LUA_ROCK_BUILD_LOCK := $(LUA_ROCK_TREE)/.build.lock
-LUA_ROCK_EXTRA_CFLAGS ?= -O3 -DNDEBUG -D_FILE_OFFSET_BITS=64 -fno-semantic-interposition
+LUA_ROCK_EXTRA_CFLAGS ?= -std=gnu89 -O3 -DNDEBUG -D_FILE_OFFSET_BITS=64 -fno-semantic-interposition
 LONEJSON_LUA_LIBDIR ?= $(CURDIR)/build/$(DEBUG_PRESET)
 LONEJSON_LUA_BENCH_LIBDIR ?= $(CURDIR)/build/$(HOST_PRESET)
 LUA_ROCK_BUILD_BYPRODUCTS := \
@@ -131,6 +137,8 @@ LUA_ROCK_LIBLONEJSON_SOURCES := \
 	$(wildcard src/impl/*.h)
 
 SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_confirm_tests|lua_legacy_uservalue_tests|lua_schema_cache_tests|lua_encode_stats_tests|lua_external_liblonejson_tests|lua_target_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|run_release_matrix_darwin_target_tests)
+HOST_POLICY_CTEST_EXCLUDE := lonejson_(make_lifecycle_aliases_tests|discover_target_tools_tests|darwin_macho_metadata_tests|darwin_linker_route_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|cmake_c_pkt_systems_root_tests|test_all_clang_optional_tests|check_clang_sanitizer_support_tests|cmake_fuzz_sanitizer_conflict_tests|cmake_fuzz_auth_optional_tests|release_werror_tests|source_release_tarball_tests|lua_src_rock_privacy_tests|lua_public_boundary_tests|lua_surface_coverage_tests|lua_source_stage_manifest_tests|release_artifact_verify_tests|release_archive_verify_tests|lua_native_test_target_filter_tests|run_release_matrix_darwin_target_tests|release_checksum_manifest_tests|ctest_metadata_tests|short_names_tests|short_names_disabled_tests|single_header_strict_warning_tests|single_header_strict_warning_build_tests|single_header_strict_clang_build_tests|single_header_config_default|single_header_config_omit_protocol|single_header_config_lj_implementation|single_header_config_lj_config_aliases|single_header_config_short_names_disabled|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|bench_gate_tests)
+SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUDE)
 
 .PHONY: \
 	help \
@@ -174,6 +182,7 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	test-host \
 	test-host-curl \
 	test-cross \
+	cross-sanitizers \
 	test-all \
 	test-all-bindings \
 	test-install-tree \
@@ -208,6 +217,8 @@ SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_co
 	compose-logs \
 	curl-examples \
 	test-curl-e2e \
+	test-oidc-e2e \
+	test-m2m-e2e \
 	clean \
 	clean-dist
 
@@ -219,16 +230,16 @@ help:
 		'make build-host             Configure and build the host-native release preset.' \
 		'make build-release          Configure and build the full shipped release test matrix.' \
 		'make package                Build all release packages through make release.' \
-		'make prerelease-artifacts   Build and verify current-version source, single-header, and Lua release artifacts from a clean dist/.' \
+		'make prerelease-artifacts   Compatibility alias for make release-matrix.' \
 		'make package-source         Build the source-only release tarball in dist/.' \
 		'make package-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make package-checksums      Generate release checksums for existing dist artifacts.' \
 		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
 		'make verify-release-archives Alias for make package-verify.' \
 		'make verify-release-privacy Alias for make package-verify.' \
-		'make prerelease             Run the standard local pre-release confidence gate.' \
+		'make prerelease             Run the deterministic local pre-release confidence gate.' \
 		'make prerelease-live        Refuse live external-provider release checks unless explicitly enabled.' \
-		'make prerelease-hardening   Run the clean release gate.' \
+		'make prerelease-hardening   Run prerelease, then the release-matrix rehearsal.' \
 		'make release-matrix         Build, test, package, checksum, and verify every release target without cleaning first.' \
 		'make release                Clean generated state, then run the release matrix and package generation.' \
 		'make release-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
@@ -251,8 +262,9 @@ help:
 		'make test-host              Build and run the host-native test preset.' \
 		'make test-host-curl         Build and run the host-native curl-enabled test preset.' \
 		'make test-cross             Configure, build, and run all cross release test presets serially.' \
-		'make test-all               Run debug, host, host-curl, cross, ASan, benchmark gates, and fuzz-smoke serially; TSan/MSan are included when clang is available.' \
-		'make test-all-bindings      Run test-all plus the optional Lua binding suite.' \
+		'make cross-sanitizers       Extra hardening: build and run the supported armhf-linux-gnu ASan/UBSan target under QEMU.' \
+		'make test-all               Run debug, host, host-curl, cross, host sanitizers, benchmark gates, and fuzz-smoke serially.' \
+		'make test-all-bindings      Compatibility alias for make lua-test; binding coverage is no longer a full world gate.' \
 		'make test-install-tree      Verify checksum-listed SDK archives through installed CMake and pkg-config consumers.' \
 		'make example-smoke-local    Build and stage standalone local examples.' \
 		'make asan                   Build and run the ASan/UBSan preset.' \
@@ -280,11 +292,13 @@ help:
 		'make dev-down               Alias for make compose-down.' \
 		'make dev-reset              Stop the local compose stack and remove generated local service state.' \
 		'make dev-logs               Alias for make compose-logs.' \
-		'make compose-up             Start the local nginx + sink HTTP/HTTPS test rig.' \
+		'make compose-up             Start the local nginx, sink, API fixture, and OIDC/OAuth2 test rig.' \
 		'make compose-down           Stop and remove the local compose stack.' \
 		'make compose-logs           Tail logs from the local compose stack.' \
 		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
 		'make test-curl-e2e          Build and run the curl examples against the local HTTPS rig.' \
+		'make test-oidc-e2e          Build and run OIDC/OAuth2/JWKS e2e against the local compose rig.' \
+		'make test-m2m-e2e           Build and run M2M Basic/Bearer auth e2e with curl as the client.' \
 		'make release-source-artifact Build the source-only release tarball in dist/.' \
 		'make clean                  Remove build/, dist/, .deps/, examples/bin/, and generated Lua module artifacts.' \
 		'make clean-dist             Remove dist/ release artifacts only.'
@@ -364,14 +378,7 @@ release-darwin-smoke-bundle: deps-arm64-apple-darwin
 	cmake --preset arm64-apple-darwin-release
 	cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
 
-prerelease-artifacts:
-	cmake --preset $(HOST_PRESET)
-	cmake --build --preset package-clean-dist
-	cmake --build --preset package-single-header
-	cmake --build --preset package-source
-	$(MAKE) release-lua-artifacts
-	cmake --build --preset package-checksums
-	$(MAKE) package-verify
+prerelease-artifacts: release-matrix
 
 package-verify:
 	./scripts/verify_release_artifacts.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
@@ -381,18 +388,21 @@ verify-release-archives: package-verify
 
 verify-release-privacy: package-verify
 
-prerelease: test-all prerelease-artifacts
+prerelease: test-all
 
 prerelease-live:
 	@test "$${LONEJSON_ENABLE_LIVE_TESTS:-}" = "1" || (printf '%s\n' 'Set LONEJSON_ENABLE_LIVE_TESTS=1 to run live prerelease checks; no live prerelease checks are currently defined.' >&2; exit 1)
 
-prerelease-hardening: release
+prerelease-hardening:
+	$(MAKE) prerelease
+	$(MAKE) release-matrix
 
 release-matrix:
 	./scripts/run_release_matrix.sh
 
 release:
 	./scripts/clean.sh
+	$(MAKE) prerelease
 	$(MAKE) release-matrix
 
 bench:
@@ -466,7 +476,6 @@ test-debug: test
 
 test-host: build-host
 	ctest --preset $(HOST_PRESET)
-	$(MAKE) lua-test
 
 test-host-curl: deps-host
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
@@ -477,8 +486,11 @@ test-cross: deps-cross
 	@set -e; for preset in $(CROSS_RELEASE_PRESETS); do \
 		cmake --preset "$$preset"; \
 		cmake --build --preset "$$preset"; \
-		ctest --preset "$$preset" --output-on-failure; \
+		ctest --preset "$$preset" --output-on-failure -E "$(HOST_POLICY_CTEST_EXCLUDE)"; \
 	done
+
+cross-sanitizers: deps-cross
+	./scripts/run_cross_sanitizer_matrix.sh
 
 test-all:
 	$(MAKE) test
@@ -500,7 +512,6 @@ endif
 	$(MAKE) fuzz-smoke
 
 test-all-bindings:
-	$(MAKE) test-all
 	$(MAKE) lua-test
 
 test-install-tree: package-verify
@@ -580,10 +591,11 @@ fuzz:
 		./scripts/generate_fuzz_large_seeds.sh; \
 	fi
 	cmake --preset $(FUZZ_PRESET)
-	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_path_value_visitor lonejson_fuzz_candidate_stream lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries
+	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_base64 lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_path_value_visitor lonejson_fuzz_candidate_stream lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries lonejson_fuzz_jwt
 	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -P cmake/check_fuzz_instrumentation.cmake
-	cmake -E rm -rf "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_CANDIDATE_STREAM_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)"
-	cmake -E make_directory "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_CANDIDATE_STREAM_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)"
+	cmake -E rm -rf "$(FUZZ_BASE64_CORPUS_DIR)" "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_CANDIDATE_STREAM_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)" "$(FUZZ_JWT_CORPUS_DIR)"
+	cmake -E make_directory "$(FUZZ_BASE64_GENERATED_DIR)" "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_CANDIDATE_STREAM_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)" "$(FUZZ_JWT_GENERATED_DIR)"
+	cmake -E make_directory "$(FUZZ_BASE64_CORPUS_DIR)/base64"
 	cmake -E make_directory "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
 	cmake -E make_directory "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
@@ -599,6 +611,8 @@ fuzz:
 	cmake -E make_directory "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)/fixed_string_paths"
 	cmake -E make_directory "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)/alloc_ceiling"
 	cmake -E make_directory "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)/parser_boundaries"
+	cmake -E make_directory "$(FUZZ_JWT_CORPUS_DIR)/jwt"
+	cp -R fuzz/corpus/base64/. "$(FUZZ_BASE64_CORPUS_DIR)/base64/"
 	cp -R tests/fixtures/vendor/json_test_suite/test_parsing/. "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor/"
 	cp -R tests/fixtures/spec/. "$(FUZZ_VALIDATE_CORPUS_DIR)/spec/"
 	cp -R tests/fixtures/languages/. "$(FUZZ_VALIDATE_CORPUS_DIR)/languages/"
@@ -638,6 +652,7 @@ fuzz:
 	cp -R fuzz/corpus/fixed_string_paths/. "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)/fixed_string_paths/"
 	cp -R fuzz/corpus/alloc_ceiling/. "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)/alloc_ceiling/"
 	cp -R fuzz/corpus/parser_boundaries/. "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)/parser_boundaries/"
+	cp -R fuzz/corpus/jwt/. "$(FUZZ_JWT_CORPUS_DIR)/jwt/"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/validate"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/mapped"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/array_stream"
@@ -653,6 +668,9 @@ fuzz:
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/fixed_string_paths"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/alloc_ceiling"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/parser_boundaries"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/jwt"
+	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/base64"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_base64 -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_BASE64_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/base64/ "$(FUZZ_BASE64_GENERATED_DIR)" "$(FUZZ_BASE64_CORPUS_DIR)/base64"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_validate -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALIDATE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/validate/ "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_MAPPED_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/mapped/ "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_array_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ARRAY_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/array_stream/ "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
@@ -668,6 +686,7 @@ fuzz:
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_fixed_string_paths -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_FIXED_STRING_PATHS_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/fixed_string_paths/ "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)/fixed_string_paths"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_alloc_ceiling -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ALLOC_CEILING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/alloc_ceiling/ "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)/alloc_ceiling"
 	./build/$(FUZZ_PRESET)/lonejson_fuzz_parser_boundaries -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PARSER_BOUNDARIES_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/parser_boundaries/ "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)/parser_boundaries"
+	./build/$(FUZZ_PRESET)/lonejson_fuzz_jwt -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_JWT_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/jwt/ "$(FUZZ_JWT_GENERATED_DIR)" "$(FUZZ_JWT_CORPUS_DIR)/jwt"
 	$(MAKE) lua-fuzz
 
 fuzz-long:
@@ -744,7 +763,7 @@ compose-up:
 	$(MAKE) certs
 	./scripts/ensure_large_fixtures.sh "$(LUA)" "./scripts/generate_large_fixtures.lua" "$(GENERATED_FIXTURE_DIR)"
 	$(LUA) ./scripts/generate_large_fixtures.lua ./docker/nginx/generated/variants
-	$(COMPOSE) -f docker-compose.yml up -d --build
+	$(COMPOSE) -f docker-compose.yml up -d --build --force-recreate
 
 compose-down:
 	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
@@ -759,6 +778,16 @@ curl-examples: deps-host
 
 test-curl-e2e: curl-examples
 	./scripts/test_curl_e2e.sh
+
+test-oidc-e2e: compose-up deps-host
+	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
+	cmake --build --preset host-curl --target lonejson_oidc_fixture_server
+	./scripts/test_oidc_e2e.sh
+
+test-m2m-e2e: deps-host
+	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
+	cmake --build --preset host-curl --target lonejson_m2m_fixture_server
+	./scripts/test_m2m_e2e.sh
 
 clean:
 	./scripts/clean.sh

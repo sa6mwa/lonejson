@@ -12,8 +12,10 @@
 /docker/nginx/certs/openssl.cnf
 /docker/nginx/generated/
 /perflogs/history.jsonl
+/perflogs/latest.json
 /perflogs/runs/
 /perflogs/lua/history.jsonl
+/perflogs/lua/latest.json
 /perflogs/lua/runs/
 /compile_commands.json
 /dist/

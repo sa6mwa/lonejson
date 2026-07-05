@@ -40,6 +40,18 @@
 #if defined(LJ_WITH_CURL) && !defined(LONEJSON_WITH_CURL)
 #define LONEJSON_WITH_CURL
 #endif
+#if defined(LJ_WITH_OPENSSL) && !defined(LONEJSON_WITH_OPENSSL)
+#define LONEJSON_WITH_OPENSSL
+#endif
+#if defined(LJ_WITH_JWT) && !defined(LONEJSON_WITH_JWT)
+#define LONEJSON_WITH_JWT
+#endif
+#if defined(LJ_WITH_OIDC) && !defined(LONEJSON_WITH_OIDC)
+#define LONEJSON_WITH_OIDC
+#endif
+#if defined(LONEJSON_WITH_OIDC) && !defined(LONEJSON_WITH_JWT)
+#error "LONEJSON_WITH_OIDC requires LONEJSON_WITH_JWT"
+#endif
 #if defined(LJ_MALLOC) && !defined(LONEJSON_MALLOC)
 #define LONEJSON_MALLOC LJ_MALLOC
 #endif
@@ -496,7 +508,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 19
+#define LONEJSON_ABI_VERSION 20
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -513,7 +525,7 @@ extern "C" {
 #define LONEJSON_FIELD_ACCEPT_NULL (1u << 4)
 /* Internal-only flag used by implementation-generated maps. */
 #define LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE (1u << 31)
-#define LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE                             \
+#define LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE                              \
   LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE
 
 /** Internal/runtime flag indicating that an array container owns its backing
@@ -808,6 +820,11 @@ typedef struct lonejson_allocator {
   lonejson_allocator_stats *stats;
 } lonejson_allocator;
 
+/** Forward declaration for the optional auth provider vtable. */
+typedef struct lonejson_auth_provider lonejson_auth_provider;
+/** Forward declaration for the optional auth HTTP provider vtable. */
+typedef struct lonejson_http_provider lonejson_http_provider;
+
 /** Named spool policy selectors used by streamed text and base64 fields. */
 typedef enum lonejson_spool_class {
   /** Use the runtime's default spool policy. */
@@ -892,6 +909,16 @@ typedef struct lonejson_config {
    * metadata and does not route through this allocator.
    */
   const lonejson_allocator *allocator;
+  /** Optional auth provider used by runtime-backed JWT/OIDC trust helpers.
+   * `lonejson_new()` copies this vtable by value. The provider's `user_data`
+   * remains caller-owned and must outlive the runtime.
+   */
+  const lonejson_auth_provider *auth_provider;
+  /** Optional HTTP provider used by runtime-backed OIDC/OAuth2 helpers.
+   * `lonejson_new()` copies this vtable by value. The provider's `user_data`
+   * remains caller-owned and must outlive the runtime.
+   */
+  const lonejson_http_provider *http_provider;
   /** Internal initialization marker set by `lonejson_default_config()`.
    * Build configs from that helper before overriding fields; raw zeroed or
    * partial designated literals are rejected because `0` is a meaningful
@@ -955,6 +982,18 @@ typedef lonejson_read_result (*lonejson_reader_fn)(void *user,
 /** Generic sink callback used by serializer APIs and raw spool writers. */
 typedef lonejson_status (*lonejson_sink_fn)(void *user, const void *data,
                                             size_t len, lonejson_error *error);
+
+/** Base64 alphabet and padding policy. */
+typedef enum lonejson_base64_variant {
+  /** RFC 4648 standard alphabet with `=` padding. */
+  LONEJSON_BASE64_STANDARD = 0,
+  /** RFC 4648 standard alphabet without `=` padding. */
+  LONEJSON_BASE64_STANDARD_RAW = 1,
+  /** RFC 4648 URL-safe alphabet with `=` padding. */
+  LONEJSON_BASE64_URL = 2,
+  /** RFC 4648 URL-safe alphabet without `=` padding, as used by JWT/JWS. */
+  LONEJSON_BASE64_URL_RAW = 3
+} lonejson_base64_variant;
 
 /** Spill-backed storage used by streamed text and decoded byte fields.
  * Applications typically treat this as an opaque handle and interact through
@@ -1142,7 +1181,6 @@ typedef struct lonejson_map lonejson_map;
 struct lonejson_array_rewrite_options;
 struct lonejson_value_rewrite_options;
 struct lonejson_value_rewrite_selector_options;
-#ifdef LONEJSON_WITH_CURL
 typedef struct lonejson_curl_parse lonejson_curl_parse;
 typedef struct lonejson_curl_array_parse lonejson_curl_array_parse;
 typedef struct lonejson_curl_string_array_parse
@@ -1150,12 +1188,675 @@ typedef struct lonejson_curl_string_array_parse
 typedef struct lonejson_curl_string_items_parse
     lonejson_curl_string_items_parse;
 typedef struct lonejson_curl_upload lonejson_curl_upload;
+#ifdef LONEJSON_WITH_CURL
+#ifdef LONEJSON_WITH_OIDC
+typedef struct lonejson_oidc_jwks_cache_parse lonejson_oidc_jwks_cache_parse;
+#endif
 #endif
 /** Object-framed JSON stream cursor. */
 typedef struct lonejson_stream lonejson_stream;
 /** Selected-array item stream cursor. */
 typedef struct lonejson_array_stream lonejson_array_stream;
 struct lonejson_array_stream_string_handler;
+#ifdef LONEJSON_WITH_JWT
+typedef struct lonejson_jws_verify_request lonejson_jws_verify_request;
+/** Caller-owned JWT compact-serialization segment. */
+typedef struct lonejson_jwt_segment {
+  /** Pointer into the original token or caller-provided segment buffer. */
+  const char *data;
+  /** Number of bytes in `data`. */
+  size_t len;
+} lonejson_jwt_segment;
+
+/** Parsed JWT compact serialization. Parsing only splits and checks syntax; it
+ * does not validate trust, claims, signatures, issuers, or algorithms.
+ */
+typedef struct lonejson_jwt_compact {
+  /** Base64url-encoded JOSE header segment. */
+  lonejson_jwt_segment header;
+  /** Base64url-encoded claims payload segment. */
+  lonejson_jwt_segment payload;
+  /** Base64url-encoded signature segment, which may be empty. */
+  lonejson_jwt_segment signature;
+  /** Header, separator, and payload bytes covered by a JWS signature. */
+  lonejson_jwt_segment signing_input;
+} lonejson_jwt_compact;
+
+/** Parsed JSON Web Key with lonejson-owned string fields. Parsing only checks
+ * JWK shape and base64url syntax; it does not establish trust.
+ */
+typedef struct lonejson_jwk {
+  /** Key type such as `RSA`, `EC`, or `oct`. Required. */
+  char *kty;
+  /** Optional key identifier. */
+  char *kid;
+  /** Optional intended algorithm. */
+  char *alg;
+  /** Optional public key use such as `sig`. */
+  char *use;
+  /** Optional permitted key operations such as `verify`. */
+  lonejson_string_array key_ops;
+  /** Optional curve name for EC keys. */
+  char *crv;
+  /** RSA modulus, base64url encoded. */
+  char *n;
+  /** RSA exponent, base64url encoded. */
+  char *e;
+  /** EC public x coordinate, base64url encoded. */
+  char *x;
+  /** EC public y coordinate, base64url encoded. */
+  char *y;
+  /** Symmetric key bytes, base64url encoded. */
+  char *k;
+  /** Optional X.509 certificate SHA-1 thumbprint, base64url encoded. */
+  char *x5t;
+  /** Optional X.509 certificate SHA-256 thumbprint, base64url encoded. */
+  char *x5t_s256;
+  /** Optional X.509 certificate chain, each entry base64 DER encoded. */
+  lonejson_string_array x5c;
+} lonejson_jwk;
+
+/** Parsed JWK Set. `keys.items` contains `lonejson_jwk` elements. */
+typedef struct lonejson_jwks {
+  lonejson_object_array keys;
+} lonejson_jwks;
+
+/** Optional JWK selection filters. NULL filter members are ignored. */
+typedef struct lonejson_jwk_select_options {
+  const char *kid;
+  const char *kty;
+  const char *alg;
+  const char *use;
+} lonejson_jwk_select_options;
+
+/** Decoded JWT JOSE header fields retained by lonejson. */
+typedef struct lonejson_jwt_header {
+  /** JOSE algorithm. Required for validation. */
+  char *alg;
+  /** Optional key identifier. */
+  char *kid;
+  /** Optional token type. */
+  char *typ;
+  /** Optional critical JOSE header parameters. */
+  lonejson_string_array crit;
+  /** Optional X.509 certificate SHA-1 thumbprint, base64url encoded. */
+  char *x5t;
+  /** Optional X.509 certificate SHA-256 thumbprint, base64url encoded. */
+  char *x5t_s256;
+  /** Optional X.509 certificate chain, each entry base64 DER encoded. */
+  lonejson_string_array x5c;
+} lonejson_jwt_header;
+
+/** Decoded JWT claims retained by lonejson.
+ *
+ * This struct is parse output only. Values are not trusted until validated
+ * with an explicit `lonejson_jwt_claim_policy`.
+ */
+typedef struct lonejson_jwt_claims {
+  /** Issuer claim. */
+  char *iss;
+  /** Subject claim. */
+  char *sub;
+  /** OIDC nonce claim, when present. */
+  char *nonce;
+  /** OIDC authorized party claim, when present. */
+  char *azp;
+  /** OAuth2 scope claim when encoded as a space-delimited string. */
+  char *scope;
+  /** OAuth2 `scp` claim values when encoded as a string or array. */
+  lonejson_string_array scp;
+  /** String audience claim when `aud` is encoded as a JSON string. */
+  char *aud;
+  /** Audience array when `aud` is encoded as a JSON array of strings. */
+  lonejson_string_array aud_array;
+  /** Expiration time seconds since Unix epoch, present when `has_exp != 0`. */
+  lonejson_int64 exp;
+  /** Not-before time seconds since Unix epoch, present when `has_nbf != 0`. */
+  lonejson_int64 nbf;
+  /** Issued-at time seconds since Unix epoch, present when `has_iat != 0`. */
+  lonejson_int64 iat;
+  int has_exp;
+  int has_nbf;
+  int has_iat;
+} lonejson_jwt_claims;
+
+/** Explicit trust policy for validating parsed JWT header and claims. */
+typedef struct lonejson_jwt_claim_policy {
+  /** Accepted JOSE algorithms. Required and must not include `none`. */
+  const char *const *accepted_algs;
+  size_t accepted_alg_count;
+  /** Accepted issuer values. Required. */
+  const char *const *accepted_issuers;
+  size_t accepted_issuer_count;
+  /** Accepted audience values. Required. */
+  const char *const *accepted_audiences;
+  size_t accepted_audience_count;
+  /** Optional expected OIDC nonce. When non-NULL, `claims->nonce` must match.
+   */
+  const char *expected_nonce;
+  /** Optional expected OIDC authorized party. */
+  const char *expected_azp;
+  /** Critical JOSE header names explicitly handled by the caller. */
+  const char *const *accepted_crit;
+  size_t accepted_crit_count;
+  /** Required OAuth2 scopes. They may appear in `scope` or `scp`. */
+  const char *const *required_scopes;
+  size_t required_scope_count;
+  /** Non-zero requires `azp` when `aud` contains multiple audiences. */
+  int require_azp_when_multiple_audiences;
+  /** Non-zero requires every JWT audience to be in `accepted_audiences`. */
+  int require_all_audiences_accepted;
+  /** Required claim names such as `sub` or `iat`. */
+  const char *const *required_claims;
+  size_t required_claim_count;
+  /** Current time in seconds since Unix epoch. */
+  lonejson_int64 now;
+  /** Allowed clock skew in seconds. Negative values are invalid. */
+  lonejson_int64 allowed_clock_skew;
+  /** Maximum compact token size accepted by `lonejson_jwt_decode_compact`. */
+  size_t max_token_bytes;
+  /** Maximum decoded JOSE header JSON size. Zero means the default limit. */
+  size_t max_decoded_header_bytes;
+  /** Maximum decoded claims JSON size. Zero means the default limit. */
+  size_t max_decoded_claims_bytes;
+} lonejson_jwt_claim_policy;
+
+/** High-level JWS verification request passed to auth crypto providers. */
+struct lonejson_jws_verify_request {
+  /** Parsed compact JWT/JWS segments. All slices are caller-owned. */
+  const lonejson_jwt_compact *jwt;
+  /** Decoded JOSE header associated with `jwt`. */
+  const lonejson_jwt_header *header;
+  /** Selected candidate verification key. */
+  const lonejson_jwk *jwk;
+};
+
+/** Auth provider vtable for provider-backed JWT/OIDC/M2M helpers.
+ *
+ * The caller owns `user_data` and must keep it alive until no runtime using
+ * this provider can call auth APIs. `verify_jws` is required for runtime JWT
+ * signature validation, `sha256` is required for PKCE challenge computation,
+ * and both `random_bytes` and `sha256` are required for PKCE generation and
+ * M2M credential/signup helpers. Callback implementations may delegate to
+ * OpenSSL, another crypto stack, or test fixtures; lonejson only depends on
+ * this narrow public surface.
+ */
+struct lonejson_auth_provider {
+  /** Caller-owned provider context passed to auth callbacks. */
+  void *user_data;
+  /** Verifies one JWS signature against the selected JWK. */
+  lonejson_status (*verify_jws)(void *user_data,
+                                const lonejson_jws_verify_request *request,
+                                lonejson_error *error);
+  /** Fills `dst` with cryptographically strong random bytes. */
+  lonejson_status (*random_bytes)(void *user_data, unsigned char *dst,
+                                  size_t len, lonejson_error *error);
+  /** Computes SHA-256 over `data` into the 32-byte output buffer. */
+  lonejson_status (*sha256)(void *user_data, const void *data, size_t len,
+                            unsigned char out[32], lonejson_error *error);
+};
+
+#ifdef LONEJSON_WITH_OPENSSL
+/** Optional OpenSSL provider configuration. NULL fields use OpenSSL defaults.
+ *
+ * `x509_store` may point to an OpenSSL `X509_STORE` owned by the caller. The
+ * OpenSSL adapter copies this pointer value into `lonejson_auth_provider`, but
+ * does not take ownership of the store object. When NULL, the OpenSSL provider
+ * uses a temporary store with OpenSSL default verify paths. The caller must
+ * keep a non-NULL store object alive until no runtime using the provider can
+ * call auth APIs.
+ */
+typedef struct lonejson_openssl_auth_provider_config {
+  /** Optional OpenSSL library context. */
+  void *libctx;
+  /** Optional OpenSSL property query string. */
+  const char *propq;
+  /** Optional caller-owned `X509_STORE *` trust store. */
+  void *x509_store;
+} lonejson_openssl_auth_provider_config;
+#endif
+#endif
+#ifdef LONEJSON_WITH_OIDC
+typedef struct lonejson_http_request lonejson_http_request;
+typedef struct lonejson_http_response lonejson_http_response;
+typedef struct lonejson_http_provider_config lonejson_http_provider_config;
+/** Parsed OpenID Connect discovery metadata retained by lonejson.
+ *
+ * This object is metadata only. Fetching is normally performed through a
+ * caller-installed HTTP provider via `lonejson_oidc_fetch_discovery()`, or by
+ * caller-owned HTTP code followed by `lonejson_oidc_discovery_parse_json()`.
+ */
+typedef struct lonejson_oidc_discovery {
+  /** Discovery issuer. Required and must match the expected issuer before use.
+   */
+  char *issuer;
+  /** OAuth2/OIDC authorization endpoint, when advertised. */
+  char *authorization_endpoint;
+  /** OAuth2 token endpoint. Required for client-credentials flows. */
+  char *token_endpoint;
+  /** JWK Set endpoint used for JWT signature key retrieval. Required. */
+  char *jwks_uri;
+  /** OAuth2 token introspection endpoint, when advertised. */
+  char *introspection_endpoint;
+  /** OAuth2 token revocation endpoint, when advertised. */
+  char *revocation_endpoint;
+  /** OIDC UserInfo endpoint, when advertised. */
+  char *userinfo_endpoint;
+} lonejson_oidc_discovery;
+
+/** Explicit policy for installing and selecting a cached JWKS document. */
+typedef struct lonejson_oidc_jwks_cache_policy {
+  /** Expected issuer owning the JWKS document. Required and must be HTTPS. */
+  const char *issuer;
+  /** JWKS endpoint URI used for the fetch. Required and must be HTTPS. */
+  const char *jwks_uri;
+  /** Maximum JWKS JSON response size in bytes. Zero means the default limit. */
+  size_t max_jwks_bytes;
+  /** Current time in seconds since Unix epoch. */
+  lonejson_int64 now;
+  /** Cache lifetime in seconds. Must be positive. */
+  lonejson_int64 ttl_seconds;
+} lonejson_oidc_jwks_cache_policy;
+
+/** Parsed, bounded JWKS cache for one issuer/JWKS URI pair.
+ *
+ * The cache owns all strings and keys. It never fetches on its own; callers or
+ * curl adapters provide JWKS JSON bytes explicitly.
+ */
+typedef struct lonejson_oidc_jwks_cache {
+  /** Issuer this cache was installed for. */
+  char *issuer;
+  /** JWKS URI this cache was installed from. */
+  char *jwks_uri;
+  /** Fetch/install time in seconds since Unix epoch. */
+  lonejson_int64 fetched_at;
+  /** Expiry time in seconds since Unix epoch. */
+  lonejson_int64 expires_at;
+  /** Maximum JWKS JSON bytes accepted when the cache was installed. */
+  size_t max_jwks_bytes;
+  /** Non-zero when `jwks` contains an installed key set. */
+  int has_jwks;
+  /** Parsed key set owned by this cache. */
+  lonejson_jwks jwks;
+} lonejson_oidc_jwks_cache;
+
+/** OAuth2 client-credentials request body options.
+ *
+ * This models the `client_secret_post` token endpoint authentication method.
+ * Network transfer, TLS policy, and durable credential storage remain
+ * caller-owned. Higher-level token-flow helpers may layer bounded retry and
+ * refresh behavior over these request-body primitives.
+ */
+typedef struct lonejson_oauth2_client_credentials {
+  /** OAuth2 client identifier. Required. */
+  const char *client_id;
+  /** OAuth2 client secret. Required. */
+  const char *client_secret;
+  /** Optional OAuth2 scope string. */
+  const char *scope;
+  /** Optional provider-specific audience parameter. */
+  const char *audience;
+  /** Optional RFC 8707 resource indicator. */
+  const char *resource;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oauth2_client_credentials;
+
+/** OAuth2 refresh-token request body options. */
+typedef struct lonejson_oauth2_refresh_token {
+  /** Refresh token previously issued by the authorization server. Required. */
+  const char *refresh_token;
+  /** Optional OAuth2 client identifier. Required when `client_secret` is set.
+   */
+  const char *client_id;
+  /** Optional OAuth2 client secret for `client_secret_post` authentication. */
+  const char *client_secret;
+  /** Optional OAuth2 scope string for scope narrowing. */
+  const char *scope;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oauth2_refresh_token;
+
+/** OAuth2 token introspection request body options. */
+typedef struct lonejson_oauth2_token_introspection {
+  /** Access or refresh token to introspect. Required. */
+  const char *token;
+  /** Optional token type hint, commonly `access_token` or `refresh_token`. */
+  const char *token_type_hint;
+  /** Optional OAuth2 client identifier for `client_secret_post`. */
+  const char *client_id;
+  /** Optional OAuth2 client secret for `client_secret_post`. */
+  const char *client_secret;
+  /** Use `client_secret_basic` on provider-backed requests instead of posting
+   * client credentials in the form body.
+   */
+  int use_basic_auth;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oauth2_token_introspection;
+
+/** OAuth2 token revocation request body options. */
+typedef struct lonejson_oauth2_token_revocation {
+  /** Access or refresh token to revoke. Required. */
+  const char *token;
+  /** Optional token type hint, commonly `access_token` or `refresh_token`. */
+  const char *token_type_hint;
+  /** Optional OAuth2 client identifier for `client_secret_post`. */
+  const char *client_id;
+  /** Optional OAuth2 client secret for `client_secret_post`. */
+  const char *client_secret;
+  /** Use `client_secret_basic` on provider-backed requests instead of posting
+   * client credentials in the form body.
+   */
+  int use_basic_auth;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oauth2_token_revocation;
+
+/** OIDC/OAuth2 authorization-code token request body options. */
+typedef struct lonejson_oidc_authorization_code_token {
+  /** OAuth2 client identifier. Required. */
+  const char *client_id;
+  /** Authorization code received from the redirect callback. Required. */
+  const char *code;
+  /** Redirect URI used in the authorization request. Required. */
+  const char *redirect_uri;
+  /** PKCE code verifier matching the authorization request challenge. Required.
+   */
+  const char *code_verifier;
+  /** Optional OAuth2 client secret for confidential clients. */
+  const char *client_secret;
+  /** Maximum encoded request body bytes. Zero means the default limit. */
+  size_t max_body_bytes;
+} lonejson_oidc_authorization_code_token;
+
+/** Parsed successful OAuth2 token endpoint response.
+ *
+ * This object owns all strings. An access token is credential material; callers
+ * are responsible for storage, logging, and lifetime policy.
+ */
+typedef struct lonejson_oauth2_token_response {
+  /** Bearer access token returned by the token endpoint. Required on success.
+   */
+  char *access_token;
+  /** Token type, normally `Bearer`. Required on success. */
+  char *token_type;
+  /** Optional refresh token for later transparent refresh. */
+  char *refresh_token;
+  /** Granted or narrowed OAuth2 scope. */
+  char *scope;
+  /** Optional OIDC ID token. */
+  char *id_token;
+  /** OAuth2 error code when parsing an error-shaped response. */
+  char *error;
+  /** Optional provider diagnostic for `error`. */
+  char *error_description;
+  /** Optional provider documentation URI for `error`. */
+  char *error_uri;
+  /** Access-token lifetime in seconds, meaningful when `has_expires_in != 0`.
+   */
+  lonejson_int64 expires_in;
+  /** Non-zero when `expires_in` was present. */
+  int has_expires_in;
+} lonejson_oauth2_token_response;
+
+/** OAuth2/OIDC token-flow state retained by lonejson helpers.
+ *
+ * This object owns copied token strings. It is not durable storage and does
+ * not perform browser interaction; callers decide where to persist it and how
+ * to resume interactive flows.
+ */
+typedef struct lonejson_oauth2_token_flow {
+  /** Current Bearer access token, when known. */
+  char *access_token;
+  /** Token type, normally `Bearer`. */
+  char *token_type;
+  /** Refresh token used for transparent refresh, when available. */
+  char *refresh_token;
+  /** Granted or narrowed scope, when returned by the provider. */
+  char *scope;
+  /** OIDC ID token, when returned by the provider. */
+  char *id_token;
+  /** Access-token expiry time in seconds since Unix epoch. */
+  lonejson_int64 expires_at;
+  /** Non-zero when `expires_at` is meaningful. */
+  int has_expires_at;
+} lonejson_oauth2_token_flow;
+
+/** Token-flow state returned by `lonejson_oauth2_token_flow_ensure()`. */
+typedef enum lonejson_oauth2_token_flow_state {
+  /** Access token was already usable under the configured policy. */
+  LONEJSON_OAUTH2_TOKEN_FLOW_READY = 0,
+  /** Access token was refreshed through the runtime HTTP provider. */
+  LONEJSON_OAUTH2_TOKEN_FLOW_REFRESHED = 1,
+  /** The helper cannot continue without caller/user interaction. */
+  LONEJSON_OAUTH2_TOKEN_FLOW_NEEDS_INTERACTION = 2,
+  /** Refresh was attempted and failed. Inspect the returned status/error. */
+  LONEJSON_OAUTH2_TOKEN_FLOW_FAILED = 3
+} lonejson_oauth2_token_flow_state;
+
+/** Policy for ensuring an OAuth2/OIDC token flow.
+ *
+ * Zero-initialized fields use conservative defaults. `token_endpoint`,
+ * `client_id`, and `client_secret` are required only when refresh may be
+ * attempted.
+ */
+typedef struct lonejson_oauth2_token_flow_policy {
+  /** OAuth2 token endpoint used for refresh. Required for refresh. */
+  const char *token_endpoint;
+  /** OAuth2 client identifier used for refresh. Required for refresh. */
+  const char *client_id;
+  /** OAuth2 client secret used for refresh when required by the provider. */
+  const char *client_secret;
+  /** Optional scope narrowing for refresh requests. */
+  const char *scope;
+  /** Current time in seconds since Unix epoch. Required. */
+  lonejson_int64 now;
+  /** Refresh before expiry by this many seconds. Zero means 60 seconds. */
+  lonejson_int64 refresh_skew_seconds;
+  /** Maximum token endpoint response bytes. Zero means the default limit. */
+  size_t max_response_bytes;
+  /** Additional retries after the first refresh attempt. Zero means 2. */
+  unsigned max_retries;
+  /** Non-zero disables transparent refresh. */
+  int disable_refresh;
+  /** Non-zero disables retry; exactly one refresh attempt is made. */
+  int disable_retry;
+} lonejson_oauth2_token_flow_policy;
+
+/** Observable result from token-flow ensure. */
+typedef struct lonejson_oauth2_token_flow_result {
+  lonejson_oauth2_token_flow_state state;
+  /** Number of token endpoint attempts performed by this call. */
+  unsigned attempts;
+  /** Non-zero when `flow` was updated from a refresh response. */
+  int refreshed;
+} lonejson_oauth2_token_flow_result;
+
+/** Parsed OAuth2 token introspection response.
+ *
+ * The response owns all strings. `active` is required by RFC 7662. Other
+ * fields are optional provider facts; applications still own authorization.
+ */
+typedef struct lonejson_oauth2_introspection_response {
+  /** RFC 7662 active flag. Required in valid introspection responses. */
+  int active;
+  /** Non-zero when `active` was present. */
+  int has_active;
+  /** Optional space-delimited scope string. */
+  char *scope;
+  /** Optional client identifier associated with the token. */
+  char *client_id;
+  /** Optional provider username associated with the token. */
+  char *username;
+  /** Optional token type. */
+  char *token_type;
+  /** Optional subject claim. */
+  char *sub;
+  /** Optional audience value retained as a string when present. */
+  char *aud;
+  /** Optional issuer value. */
+  char *iss;
+  /** Optional token identifier. */
+  char *jti;
+  /** Optional expiration time seconds since Unix epoch. */
+  lonejson_int64 exp;
+  /** Non-zero when `exp` was present. */
+  int has_exp;
+  /** Optional issued-at time seconds since Unix epoch. */
+  lonejson_int64 iat;
+  /** Non-zero when `iat` was present. */
+  int has_iat;
+  /** Optional not-before time seconds since Unix epoch. */
+  lonejson_int64 nbf;
+  /** Non-zero when `nbf` was present. */
+  int has_nbf;
+} lonejson_oauth2_introspection_response;
+
+/** OIDC UserInfo request options. */
+typedef struct lonejson_oidc_userinfo_request {
+  /** Bearer access token. Required. */
+  const char *access_token;
+  /** Maximum JSON response bytes. Zero means the default limit. */
+  size_t max_response_bytes;
+} lonejson_oidc_userinfo_request;
+
+/** Parsed OIDC UserInfo response.
+ *
+ * The helper validates that the response is bounded JSON and retains the exact
+ * JSON bytes. Common claims are copied when present; provider-specific claims
+ * remain available in `json`.
+ */
+typedef struct lonejson_oidc_userinfo_response {
+  /** Exact bounded JSON response bytes retained for provider-specific claims.
+   */
+  char *json;
+  /** Number of bytes in `json`. */
+  size_t len;
+  /** Optional subject claim. */
+  char *sub;
+  /** Optional display name claim. */
+  char *name;
+  /** Optional preferred username claim. */
+  char *preferred_username;
+  /** Optional email claim. */
+  char *email;
+  /** Optional email verification flag. */
+  int email_verified;
+  /** Non-zero when `email_verified` was present. */
+  int has_email_verified;
+} lonejson_oidc_userinfo_response;
+
+/** Generated OIDC/OAuth2 PKCE verifier and S256 challenge pair.
+ *
+ * Both strings are lonejson-owned and must be released with
+ * `lonejson_oidc_pkce_cleanup()`.
+ */
+typedef struct lonejson_oidc_pkce {
+  char *code_verifier;
+  char *code_challenge;
+} lonejson_oidc_pkce;
+
+/** OIDC/OAuth2 authorization-code request URL inputs.
+ *
+ * The helper builds an HTTPS authorization URL with PKCE S256 parameters.
+ * `authorization_endpoint`, `client_id`, `redirect_uri`, `state`, `nonce`, and
+ * `code_challenge` are required. Fragment-bearing endpoints are rejected so
+ * generated OAuth parameters cannot be placed after `#`.
+ */
+typedef struct lonejson_oidc_authorization_request {
+  /** HTTPS authorization endpoint. Required and must not contain a fragment. */
+  const char *authorization_endpoint;
+  /** OAuth2 client identifier. Required. */
+  const char *client_id;
+  /** Redirect URI registered with the authorization server. Required. */
+  const char *redirect_uri;
+  /** Optional OAuth2/OIDC scope string. */
+  const char *scope;
+  /** Opaque CSRF state value. Required. */
+  const char *state;
+  /** OIDC nonce value. Required. */
+  const char *nonce;
+  /** PKCE S256 code challenge. Required. */
+  const char *code_challenge;
+  /** Optional provider-specific audience parameter. */
+  const char *audience;
+  /** Optional RFC 8707 resource indicator. */
+  const char *resource;
+  /** Maximum generated URL bytes. Zero means the default limit. */
+  size_t max_url_bytes;
+} lonejson_oidc_authorization_request;
+
+/** Parsed authorization-code callback query.
+ *
+ * Returned strings are lonejson-owned. Parsing rejects duplicate known fields,
+ * malformed percent encoding, decoded NUL bytes, provider error callbacks, and
+ * state mismatches.
+ */
+typedef struct lonejson_oidc_authorization_callback {
+  /** Authorization code returned by the provider on success. */
+  char *code;
+  /** State value returned by the provider. */
+  char *state;
+  /** OAuth2/OIDC error code for error callbacks. */
+  char *error;
+  /** Optional provider diagnostic for `error`. */
+  char *error_description;
+  /** Optional provider documentation URI for `error`. */
+  char *error_uri;
+} lonejson_oidc_authorization_callback;
+
+/** Framework-neutral bearer-token authentication failure class. */
+typedef enum lonejson_auth_failure {
+  LONEJSON_AUTH_FAILURE_NONE = 0,
+  LONEJSON_AUTH_FAILURE_MISSING_CREDENTIALS,
+  LONEJSON_AUTH_FAILURE_MALFORMED_TOKEN,
+  LONEJSON_AUTH_FAILURE_CACHE_UNAVAILABLE,
+  LONEJSON_AUTH_FAILURE_KEY_NOT_FOUND,
+  LONEJSON_AUTH_FAILURE_INVALID_SIGNATURE,
+  LONEJSON_AUTH_FAILURE_EXPIRED_TOKEN,
+  LONEJSON_AUTH_FAILURE_NOT_YET_VALID,
+  LONEJSON_AUTH_FAILURE_ISSUER_MISMATCH,
+  LONEJSON_AUTH_FAILURE_AUDIENCE_MISMATCH,
+  LONEJSON_AUTH_FAILURE_CLAIMS_INVALID
+} lonejson_auth_failure;
+
+/** Server-side bearer-token validation inputs.
+ *
+ * This helper does not fetch keys, write responses, route requests, or depend
+ * on any framework. Callers supply the HTTP Authorization header value, a
+ * fresh JWKS cache policy, a JWKS cache previously filled by caller-owned
+ * network code, and an explicit JWT claim policy.
+ */
+typedef struct lonejson_oidc_bearer_validation_request {
+  /** Raw HTTP Authorization header value. Required. */
+  const char *authorization_header;
+  /** Fresh caller-owned JWKS cache. Required. */
+  const lonejson_oidc_jwks_cache *jwks_cache;
+  /** Policy matching `jwks_cache`. Required. */
+  const lonejson_oidc_jwks_cache_policy *jwks_policy;
+  /** Explicit JWT claim policy. Required. */
+  const lonejson_jwt_claim_policy *claim_policy;
+} lonejson_oidc_bearer_validation_request;
+
+/** Server-side bearer-token validation result.
+ *
+ * On success, `header` and `claims` contain validated JWT data and `jwk`
+ * points into the caller-owned JWKS cache. On failure, `failure` classifies the
+ * denial and the remaining fields are cleared.
+ */
+typedef struct lonejson_oidc_bearer_validation {
+  /** Failure classification, or `LONEJSON_AUTH_FAILURE_NONE` on success. */
+  lonejson_auth_failure failure;
+  /** Validated JOSE header on success. */
+  lonejson_jwt_header header;
+  /** Validated JWT claims on success. */
+  lonejson_jwt_claims claims;
+  /** Selected JWK inside the caller-owned JWKS cache on success. */
+  const lonejson_jwk *jwk;
+} lonejson_oidc_bearer_validation;
+
+#endif
 /** Callback invoked after one push-fed selected array item has been parsed into
  * `dst`. The push stream cleans up and reuses `dst` after the callback returns,
  * so callers that need to retain an item must copy it here.
@@ -1741,7 +2442,8 @@ typedef struct lonejson_path_value_visitor {
   lonejson_path_value_event_fn object_begin;
   /** Called when an object ends at `path`. */
   lonejson_path_value_event_fn object_end;
-  /** Called before chunks for an object key are delivered at the parent path. */
+  /** Called before chunks for an object key are delivered at the parent path.
+   */
   lonejson_path_value_event_fn object_key_begin;
   /** Delivers one decoded UTF-8 object-key chunk at the parent path. */
   lonejson_path_value_chunk_fn object_key_chunk;
@@ -2000,6 +2702,265 @@ typedef struct lonejson_owned_buffer {
   lonejson_allocator allocator;
 } lonejson_owned_buffer;
 
+#ifdef LONEJSON_WITH_OIDC
+/** Bounded materialized HTTP request used by auth provider helpers.
+ *
+ * Providers must not retain pointers after the callback returns. `method`,
+ * `url`, and `body` are caller-owned. `max_response_bytes == 0` means the
+ * helper-specific default limit.
+ */
+struct lonejson_http_request {
+  /** HTTP method such as `GET` or `POST`. */
+  const char *method;
+  /** Absolute HTTPS URL for the provider to request. */
+  const char *url;
+  /** Optional request content type for `body`. */
+  const char *content_type;
+  /** Optional Authorization header value. */
+  const char *authorization;
+  /** Optional User-Agent header value from the installed provider. */
+  const char *user_agent;
+  /** Optional request body bytes. */
+  const void *body;
+  /** Number of bytes in `body`. */
+  size_t body_len;
+  /** Maximum accepted response body bytes. Zero means helper default. */
+  size_t max_response_bytes;
+};
+
+/** Bounded materialized HTTP response populated by auth HTTP providers. */
+struct lonejson_http_response {
+  /** HTTP status code returned by the provider. */
+  long status_code;
+  /** Optional response content type owned by this response. */
+  char *content_type;
+  /** Response body bytes owned by this response. */
+  lonejson_owned_buffer body;
+};
+
+/** Auth HTTP provider vtable.
+ *
+ * The caller owns `user_data` and must keep it alive until no runtime using
+ * this provider can call OIDC/OAuth2 HTTP helpers. This is the public
+ * transport boundary for OIDC discovery, JWKS refresh, and OAuth2 token
+ * exchange helpers. Use `lonejson_http_provider_init_simple()` with the
+ * embedding application's HTTP client. In curl-enabled builds, curl remains an
+ * application-owned transport: configure libcurl in your callback and set a
+ * product-specific `user_agent` so identity providers can diagnose traffic.
+ * Token-flow helpers may call this provider more than once for bounded retries
+ * or refresh; provider callbacks should therefore be idempotent at the HTTP
+ * request boundary and enforce their own TLS/proxy/redirect policy.
+ */
+struct lonejson_http_provider {
+  /** Caller-owned provider context passed to `request`. */
+  void *user_data;
+  /** Optional default User-Agent copied into provider-backed requests. */
+  const char *user_agent;
+  /** Caller-owned HTTP transfer callback. */
+  lonejson_status (*request)(void *user_data,
+                             const lonejson_http_request *request,
+                             lonejson_http_response *response,
+                             lonejson_error *error);
+};
+
+#define LONEJSON_M2M_AUTH_BASIC (1u << 0)
+#define LONEJSON_M2M_AUTH_BEARER (1u << 1)
+#define LONEJSON_M2M_AUTH_DEFAULT                                              \
+  (LONEJSON_M2M_AUTH_BASIC | LONEJSON_M2M_AUTH_BEARER)
+
+/** Generated confidential-client/API-key credential material.
+ *
+ * `client_secret` and `api_key` are shown once to the caller according to the
+ * requested auth modes. `record_json` contains only salts and hashes plus the
+ * caller-supplied claim JSON and can be placed under a credential store's
+ * `credentials` array. Store persistence, locking, rotation, revocation, and
+ * audit policy are caller-owned.
+ */
+typedef struct lonejson_m2m_credential {
+  /** Generated client identifier shown to the caller. */
+  char *client_id;
+  /** Generated one-time client secret when Basic auth is enabled. */
+  char *client_secret;
+  /** Generated one-time API key when Bearer auth is enabled. */
+  char *api_key;
+  /** Store-ready credential record containing only salts, hashes, and claim. */
+  lonejson_owned_buffer record_json;
+} lonejson_m2m_credential;
+
+/** M2M/API-key credential generation inputs.
+ *
+ * `claim_json` is embedded as raw JSON after validation. Use
+ * `LONEJSON_M2M_AUTH_BEARER` to generate an API-key-only credential for
+ * `Authorization: Bearer <api_key>`, `LONEJSON_M2M_AUTH_BASIC` for
+ * client-id/client-secret Basic auth, or both. `auth_modes == 0` uses
+ * `LONEJSON_M2M_AUTH_DEFAULT`.
+ */
+typedef struct lonejson_m2m_credential_request {
+  /** Caller-supplied JSON claim embedded into the generated record. */
+  const char *claim_json;
+  /** Number of bytes in `claim_json`. */
+  size_t claim_len;
+  /** Bitmask of `LONEJSON_M2M_AUTH_*`; zero uses the default modes. */
+  unsigned auth_modes;
+  /** Maximum generated record bytes. Zero means the default limit. */
+  size_t max_record_bytes;
+} lonejson_m2m_credential_request;
+
+/** Caller-owned credential store JSON used by M2M verification helpers.
+ *
+ * The expected shape is an object with optional `credentials[]` and `signups[]`
+ * arrays containing records returned by lonejson generation helpers. To revoke
+ * or rotate, update this caller-owned JSON store: remove a record, set its
+ * `revoked` field, or insert a replacement generated credential. The helper
+ * output is deliberately store-ready JSON so applications can implement those
+ * mutations with their own file, database, lock, and audit model.
+ */
+typedef struct lonejson_m2m_store {
+  /** Credential-store JSON object bytes. */
+  const char *json;
+  /** Number of bytes in `json`. */
+  size_t len;
+  /** Maximum store JSON bytes. Zero means the default limit. */
+  size_t max_store_bytes;
+} lonejson_m2m_store;
+
+/** M2M/API-key Authorization header verification inputs.
+ *
+ * `authorization_header` is the raw HTTP `Authorization` header value. Bearer
+ * mode verifies `Authorization: Bearer <api_key>`. Basic mode verifies
+ * `Authorization: Basic <base64(client_id:client_secret)>`.
+ * `allowed_auth_modes == 0` accepts modes present in the credential record.
+ */
+typedef struct lonejson_m2m_verify_request {
+  /** Caller-owned credential store. Required. */
+  const lonejson_m2m_store *store;
+  /** Raw HTTP Authorization header value. Required. */
+  const char *authorization_header;
+  /** Allowed `LONEJSON_M2M_AUTH_*` modes; zero uses record modes. */
+  unsigned allowed_auth_modes;
+} lonejson_m2m_verify_request;
+
+/** M2M/API-key authentication result.
+ *
+ * On success, `failure` is `LONEJSON_AUTH_FAILURE_NONE`, `auth_mode`
+ * identifies Basic or Bearer, `client_id` owns the authenticated credential id,
+ * and `claim` owns the captured caller-supplied JSON. lonejson authenticates
+ * and returns facts; endpoint, method, tenant, tool, and operation
+ * authorization remain application-owned decisions.
+ */
+typedef struct lonejson_m2m_authentication {
+  /** Failure classification, or `LONEJSON_AUTH_FAILURE_NONE` on success. */
+  lonejson_auth_failure failure;
+  /** Auth mode that matched the credential on success. */
+  unsigned auth_mode;
+  /** Authenticated client identifier owned by this result. */
+  char *client_id;
+  /** Caller-supplied claim JSON captured from the credential record. */
+  lonejson_json_value claim;
+} lonejson_m2m_authentication;
+
+/** Generated signup seed material.
+ *
+ * `signup_secret` is shown once to the inviter or encoded into a signup URL.
+ * `record_json` contains only salted/hashed secret material and claim JSON and
+ * can be placed under a credential store's `signups` array. The caller owns
+ * delivery of `query`/`url`, storage mutation, expiry policy, and removal of
+ * consumed or revoked signup seeds.
+ */
+typedef struct lonejson_m2m_signup {
+  /** Generated signup identifier. */
+  char *signup_id;
+  /** Generated one-time signup secret. */
+  char *signup_secret;
+  /** URL query component carrying signup id and secret. */
+  lonejson_owned_buffer query;
+  /** Full signup URL when `base_url` was supplied. */
+  lonejson_owned_buffer url;
+  /** Store-ready signup record containing only salted/hashed secret material.
+   */
+  lonejson_owned_buffer record_json;
+} lonejson_m2m_signup;
+
+/** Signup seed generation inputs.
+ *
+ * `base_url`, when present, is combined with generated query parameters to
+ * produce `url`. `secret_param` and `id_param` override the default query
+ * names. `claim_json` is validated and copied into the signup record for later
+ * credential generation.
+ */
+typedef struct lonejson_m2m_signup_request {
+  /** Optional base URL used to build `url`. */
+  const char *base_url;
+  /** Optional query parameter name for the signup secret. */
+  const char *secret_param;
+  /** Optional query parameter name for the signup id. */
+  const char *id_param;
+  /** Caller-supplied JSON claim embedded into the signup record. */
+  const char *claim_json;
+  /** Number of bytes in `claim_json`. */
+  size_t claim_len;
+  /** Maximum generated URL bytes. Zero means the default limit. */
+  size_t max_url_bytes;
+  /** Maximum generated record bytes. Zero means the default limit. */
+  size_t max_record_bytes;
+} lonejson_m2m_signup_request;
+
+/** Signup completion inputs.
+ *
+ * `email` is required by the helper so the handler can keep the first public
+ * signup flow intentionally small. `credential_auth_modes` controls the
+ * generated credential; use `LONEJSON_M2M_AUTH_BEARER` for API-key-only signup.
+ */
+typedef struct lonejson_m2m_signup_complete_request {
+  /** Caller-owned credential store containing the signup seed. Required. */
+  const lonejson_m2m_store *store;
+  /** Signup identifier supplied by the user/link. Required. */
+  const char *signup_id;
+  /** Signup secret supplied by the user/link. Required. */
+  const char *signup_secret;
+  /** User email captured by the signup handler. Required. */
+  const char *email;
+  /** Auth modes for the generated credential; zero uses defaults. */
+  unsigned credential_auth_modes;
+} lonejson_m2m_signup_complete_request;
+
+/** Signup completion result. Remove `signup_id` from the caller-owned store
+ * after successful completion, then insert `credential.record_json`.
+ */
+typedef struct lonejson_m2m_signup_completion {
+  /** Consumed signup identifier. */
+  char *signup_id;
+  /** Email copied from the completion request. */
+  char *email;
+  /** Generated credential to insert after removing the signup record. */
+  lonejson_m2m_credential credential;
+} lonejson_m2m_signup_completion;
+
+/** Generic HTTP provider initializer config.
+ *
+ * The caller owns all referenced pointers and must keep them alive while the
+ * initialized provider can be used. The recommended framework integration is:
+ * HTTP clients fill this provider for outbound OIDC/OAuth2 requests, while web
+ * frameworks such as Kore or Vectis pass each inbound Authorization header to
+ * `lonejson_oidc_validate_bearer_token()` from their request handler. lonejson
+ * intentionally does not own framework routing, response writing, TLS policy,
+ * proxy/redirect policy, or durable credential storage. Higher-level
+ * token-flow helpers may add bounded retry/refresh behavior while still using
+ * this provider boundary for the actual transfer.
+ */
+struct lonejson_http_provider_config {
+  /** Caller-owned provider context passed to `request`. */
+  void *user_data;
+  /** Optional default User-Agent copied into provider-backed requests. */
+  const char *user_agent;
+  /** Caller-owned HTTP transfer callback. */
+  lonejson_status (*request)(void *user_data,
+                             const lonejson_http_request *request,
+                             lonejson_http_response *response,
+                             lonejson_error *error);
+};
+#endif
+
 /** Instantiated lonejson runtime.
  *
  * Construct this with `lonejson_new()` and release it with `lonejson_free()`.
@@ -2114,9 +3075,8 @@ struct lonejson {
    * callbacks.
    */
   lonejson_status (*visit_path_value_filep)(
-      lonejson *runtime, FILE *fp,
-      const lonejson_path_value_visitor *visitor, void *user,
-      lonejson_error *error);
+      lonejson *runtime, FILE *fp, const lonejson_path_value_visitor *visitor,
+      void *user, lonejson_error *error);
   /** Visits exactly one JSON value from a filesystem path with path-aware
    * callbacks.
    */
@@ -2395,7 +3355,140 @@ struct lonejson {
                                           const void *items, size_t count,
                                           size_t stride, const char *path,
                                           lonejson_error *error);
-#ifdef LONEJSON_WITH_CURL
+#ifdef LONEJSON_WITH_JWT
+  /** Parses one JWK JSON object into `out`. */
+  lonejson_status (*jwk_parse_json)(lonejson *runtime, const char *json,
+                                    size_t len, lonejson_jwk *out,
+                                    lonejson_error *error);
+  /** Parses one JWKS JSON object with a required `keys` array. */
+  lonejson_status (*jwks_parse_json)(lonejson *runtime, const char *json,
+                                     size_t len, lonejson_jwks *out,
+                                     lonejson_error *error);
+  /** Decodes and parses one compact JWT header and claims payload. */
+  lonejson_status (*jwt_decode_compact)(lonejson *runtime, const char *token,
+                                        size_t len,
+                                        const lonejson_jwt_claim_policy *limits,
+                                        lonejson_jwt_header *header,
+                                        lonejson_jwt_claims *claims,
+                                        lonejson_error *error);
+  /** Validates a compact JWT signature through this runtime's auth provider. */
+  lonejson_status (*jwt_validate_signature_with_runtime)(
+      lonejson *runtime, const lonejson_jwt_compact *jwt,
+      const lonejson_jwt_header *header, const lonejson_jwk *jwk,
+      lonejson_error *error);
+#endif
+  /** Installs or clears the runtime auth provider. */
+  lonejson_status (*set_auth_provider)(lonejson *runtime,
+                                       const lonejson_auth_provider *provider,
+                                       lonejson_error *error);
+#ifdef LONEJSON_WITH_OIDC
+  /** Parses one OIDC discovery JSON object into `out`. */
+  lonejson_status (*oidc_discovery_parse_json)(lonejson *runtime,
+                                               const char *json, size_t len,
+                                               lonejson_oidc_discovery *out,
+                                               lonejson_error *error);
+  /** Fetches, parses, and validates discovery metadata through HTTP provider.
+   */
+  lonejson_status (*oidc_fetch_discovery)(lonejson *runtime, const char *issuer,
+                                          size_t max_response_bytes,
+                                          lonejson_oidc_discovery *out,
+                                          lonejson_error *error);
+  /** Installs caller-provided JWKS JSON into a bounded cache. */
+  lonejson_status (*oidc_jwks_cache_update_json)(
+      lonejson *runtime, lonejson_oidc_jwks_cache *cache,
+      const lonejson_oidc_jwks_cache_policy *policy, const char *json,
+      size_t len, lonejson_error *error);
+  /** Refreshes a JWKS cache through this runtime's HTTP provider. */
+  lonejson_status (*oidc_jwks_cache_refresh)(
+      lonejson *runtime, lonejson_oidc_jwks_cache *cache,
+      const lonejson_oidc_jwks_cache_policy *policy, lonejson_error *error);
+  /** Parses and validates a bounded OAuth2 token response. */
+  lonejson_status (*oauth2_token_response_parse_json)(
+      lonejson *runtime, const char *json, size_t len,
+      size_t max_response_bytes, lonejson_oauth2_token_response *out,
+      lonejson_error *error);
+  /** Exchanges OAuth2 client credentials through this runtime's HTTP provider.
+   */
+  lonejson_status (*oauth2_client_credentials_request)(
+      lonejson *runtime, const char *token_endpoint,
+      const lonejson_oauth2_client_credentials *request,
+      size_t max_response_bytes, lonejson_oauth2_token_response *out,
+      lonejson_error *error);
+  /** Exchanges an OAuth2 refresh token through this runtime's HTTP provider. */
+  lonejson_status (*oauth2_refresh_token_request)(
+      lonejson *runtime, const char *token_endpoint,
+      const lonejson_oauth2_refresh_token *request, size_t max_response_bytes,
+      lonejson_oauth2_token_response *out, lonejson_error *error);
+  /** Ensures a token-flow has a usable access token, refreshing if needed. */
+  lonejson_status (*oauth2_token_flow_ensure)(
+      lonejson *runtime, lonejson_oauth2_token_flow *flow,
+      const lonejson_oauth2_token_flow_policy *policy,
+      lonejson_oauth2_token_flow_result *result, lonejson_error *error);
+  /** Introspects a token through this runtime's HTTP provider. */
+  lonejson_status (*oauth2_introspect_token_request)(
+      lonejson *runtime, const char *introspection_endpoint,
+      const lonejson_oauth2_token_introspection *request,
+      size_t max_response_bytes, lonejson_oauth2_introspection_response *out,
+      lonejson_error *error);
+  /** Revokes a token through this runtime's HTTP provider. */
+  lonejson_status (*oauth2_revoke_token_request)(
+      lonejson *runtime, const char *revocation_endpoint,
+      const lonejson_oauth2_token_revocation *request, lonejson_error *error);
+  /** Fetches OIDC UserInfo through this runtime's HTTP provider. */
+  lonejson_status (*oidc_fetch_userinfo)(
+      lonejson *runtime, const char *userinfo_endpoint,
+      const lonejson_oidc_userinfo_request *request,
+      lonejson_oidc_userinfo_response *out, lonejson_error *error);
+  /** Exchanges an authorization code through this runtime's HTTP provider. */
+  lonejson_status (*oidc_authorization_code_token_request)(
+      lonejson *runtime, const char *token_endpoint,
+      const lonejson_oidc_authorization_code_token *request,
+      size_t max_response_bytes, lonejson_oauth2_token_response *out,
+      lonejson_error *error);
+  /** Validates one Authorization Bearer JWT against cache and claim policy. */
+  lonejson_status (*oidc_validate_bearer_token)(
+      lonejson *runtime, const lonejson_oidc_bearer_validation_request *request,
+      lonejson_oidc_bearer_validation *out, lonejson_error *error);
+  /** Computes a PKCE S256 challenge through this runtime's auth provider.
+   *
+   * Requires provider `sha256`. OpenSSL-enabled builds fall back to the
+   * built-in OpenSSL adapter when this runtime has no provider installed.
+   */
+  lonejson_status (*oidc_pkce_challenge_with_runtime)(
+      lonejson *runtime, const char *code_verifier, lonejson_owned_buffer *out,
+      lonejson_error *error);
+  /** Generates a PKCE verifier through this runtime's auth provider.
+   *
+   * Requires provider `random_bytes` and `sha256`. OpenSSL-enabled builds fall
+   * back to the built-in OpenSSL adapter when this runtime has no provider
+   * installed.
+   */
+  lonejson_status (*oidc_pkce_generate_with_runtime)(lonejson *runtime,
+                                                     size_t verifier_bytes,
+                                                     lonejson_oidc_pkce *out,
+                                                     lonejson_error *error);
+  /** Generates one M2M credential record plus one-time secrets. */
+  lonejson_status (*m2m_credential_generate)(
+      lonejson *runtime, const lonejson_m2m_credential_request *request,
+      lonejson_m2m_credential *out, lonejson_error *error);
+  /** Verifies Basic client credentials or Bearer API key against a JSON store.
+   */
+  lonejson_status (*m2m_verify_authorization)(
+      lonejson *runtime, const lonejson_m2m_verify_request *request,
+      lonejson_m2m_authentication *out, lonejson_error *error);
+  /** Generates one signup seed record and optional URL/query values. */
+  lonejson_status (*m2m_signup_generate)(
+      lonejson *runtime, const lonejson_m2m_signup_request *request,
+      lonejson_m2m_signup *out, lonejson_error *error);
+  /** Completes one signup seed into a new M2M credential. */
+  lonejson_status (*m2m_signup_complete)(
+      lonejson *runtime, const lonejson_m2m_signup_complete_request *request,
+      lonejson_m2m_signup_completion *out, lonejson_error *error);
+#endif
+  /** Installs or clears the runtime auth HTTP provider. */
+  lonejson_status (*set_http_provider)(lonejson *runtime,
+                                       const lonejson_http_provider *provider,
+                                       lonejson_error *error);
   /** Initializes one curl parse adapter. */
   lonejson_status (*curl_parse_init)(lonejson *runtime,
                                      lonejson_curl_parse *ctx,
@@ -2418,7 +3511,6 @@ struct lonejson {
   lonejson_status (*curl_upload_init)(lonejson *runtime,
                                       lonejson_curl_upload *ctx,
                                       const lonejson_map *map, const void *src);
-#endif
   /** Releases the runtime and all runtime-owned state. */
   void (*free)(lonejson *runtime);
 };
@@ -3955,8 +5047,8 @@ lonejson_read_result lonejson_default_read_result(void);
  * boundaries and `visitor` or `path_visitor` to receive streaming arbitrary
  * JSON value events for each candidate.
  */
-lonejson_candidate_stream_options lonejson_default_candidate_stream_options(
-    void);
+lonejson_candidate_stream_options
+lonejson_default_candidate_stream_options(void);
 /** Initializes a memory-buffer reader adapter.
  *
  * The adapter reads directly from the caller-owned `data` buffer without
@@ -4892,43 +5984,47 @@ lonejson_status lonejson_visit_value_fd(lonejson *runtime, int fd,
  * fails on malformed JSON or on trailing non-whitespace bytes after the first
  * complete value.
  */
-lonejson_status lonejson_visit_path_value_buffer(
-    lonejson *runtime, const void *data, size_t len,
-    const lonejson_path_value_visitor *visitor, void *user,
-    lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_buffer(lonejson *runtime, const void *data,
+                                 size_t len,
+                                 const lonejson_path_value_visitor *visitor,
+                                 void *user, lonejson_error *error);
 /** Visits exactly one JSON value from a NUL-terminated string and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_cstr(
-    lonejson *runtime, const char *json,
-    const lonejson_path_value_visitor *visitor, void *user,
-    lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_cstr(lonejson *runtime, const char *json,
+                               const lonejson_path_value_visitor *visitor,
+                               void *user, lonejson_error *error);
 /** Visits exactly one JSON value from a caller-provided reader callback and
  * supplies the normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_reader(
-    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
-    const lonejson_path_value_visitor *visitor, void *user,
-    lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_reader(lonejson *runtime, lonejson_reader_fn reader,
+                                 void *reader_user,
+                                 const lonejson_path_value_visitor *visitor,
+                                 void *user, lonejson_error *error);
 /** Visits exactly one JSON value from an open `FILE *` and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_filep(
-    lonejson *runtime, FILE *fp, const lonejson_path_value_visitor *visitor,
-    void *user, lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_filep(lonejson *runtime, FILE *fp,
+                                const lonejson_path_value_visitor *visitor,
+                                void *user, lonejson_error *error);
 /** Visits exactly one JSON value from a filesystem path and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_path(
-    lonejson *runtime, const char *path,
-    const lonejson_path_value_visitor *visitor, void *user,
-    lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_path(lonejson *runtime, const char *path,
+                               const lonejson_path_value_visitor *visitor,
+                               void *user, lonejson_error *error);
 /** Visits exactly one JSON value from a file descriptor and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-lonejson_status lonejson_visit_path_value_fd(
-    lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
-    void *user, lonejson_error *error);
+lonejson_status
+lonejson_visit_path_value_fd(lonejson *runtime, int fd,
+                             const lonejson_path_value_visitor *visitor,
+                             void *user, lonejson_error *error);
 
 /** Streams arbitrary JSON candidates from a caller-provided buffer.
  *
@@ -4948,13 +6044,15 @@ lonejson_status lonejson_visit_candidates_filep(
     lonejson *runtime, FILE *fp,
     const lonejson_candidate_stream_options *options, lonejson_error *error);
 /** Streams arbitrary JSON candidates from a filesystem path. */
-lonejson_status lonejson_visit_candidates_path(
-    lonejson *runtime, const char *path,
-    const lonejson_candidate_stream_options *options, lonejson_error *error);
+lonejson_status
+lonejson_visit_candidates_path(lonejson *runtime, const char *path,
+                               const lonejson_candidate_stream_options *options,
+                               lonejson_error *error);
 /** Streams arbitrary JSON candidates from a file descriptor. */
-lonejson_status lonejson_visit_candidates_fd(
-    lonejson *runtime, int fd,
-    const lonejson_candidate_stream_options *options, lonejson_error *error);
+lonejson_status
+lonejson_visit_candidates_fd(lonejson *runtime, int fd,
+                             const lonejson_candidate_stream_options *options,
+                             lonejson_error *error);
 
 /** Serializes a mapped struct to a generic output sink callback using runtime
  * write policy.
@@ -5419,49 +6517,564 @@ int lonejson_field_has_presence(const lonejson_field *field);
 void lonejson_field_set_presence(void *record, const lonejson_field *field,
                                  int present);
 /** Assigns JSON null semantics to one field in an initialized mapped record. */
-lonejson_status lonejson_record_assign_null(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_error *error);
+lonejson_status lonejson_record_assign_null(lonejson *runtime,
+                                            const lonejson_map *map,
+                                            void *record,
+                                            const lonejson_field *field,
+                                            lonejson_error *error);
 /** Assigns one decoded string value to a string field in an initialized mapped
  * record, applying fixed-capacity overflow and allocation limits.
  */
-lonejson_status lonejson_record_assign_string(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, const char *data, size_t len,
-    lonejson_error *error);
+lonejson_status lonejson_record_assign_string(lonejson *runtime,
+                                              const lonejson_map *map,
+                                              void *record,
+                                              const lonejson_field *field,
+                                              const char *data, size_t len,
+                                              lonejson_error *error);
 /** Appends one decoded string item to a mapped string array field. */
 lonejson_status lonejson_record_array_append_string(
     lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_string_array *array,
-    const char *data, size_t len, lonejson_error *error);
+    const lonejson_field *field, lonejson_string_array *array, const char *data,
+    size_t len, lonejson_error *error);
 /** Appends one signed integer item to a mapped i64 array field. */
-lonejson_status lonejson_record_array_append_i64(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_i64_array *array,
-    lonejson_int64 value, lonejson_error *error);
+lonejson_status
+lonejson_record_array_append_i64(lonejson *runtime, const lonejson_map *map,
+                                 void *record, const lonejson_field *field,
+                                 lonejson_i64_array *array,
+                                 lonejson_int64 value, lonejson_error *error);
 /** Appends one unsigned integer item to a mapped u64 array field. */
-lonejson_status lonejson_record_array_append_u64(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_u64_array *array,
-    lonejson_uint64 value, lonejson_error *error);
+lonejson_status
+lonejson_record_array_append_u64(lonejson *runtime, const lonejson_map *map,
+                                 void *record, const lonejson_field *field,
+                                 lonejson_u64_array *array,
+                                 lonejson_uint64 value, lonejson_error *error);
 /** Appends one number item to a mapped f64 array field. */
-lonejson_status lonejson_record_array_append_f64(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_f64_array *array, double value,
-    lonejson_error *error);
+lonejson_status
+lonejson_record_array_append_f64(lonejson *runtime, const lonejson_map *map,
+                                 void *record, const lonejson_field *field,
+                                 lonejson_f64_array *array, double value,
+                                 lonejson_error *error);
 /** Appends one boolean item to a mapped bool array field. */
-lonejson_status lonejson_record_array_append_bool(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_bool_array *array, int value,
-    lonejson_error *error);
+lonejson_status
+lonejson_record_array_append_bool(lonejson *runtime, const lonejson_map *map,
+                                  void *record, const lonejson_field *field,
+                                  lonejson_bool_array *array, int value,
+                                  lonejson_error *error);
 /** Appends one uninitialized slot to a mapped object array field and returns
  * the slot pointer. The caller should initialize/populate it with the field's
  * submap before serialization.
  */
-void *lonejson_record_object_array_append_slot(
-    lonejson *runtime, const lonejson_map *map, void *record,
-    const lonejson_field *field, lonejson_object_array *array,
+void *lonejson_record_object_array_append_slot(lonejson *runtime,
+                                               const lonejson_map *map,
+                                               void *record,
+                                               const lonejson_field *field,
+                                               lonejson_object_array *array,
+                                               lonejson_error *error);
+
+/** Computes the encoded byte length for `len` raw bytes and base64 `variant`.
+ *
+ * Use `LONEJSON_BASE64_STANDARD` for padded RFC 4648 base64,
+ * `LONEJSON_BASE64_STANDARD_RAW` for unpadded standard base64,
+ * `LONEJSON_BASE64_URL` for padded base64url, and
+ * `LONEJSON_BASE64_URL_RAW` for unpadded JWT/JWS-style base64url segments.
+ */
+lonejson_status lonejson_base64_encoded_len(size_t len,
+                                            lonejson_base64_variant variant,
+                                            size_t *out_len,
+                                            lonejson_error *error);
+/** Encodes raw bytes into caller-provided base64 storage.
+ *
+ * `needed` is set to the required encoded size on success or truncation. The
+ * output is not NUL-terminated. If `capacity` is too small, no bytes are
+ * written and `LONEJSON_STATUS_TRUNCATED` is returned.
+ */
+lonejson_status lonejson_base64_encode(const void *data, size_t len,
+                                       lonejson_base64_variant variant,
+                                       char *out, size_t capacity,
+                                       size_t *needed, lonejson_error *error);
+/** Encodes raw bytes as base64 and streams encoded chunks to `sink`.
+ *
+ * This uses bounded internal chunks and does not require the caller to
+ * allocate the complete encoded output.
+ */
+lonejson_status lonejson_base64_encode_sink(const void *data, size_t len,
+                                            lonejson_base64_variant variant,
+                                            lonejson_sink_fn sink, void *user,
+                                            lonejson_error *error);
+/** Computes the decoded byte length for one base64 value.
+ *
+ * Raw variants reject `=` padding. Padded variants accept canonical padding
+ * and reject non-padding data after padding.
+ */
+lonejson_status lonejson_base64_decoded_len(const char *data, size_t len,
+                                            lonejson_base64_variant variant,
+                                            size_t *out_len,
+                                            lonejson_error *error);
+/** Decodes one base64 value into caller-provided storage.
+ *
+ * `needed` is set to the required decoded size on success or truncation. If
+ * `capacity` is too small, no bytes are written and
+ * `LONEJSON_STATUS_TRUNCATED` is returned.
+ */
+lonejson_status lonejson_base64_decode(const char *data, size_t len,
+                                       lonejson_base64_variant variant,
+                                       unsigned char *out, size_t capacity,
+                                       size_t *needed, lonejson_error *error);
+/** Decodes one base64 value and streams decoded chunks to `sink`.
+ *
+ * The decoder validates the selected alphabet and padding policy before
+ * emitting bytes. It does not materialize the complete decoded value.
+ */
+lonejson_status lonejson_base64_decode_sink(const char *data, size_t len,
+                                            lonejson_base64_variant variant,
+                                            lonejson_sink_fn sink, void *user,
+                                            lonejson_error *error);
+
+#ifdef LONEJSON_WITH_JWT
+/** Installs or clears the runtime auth provider. */
+lonejson_status
+lonejson_set_auth_provider(lonejson *runtime,
+                           const lonejson_auth_provider *provider,
+                           lonejson_error *error);
+#ifdef LONEJSON_WITH_OPENSSL
+/** Initializes `provider` with lonejson's OpenSSL-backed auth adapter.
+ *
+ * The adapter verifies JWT/JWS signatures and, when a selected JWK includes an
+ * `x5c` chain, validates the leaf certificate thumbprints, checks that the leaf
+ * public key matches the JWK, and verifies the chain against
+ * `config->x509_store` or OpenSSL's default verify paths. The provider copies
+ * the `x509_store` pointer value; the config object itself only needs to remain
+ * valid for this call.
+ */
+lonejson_status lonejson_auth_provider_init_openssl(
+    lonejson_auth_provider *provider,
+    const lonejson_openssl_auth_provider_config *config, lonejson_error *error);
+#endif
+/** Parses one JWT compact serialization into caller-owned segment slices.
+ *
+ * This checks compact serialization and base64url segment syntax only. It does
+ * not decode JSON, validate signatures, validate claims, or establish trust.
+ */
+lonejson_status lonejson_jwt_parse_compact(const char *token, size_t len,
+                                           lonejson_jwt_compact *out,
+                                           lonejson_error *error);
+/** Initializes a JWK object for parsing or cleanup. */
+void lonejson_jwk_init(lonejson_jwk *jwk);
+/** Releases storage owned by a JWK object and resets it to empty. */
+void lonejson_jwk_cleanup(lonejson_jwk *jwk);
+/** Initializes a JWKS object for parsing or cleanup. */
+void lonejson_jwks_init(lonejson_jwks *jwks);
+/** Releases storage owned by a JWKS object and resets it to empty. */
+void lonejson_jwks_cleanup(lonejson_jwks *jwks);
+/** Parses one JWK JSON object into `out`.
+ *
+ * This validates required key material for supported `kty` values and checks
+ * base64url member syntax only. It does not validate signatures or trust.
+ */
+lonejson_status lonejson_jwk_parse_json(lonejson *runtime, const char *json,
+                                        size_t len, lonejson_jwk *out,
+                                        lonejson_error *error);
+/** Parses one JWKS JSON object with a required `keys` array. */
+lonejson_status lonejson_jwks_parse_json(lonejson *runtime, const char *json,
+                                         size_t len, lonejson_jwks *out,
+                                         lonejson_error *error);
+/** Selects the first JWK matching all non-NULL filters.
+ *
+ * Returns `LONEJSON_STATUS_OK` and sets `*out` to NULL when no key matches.
+ */
+lonejson_status lonejson_jwks_select(const lonejson_jwks *jwks,
+                                     const lonejson_jwk_select_options *options,
+                                     const lonejson_jwk **out,
+                                     lonejson_error *error);
+/** Initializes decoded JWT header storage. */
+void lonejson_jwt_header_init(lonejson_jwt_header *header);
+/** Releases storage owned by decoded JWT header storage. */
+void lonejson_jwt_header_cleanup(lonejson_jwt_header *header);
+/** Initializes decoded JWT claims storage. */
+void lonejson_jwt_claims_init(lonejson_jwt_claims *claims);
+/** Releases storage owned by decoded JWT claims storage. */
+void lonejson_jwt_claims_cleanup(lonejson_jwt_claims *claims);
+/** Decodes and parses the header and claims payload from one compact JWT.
+ *
+ * This validates compact serialization, base64url syntax, decoded-size limits,
+ * JSON syntax, duplicate registered claims, and registered claim types. It
+ * does not validate signatures or trust.
+ */
+lonejson_status
+lonejson_jwt_decode_compact(lonejson *runtime, const char *token, size_t len,
+                            const lonejson_jwt_claim_policy *limits,
+                            lonejson_jwt_header *header,
+                            lonejson_jwt_claims *claims, lonejson_error *error);
+/** Validates decoded JWT header and claims against an explicit policy.
+ *
+ * This is a trust decision for claims only. Signature validation must be
+ * composed separately once a verified signature result is available.
+ */
+lonejson_status lonejson_jwt_validate_claims(
+    const lonejson_jwt_header *header, const lonejson_jwt_claims *claims,
+    const lonejson_jwt_claim_policy *policy, lonejson_error *error);
+/** Validates a compact JWT signature against a selected JWK.
+ *
+ * This is a trust decision for the JWS signature only. The caller must still
+ * validate claims with `lonejson_jwt_validate_claims()`. The decoded header is
+ * supplied explicitly so algorithm and key constraints are checked against the
+ * same parsed header the caller will use for claim policy. With the OpenSSL
+ * auth provider, selected JWK `x5c` chains are validated when present.
+ */
+lonejson_status
+lonejson_jwt_validate_signature(const lonejson_jwt_compact *jwt,
+                                const lonejson_jwt_header *header,
+                                const lonejson_jwk *jwk, lonejson_error *error);
+/** Validates a compact JWT signature through a runtime auth provider. */
+lonejson_status lonejson_jwt_validate_signature_with_runtime(
+    lonejson *runtime, const lonejson_jwt_compact *jwt,
+    const lonejson_jwt_header *header, const lonejson_jwk *jwk,
     lonejson_error *error);
+#endif
+#ifdef LONEJSON_WITH_OIDC
+/** Initializes a materialized HTTP response for provider use or cleanup. */
+void lonejson_http_response_init(lonejson_http_response *response);
+/** Releases storage owned by a materialized HTTP response. */
+void lonejson_http_response_cleanup(lonejson_http_response *response);
+/** Initializes an HTTP provider from caller-owned callback config. */
+lonejson_status
+lonejson_http_provider_init(lonejson_http_provider *provider,
+                            const lonejson_http_provider_config *config,
+                            lonejson_error *error);
+/** Initializes an HTTP provider from direct caller-owned callback arguments. */
+lonejson_status lonejson_http_provider_init_simple(
+    lonejson_http_provider *provider, void *user_data, const char *user_agent,
+    lonejson_status (*request)(void *user_data,
+                               const lonejson_http_request *request,
+                               lonejson_http_response *response,
+                               lonejson_error *error),
+    lonejson_error *error);
+/** Installs or clears the runtime auth HTTP provider. */
+lonejson_status
+lonejson_set_http_provider(lonejson *runtime,
+                           const lonejson_http_provider *provider,
+                           lonejson_error *error);
+/** Initializes OIDC discovery metadata storage. */
+void lonejson_oidc_discovery_init(lonejson_oidc_discovery *discovery);
+/** Releases storage owned by OIDC discovery metadata. */
+void lonejson_oidc_discovery_cleanup(lonejson_oidc_discovery *discovery);
+/** Builds the OIDC discovery URL for an HTTPS issuer.
+ *
+ * Path-based issuers follow OpenID Connect Discovery placement:
+ * `https://host/path` becomes
+ * `https://host/path/.well-known/openid-configuration`.
+ */
+lonejson_status lonejson_oidc_discovery_url(const char *issuer,
+                                            lonejson_owned_buffer *out,
+                                            lonejson_error *error);
+/** Parses one OIDC discovery JSON object into `out`.
+ *
+ * This validates required metadata shape only. It does not fetch JWKS, validate
+ * signatures, validate tokens, or establish issuer trust.
+ */
+lonejson_status lonejson_oidc_discovery_parse_json(lonejson *runtime,
+                                                   const char *json, size_t len,
+                                                   lonejson_oidc_discovery *out,
+                                                   lonejson_error *error);
+/** Validates parsed discovery metadata against the issuer configured by caller.
+ */
+lonejson_status lonejson_oidc_discovery_validate_issuer(
+    const lonejson_oidc_discovery *discovery, const char *expected_issuer,
+    lonejson_error *error);
+/** Fetches, parses, and issuer-validates OIDC discovery metadata through the
+ * runtime HTTP provider.
+ */
+lonejson_status lonejson_oidc_fetch_discovery(lonejson *runtime,
+                                              const char *issuer,
+                                              size_t max_response_bytes,
+                                              lonejson_oidc_discovery *out,
+                                              lonejson_error *error);
+/** Initializes a JWKS cache for later update or cleanup. */
+void lonejson_oidc_jwks_cache_init(lonejson_oidc_jwks_cache *cache);
+/** Releases all storage owned by a JWKS cache. */
+void lonejson_oidc_jwks_cache_cleanup(lonejson_oidc_jwks_cache *cache);
+/** Installs caller-provided JWKS JSON into a bounded cache.
+ *
+ * This parses and validates a JWKS document, records the expected issuer and
+ * JWKS URI, and sets `expires_at = policy->now + policy->ttl_seconds`. Network
+ * retrieval remains caller-owned.
+ */
+lonejson_status lonejson_oidc_jwks_cache_update_json(
+    lonejson *runtime, lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy, const char *json, size_t len,
+    lonejson_error *error);
+/** Returns non-zero when a cache has keys for the configured issuer/URI and is
+ * not expired at `policy->now`.
+ */
+int lonejson_oidc_jwks_cache_is_fresh(
+    const lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy);
+/** Selects a key from a fresh JWKS cache. */
+lonejson_status
+lonejson_oidc_jwks_cache_select(const lonejson_oidc_jwks_cache *cache,
+                                const lonejson_oidc_jwks_cache_policy *policy,
+                                const lonejson_jwk_select_options *options,
+                                const lonejson_jwk **out,
+                                lonejson_error *error);
+/** Refreshes a JWKS cache through the runtime HTTP provider. */
+lonejson_status lonejson_oidc_jwks_cache_refresh(
+    lonejson *runtime, lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy, lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` client-credentials body. */
+lonejson_status lonejson_oauth2_client_credentials_body(
+    const lonejson_oauth2_client_credentials *request,
+    lonejson_owned_buffer *out, lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` refresh-token body. */
+lonejson_status
+lonejson_oauth2_refresh_token_body(const lonejson_oauth2_refresh_token *request,
+                                   lonejson_owned_buffer *out,
+                                   lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` introspection body. */
+lonejson_status lonejson_oauth2_token_introspection_body(
+    const lonejson_oauth2_token_introspection *request,
+    lonejson_owned_buffer *out, lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` revocation body. */
+lonejson_status lonejson_oauth2_token_revocation_body(
+    const lonejson_oauth2_token_revocation *request, lonejson_owned_buffer *out,
+    lonejson_error *error);
+/** Builds an `application/x-www-form-urlencoded` authorization-code token body.
+ */
+lonejson_status lonejson_oidc_authorization_code_token_body(
+    const lonejson_oidc_authorization_code_token *request,
+    lonejson_owned_buffer *out, lonejson_error *error);
+/** Initializes a token response for parsing or cleanup. */
+void lonejson_oauth2_token_response_init(
+    lonejson_oauth2_token_response *response);
+/** Releases all storage owned by a token response. */
+void lonejson_oauth2_token_response_cleanup(
+    lonejson_oauth2_token_response *response);
+/** Parses and validates a bounded successful OAuth2 token endpoint response.
+ *
+ * `max_response_bytes == 0` applies lonejson's default token-response cap.
+ * Provider error responses are rejected with `LONEJSON_STATUS_TYPE_MISMATCH`.
+ */
+lonejson_status lonejson_oauth2_token_response_parse_json(
+    lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lonejson_oauth2_token_response *out, lonejson_error *error);
+/** Initializes an introspection response for parsing or cleanup. */
+void lonejson_oauth2_introspection_response_init(
+    lonejson_oauth2_introspection_response *response);
+/** Releases all storage owned by an introspection response. */
+void lonejson_oauth2_introspection_response_cleanup(
+    lonejson_oauth2_introspection_response *response);
+/** Parses and validates a bounded OAuth2 token introspection response. */
+lonejson_status lonejson_oauth2_introspection_response_parse_json(
+    lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lonejson_oauth2_introspection_response *out, lonejson_error *error);
+/** Exchanges OAuth2 client credentials through the runtime HTTP provider and
+ * parses the bounded token endpoint response.
+ */
+lonejson_status lonejson_oauth2_client_credentials_request(
+    lonejson *runtime, const char *token_endpoint,
+    const lonejson_oauth2_client_credentials *request,
+    size_t max_response_bytes, lonejson_oauth2_token_response *out,
+    lonejson_error *error);
+/** Exchanges an OAuth2 refresh token through the runtime HTTP provider. */
+lonejson_status lonejson_oauth2_refresh_token_request(
+    lonejson *runtime, const char *token_endpoint,
+    const lonejson_oauth2_refresh_token *request, size_t max_response_bytes,
+    lonejson_oauth2_token_response *out, lonejson_error *error);
+/** Initializes token-flow storage for update or cleanup. */
+void lonejson_oauth2_token_flow_init(lonejson_oauth2_token_flow *flow);
+/** Releases all storage owned by a token flow. */
+void lonejson_oauth2_token_flow_cleanup(lonejson_oauth2_token_flow *flow);
+/** Copies borrowed or persisted token-flow fields into owned token-flow
+ * storage.
+ *
+ * This is the supported import path when loading a token flow from application
+ * storage, Lua tables, or other caller-owned memory. Existing storage in
+ * `flow` is released only after all replacement strings have been copied.
+ */
+lonejson_status
+lonejson_oauth2_token_flow_assign(lonejson_oauth2_token_flow *flow,
+                                  const lonejson_oauth2_token_flow *source,
+                                  lonejson_error *error);
+/** Returns non-zero when the flow has no usable access token at `now`.
+ *
+ * A zero `skew_seconds` applies the default 60-second refresh skew. Negative
+ * skew is treated as zero.
+ */
+int lonejson_oauth2_token_flow_is_expired(
+    const lonejson_oauth2_token_flow *flow, lonejson_int64 now,
+    lonejson_int64 skew_seconds);
+/** Updates token-flow storage from a successful token endpoint response.
+ *
+ * Returned strings are copied. Existing refresh tokens are preserved when a
+ * refresh response omits `refresh_token`, matching common OAuth2 rotation
+ * behavior.
+ */
+lonejson_status lonejson_oauth2_token_flow_update_response(
+    lonejson_oauth2_token_flow *flow,
+    const lonejson_oauth2_token_response *response, lonejson_int64 now,
+    lonejson_error *error);
+/** Ensures a flow has a usable access token, refreshing through the runtime
+ * HTTP provider when refresh is enabled and required.
+ *
+ * This helper never performs browser interaction and never persists state.
+ * When interaction or re-authorization is needed it returns
+ * `LONEJSON_STATUS_OK` with result state
+ * `LONEJSON_OAUTH2_TOKEN_FLOW_NEEDS_INTERACTION`.
+ */
+lonejson_status lonejson_oauth2_token_flow_ensure(
+    lonejson *runtime, lonejson_oauth2_token_flow *flow,
+    const lonejson_oauth2_token_flow_policy *policy,
+    lonejson_oauth2_token_flow_result *result, lonejson_error *error);
+/** Introspects a token through the runtime HTTP provider. */
+lonejson_status lonejson_oauth2_introspect_token_request(
+    lonejson *runtime, const char *introspection_endpoint,
+    const lonejson_oauth2_token_introspection *request,
+    size_t max_response_bytes, lonejson_oauth2_introspection_response *out,
+    lonejson_error *error);
+/** Revokes a token through the runtime HTTP provider. */
+lonejson_status lonejson_oauth2_revoke_token_request(
+    lonejson *runtime, const char *revocation_endpoint,
+    const lonejson_oauth2_token_revocation *request, lonejson_error *error);
+/** Initializes an OIDC UserInfo response for request or cleanup. */
+void lonejson_oidc_userinfo_response_init(lonejson_oidc_userinfo_response *out);
+/** Releases all storage owned by an OIDC UserInfo response. */
+void lonejson_oidc_userinfo_response_cleanup(
+    lonejson_oidc_userinfo_response *out);
+/** Parses and validates a bounded OIDC UserInfo JSON response. */
+lonejson_status lonejson_oidc_userinfo_response_parse_json(
+    lonejson *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lonejson_oidc_userinfo_response *out, lonejson_error *error);
+/** Fetches OIDC UserInfo through the runtime HTTP provider. */
+lonejson_status
+lonejson_oidc_fetch_userinfo(lonejson *runtime, const char *userinfo_endpoint,
+                             const lonejson_oidc_userinfo_request *request,
+                             lonejson_oidc_userinfo_response *out,
+                             lonejson_error *error);
+/** Exchanges an OIDC/OAuth2 authorization code through the runtime HTTP
+ * provider.
+ */
+lonejson_status lonejson_oidc_authorization_code_token_request(
+    lonejson *runtime, const char *token_endpoint,
+    const lonejson_oidc_authorization_code_token *request,
+    size_t max_response_bytes, lonejson_oauth2_token_response *out,
+    lonejson_error *error);
+/** Initializes a PKCE pair for generation or cleanup. */
+void lonejson_oidc_pkce_init(lonejson_oidc_pkce *pkce);
+/** Releases all storage owned by a PKCE pair. */
+void lonejson_oidc_pkce_cleanup(lonejson_oidc_pkce *pkce);
+/** Computes a base64url S256 PKCE challenge for a caller-provided verifier.
+ *
+ * This convenience helper uses lonejson's built-in OpenSSL adapter when
+ * compiled with `LONEJSON_WITH_OPENSSL`. Builds without that adapter should use
+ * `lonejson_oidc_pkce_challenge_with_runtime()` and install an auth provider
+ * with `sha256`.
+ */
+lonejson_status lonejson_oidc_pkce_challenge(const char *code_verifier,
+                                             lonejson_owned_buffer *out,
+                                             lonejson_error *error);
+/** Computes a PKCE S256 challenge through the runtime auth provider.
+ *
+ * The provider must implement `sha256`. OpenSSL-enabled builds fall back to the
+ * built-in adapter when the runtime has no provider.
+ */
+lonejson_status lonejson_oidc_pkce_challenge_with_runtime(
+    lonejson *runtime, const char *code_verifier, lonejson_owned_buffer *out,
+    lonejson_error *error);
+/** Generates a random PKCE verifier and matching S256 challenge.
+ *
+ * `verifier_bytes == 0` uses the default 32 random bytes. Valid non-zero
+ * values are 32..96, producing RFC 7636 verifier lengths of 43..128 chars.
+ * This convenience helper uses lonejson's built-in OpenSSL adapter when
+ * compiled with `LONEJSON_WITH_OPENSSL`; otherwise use
+ * `lonejson_oidc_pkce_generate_with_runtime()` with an auth provider that
+ * implements `random_bytes` and `sha256`.
+ */
+lonejson_status lonejson_oidc_pkce_generate(size_t verifier_bytes,
+                                            lonejson_oidc_pkce *out,
+                                            lonejson_error *error);
+/** Generates a PKCE verifier and matching challenge through the runtime auth
+ * provider.
+ *
+ * The provider must implement `random_bytes` and `sha256`. OpenSSL-enabled
+ * builds fall back to the built-in adapter when the runtime has no provider.
+ */
+lonejson_status lonejson_oidc_pkce_generate_with_runtime(
+    lonejson *runtime, size_t verifier_bytes, lonejson_oidc_pkce *out,
+    lonejson_error *error);
+/** Builds an authorization-code URL with PKCE S256 parameters. */
+lonejson_status lonejson_oidc_authorization_url(
+    const lonejson_oidc_authorization_request *request,
+    lonejson_owned_buffer *out, lonejson_error *error);
+/** Initializes a parsed authorization callback for parsing or cleanup. */
+void lonejson_oidc_authorization_callback_init(
+    lonejson_oidc_authorization_callback *callback);
+/** Releases all storage owned by a parsed authorization callback. */
+void lonejson_oidc_authorization_callback_cleanup(
+    lonejson_oidc_authorization_callback *callback);
+/** Parses and validates an authorization-code callback query string.
+ *
+ * `query` may start with `?`. Provider error callbacks are rejected with
+ * `LONEJSON_STATUS_TYPE_MISMATCH`. `expected_state` is required.
+ */
+lonejson_status lonejson_oidc_authorization_callback_parse_query(
+    const char *query, size_t len, const char *expected_state,
+    size_t max_query_bytes, lonejson_oidc_authorization_callback *out,
+    lonejson_error *error);
+/** Returns a stable string for one bearer-token authentication failure class.
+ */
+const char *lonejson_auth_failure_string(lonejson_auth_failure failure);
+/** Initializes bearer validation output storage. */
+void lonejson_oidc_bearer_validation_init(
+    lonejson_oidc_bearer_validation *validation);
+/** Releases storage owned by a bearer validation result. */
+void lonejson_oidc_bearer_validation_cleanup(
+    lonejson_oidc_bearer_validation *validation);
+/** Extracts the compact JWT from an HTTP Authorization Bearer header value. */
+lonejson_status
+lonejson_oidc_authorization_bearer_token(const char *authorization_header,
+                                         lonejson_jwt_segment *out,
+                                         lonejson_error *error);
+/** Validates one Authorization Bearer JWT against a fresh JWKS cache and claim
+ * policy.
+ */
+lonejson_status lonejson_oidc_validate_bearer_token(
+    lonejson *runtime, const lonejson_oidc_bearer_validation_request *request,
+    lonejson_oidc_bearer_validation *out, lonejson_error *error);
+/** Initializes an M2M credential result for generation or cleanup. */
+void lonejson_m2m_credential_init(lonejson_m2m_credential *credential);
+/** Releases storage owned by an M2M credential result. */
+void lonejson_m2m_credential_cleanup(lonejson_m2m_credential *credential);
+/** Generates a store-ready M2M credential record and one-time clear secrets. */
+lonejson_status lonejson_m2m_credential_generate(
+    lonejson *runtime, const lonejson_m2m_credential_request *request,
+    lonejson_m2m_credential *out, lonejson_error *error);
+/** Initializes an M2M authentication result. */
+void lonejson_m2m_authentication_init(lonejson_m2m_authentication *auth);
+/** Releases storage owned by an M2M authentication result. */
+void lonejson_m2m_authentication_cleanup(lonejson_m2m_authentication *auth);
+/** Verifies an HTTP Authorization header against a JSON credential store. */
+lonejson_status lonejson_m2m_verify_authorization(
+    lonejson *runtime, const lonejson_m2m_verify_request *request,
+    lonejson_m2m_authentication *out, lonejson_error *error);
+/** Initializes an M2M signup seed result for generation or cleanup. */
+void lonejson_m2m_signup_init(lonejson_m2m_signup *signup);
+/** Releases storage owned by an M2M signup seed result. */
+void lonejson_m2m_signup_cleanup(lonejson_m2m_signup *signup);
+/** Generates a signup seed record plus optional query/URL values. */
+lonejson_status
+lonejson_m2m_signup_generate(lonejson *runtime,
+                             const lonejson_m2m_signup_request *request,
+                             lonejson_m2m_signup *out, lonejson_error *error);
+/** Initializes an M2M signup completion result for completion or cleanup. */
+void lonejson_m2m_signup_complete_init(
+    lonejson_m2m_signup_completion *complete);
+/** Releases storage owned by an M2M signup completion result. */
+void lonejson_m2m_signup_complete_cleanup(
+    lonejson_m2m_signup_completion *complete);
+/** Verifies a signup seed and returns a generated credential for the user. */
+lonejson_status lonejson_m2m_signup_complete(
+    lonejson *runtime, const lonejson_m2m_signup_complete_request *request,
+    lonejson_m2m_signup_completion *out, lonejson_error *error);
+#endif
 
 #ifdef LONEJSON_WITH_CURL
 #include <curl/curl.h>
@@ -5578,6 +7191,25 @@ struct lonejson_curl_upload {
   void (*cleanup)(struct lonejson_curl_upload *ctx);
 };
 
+#ifdef LONEJSON_WITH_OIDC
+/** Curl response adapter that installs a bounded JWKS response into a cache at
+ * EOF. The policy strings are copied at init; `runtime` and `cache` are
+ * caller-owned and must remain valid until finish/cleanup.
+ */
+struct lonejson_oidc_jwks_cache_parse {
+  lonejson_owned_buffer response;
+  lonejson *runtime;
+  lonejson_oidc_jwks_cache *cache;
+  lonejson_oidc_jwks_cache_policy policy;
+  lonejson_error error;
+  unsigned char _reserved_state[8];
+  size_t (*write_callback)(struct lonejson_oidc_jwks_cache_parse *ctx,
+                           char *ptr, size_t size, size_t nmemb);
+  lonejson_status (*finish)(struct lonejson_oidc_jwks_cache_parse *ctx);
+  void (*cleanup)(struct lonejson_oidc_jwks_cache_parse *ctx);
+};
+#endif
+
 /** Initializes a curl parse adapter suitable for `CURLOPT_WRITEFUNCTION`. */
 lonejson_status lonejson_curl_parse_init(lonejson_curl_parse *ctx,
                                          lonejson *runtime,
@@ -5660,6 +7292,26 @@ size_t lonejson_curl_read_callback(char *ptr, size_t size, size_t nmemb,
 curl_off_t lonejson_curl_upload_size(const lonejson_curl_upload *ctx);
 /** Releases resources owned by a curl upload adapter. */
 void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
+#ifdef LONEJSON_WITH_OIDC
+/** Initializes a curl write adapter for a bounded JWKS cache refresh.
+ *
+ * The adapter copies the policy strings. The runtime and cache pointers remain
+ * caller-owned and must outlive finish/cleanup.
+ */
+lonejson_status lonejson_oidc_jwks_cache_parse_init(
+    lonejson_oidc_jwks_cache_parse *ctx, lonejson *runtime,
+    lonejson_oidc_jwks_cache *cache,
+    const lonejson_oidc_jwks_cache_policy *policy);
+/** Curl write callback for a JWKS cache refresh adapter. */
+size_t lonejson_oidc_jwks_cache_write_callback(char *ptr, size_t size,
+                                               size_t nmemb, void *userdata);
+/** Finalizes a JWKS cache refresh adapter after curl EOF. */
+lonejson_status
+lonejson_oidc_jwks_cache_parse_finish(lonejson_oidc_jwks_cache_parse *ctx);
+/** Releases resources owned by a JWKS cache refresh adapter. */
+void lonejson_oidc_jwks_cache_parse_cleanup(
+    lonejson_oidc_jwks_cache_parse *ctx);
+#endif
 #endif
 
 #ifndef LONEJSON_DISABLE_SHORT_NAMES
@@ -5785,8 +7437,7 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 /** Parse repeated top-level JSON candidates. */
 #define LJ_CANDIDATE_FRAMING_NDJSON LONEJSON_CANDIDATE_FRAMING_NDJSON
 /** Parse each top-level array item as one candidate. */
-#define LJ_CANDIDATE_FRAMING_ARRAY_ITEMS                                       \
-  LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS
+#define LJ_CANDIDATE_FRAMING_ARRAY_ITEMS LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS
 /** Do not retain or emit candidate payload bytes. */
 #define LJ_CANDIDATE_CAPTURE_NONE LONEJSON_CANDIDATE_CAPTURE_NONE
 /** Stream each compact candidate to a caller sink. */
@@ -5844,6 +7495,11 @@ void lonejson_curl_upload_cleanup(lonejson_curl_upload *ctx);
 #define LJ_FIELD_KIND_BOOL_ARRAY LONEJSON_FIELD_KIND_BOOL_ARRAY
 /** JSON array of nested objects stored in `lonejson_object_array`. */
 #define LJ_FIELD_KIND_OBJECT_ARRAY LONEJSON_FIELD_KIND_OBJECT_ARRAY
+#ifdef LONEJSON_WITH_OIDC
+#define LJ_M2M_AUTH_BASIC LONEJSON_M2M_AUTH_BASIC
+#define LJ_M2M_AUTH_BEARER LONEJSON_M2M_AUTH_BEARER
+#define LJ_M2M_AUTH_DEFAULT LONEJSON_M2M_AUTH_DEFAULT
+#endif
 
 /** No source configured. Serializes as JSON `null`. */
 #define LJ_SOURCE_NONE LONEJSON_SOURCE_NONE
@@ -6192,6 +7848,67 @@ typedef lonejson_candidate_info lj_candidate_info;
 typedef lonejson_candidate_event_fn lj_candidate_event_fn;
 /** Options for arbitrary JSON candidate streams. */
 typedef lonejson_candidate_stream_options lj_candidate_stream_options;
+#ifdef LONEJSON_WITH_JWT
+typedef lonejson_auth_provider lj_auth_provider;
+typedef lonejson_jws_verify_request lj_jws_verify_request;
+#ifdef LONEJSON_WITH_OPENSSL
+typedef lonejson_openssl_auth_provider_config lj_openssl_auth_provider_config;
+#endif
+/** Caller-owned JWT compact-serialization segment. */
+typedef lonejson_jwt_segment lj_jwt_segment;
+/** Parsed JWT compact serialization. */
+typedef lonejson_jwt_compact lj_jwt_compact;
+/** Parsed JSON Web Key. */
+typedef lonejson_jwk lj_jwk;
+/** Parsed JSON Web Key Set. */
+typedef lonejson_jwks lj_jwks;
+/** Optional JWK selection filters. */
+typedef lonejson_jwk_select_options lj_jwk_select_options;
+/** Decoded JWT JOSE header fields retained by lonejson. */
+typedef lonejson_jwt_header lj_jwt_header;
+/** Decoded JWT claims retained by lonejson. */
+typedef lonejson_jwt_claims lj_jwt_claims;
+/** Explicit trust policy for validating parsed JWT header and claims. */
+typedef lonejson_jwt_claim_policy lj_jwt_claim_policy;
+#endif
+#ifdef LONEJSON_WITH_OIDC
+typedef lonejson_http_request lj_http_request;
+typedef lonejson_http_response lj_http_response;
+typedef lonejson_http_provider lj_http_provider;
+typedef lonejson_http_provider_config lj_http_provider_config;
+typedef lonejson_oidc_discovery lj_oidc_discovery;
+typedef lonejson_oidc_jwks_cache_policy lj_oidc_jwks_cache_policy;
+typedef lonejson_oidc_jwks_cache lj_oidc_jwks_cache;
+typedef lonejson_oauth2_client_credentials lj_oauth2_client_credentials;
+typedef lonejson_oauth2_refresh_token lj_oauth2_refresh_token;
+typedef lonejson_oauth2_token_introspection lj_oauth2_token_introspection;
+typedef lonejson_oauth2_token_revocation lj_oauth2_token_revocation;
+typedef lonejson_oidc_authorization_code_token lj_oidc_authorization_code_token;
+typedef lonejson_oauth2_token_response lj_oauth2_token_response;
+typedef lonejson_oauth2_token_flow lj_oauth2_token_flow;
+typedef lonejson_oauth2_token_flow_state lj_oauth2_token_flow_state;
+typedef lonejson_oauth2_token_flow_policy lj_oauth2_token_flow_policy;
+typedef lonejson_oauth2_token_flow_result lj_oauth2_token_flow_result;
+typedef lonejson_oauth2_introspection_response lj_oauth2_introspection_response;
+typedef lonejson_oidc_userinfo_request lj_oidc_userinfo_request;
+typedef lonejson_oidc_userinfo_response lj_oidc_userinfo_response;
+typedef lonejson_oidc_pkce lj_oidc_pkce;
+typedef lonejson_oidc_authorization_request lj_oidc_authorization_request;
+typedef lonejson_oidc_authorization_callback lj_oidc_authorization_callback;
+typedef lonejson_auth_failure lj_auth_failure;
+typedef lonejson_oidc_bearer_validation_request
+    lj_oidc_bearer_validation_request;
+typedef lonejson_oidc_bearer_validation lj_oidc_bearer_validation;
+typedef lonejson_m2m_credential lj_m2m_credential;
+typedef lonejson_m2m_credential_request lj_m2m_credential_request;
+typedef lonejson_m2m_store lj_m2m_store;
+typedef lonejson_m2m_verify_request lj_m2m_verify_request;
+typedef lonejson_m2m_authentication lj_m2m_authentication;
+typedef lonejson_m2m_signup lj_m2m_signup;
+typedef lonejson_m2m_signup_request lj_m2m_signup_request;
+typedef lonejson_m2m_signup_complete_request lj_m2m_signup_complete_request;
+typedef lonejson_m2m_signup_completion lj_m2m_signup_completion;
+#endif
 /** Handler invoked while a mapped string-array stream field is decoded.
  * `chunk` receives decoded UTF-8 string bytes and may be called more than once
  * per item. `end` is called only after the string item is complete; the JSON
@@ -6478,6 +8195,12 @@ typedef lonejson_buffer_reader lj_buffer_reader;
 typedef lonejson_reader_fn lj_reader_fn;
 /** Generic sink callback used by serializer APIs and raw spool writers. */
 typedef lonejson_sink_fn lj_sink_fn;
+/** Base64 alphabet and padding policy. */
+typedef lonejson_base64_variant lj_base64_variant;
+#define LJ_BASE64_STANDARD LONEJSON_BASE64_STANDARD
+#define LJ_BASE64_STANDARD_RAW LONEJSON_BASE64_STANDARD_RAW
+#define LJ_BASE64_URL LONEJSON_BASE64_URL
+#define LJ_BASE64_URL_RAW LONEJSON_BASE64_URL_RAW
 /** Header name/value pair exposed while processing multipart part headers.
  * Pointers are valid only for the duration of the callback currently using
  * them.
@@ -6797,7 +8520,7 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_json_value_set_parse_path_visitor(
     lj_json_value *value, const lj_path_value_visitor *visitor, void *user,
     lj_error *error) {
   return lonejson_json_value_set_parse_path_visitor(value, visitor, user,
-                                                   error);
+                                                    error);
 }
 
 /** Enables explicit parse-time capture of one inbound JSON value into owned
@@ -7442,10 +9165,9 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_path_value_path(
 /** Visits exactly one JSON value from a file descriptor and supplies the
  * normalized current path with every path-aware visitor callback.
  */
-LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_visit_path_value_fd(lonejson *runtime, int fd,
-                       const lj_path_value_visitor *visitor, void *user,
-                       lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_path_value_fd(
+    lonejson *runtime, int fd, const lj_path_value_visitor *visitor, void *user,
+    lj_error *error) {
   return lonejson_visit_path_value_fd(runtime, fd, visitor, user, error);
 }
 /** Streams arbitrary JSON candidates from a caller-provided buffer. */
@@ -7474,10 +9196,9 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_candidates_path(
   return lonejson_visit_candidates_path(runtime, path, options, error);
 }
 /** Streams arbitrary JSON candidates from a file descriptor. */
-LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_visit_candidates_fd(lonejson *runtime, int fd,
-                       const lj_candidate_stream_options *options,
-                       lj_error *error) {
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_candidates_fd(
+    lonejson *runtime, int fd, const lj_candidate_stream_options *options,
+    lj_error *error) {
   return lonejson_visit_candidates_fd(runtime, fd, options, error);
 }
 /** Pull-style JSON generator state. */
@@ -8050,6 +9771,561 @@ LONEJSON_SHORT_ALIAS_INLINE void lj_reset(lonejson *runtime, const lj_map *map,
                                           void *value) {
   lonejson_reset(runtime, map, value);
 }
+/** Computes the encoded byte length for raw bytes and base64 variant. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_base64_encoded_len(
+    size_t len, lj_base64_variant variant, size_t *out_len, lj_error *error) {
+  return lonejson_base64_encoded_len(len, variant, out_len, error);
+}
+/** Encodes raw bytes into caller-provided base64 storage. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_base64_encode(const void *data, size_t len, lj_base64_variant variant,
+                 char *out, size_t capacity, size_t *needed, lj_error *error) {
+  return lonejson_base64_encode(data, len, variant, out, capacity, needed,
+                                error);
+}
+/** Encodes raw bytes as base64 and streams encoded chunks to a sink. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_base64_encode_sink(const void *data, size_t len, lj_base64_variant variant,
+                      lj_sink_fn sink, void *user, lj_error *error) {
+  return lonejson_base64_encode_sink(data, len, variant, sink, user, error);
+}
+/** Computes the decoded byte length for one base64 value. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_base64_decoded_len(const char *data, size_t len, lj_base64_variant variant,
+                      size_t *out_len, lj_error *error) {
+  return lonejson_base64_decoded_len(data, len, variant, out_len, error);
+}
+/** Decodes one base64 value into caller-provided storage. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_base64_decode(
+    const char *data, size_t len, lj_base64_variant variant, unsigned char *out,
+    size_t capacity, size_t *needed, lj_error *error) {
+  return lonejson_base64_decode(data, len, variant, out, capacity, needed,
+                                error);
+}
+/** Decodes one base64 value and streams decoded chunks to a sink. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_base64_decode_sink(const char *data, size_t len, lj_base64_variant variant,
+                      lj_sink_fn sink, void *user, lj_error *error) {
+  return lonejson_base64_decode_sink(data, len, variant, sink, user, error);
+}
+#ifdef LONEJSON_WITH_JWT
+/** Installs or clears the runtime auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_set_auth_provider(
+    lj *runtime, const lj_auth_provider *provider, lj_error *error) {
+  return lonejson_set_auth_provider(runtime, provider, error);
+}
+#ifdef LONEJSON_WITH_OPENSSL
+/** Initializes an OpenSSL-backed auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_auth_provider_init_openssl(
+    lj_auth_provider *provider, const lj_openssl_auth_provider_config *config,
+    lj_error *error) {
+  return lonejson_auth_provider_init_openssl(provider, config, error);
+}
+#endif
+/** Parses one JWT compact serialization into caller-owned segment slices. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_parse_compact(const char *token,
+                                                           size_t len,
+                                                           lj_jwt_compact *out,
+                                                           lj_error *error) {
+  return lonejson_jwt_parse_compact(token, len, out, error);
+}
+/** Initializes a JWK object for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwk_init(lj_jwk *jwk) {
+  lonejson_jwk_init(jwk);
+}
+/** Releases storage owned by a JWK object and resets it to empty. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwk_cleanup(lj_jwk *jwk) {
+  lonejson_jwk_cleanup(jwk);
+}
+/** Initializes a JWKS object for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwks_init(lj_jwks *jwks) {
+  lonejson_jwks_init(jwks);
+}
+/** Releases storage owned by a JWKS object and resets it to empty. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwks_cleanup(lj_jwks *jwks) {
+  lonejson_jwks_cleanup(jwks);
+}
+/** Parses one JWK JSON object into `out`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwk_parse_json(lj *runtime,
+                                                        const char *json,
+                                                        size_t len, lj_jwk *out,
+                                                        lj_error *error) {
+  return lonejson_jwk_parse_json(runtime, json, len, out, error);
+}
+/** Parses one JWKS JSON object with a required `keys` array. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwks_parse_json(
+    lj *runtime, const char *json, size_t len, lj_jwks *out, lj_error *error) {
+  return lonejson_jwks_parse_json(runtime, json, len, out, error);
+}
+/** Selects the first JWK matching all non-NULL filters. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_jwks_select(const lj_jwks *jwks, const lj_jwk_select_options *options,
+               const lj_jwk **out, lj_error *error) {
+  return lonejson_jwks_select(jwks, options, out, error);
+}
+/** Initializes decoded JWT header storage. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwt_header_init(lj_jwt_header *header) {
+  lonejson_jwt_header_init(header);
+}
+/** Releases storage owned by decoded JWT header storage. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwt_header_cleanup(lj_jwt_header *header) {
+  lonejson_jwt_header_cleanup(header);
+}
+/** Initializes decoded JWT claims storage. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwt_claims_init(lj_jwt_claims *claims) {
+  lonejson_jwt_claims_init(claims);
+}
+/** Releases storage owned by decoded JWT claims storage. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_jwt_claims_cleanup(lj_jwt_claims *claims) {
+  lonejson_jwt_claims_cleanup(claims);
+}
+/** Decodes and parses the header and claims payload from one compact JWT. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_jwt_decode_compact(lj *runtime, const char *token, size_t len,
+                      const lj_jwt_claim_policy *limits, lj_jwt_header *header,
+                      lj_jwt_claims *claims, lj_error *error) {
+  return lonejson_jwt_decode_compact(runtime, token, len, limits, header,
+                                     claims, error);
+}
+/** Validates decoded JWT header and claims against an explicit policy. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_jwt_validate_claims(const lj_jwt_header *header, const lj_jwt_claims *claims,
+                       const lj_jwt_claim_policy *policy, lj_error *error) {
+  return lonejson_jwt_validate_claims(header, claims, policy, error);
+}
+/** Validates a compact JWT signature against a selected JWK. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_validate_signature(
+    const lj_jwt_compact *jwt, const lj_jwt_header *header, const lj_jwk *jwk,
+    lj_error *error) {
+  return lonejson_jwt_validate_signature(jwt, header, jwk, error);
+}
+/** Validates a compact JWT signature through a runtime auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_jwt_validate_signature_with_runtime(
+    lj *runtime, const lj_jwt_compact *jwt, const lj_jwt_header *header,
+    const lj_jwk *jwk, lj_error *error) {
+  return lonejson_jwt_validate_signature_with_runtime(runtime, jwt, header, jwk,
+                                                      error);
+}
+#endif
+#ifdef LONEJSON_WITH_OIDC
+/** Initializes a materialized HTTP response for provider use or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_http_response_init(lj_http_response *response) {
+  lonejson_http_response_init(response);
+}
+/** Releases storage owned by a materialized HTTP response. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_http_response_cleanup(lj_http_response *response) {
+  lonejson_http_response_cleanup(response);
+}
+/** Initializes an HTTP provider from caller-owned callback config. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_http_provider_init(lj_http_provider *provider,
+                      const lj_http_provider_config *config, lj_error *error) {
+  return lonejson_http_provider_init(provider, config, error);
+}
+/** Initializes an HTTP provider from direct caller-owned callback arguments. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_http_provider_init_simple(
+    lj_http_provider *provider, void *user_data, const char *user_agent,
+    lj_status (*request)(void *user_data, const lj_http_request *request,
+                         lj_http_response *response, lj_error *error),
+    lj_error *error) {
+  return lonejson_http_provider_init_simple(
+      provider, user_data, user_agent,
+      (lonejson_status (*)(void *, const lonejson_http_request *,
+                           lonejson_http_response *, lonejson_error *))request,
+      error);
+}
+/** Installs or clears the runtime auth HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_set_http_provider(
+    lj *runtime, const lj_http_provider *provider, lj_error *error) {
+  return lonejson_set_http_provider(runtime, provider, error);
+}
+/** Initializes OIDC discovery metadata storage. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_discovery_init(lj_oidc_discovery *discovery) {
+  lonejson_oidc_discovery_init(discovery);
+}
+/** Releases storage owned by OIDC discovery metadata. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_discovery_cleanup(lj_oidc_discovery *discovery) {
+  lonejson_oidc_discovery_cleanup(discovery);
+}
+/** Builds the OIDC discovery URL for an HTTPS issuer. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_discovery_url(
+    const char *issuer, lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oidc_discovery_url(issuer, out, error);
+}
+/** Parses one OIDC discovery JSON object into `out`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_discovery_parse_json(lj *runtime, const char *json, size_t len,
+                             lj_oidc_discovery *out, lj_error *error) {
+  return lonejson_oidc_discovery_parse_json(runtime, json, len, out, error);
+}
+/** Validates parsed discovery metadata against the caller-configured issuer. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_discovery_validate_issuer(
+    const lj_oidc_discovery *discovery, const char *expected_issuer,
+    lj_error *error) {
+  return lonejson_oidc_discovery_validate_issuer(discovery, expected_issuer,
+                                                 error);
+}
+/** Fetches, parses, and validates discovery metadata through the HTTP provider.
+ */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_fetch_discovery(
+    lj *runtime, const char *issuer, size_t max_response_bytes,
+    lj_oidc_discovery *out, lj_error *error) {
+  return lonejson_oidc_fetch_discovery(runtime, issuer, max_response_bytes, out,
+                                       error);
+}
+/** Initializes a JWKS cache for later update or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_jwks_cache_init(lj_oidc_jwks_cache *cache) {
+  lonejson_oidc_jwks_cache_init(cache);
+}
+/** Releases all storage owned by a JWKS cache. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_jwks_cache_cleanup(lj_oidc_jwks_cache *cache) {
+  lonejson_oidc_jwks_cache_cleanup(cache);
+}
+/** Installs caller-provided JWKS JSON into a bounded cache. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_jwks_cache_update_json(lj *runtime, lj_oidc_jwks_cache *cache,
+                               const lj_oidc_jwks_cache_policy *policy,
+                               const char *json, size_t len, lj_error *error) {
+  return lonejson_oidc_jwks_cache_update_json(runtime, cache, policy, json, len,
+                                              error);
+}
+/** Returns non-zero when a cache has fresh keys for the configured issuer/URI.
+ */
+LONEJSON_SHORT_ALIAS_INLINE int
+lj_oidc_jwks_cache_is_fresh(const lj_oidc_jwks_cache *cache,
+                            const lj_oidc_jwks_cache_policy *policy) {
+  return lonejson_oidc_jwks_cache_is_fresh(cache, policy);
+}
+/** Selects a key from a fresh JWKS cache. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_jwks_cache_select(
+    const lj_oidc_jwks_cache *cache, const lj_oidc_jwks_cache_policy *policy,
+    const lj_jwk_select_options *options, const lj_jwk **out, lj_error *error) {
+  return lonejson_oidc_jwks_cache_select(cache, policy, options, out, error);
+}
+/** Refreshes a JWKS cache through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_jwks_cache_refresh(
+    lj *runtime, lj_oidc_jwks_cache *cache,
+    const lj_oidc_jwks_cache_policy *policy, lj_error *error) {
+  return lonejson_oidc_jwks_cache_refresh(runtime, cache, policy, error);
+}
+/** Builds an `application/x-www-form-urlencoded` client-credentials body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oauth2_client_credentials_body(const lj_oauth2_client_credentials *request,
+                                  lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oauth2_client_credentials_body(request, out, error);
+}
+/** Builds an `application/x-www-form-urlencoded` refresh-token body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oauth2_refresh_token_body(const lj_oauth2_refresh_token *request,
+                             lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oauth2_refresh_token_body(request, out, error);
+}
+/** Builds an introspection request body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oauth2_token_introspection_body(const lj_oauth2_token_introspection *request,
+                                   lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oauth2_token_introspection_body(request, out, error);
+}
+/** Builds a revocation request body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oauth2_token_revocation_body(const lj_oauth2_token_revocation *request,
+                                lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oauth2_token_revocation_body(request, out, error);
+}
+/** Builds an authorization-code token body. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_authorization_code_token_body(
+    const lj_oidc_authorization_code_token *request, lj_owned_buffer *out,
+    lj_error *error) {
+  return lonejson_oidc_authorization_code_token_body(request, out, error);
+}
+/** Initializes a token response for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oauth2_token_response_init(lj_oauth2_token_response *response) {
+  lonejson_oauth2_token_response_init(response);
+}
+/** Releases all storage owned by a token response. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oauth2_token_response_cleanup(lj_oauth2_token_response *response) {
+  lonejson_oauth2_token_response_cleanup(response);
+}
+/** Parses and validates a bounded successful OAuth2 token endpoint response. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_response_parse_json(
+    lj *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lj_oauth2_token_response *out, lj_error *error) {
+  return lonejson_oauth2_token_response_parse_json(
+      runtime, json, len, max_response_bytes, out, error);
+}
+/** Initializes an introspection response for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oauth2_introspection_response_init(
+    lj_oauth2_introspection_response *response) {
+  lonejson_oauth2_introspection_response_init(response);
+}
+/** Releases all storage owned by an introspection response. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oauth2_introspection_response_cleanup(
+    lj_oauth2_introspection_response *response) {
+  lonejson_oauth2_introspection_response_cleanup(response);
+}
+/** Parses and validates a bounded OAuth2 introspection response. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oauth2_introspection_response_parse_json(
+    lj *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lj_oauth2_introspection_response *out, lj_error *error) {
+  return lonejson_oauth2_introspection_response_parse_json(
+      runtime, json, len, max_response_bytes, out, error);
+}
+/** Exchanges OAuth2 client credentials through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_client_credentials_request(
+    lj *runtime, const char *token_endpoint,
+    const lj_oauth2_client_credentials *request, size_t max_response_bytes,
+    lj_oauth2_token_response *out, lj_error *error) {
+  return lonejson_oauth2_client_credentials_request(
+      runtime, token_endpoint, request, max_response_bytes, out, error);
+}
+/** Exchanges an OAuth2 refresh token through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_refresh_token_request(
+    lj *runtime, const char *token_endpoint,
+    const lj_oauth2_refresh_token *request, size_t max_response_bytes,
+    lj_oauth2_token_response *out, lj_error *error) {
+  return lonejson_oauth2_refresh_token_request(runtime, token_endpoint, request,
+                                               max_response_bytes, out, error);
+}
+/** Initializes token-flow storage for update or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oauth2_token_flow_init(lj_oauth2_token_flow *flow) {
+  lonejson_oauth2_token_flow_init(flow);
+}
+/** Releases all storage owned by a token flow. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oauth2_token_flow_cleanup(lj_oauth2_token_flow *flow) {
+  lonejson_oauth2_token_flow_cleanup(flow);
+}
+/** Copies borrowed or persisted token-flow fields into owned storage. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_flow_assign(
+    lj_oauth2_token_flow *flow, const lj_oauth2_token_flow *source,
+    lj_error *error) {
+  return lonejson_oauth2_token_flow_assign(flow, source, error);
+}
+/** Returns non-zero when the flow has no usable access token at `now`. */
+LONEJSON_SHORT_ALIAS_INLINE int
+lj_oauth2_token_flow_is_expired(const lj_oauth2_token_flow *flow, lj_int64 now,
+                                lj_int64 skew_seconds) {
+  return lonejson_oauth2_token_flow_is_expired(flow, now, skew_seconds);
+}
+/** Updates token-flow storage from a successful token endpoint response. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_flow_update_response(
+    lj_oauth2_token_flow *flow, const lj_oauth2_token_response *response,
+    lj_int64 now, lj_error *error) {
+  return lonejson_oauth2_token_flow_update_response(flow, response, now, error);
+}
+/** Ensures a token-flow has a usable access token, refreshing if needed. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_token_flow_ensure(
+    lj *runtime, lj_oauth2_token_flow *flow,
+    const lj_oauth2_token_flow_policy *policy,
+    lj_oauth2_token_flow_result *result, lj_error *error) {
+  return lonejson_oauth2_token_flow_ensure(runtime, flow, policy, result,
+                                           error);
+}
+/** Introspects a token through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_introspect_token_request(
+    lj *runtime, const char *introspection_endpoint,
+    const lj_oauth2_token_introspection *request, size_t max_response_bytes,
+    lj_oauth2_introspection_response *out, lj_error *error) {
+  return lonejson_oauth2_introspect_token_request(
+      runtime, introspection_endpoint, request, max_response_bytes, out, error);
+}
+/** Revokes a token through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oauth2_revoke_token_request(
+    lj *runtime, const char *revocation_endpoint,
+    const lj_oauth2_token_revocation *request, lj_error *error) {
+  return lonejson_oauth2_revoke_token_request(runtime, revocation_endpoint,
+                                              request, error);
+}
+/** Initializes an OIDC UserInfo response for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_userinfo_response_init(lj_oidc_userinfo_response *out) {
+  lonejson_oidc_userinfo_response_init(out);
+}
+/** Releases all storage owned by an OIDC UserInfo response. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_userinfo_response_cleanup(lj_oidc_userinfo_response *out) {
+  lonejson_oidc_userinfo_response_cleanup(out);
+}
+/** Parses and validates a bounded OIDC UserInfo response. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_userinfo_response_parse_json(
+    lj *runtime, const char *json, size_t len, size_t max_response_bytes,
+    lj_oidc_userinfo_response *out, lj_error *error) {
+  return lonejson_oidc_userinfo_response_parse_json(
+      runtime, json, len, max_response_bytes, out, error);
+}
+/** Fetches OIDC UserInfo through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_fetch_userinfo(lj *runtime, const char *userinfo_endpoint,
+                       const lj_oidc_userinfo_request *request,
+                       lj_oidc_userinfo_response *out, lj_error *error) {
+  return lonejson_oidc_fetch_userinfo(runtime, userinfo_endpoint, request, out,
+                                      error);
+}
+/** Exchanges an authorization code through the runtime HTTP provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_authorization_code_token_request(
+    lj *runtime, const char *token_endpoint,
+    const lj_oidc_authorization_code_token *request, size_t max_response_bytes,
+    lj_oauth2_token_response *out, lj_error *error) {
+  return lonejson_oidc_authorization_code_token_request(
+      runtime, token_endpoint, request, max_response_bytes, out, error);
+}
+/** Initializes a PKCE pair for generation or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oidc_pkce_init(lj_oidc_pkce *pkce) {
+  lonejson_oidc_pkce_init(pkce);
+}
+/** Releases all storage owned by a PKCE pair. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oidc_pkce_cleanup(lj_oidc_pkce *pkce) {
+  lonejson_oidc_pkce_cleanup(pkce);
+}
+/** Computes a base64url S256 PKCE challenge for a verifier. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_pkce_challenge(
+    const char *code_verifier, lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oidc_pkce_challenge(code_verifier, out, error);
+}
+/** Computes a PKCE S256 challenge through a runtime auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_pkce_challenge_with_runtime(lj *runtime, const char *code_verifier,
+                                    lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oidc_pkce_challenge_with_runtime(runtime, code_verifier, out,
+                                                   error);
+}
+/** Generates a random PKCE verifier and matching S256 challenge. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_pkce_generate(
+    size_t verifier_bytes, lj_oidc_pkce *out, lj_error *error) {
+  return lonejson_oidc_pkce_generate(verifier_bytes, out, error);
+}
+/** Generates a PKCE verifier through a runtime auth provider. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_pkce_generate_with_runtime(
+    lj *runtime, size_t verifier_bytes, lj_oidc_pkce *out, lj_error *error) {
+  return lonejson_oidc_pkce_generate_with_runtime(runtime, verifier_bytes, out,
+                                                  error);
+}
+/** Builds an authorization-code URL with PKCE S256 parameters. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_authorization_url(const lj_oidc_authorization_request *request,
+                          lj_owned_buffer *out, lj_error *error) {
+  return lonejson_oidc_authorization_url(request, out, error);
+}
+/** Initializes a parsed authorization callback for parsing or cleanup. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_authorization_callback_init(lj_oidc_authorization_callback *callback) {
+  lonejson_oidc_authorization_callback_init(callback);
+}
+/** Releases all storage owned by a parsed authorization callback. */
+LONEJSON_SHORT_ALIAS_INLINE void lj_oidc_authorization_callback_cleanup(
+    lj_oidc_authorization_callback *callback) {
+  lonejson_oidc_authorization_callback_cleanup(callback);
+}
+/** Parses and validates an authorization-code callback query string. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_authorization_callback_parse_query(const char *query, size_t len,
+                                           const char *expected_state,
+                                           size_t max_query_bytes,
+                                           lj_oidc_authorization_callback *out,
+                                           lj_error *error) {
+  return lonejson_oidc_authorization_callback_parse_query(
+      query, len, expected_state, max_query_bytes, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE const char *
+lj_auth_failure_string(lj_auth_failure failure) {
+  return lonejson_auth_failure_string(failure);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_bearer_validation_init(lj_oidc_bearer_validation *validation) {
+  lonejson_oidc_bearer_validation_init(validation);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_bearer_validation_cleanup(lj_oidc_bearer_validation *validation) {
+  lonejson_oidc_bearer_validation_cleanup(validation);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_authorization_bearer_token(
+    const char *authorization_header, lj_jwt_segment *out, lj_error *error) {
+  return lonejson_oidc_authorization_bearer_token(authorization_header, out,
+                                                  error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_validate_bearer_token(
+    lj *runtime, const lj_oidc_bearer_validation_request *request,
+    lj_oidc_bearer_validation *out, lj_error *error) {
+  return lonejson_oidc_validate_bearer_token(runtime, request, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_credential_init(lj_m2m_credential *credential) {
+  lonejson_m2m_credential_init(credential);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_credential_cleanup(lj_m2m_credential *credential) {
+  lonejson_m2m_credential_cleanup(credential);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_m2m_credential_generate(
+    lj *runtime, const lj_m2m_credential_request *request,
+    lj_m2m_credential *out, lj_error *error) {
+  return lonejson_m2m_credential_generate(runtime, request, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_authentication_init(lj_m2m_authentication *auth) {
+  lonejson_m2m_authentication_init(auth);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_authentication_cleanup(lj_m2m_authentication *auth) {
+  lonejson_m2m_authentication_cleanup(auth);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_m2m_verify_authorization(lj *runtime, const lj_m2m_verify_request *request,
+                            lj_m2m_authentication *out, lj_error *error) {
+  return lonejson_m2m_verify_authorization(runtime, request, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void lj_m2m_signup_init(lj_m2m_signup *signup) {
+  lonejson_m2m_signup_init(signup);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void lj_m2m_signup_cleanup(lj_m2m_signup *signup) {
+  lonejson_m2m_signup_cleanup(signup);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_m2m_signup_generate(lj *runtime, const lj_m2m_signup_request *request,
+                       lj_m2m_signup *out, lj_error *error) {
+  return lonejson_m2m_signup_generate(runtime, request, out, error);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_signup_complete_init(lj_m2m_signup_completion *complete) {
+  lonejson_m2m_signup_complete_init(complete);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_m2m_signup_complete_cleanup(lj_m2m_signup_completion *complete) {
+  lonejson_m2m_signup_complete_cleanup(complete);
+}
+
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_m2m_signup_complete(
+    lj *runtime, const lj_m2m_signup_complete_request *request,
+    lj_m2m_signup_completion *out, lj_error *error) {
+  return lonejson_m2m_signup_complete(runtime, request, out, error);
+}
+#endif
 #ifdef LONEJSON_WITH_CURL
 /** Curl response parse adapter state for incremental `CURLOPT_WRITEFUNCTION`
  * parsing. */
@@ -8068,6 +10344,10 @@ typedef lonejson_curl_string_array_parse lj_curl_string_array_parse;
 typedef lonejson_curl_string_items_parse lj_curl_string_items_parse;
 /** Curl upload adapter state for streaming generated JSON to libcurl. */
 typedef lonejson_curl_upload lj_curl_upload;
+#ifdef LONEJSON_WITH_OIDC
+/** Curl response adapter that installs a bounded JWKS response into a cache. */
+typedef lonejson_oidc_jwks_cache_parse lj_oidc_jwks_cache_parse;
+#endif
 /** Initializes a curl parse adapter suitable for `CURLOPT_WRITEFUNCTION`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_curl_parse_init(lj_curl_parse *ctx,
                                                          lj *runtime,
@@ -8194,6 +10474,29 @@ lj_curl_upload_size(const lj_curl_upload *ctx) {
 LONEJSON_SHORT_ALIAS_INLINE void lj_curl_upload_cleanup(lj_curl_upload *ctx) {
   lonejson_curl_upload_cleanup(ctx);
 }
+#ifdef LONEJSON_WITH_OIDC
+/** Initializes a curl write adapter for a bounded JWKS cache refresh. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_oidc_jwks_cache_parse_init(
+    lj_oidc_jwks_cache_parse *ctx, lj *runtime, lj_oidc_jwks_cache *cache,
+    const lj_oidc_jwks_cache_policy *policy) {
+  return lonejson_oidc_jwks_cache_parse_init(ctx, runtime, cache, policy);
+}
+/** Curl write callback for a JWKS cache refresh adapter. */
+LONEJSON_SHORT_ALIAS_INLINE size_t lj_oidc_jwks_cache_write_callback(
+    char *ptr, size_t size, size_t nmemb, void *userdata) {
+  return lonejson_oidc_jwks_cache_write_callback(ptr, size, nmemb, userdata);
+}
+/** Finalizes a JWKS cache refresh adapter after curl EOF. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_oidc_jwks_cache_parse_finish(lj_oidc_jwks_cache_parse *ctx) {
+  return lonejson_oidc_jwks_cache_parse_finish(ctx);
+}
+/** Releases resources owned by a JWKS cache refresh adapter. */
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_oidc_jwks_cache_parse_cleanup(lj_oidc_jwks_cache_parse *ctx) {
+  lonejson_oidc_jwks_cache_parse_cleanup(ctx);
+}
+#endif
 #endif
 #endif
 

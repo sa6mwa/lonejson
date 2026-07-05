@@ -67,6 +67,17 @@ local function exists(path)
   return true
 end
 
+assert_eq(lonejson.base64_encode("Hello"), "SGVsbG8=")
+assert_eq(lonejson.base64_encode("\255", "url_raw"), "_w")
+assert_eq(lonejson.base64_decode("SGVsbG8="), "Hello")
+assert_eq(lj:base64_decode("_w", "jwt"), "\255")
+assert_true(lonejson.monotonic_ns == nil)
+do
+  local bad_base64, bad_base64_err = lonejson.base64_decode("AA=", "url_raw")
+  assert_true(bad_base64 == nil)
+  assert_eq(bad_base64_err.status, "invalid_json")
+end
+
 local function build_test_schema(runtime, name)
   return runtime.schema(name, {
   lj.field("name", lj.string { required = true }),
@@ -170,6 +181,746 @@ do
   assert_eq(table.concat(sink_chunks), '{"beta":true}')
   assert_eq(colon_lj:decode_json('{"gamma":2}').gamma, 2)
   assert_eq(schema:decode('{"name":"colon"}').name, "colon")
+end
+
+if lonejson.jwt_parse_compact ~= nil then
+  local jwt_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ." ..
+      "c2ln"
+  local aud_array_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOlsiYXBpIiwib3RoZXIiXSwiZXhwIjoyMDAwfQ." ..
+      "c2ln"
+  local nonce_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJu" ..
+      "b25jZSI6Im5vbmNlLTQ1NiJ9." ..
+      "c2ln"
+  local jose_policy_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIiwiY3JpdCI6WyJleHAt" ..
+      "dGVzdCJdLCJ4NXQiOiJBQSIsIng1dCNTMjU2IjoiQUEiLCJ4NWMiOlsiQUE9PSJdfQ." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjpbImFwaSIsImNsaWVudCJdLCJh" ..
+      "enAiOiJjbGllbnQiLCJzY29wZSI6InJlYWQgd3JpdGUiLCJzY3AiOlsiYWRtaW4iLCJi" ..
+      "aWxsaW5nLnJlYWQiXSwiZXhwIjoyMDAwfQ." ..
+      "c2ln"
+  local policy = {
+    accepted_algs = { "RS256" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api" },
+    required_claims = { "iss", "aud", "exp" },
+    now = 1000,
+    allowed_clock_skew = 30,
+  }
+  local parts = lonejson.jwt_parse_compact(jwt_token)
+  local decoded = lj:jwt_decode_compact(jwt_token)
+  local validated = lj:jwt_validate_compact_claims(jwt_token, policy)
+  local aud_array = lonejson.jwt_validate_compact_claims(aud_array_token, policy)
+  local nonce_policy = {
+    accepted_algs = { "RS256" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api" },
+    required_claims = { "iss", "aud", "exp", "nonce" },
+    expected_nonce = "nonce-456",
+    now = 1000,
+  }
+  local nonce_validated = lj:jwt_validate_compact_claims(nonce_token, nonce_policy)
+  local jose_policy = {
+    accepted_algs = { "RS256" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api", "client" },
+    accepted_crit = { "exp-test" },
+    required_scopes = { "read", "admin" },
+    expected_azp = "client",
+    require_azp_when_multiple_audiences = true,
+    require_all_audiences_accepted = true,
+    now = 1000,
+  }
+  local jose_validated = lj:jwt_validate_compact_claims(jose_policy_token, jose_policy)
+  local jwk = lonejson.jwk_parse_json(
+      '{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","key_ops":["verify"],' ..
+      '"x5t":"AA","x5t#S256":"AA","x5c":["AA=="],"n":"AQIDBA","e":"AQAB"}')
+  local signed_token =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6InJzYS10ZXN0IiwidHlwIjoiSldUIn0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAwLCJuYmYiOjkwMCwiaWF0IjoxMDAwfQ." ..
+      "PoouvDAoloqvsfTQxadOTpQGXKyeHq0lx6WQEPv0qvg59KMuy8lD-XBTBPCF_MpQGoe3DS84CSg27iktG7z12Qv6TX1gqbJUO2wkwhuW4dIWFPY9tDhI3e05W5yz8D70wARx7CL9tHKWsOpLwHRWf5ugfrq1PuofcC9atB7D-QUfrmmJ01NXbQl4aq6DJ02M7azHTLq-15X3TuE2CHN5P_zo_zkaJT8V0QhoQ3MUhUE_pBxMtAByRIUOEW32RbWjYgkwZ_zxaVkbhXv1CYznQCzikX2wXn9OQ_1z0TCH7bT5Ao3EXEQeiK7Fhuq8lyPFbkhDc_yCjxFRjm7ufSFZbg"
+  local signed_jwk_json =
+      '{"kty":"RSA","kid":"rsa-test","use":"sig","alg":"RS256",' ..
+      '"n":"nGFfcf9mkkjv4XoIzgmENq-A3pTE4uT7gzmYMDB4_xwXvHaTogDTrduaIKcd-oziNa6mM1HXGk-4q8084Wvvz44ZTyRlaVKm2eRHPqjJ1hmxB80nG7iWEkORAKazobRfB8g7fGXZWhL0JsWqd51igefciKMefuvjs-2_JvusIF6uXu3jSCVRsqXkoZGnYsauGUq4GcspGtCHe5M4oie5kJrfbwcZgajJp4HS-ZUd4m1q12BPSuUSqi5Vb3wS6fLdVsQjxZXVqyk1OgnI3Ar5by-bbCTML4NZB8icr9uti6nO1TabV4M-skfnGyUFgbOWLxznKmHKphgpiMtHjWyYoQ",' ..
+      '"e":"AQAB"}'
+  local signed_jwks_json = '{"keys":[' .. signed_jwk_json .. ']}'
+  local jwks_json =
+      '{"keys":[{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","n":"AQIDBA","e":"AQAB"},' ..
+      '{"kty":"EC","kid":"ec1","use":"sig","alg":"ES256","crv":"P-256","x":"AAEC","y":"AwQF"}]}'
+  local jwks = lj:jwks_parse_json(jwks_json)
+  local selected = lonejson.jwks_select_json(jwks_json, { kid = "ec1", kty = "EC", use = "sig" })
+  local missing = lonejson.jwks_select_json(jwks_json, { kid = "missing" })
+  local bad, err
+
+  if lj.set_openssl_auth_provider ~= nil then
+    local no_provider_lj = new_runtime()
+    bad, err = no_provider_lj:jwt_validate_compact_signature(signed_token, signed_jwk_json)
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+    assert_true(lj:set_openssl_auth_provider())
+  end
+
+  assert_eq(parts.signature, "c2ln")
+  assert_eq(parts.signing_input, parts.header .. "." .. parts.payload)
+  assert_eq(decoded.header.alg, "RS256")
+  assert_eq(decoded.header.kid, "k1")
+  assert_eq(decoded.claims.iss, "issuer")
+  assert_eq(decoded.claims.sub, "s")
+  assert_eq(decoded.claims.aud, "api")
+  assert_eq(decoded.claims.exp, 2000)
+  assert_eq(validated.claims.aud, "api")
+  assert_eq(aud_array.claims.aud[1], "api")
+  assert_eq(aud_array.claims.aud[2], "other")
+  assert_eq(nonce_validated.claims.nonce, "nonce-456")
+  assert_eq(jwk.kid, "rsa1")
+  assert_eq(jwk.key_ops[1], "verify")
+  assert_eq(jwk["x5t#S256"], "AA")
+  assert_eq(jwk.x5c[1], "AA==")
+  assert_eq(jwk.n, "AQIDBA")
+  assert_eq(jose_validated.header.crit[1], "exp-test")
+  assert_eq(jose_validated.header.x5t, "AA")
+  assert_eq(jose_validated.claims.azp, "client")
+  assert_eq(jose_validated.claims.scope, "read write")
+  assert_eq(jose_validated.claims.scp[1], "admin")
+  assert_true(lj:jwt_validate_compact_signature(signed_token, signed_jwk_json))
+  assert_eq(#jwks.keys, 2)
+  assert_eq(jwks.keys[2].kid, "ec1")
+  assert_eq(selected.kid, "ec1")
+  assert_true(missing == nil)
+
+  if lonejson.oidc_discovery_url ~= nil then
+    local discovery_json =
+        '{"issuer":"https://id.example/tenant",' ..
+        '"authorization_endpoint":"https://id.example/auth",' ..
+        '"token_endpoint":"https://id.example/token",' ..
+        '"jwks_uri":"https://id.example/jwks",' ..
+        '"introspection_endpoint":"https://id.example/introspect",' ..
+        '"revocation_endpoint":"https://id.example/revoke",' ..
+        '"userinfo_endpoint":"https://id.example/userinfo"}'
+    local discovery = lj:oidc_discovery_parse_json(discovery_json, "https://id.example/tenant")
+    local cache_policy = {
+      issuer = "https://id.example/tenant",
+      jwks_uri = "https://id.example/jwks",
+      now = 1000,
+      ttl_seconds = 60,
+      max_jwks_bytes = 4096,
+    }
+    local cache_selected = lj:oidc_jwks_cache_select_json(
+        jwks_json, cache_policy, { kid = "rsa1", kty = "RSA", alg = "RS256", use = "sig" })
+    local cache_missing = lonejson.oidc_jwks_cache_select_json(
+        jwks_json, cache_policy, { kid = "missing" })
+    local runtime_only_auth_methods = {
+      "jwt_parse_compact",
+      "jwt_decode_compact",
+      "jwt_validate_compact_claims",
+      "jwt_validate_compact_signature",
+      "jwk_parse_json",
+      "jwks_parse_json",
+      "jwks_select_json",
+      "oauth2_client_credentials_body",
+      "oauth2_refresh_token_body",
+      "oauth2_token_introspection_body",
+      "oauth2_token_revocation_body",
+      "oidc_authorization_code_token_body",
+      "oauth2_client_credentials_request",
+      "oauth2_refresh_token_request",
+      "oauth2_token_flow_ensure",
+      "oauth2_introspect_token_request",
+      "oauth2_revoke_token_request",
+      "oidc_userinfo_request",
+      "oidc_authorization_code_token_request",
+      "oauth2_token_response_parse_json",
+      "oauth2_introspection_response_parse_json",
+      "oidc_userinfo_response_parse_json",
+      "oidc_validate_bearer_token",
+      "oidc_discovery_parse_json",
+      "oidc_jwks_cache_select_json",
+    }
+    local free_only_auth_helpers = {
+      "oauth2_token_flow_update_response",
+      "oauth2_token_flow_is_expired",
+      "oidc_pkce_challenge",
+      "oidc_pkce_generate",
+      "oidc_authorization_url",
+      "oidc_authorization_callback_parse_query",
+      "oidc_discovery_url",
+    }
+    local raw_lj = assert(lonejson.core.new())
+    for _, name in ipairs(runtime_only_auth_methods) do
+      if lonejson[name] ~= nil then
+        assert_eq(type(lj[name]), "function")
+        assert_eq(type(raw_lj[name]), "function")
+      end
+    end
+    for _, name in ipairs(free_only_auth_helpers) do
+      assert_eq(type(lonejson[name]), "function")
+      assert_eq(lj[name], nil)
+      assert_eq(raw_lj[name], nil)
+    end
+    local token_body = lj:oauth2_client_credentials_body({
+      client_id = "client id",
+      client_secret = "s+e&c=r%t",
+      scope = "read write",
+      audience = "https://api.example/a?b=c",
+      resource = "urn:example:resource",
+    })
+    local refresh_body = lj:oauth2_refresh_token_body({
+      refresh_token = "r+e&f",
+      client_id = "client id",
+      client_secret = "secret",
+      scope = "read write",
+    })
+    local introspection_body = lonejson.oauth2_token_introspection_body({
+      token = "a+b&c",
+      token_type_hint = "access_token",
+      client_id = "client id",
+      client_secret = "secret",
+    })
+    local introspection_basic_body = lonejson.oauth2_token_introspection_body({
+      token = "access",
+      token_type_hint = "access_token",
+      client_id = "client",
+      client_secret = "secret",
+      use_basic_auth = true,
+    })
+    local revocation_body = lj:oauth2_token_revocation_body({
+      token = "refresh",
+      token_type_hint = "refresh_token",
+      client_id = "client",
+      client_secret = "secret",
+    })
+    local code_body = lonejson.oidc_authorization_code_token_body({
+      client_id = "client id",
+      code = "code+123",
+      redirect_uri = "http://127.0.0.1:1234/cb",
+      code_verifier = "verifier value",
+      client_secret = "secret",
+    })
+    local token_response = lonejson.oauth2_token_response_parse_json(
+        '{"access_token":"token","token_type":"Bearer","expires_in":3600,"scope":"read write"}')
+    local token_flow = lonejson.oauth2_token_flow_update_response({
+      refresh_token = "old-refresh",
+    }, token_response, 1000)
+    local token_flow_expired = lonejson.oauth2_token_flow_is_expired(
+        token_flow, 4550, 60)
+    local introspection_response = lj:oauth2_introspection_response_parse_json(
+        '{"active":true,"scope":"read write","client_id":"client","sub":"sub","aud":"api","exp":123}')
+    local userinfo_response = lonejson.oidc_userinfo_response_parse_json(
+        '{"sub":"sub","email":"user@example.com","email_verified":true,"extra":1}')
+    local pkce_challenge = lonejson.oidc_pkce_challenge(
+        "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+    local pkce = lonejson.oidc_pkce_generate()
+    local auth_url = lonejson.oidc_authorization_url({
+      authorization_endpoint = "https://id.example/auth",
+      client_id = "client id",
+      redirect_uri = "http://127.0.0.1:1234/cb",
+      scope = "openid profile",
+      state = "state-123",
+      nonce = "nonce-456",
+      code_challenge = "challenge",
+    })
+    local callback = lonejson.oidc_authorization_callback_parse_query(
+        "?code=abc%2B123&state=state+123", "state 123")
+    local bearer = lj:oidc_validate_bearer_token(
+        "Bearer " .. signed_token, signed_jwks_json, cache_policy, policy)
+    local http_requests = {}
+    local provider_lj = new_runtime()
+    local provider_ok = provider_lj:set_http_provider(function(request)
+      http_requests[#http_requests + 1] = request
+      assert_eq(request.user_agent, "lonejson-lua-test/1")
+      if request.url == "https://id.example/tenant/.well-known/openid-configuration" then
+        assert_eq(request.method, "GET")
+        return { status_code = 200, body = discovery_json }
+      end
+      if request.url == "https://id.example/jwks" then
+        assert_eq(request.method, "GET")
+        return { status_code = 200, body = jwks_json }
+      end
+      if request.url == "https://id.example/token" then
+        assert_eq(request.method, "POST")
+        assert_eq(request.content_type, "application/x-www-form-urlencoded")
+        if request.body:find("grant_type=client_credentials", 1, true) ~= nil then
+          return { status_code = 200, body = '{"access_token":"client-token","token_type":"Bearer","expires_in":60}' }
+        end
+        if request.body:find("grant_type=refresh_token", 1, true) ~= nil then
+          return { status_code = 200, body = '{"access_token":"refresh-token","token_type":"Bearer"}' }
+        end
+        if request.body:find("grant_type=authorization_code", 1, true) ~= nil then
+          return { status_code = 200, body = '{"access_token":"code-token","token_type":"Bearer","id_token":"id.jwt"}' }
+        end
+      end
+      if request.url == "https://id.example/introspect" then
+        assert_eq(request.method, "POST")
+        assert_eq(request.content_type, "application/x-www-form-urlencoded")
+        assert_true(request.body:find("token=access", 1, true) ~= nil)
+        if request.authorization ~= nil then
+          assert_eq(request.authorization, "Basic Y2xpZW50OnNlY3JldA==")
+          assert_true(request.body:find("client_secret=", 1, true) == nil)
+        end
+        return { status_code = 200, body = '{"active":true,"scope":"read","client_id":"client","sub":"subject"}' }
+      end
+      if request.url == "https://id.example/revoke" then
+        assert_eq(request.method, "POST")
+        assert_eq(request.content_type, "application/x-www-form-urlencoded")
+        assert_true(request.body:find("token=refresh", 1, true) ~= nil)
+        if request.authorization ~= nil then
+          assert_eq(request.authorization, "Basic Y2xpZW50OnNlY3JldA==")
+          assert_true(request.body:find("client_secret=", 1, true) == nil)
+        end
+        return { status_code = 200, body = "{}" }
+      end
+      if request.url == "https://id.example/userinfo" then
+        assert_eq(request.method, "GET")
+        assert_eq(request.authorization, "Bearer access")
+        return { status_code = 200, body = '{"sub":"subject","email":"subject@example.com","email_verified":true}' }
+      end
+      return nil, "unexpected request " .. tostring(request.url)
+    end, "lonejson-lua-test/1")
+    local fetched_discovery = provider_lj:oidc_fetch_discovery("https://id.example/tenant", 4096)
+    local refreshed_cache = provider_lj:oidc_jwks_cache_refresh(cache_policy)
+    local requested_client_token = provider_lj:oauth2_client_credentials_request(
+        "https://id.example/token", {
+          client_id = "client id",
+          client_secret = "s+e&c=r%t",
+          scope = "read write",
+        }, 4096)
+    local requested_refresh_token = provider_lj:oauth2_refresh_token_request(
+        "https://id.example/token", {
+          refresh_token = "r+e&f",
+          client_id = "client id",
+          client_secret = "secret",
+        }, 4096)
+    local ensured_flow, ensured_flow_result = provider_lj:oauth2_token_flow_ensure({
+      access_token = "old-token",
+      refresh_token = "r+e&f",
+      expires_at = 1000,
+    }, {
+      token_endpoint = "https://id.example/token",
+      client_id = "client id",
+      client_secret = "secret",
+      now = 1001,
+      max_response_bytes = 4096,
+      disable_retry = true,
+    })
+    local bad_ensured_flow, bad_ensured_flow_err =
+        provider_lj:oauth2_token_flow_ensure({
+          access_token = "old-token",
+          refresh_token = "r+e&f",
+          expires_at = 1000,
+        }, {
+          client_id = "client id",
+          now = 1001,
+        })
+    local requested_introspection = provider_lj:oauth2_introspect_token_request(
+        "https://id.example/introspect", {
+          token = "access",
+          token_type_hint = "access_token",
+          client_id = "client",
+          client_secret = "secret",
+          use_basic_auth = true,
+        }, 4096)
+    local revoked = provider_lj:oauth2_revoke_token_request(
+        "https://id.example/revoke", {
+          token = "refresh",
+          token_type_hint = "refresh_token",
+          client_id = "client",
+          client_secret = "secret",
+          use_basic_auth = true,
+        })
+    local requested_userinfo = provider_lj:oidc_userinfo_request(
+        "https://id.example/userinfo", {
+          access_token = "access",
+        })
+    local requested_code_token = provider_lj:oidc_authorization_code_token_request(
+        "https://id.example/token", {
+          client_id = "client id",
+          code = "code+123",
+          redirect_uri = "http://127.0.0.1:1234/cb",
+          code_verifier = "verifier value",
+        }, 4096)
+
+    assert_eq(lonejson.oidc_discovery_url("https://id.example/tenant/"),
+              "https://id.example/tenant/.well-known/openid-configuration")
+    assert_eq(discovery.issuer, "https://id.example/tenant")
+    assert_eq(discovery.token_endpoint, "https://id.example/token")
+    assert_eq(discovery.jwks_uri, "https://id.example/jwks")
+    assert_eq(discovery.introspection_endpoint, "https://id.example/introspect")
+    assert_eq(discovery.revocation_endpoint, "https://id.example/revoke")
+    assert_eq(discovery.userinfo_endpoint, "https://id.example/userinfo")
+    assert_eq(cache_selected.kid, "rsa1")
+    assert_true(cache_missing == nil)
+    assert_eq(token_body,
+              "grant_type=client_credentials&client_id=client+id&" ..
+              "client_secret=s%2Be%26c%3Dr%25t&scope=read+write&" ..
+              "audience=https%3A%2F%2Fapi.example%2Fa%3Fb%3Dc&" ..
+              "resource=urn%3Aexample%3Aresource")
+    assert_eq(refresh_body,
+              "grant_type=refresh_token&refresh_token=r%2Be%26f&" ..
+              "client_id=client+id&client_secret=secret&scope=read+write")
+    assert_eq(introspection_body,
+              "token=a%2Bb%26c&token_type_hint=access_token&" ..
+              "client_id=client+id&client_secret=secret")
+    assert_eq(introspection_basic_body,
+              "token=access&token_type_hint=access_token")
+    assert_eq(revocation_body,
+              "token=refresh&token_type_hint=refresh_token&" ..
+              "client_id=client&client_secret=secret")
+    assert_eq(code_body,
+              "grant_type=authorization_code&client_id=client+id&" ..
+              "code=code%2B123&" ..
+              "redirect_uri=http%3A%2F%2F127.0.0.1%3A1234%2Fcb&" ..
+              "code_verifier=verifier+value&client_secret=secret")
+    assert_eq(token_response.access_token, "token")
+    assert_eq(token_response.token_type, "Bearer")
+    assert_eq(token_response.expires_in, 3600)
+    assert_eq(token_flow.access_token, "token")
+    assert_eq(token_flow.refresh_token, "old-refresh")
+    assert_eq(token_flow.expires_at, 4600)
+    assert_true(token_flow_expired)
+    assert_true(introspection_response.active)
+    assert_eq(introspection_response.scope, "read write")
+    assert_eq(introspection_response.client_id, "client")
+    assert_eq(introspection_response.sub, "sub")
+    assert_eq(introspection_response.aud, "api")
+    assert_eq(introspection_response.exp, 123)
+    assert_eq(userinfo_response.sub, "sub")
+    assert_eq(userinfo_response.email, "user@example.com")
+    assert_true(userinfo_response.email_verified)
+    assert_true(userinfo_response.json:find('"extra":1', 1, true) ~= nil)
+    assert_eq(pkce_challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
+    assert_eq(#pkce.code_verifier, 43)
+    assert_eq(#pkce.code_challenge, 43)
+    assert_eq(auth_url,
+              "https://id.example/auth?response_type=code&" ..
+              "client_id=client+id&" ..
+              "redirect_uri=http%3A%2F%2F127.0.0.1%3A1234%2Fcb&" ..
+              "scope=openid+profile&state=state-123&nonce=nonce-456&" ..
+              "code_challenge=challenge&code_challenge_method=S256")
+    assert_eq(callback.code, "abc+123")
+    assert_eq(callback.state, "state 123")
+    assert_true(bearer.authorized)
+    assert_eq(bearer.failure, "none")
+    assert_eq(bearer.header.kid, "rsa-test")
+    assert_eq(bearer.claims.iss, "issuer")
+    assert_eq(bearer.jwk.kid, "rsa-test")
+    assert_true(provider_ok)
+    assert_eq(fetched_discovery.issuer, "https://id.example/tenant")
+    assert_eq(fetched_discovery.jwks_uri, "https://id.example/jwks")
+    assert_eq(refreshed_cache.issuer, "https://id.example/tenant")
+    assert_eq(refreshed_cache.jwks_uri, "https://id.example/jwks")
+    assert_true(refreshed_cache.fetched_at == 1000)
+    assert_true(refreshed_cache.expires_at == 1060)
+    assert_eq(refreshed_cache.jwks.keys[1].kid, "rsa1")
+    assert_eq(requested_client_token.access_token, "client-token")
+    assert_eq(requested_client_token.expires_in, 60)
+    assert_eq(requested_refresh_token.access_token, "refresh-token")
+    assert_eq(ensured_flow.access_token, "refresh-token")
+    assert_eq(ensured_flow.refresh_token, "r+e&f")
+    assert_eq(ensured_flow_result.state, "refreshed")
+    assert_true(ensured_flow_result.refreshed)
+    assert_eq(ensured_flow_result.attempts, 1)
+    assert_true(bad_ensured_flow == nil)
+    assert_eq(bad_ensured_flow_err.status, "invalid_argument")
+    assert_true(requested_introspection.active)
+    assert_eq(requested_introspection.sub, "subject")
+    assert_true(revoked)
+    assert_eq(requested_userinfo.sub, "subject")
+    assert_eq(requested_userinfo.email, "subject@example.com")
+    assert_eq(requested_code_token.access_token, "code-token")
+    assert_eq(requested_code_token.id_token, "id.jwt")
+    assert_eq(#http_requests, 9)
+
+    bad, err = lonejson.oidc_discovery_parse_json(discovery_json, "https://id.example")
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = lonejson.oauth2_client_credentials_body({
+      client_id = "client",
+      client_secret = "secret",
+      max_body_bytes = 8,
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "overflow")
+
+    bad, err = lonejson.oauth2_refresh_token_body({
+      refresh_token = "refresh",
+      client_secret = "secret",
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
+
+    bad, err = lonejson.oauth2_token_introspection_body({
+      token = "access",
+      client_secret = "secret",
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
+
+    bad, err = lonejson.oauth2_token_revocation_body({
+      token = "refresh",
+      max_body_bytes = 8,
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "overflow")
+
+    bad, err = lj:oidc_authorization_code_token_body({
+      client_id = "client",
+      code = "code",
+      redirect_uri = "http://127.0.0.1/cb",
+    })
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
+
+    bad, err = lj:oauth2_token_response_parse_json(
+        '{"access_token":"token","token_type":"mac"}')
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = lj:oauth2_token_response_parse_json('{"error":"invalid_client"}')
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = lj:oauth2_introspection_response_parse_json('{"scope":"read"}')
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_json")
+
+    bad, err = lj:oidc_userinfo_response_parse_json('{"email_verified":"yes"}')
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = provider_lj:oauth2_client_credentials_request(
+        "https://id.example/token", {
+          client_id = "client id",
+          client_secret = "s+e&c=r%t",
+        }, 8)
+    assert_true(bad == nil)
+    assert_eq(err.status, "overflow")
+
+    provider_lj:set_http_provider(function()
+      return nil, "provider boom"
+    end, "lonejson-lua-test/2")
+    bad, err = provider_lj:oidc_fetch_discovery("https://id.example/tenant", 4096)
+    assert_true(bad == nil)
+    assert_eq(err.status, "callback_failed")
+    assert_true(err.message:find("provider boom", 1, true) ~= nil)
+
+    provider_lj:set_http_provider(nil)
+    bad, err = provider_lj:oidc_fetch_discovery("https://id.example/tenant", 4096)
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+
+    bad, err = lonejson.oidc_pkce_challenge("too-short")
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
+
+    bad, err = lonejson.oidc_authorization_callback_parse_query(
+        "code=abc&state=wrong", "state")
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+    bad, err = lonejson.oidc_authorization_callback_parse_query(
+        "code=abc&state=state%00extra", "state")
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_json")
+    bad, err = lonejson.oidc_authorization_callback_parse_query(
+        "error=access_denied&error=server_error&state=state", "state")
+    assert_true(bad == nil)
+    assert_eq(err.status, "duplicate_field")
+
+    bad, err = lj:oidc_jwks_cache_select_json(jwks_json, {
+      issuer = "https://id.example/tenant",
+      jwks_uri = "https://id.example/jwks",
+      now = 1000,
+      ttl_seconds = 0,
+    }, { kid = "rsa1" })
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_argument")
+
+    bad, err = lj:oidc_jwks_cache_select_json(jwks_json, {
+      issuer = "https://id.example/tenant",
+      jwks_uri = "https://id.example/jwks",
+      now = 1000,
+      ttl_seconds = 60,
+      max_jwks_bytes = 4,
+    }, { kid = "rsa1" })
+    assert_true(bad == nil)
+    assert_eq(err.status, "overflow")
+
+    local failure
+    bad, err, failure = lj:oidc_validate_bearer_token(
+        "Bearer not-a-jwt", signed_jwks_json, cache_policy, policy)
+    assert_true(bad == nil)
+    assert_eq(err.status, "invalid_json")
+    assert_eq(failure, "malformed_token")
+
+    bad, err, failure = lj:oidc_validate_bearer_token(
+        "Bearer " .. signed_token, signed_jwks_json, cache_policy, {
+          accepted_algs = { "RS256" },
+          accepted_issuers = { "other" },
+          accepted_audiences = { "api" },
+          required_claims = { "iss", "aud", "exp" },
+          now = 1000,
+        })
+    assert_true(bad == nil)
+    assert_eq(err.status, "type_mismatch")
+    assert_eq(failure, "issuer_mismatch")
+
+    if lj.set_openssl_auth_provider ~= nil and lj.m2m_credential_generate ~= nil then
+      local api_credential = lj:m2m_credential_generate({
+        claim = { scope = { "read" }, tenant = "acme" },
+        auth_modes = "bearer",
+      })
+      local api_store = '{"credentials":[' .. api_credential.record_json .. ']}'
+      local api_auth = lj:m2m_verify_authorization({
+        store_json = api_store,
+        authorization_header = "Bearer " .. api_credential.api_key,
+        allowed_auth_modes = "bearer",
+      })
+      local wrong_api, wrong_api_err, wrong_api_failure =
+          lj:m2m_verify_authorization({
+            store_json = api_store,
+            authorization_header = "Bearer wrong-api-key",
+            allowed_auth_modes = "bearer",
+          })
+      local missing_api_ok, missing_api, missing_api_err, missing_api_failure =
+          pcall(function()
+            return lj:m2m_verify_authorization({
+              store_json = api_store,
+              allowed_auth_modes = "bearer",
+            })
+          end)
+      local malformed_api, malformed_api_err, malformed_api_failure =
+          lj:m2m_verify_authorization({
+            store_json = api_store,
+            authorization_header = "Basic !!!",
+          })
+      local malformed_store, malformed_store_err, malformed_store_failure =
+          lj:m2m_verify_authorization({
+            store_json = '{"credentials":{}}',
+            authorization_header = "Bearer wrong-api-key",
+          })
+      local signup = lj:m2m_signup_generate({
+        base_url = "https://app.example/signup",
+        claim = { scope = { "write" }, plan = "trial" },
+      })
+      local signup_store = '{"signups":[' .. signup.record_json .. ']}'
+      local complete = lj:m2m_signup_complete({
+        store_json = signup_store,
+        signup_id = signup.signup_id,
+        signup_secret = signup.signup_secret,
+        email = "user@example.com",
+        credential_auth_modes = "bearer",
+      })
+      local completed_store =
+          '{"credentials":[' .. complete.credential.record_json .. ']}'
+      local completed_auth = lj:m2m_verify_authorization({
+        store_json = completed_store,
+        authorization_header = "Bearer " .. complete.credential.api_key,
+        allowed_auth_modes = { api_key = true },
+      })
+      local bad_signup, bad_signup_err = lj:m2m_signup_complete({
+        store_json = signup_store,
+        signup_id = signup.signup_id,
+        signup_secret = "wrong-secret",
+        email = "user@example.com",
+        credential_auth_modes = "bearer",
+      })
+      local basic_credential = lj:m2m_credential_generate({
+        claim_json = '{"scope":["admin"],"tenant":"ops"}',
+        auth_modes = { "basic" },
+      })
+      local basic_store = '{"credentials":[' .. basic_credential.record_json .. ']}'
+      local basic_auth = lj:m2m_verify_authorization({
+        store_json = basic_store,
+        authorization_header = "Basic " ..
+            lonejson.base64_encode(
+                basic_credential.client_id .. ":" ..
+                basic_credential.client_secret),
+        allowed_auth_modes = { basic = true },
+      })
+
+      assert_eq(api_credential.client_secret, nil)
+      assert_true(api_credential.api_key ~= nil)
+      assert_true(api_credential.record_json:find(api_credential.api_key, 1, true) == nil)
+      assert_true(api_auth.authorized)
+      assert_eq(api_auth.auth_mode, "bearer")
+      assert_eq(api_auth.client_id, api_credential.client_id)
+      assert_eq(api_auth.claim.tenant, "acme")
+      assert_eq(api_auth.claim.scope[1], "read")
+      assert_true(wrong_api == nil)
+      assert_eq(wrong_api_err.status, "type_mismatch")
+      assert_eq(wrong_api_failure, "invalid_signature")
+      assert_true(missing_api_ok)
+      assert_true(missing_api == nil)
+      assert_eq(missing_api_err.status, "type_mismatch")
+      assert_eq(missing_api_failure, "missing_credentials")
+      assert_true(malformed_api == nil)
+      assert_eq(malformed_api_err.status, "type_mismatch")
+      assert_eq(malformed_api_failure, "invalid_signature")
+      assert_true(malformed_store == nil)
+      assert_eq(malformed_store_err.status, "type_mismatch")
+      assert_eq(malformed_store_failure, "cache_unavailable")
+      assert_true(signup.signup_id ~= nil)
+      assert_true(signup.signup_secret ~= nil)
+      assert_true(signup.url:find("signup_id=", 1, true) ~= nil)
+      assert_true(signup.url:find("signup_secret=", 1, true) ~= nil)
+      assert_true(signup.record_json:find(signup.signup_secret, 1, true) == nil)
+      assert_eq(complete.signup_id, signup.signup_id)
+      assert_eq(complete.email, "user@example.com")
+      assert_eq(complete.credential.client_secret, nil)
+      assert_true(complete.credential.api_key ~= nil)
+      assert_true(completed_auth.authorized)
+      assert_eq(completed_auth.claim.plan, "trial")
+      assert_true(bad_signup == nil)
+      assert_eq(bad_signup_err.status, "type_mismatch")
+      assert_true(basic_credential.client_secret ~= nil)
+      assert_eq(basic_credential.api_key, nil)
+      assert_true(basic_auth.authorized)
+      assert_eq(basic_auth.auth_mode, "basic")
+      assert_eq(basic_auth.claim.tenant, "ops")
+      assert_eq(basic_auth.claim.scope[1], "admin")
+    end
+  end
+
+  bad, err = lj:jwt_validate_compact_claims(jwt_token, {
+    accepted_algs = { "none" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api" },
+    now = 1000,
+  })
+  assert_true(bad == nil)
+  assert_eq(err.status, "type_mismatch")
+
+  nonce_policy.expected_nonce = "other"
+  bad, err = lj:jwt_validate_compact_claims(nonce_token, nonce_policy)
+  assert_true(bad == nil)
+  assert_eq(err.status, "type_mismatch")
+
+  bad, err = lj:jwt_validate_compact_claims(jwt_token, {
+    accepted_algs = { "RS256" },
+    accepted_issuers = { "issuer" },
+    accepted_audiences = { "api" },
+    required_claims = { "nonce" },
+    now = 1000,
+  })
+  assert_true(bad == nil)
+  assert_eq(err.status, "missing_required_field")
+
+  bad, err = lonejson.jwt_validate_compact_signature(
+      signed_token:sub(1, -2) .. (signed_token:sub(-1) == "A" and "B" or "A"),
+      signed_jwk_json)
+  assert_true(bad == nil)
+  assert_eq(err.status, "type_mismatch")
+
+  bad, err = lonejson.jwt_decode_compact(
+      "eyJhbGciOiJSUzI1NiIsImFsZyI6IkVTMjU2In0." ..
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9.c2ln")
+  assert_true(bad == nil)
+  assert_eq(err.status, "duplicate_field")
 end
 
 do
@@ -903,6 +1654,14 @@ do
   payload_path = rec.payload:path()
   assert_true(exists(body_path))
   assert_true(exists(payload_path))
+  rec.body:rewind()
+  assert_eq(rec.body:read(6), text:sub(1, 6))
+  rec.body:rewind()
+  local body_chunks = {}
+  assert_true(rec.body:write_to(function(chunk)
+    body_chunks[#body_chunks + 1] = chunk
+  end, 5))
+  assert_eq(table.concat(body_chunks), text)
   rec:clear()
   assert_true(not exists(body_path))
   assert_true(not exists(payload_path))
@@ -918,6 +1677,7 @@ end
 
 do
   local path = "/tmp/lonejson-lua-test.json"
+  local file_path = "/tmp/lonejson-lua-file.json"
   local rec = Test:new_record()
   local f
   local pretty
@@ -933,6 +1693,16 @@ do
   local obj = Test:decode_path(path)
   assert_eq(obj.name, "Path")
   os.remove(path)
+
+  f = assert(io.open(file_path, "wb"))
+  assert_true(TestPretty:write_file({ name = "File", age = 11 }, f))
+  f:close()
+  f = assert(io.open(file_path, "rb"))
+  obj = Test:decode_file(f)
+  f:close()
+  assert_eq(obj.name, "File")
+  assert_eq(obj.age, 11)
+  os.remove(file_path)
 end
 
 do
@@ -960,13 +1730,19 @@ end
 
 do
   local path = "/tmp/lonejson-lua-stream.jsonl"
-  local f = assert(io.open(path, "wb"))
+  local file_path = "/tmp/lonejson-lua-stream-file.jsonl"
+  local fd_path = "/tmp/lonejson-lua-stream-fd.jsonl"
+  local f
+  local stream
+  local rec = Test:new_record()
+  local obj, err, status
+
+  f = assert(io.open(path, "wb"))
   f:write('{"name":"One","age":1}{"name":"Two","age":2}')
   f:close()
 
-  local stream = Test:stream_path(path)
-  local rec = Test:new_record()
-  local obj, err, status = stream:next(rec)
+  stream = Test:stream_path(path)
+  obj, err, status = stream:next(rec)
   assert_eq(status, "object")
   assert_true(err == nil)
   assert_eq(obj.name, "One")
@@ -977,6 +1753,38 @@ do
   assert_eq(status, "eof")
   stream:close()
   os.remove(path)
+
+  f = assert(io.open(file_path, "wb"))
+  f:write('{"name":"FileOne","age":3}{"name":"FileTwo","age":4}')
+  f:close()
+  f = assert(io.open(file_path, "rb"))
+  stream = Test:stream_file(f)
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.name, "FileOne")
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_eq(obj.name, "FileTwo")
+  stream:close()
+  f:close()
+  os.remove(file_path)
+
+  f = assert(io.open(fd_path, "wb"))
+  f:write('{"name":"FdOne","age":5}{"name":"FdTwo","age":6}')
+  f:close()
+  f = assert(io.open(fd_path, "rb"))
+  stream = Test:stream_fd(f)
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_true(err == nil)
+  assert_eq(obj.name, "FdOne")
+  obj, err, status = stream:next(rec)
+  assert_eq(status, "object")
+  assert_eq(obj.name, "FdTwo")
+  stream:close()
+  f:close()
+  os.remove(fd_path)
 end
 
 do

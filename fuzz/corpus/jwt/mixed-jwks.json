@@ -1,0 +1,1 @@
+{"keys":[{"kty":"RSA","kid":"rsa1","use":"sig","alg":"RS256","n":"AQIDBA","e":"AQAB"},{"kty":"EC","kid":"ec1","use":"sig","alg":"ES256","crv":"P-256","x":"AAEC","y":"AwQF"}]}

@@ -709,8 +709,7 @@ static void test_json_value_capture_small_budget_uses_required_capacity(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(doc.selector.json != NULL && strcmp(doc.selector.json, "1") == 0);
   EXPECT(doc.fields.json != NULL && strcmp(doc.fields.json, "2") == 0);
-  EXPECT(doc.last_error.json != NULL &&
-         strcmp(doc.last_error.json, "3") == 0);
+  EXPECT(doc.last_error.json != NULL && strcmp(doc.last_error.json, "3") == 0);
 
   lonejson_cleanup(&test_json_value_doc_map, &doc);
 }
@@ -1002,8 +1001,9 @@ typedef struct test_json_value_path_visit_state {
   char active_number_path[256];
 } test_json_value_path_visit_state;
 
-static lonejson_status test_json_value_path_visit_append(
-    test_json_value_path_visit_state *state, const char *data, size_t len) {
+static lonejson_status
+test_json_value_path_visit_append(test_json_value_path_visit_state *state,
+                                  const char *data, size_t len) {
   size_t copy_len;
 
   if (state == NULL || data == NULL) {
@@ -1021,8 +1021,9 @@ static lonejson_status test_json_value_path_visit_append(
   return copy_len == len ? LONEJSON_STATUS_OK : LONEJSON_STATUS_TRUNCATED;
 }
 
-static lonejson_status test_json_value_path_visit_append_cstr(
-    test_json_value_path_visit_state *state, const char *text) {
+static lonejson_status
+test_json_value_path_visit_append_cstr(test_json_value_path_visit_state *state,
+                                       const char *text) {
   return test_json_value_path_visit_append(state, text, strlen(text));
 }
 
@@ -1053,8 +1054,8 @@ test_json_value_path_visit_format(char *out, size_t out_size,
     }
     out[len++] = '/';
     out[len] = '\0';
-    written = snprintf(out + len, out_size - len, "%lu:",
-                       (unsigned long)path->segments[i].len);
+    written = snprintf(out + len, out_size - len,
+                       "%lu:", (unsigned long)path->segments[i].len);
     if (written < 0 || (size_t)written >= out_size - len) {
       return LONEJSON_STATUS_TRUNCATED;
     }
@@ -1069,8 +1070,9 @@ test_json_value_path_visit_format(char *out, size_t out_size,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status test_json_value_path_visit_maybe_fail(
-    test_json_value_path_visit_state *state, lonejson_error *error) {
+static lonejson_status
+test_json_value_path_visit_maybe_fail(test_json_value_path_visit_state *state,
+                                      lonejson_error *error) {
   ++state->callback_count;
   if (state->fail_after != 0u && state->callback_count >= state->fail_after) {
     return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
@@ -1154,8 +1156,9 @@ static lonejson_status test_json_value_path_visit_key_chunk(
   return status;
 }
 
-static lonejson_status test_json_value_path_visit_key_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_json_value_path_visit_key_end(void *user, const lonejson_value_path *path,
+                                   lonejson_error *error) {
   return test_json_value_path_visit_event(
       (test_json_value_path_visit_state *)user, "K>", path, error);
 }
@@ -1178,9 +1181,8 @@ static lonejson_status test_json_value_path_visit_string_begin(
   test_json_value_path_visit_state *state;
 
   state = (test_json_value_path_visit_state *)user;
-  status = test_json_value_path_visit_format(state->active_string_path,
-                                             sizeof(state->active_string_path),
-                                             path);
+  status = test_json_value_path_visit_format(
+      state->active_string_path, sizeof(state->active_string_path), path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -1225,9 +1227,8 @@ static lonejson_status test_json_value_path_visit_number_begin(
   test_json_value_path_visit_state *state;
 
   state = (test_json_value_path_visit_state *)user;
-  status = test_json_value_path_visit_format(state->active_number_path,
-                                             sizeof(state->active_number_path),
-                                             path);
+  status = test_json_value_path_visit_format(
+      state->active_number_path, sizeof(state->active_number_path), path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
@@ -1266,16 +1267,16 @@ static lonejson_status test_json_value_path_visit_number_end(
       (test_json_value_path_visit_state *)user, "N>", path, error);
 }
 
-static lonejson_status test_json_value_path_visit_bool(
-    void *user, const lonejson_value_path *path, int value,
-    lonejson_error *error) {
+static lonejson_status
+test_json_value_path_visit_bool(void *user, const lonejson_value_path *path,
+                                int value, lonejson_error *error) {
   return test_json_value_path_visit_event(
-      (test_json_value_path_visit_state *)user, value ? "T" : "F", path,
-      error);
+      (test_json_value_path_visit_state *)user, value ? "T" : "F", path, error);
 }
 
-static lonejson_status test_json_value_path_visit_null(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+test_json_value_path_visit_null(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
   return test_json_value_path_visit_event(
       (test_json_value_path_visit_state *)user, "Z", path, error);
 }
@@ -1324,11 +1325,11 @@ static void test_json_value_parse_path_visitor_paths(void) {
   visitor = test_json_value_path_visitor();
   poison_bytes(&doc, sizeof(doc), 0xCFu);
   test_init_map(&test_json_value_doc_map, &doc);
-  status = lonejson_json_value_set_parse_path_visitor(
-      &doc.selector, &visitor, &selector_state, &error);
+  status = lonejson_json_value_set_parse_path_visitor(&doc.selector, &visitor,
+                                                      &selector_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = doc.fields.methods->set_parse_path_visitor(
-      &doc.fields, &visitor, &fields_state, &error);
+  status = doc.fields.methods->set_parse_path_visitor(&doc.fields, &visitor,
+                                                      &fields_state, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   status = lj_json_value_set_parse_path_visitor(&doc.last_error, &visitor,
                                                 &error_state, &error);
@@ -1350,8 +1351,7 @@ static void test_json_value_parse_path_visitor_paths(void) {
                 "$/5:items/1:1)") != NULL);
   EXPECT(strstr(selector_state.log, "F($/5:items/1:2)Z($/5:items/1:3)](") !=
          NULL);
-  EXPECT(strstr(selector_state.log, "K<($)K>($)S<($/0:)S($/0:)=empty") !=
-         NULL);
+  EXPECT(strstr(selector_state.log, "K<($)K>($)S<($/0:)S($/0:)=empty") != NULL);
   EXPECT(strcmp(fields_state.log, "S<($)S($)=root scalarS>($)") == 0);
   EXPECT(strcmp(error_state.log, "[($)T($/1:0)]($)") == 0);
   EXPECT(selector_state.mismatched_chunk_paths == 0u);
@@ -1472,9 +1472,8 @@ static void test_json_value_parse_path_visitor_failure_cleanup(void) {
          NULL);
 
   memset(&state, 0, sizeof(state));
-  status =
-      test_parse_cstr(&test_json_value_doc_map, &doc, valid_json, &options,
-                      &error);
+  status = test_parse_cstr(&test_json_value_doc_map, &doc, valid_json, &options,
+                           &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strcmp(state.log,
                 "{($)K<($)K($)=afterK>($)[($/5:after)T($/5:after/1:0)Z($/5:"
@@ -1508,14 +1507,14 @@ static void test_json_value_parse_path_visitor_api_guards(void) {
   visitor = test_json_value_path_visitor();
   lonejson_json_value_init(test_default_runtime(), &value);
   EXPECT(value.methods->set_parse_path_visitor != NULL);
-  status = lonejson_json_value_set_parse_path_visitor(NULL, &visitor, NULL,
-                                                      &error);
+  status =
+      lonejson_json_value_set_parse_path_visitor(NULL, &visitor, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
   status =
       lonejson_json_value_set_parse_path_visitor(&value, NULL, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
-  status = value.methods->set_parse_path_visitor(&value, &visitor, &value,
-                                                 &error);
+  status =
+      value.methods->set_parse_path_visitor(&value, &visitor, &value, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(value.parse_mode == LONEJSON_JSON_VALUE_PARSE_PATH_VISITOR);
   EXPECT(value.parse_path_visitor == &visitor);
@@ -1526,8 +1525,7 @@ static void test_json_value_parse_path_visitor_api_guards(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(value.parse_mode == LONEJSON_JSON_VALUE_PARSE_CAPTURE);
   EXPECT(value.parse_path_visitor == NULL);
-  status = lj_json_value_set_parse_path_visitor(&value, &visitor, NULL,
-                                                &error);
+  status = lj_json_value_set_parse_path_visitor(&value, &visitor, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(value.parse_mode == LONEJSON_JSON_VALUE_PARSE_PATH_VISITOR);
   lonejson_json_value_cleanup(&value);

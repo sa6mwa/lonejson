@@ -111,6 +111,279 @@ public pull-style generator API and feeds libcurl through
 That upload path currently reports `-1` for the total size because lonejson
 does not prebuffer or pre-count the payload.
 
+JWT/OIDC/OAuth2 support is also optional. Build with `LONEJSON_WITH_JWT` for
+JWT, JWK, and JWKS parsing plus explicit claim validation. Build with
+`LONEJSON_WITH_OPENSSL` when you want the built-in OpenSSL auth provider for
+signature validation, PKCE hashing, and random verifier generation. Build with
+`LONEJSON_WITH_OIDC` for discovery, JWKS cache, OAuth2 token exchange helpers,
+PKCE authorization URLs, callback parsing, and bearer-token validation.
+JWT/OIDC builds without OpenSSL are valid: install a runtime
+`lonejson_auth_provider` when signature validation, PKCE SHA-256, or random
+PKCE verifier generation is needed.
+
+The auth design is provider-backed. Parsing a JWT is never a trust decision:
+decode with `lonejson_jwt_decode_compact()`, select a JWK from a trusted JWKS
+cache, validate the signature through the runtime auth provider, and validate
+claims with an explicit `lonejson_jwt_claim_policy`. The OpenSSL provider
+supports `RS256`, `PS256`, `ES256`, and `EdDSA` for Ed25519 OKP keys.
+When a selected JWK includes `x5c`, the OpenSSL provider validates the
+certificate chain, verifies `x5t`/`x5t#S256` thumbprints declared by the JWK or
+JWT header, and requires the leaf certificate public key to match the JWK. Pass
+an OpenSSL `X509_STORE *` through `lonejson_openssl_auth_provider_config` for
+private CA/test roots; otherwise OpenSSL default verify paths are used.
+`alg: none` is rejected; `HS256`, Ed448, and JWE are not implemented.
+Compatibility helpers such as `lonejson_jwt_validate_signature()` and
+`lonejson_oidc_pkce_generate()` use the built-in OpenSSL adapter only when the
+library was compiled with `LONEJSON_WITH_OPENSSL`; provider-independent builds
+should call the runtime-backed helpers.
+
+Base64 helpers are available independently of JWT. Use
+`lonejson_base64_encode()`/`lonejson_base64_decode()` for caller-provided
+buffers, or the `_sink` variants when the encoded/decoded data should be
+streamed to a callback instead of materialized by the helper. Variants are
+explicit: `LONEJSON_BASE64_STANDARD`, `LONEJSON_BASE64_STANDARD_RAW`,
+`LONEJSON_BASE64_URL`, and `LONEJSON_BASE64_URL_RAW`. JWT/JWS segments use
+`LONEJSON_BASE64_URL_RAW`. Lua exposes the materialized helpers as
+`lonejson.base64_encode(data, variant)` and
+`lonejson.base64_decode(text, variant)`, where `variant` is `"standard"`,
+`"standard_raw"`, `"url"`, or `"url_raw"`; `"jwt"` is accepted as an alias for
+`"url_raw"`.
+
+For command-line tools and services that already link curl, keep curl in the
+application and install a small HTTP provider callback. The callback receives a
+bounded `lonejson_http_request`, performs the GET or POST with the
+application's curl policy, and fills `lonejson_http_response`:
+
+```c
+lonejson_error error;
+lonejson *lj;
+lonejson_auth_provider auth;
+lonejson_http_provider http;
+struct my_http_state http_state;
+
+lonejson_error_init(&error);
+lj = lonejson_new(NULL, &error);
+lonejson_auth_provider_init_openssl(&auth, NULL, &error);
+lonejson_set_auth_provider(lj, &auth, &error);
+lonejson_http_provider_init_simple(&http, &http_state, "my-product/1.0",
+                                   my_curl_request, &error);
+lonejson_set_http_provider(lj, &http, &error);
+```
+
+After that, `lonejson_oidc_fetch_discovery()`,
+`lonejson_oidc_jwks_cache_refresh()`,
+`lonejson_oauth2_client_credentials_request()`,
+`lonejson_oauth2_refresh_token_request()`, and
+`lonejson_oidc_authorization_code_token_request()` use the installed HTTP
+provider. The auth HTTP provider materializes bounded discovery, JWKS, and
+token endpoint responses because those helper APIs are materialized by design;
+this keeps TLS trust roots, proxies, redirects, retry policy, and advanced curl
+options in application code. Use the lower-level curl parse adapters for
+general large JSON response streaming.
+
+For dev-only HTTPS test providers with self-signed certificates, put
+`CURLOPT_SSL_VERIFYPEER = 0` and `CURLOPT_SSL_VERIFYHOST = 0` in the caller's
+HTTP provider callback. Do not put that policy in lonejson configuration; TLS
+verification remains transport-owned.
+
+For client-side token state, use `lonejson_oauth2_token_flow`. Initialize it,
+copy a successful token endpoint response into it, then call
+`lonejson_oauth2_token_flow_ensure()` before sending a request that needs an
+access token. The helper returns `ready`, `refreshed`, `needs_interaction`, or
+`failed` state via `lonejson_oauth2_token_flow_result`; it refreshes expired
+tokens through the installed HTTP provider when a refresh token and token
+endpoint policy are available. Refresh and retry can be disabled per call, and
+the helper never starts a browser, persists credentials, sleeps, or schedules
+background work. Lua exposes the same workflow as table-based
+`oauth2_token_flow_update_response`, `oauth2_token_flow_is_expired`, and
+runtime `oauth2_token_flow_ensure`.
+
+For server-local machine-to-machine credentials,
+`lonejson_m2m_credential_generate()` creates one-time client secrets/API keys
+and a store-ready JSON record containing only salts, hashes, and an opaque claim
+JSON value. `lonejson_m2m_verify_authorization()` checks
+`Authorization: Basic ...` client credentials or `Authorization: Bearer ...`
+API keys against caller-owned store JSON and returns the authenticated
+`client_id` plus claim. `lonejson_m2m_signup_generate()` and
+`lonejson_m2m_signup_complete()` support admin-seeded signup links where the
+handler collects an email address, issues credentials once, and then removes
+the consumed signup seed from caller-owned storage.
+
+Use Bearer-only mode when the endpoint is just an API-key gate:
+
+```c
+lonejson_m2m_credential_request create = {
+    .claim_json = "{\"scope\":[\"read\"],\"tenant\":\"acme\"}",
+    .auth_modes = LONEJSON_M2M_AUTH_BEARER
+};
+lonejson_m2m_credential credential;
+
+lonejson_m2m_credential_init(&credential);
+lonejson_m2m_credential_generate(lj, &create, &credential, &error);
+/* Show credential.api_key once. Store credential.record_json under credentials[]. */
+```
+
+In a web handler, verify the raw `Authorization` header before application
+logic:
+
+```c
+lonejson_m2m_store store = {
+    .json = credential_store_json,
+    .len = credential_store_len
+};
+lonejson_m2m_verify_request verify = {
+    .store = &store,
+    .authorization_header = authorization_header,
+    .allowed_auth_modes = LONEJSON_M2M_AUTH_BEARER
+};
+lonejson_m2m_authentication auth;
+
+lonejson_m2m_authentication_init(&auth);
+status = lonejson_m2m_verify_authorization(lj, &verify, &auth, &error);
+if (status != LONEJSON_STATUS_OK ||
+    auth.failure != LONEJSON_AUTH_FAILURE_NONE) {
+    /* framework code returns 401/403 here */
+}
+/* auth.client_id and auth.claim are authenticated facts. App code decides
+ * whether this client may use this endpoint/method/tenant/operation. */
+lonejson_m2m_authentication_cleanup(&auth);
+```
+
+Credential store mutation is deliberately caller-owned. The intended persistent
+shape is a JSON object containing `credentials[]` and, when signup is used,
+`signups[]`. To rotate an API key, generate a replacement credential, insert
+the new `record_json`, and remove or mark the old record as revoked. To revoke,
+remove the record or set its `revoked` field. lonejson does not lock files,
+encrypt stores, keep audit history, or decide access policy from claims.
+
+For Kore, Vectis, or another C web framework, keep lonejson at the auth
+boundary instead of adding framework-specific dependencies. Refresh discovery
+and JWKS through a configured runtime during startup or cache maintenance, then
+call `lonejson_oidc_validate_bearer_token()` from the framework request handler
+before application logic:
+
+```c
+lonejson_oidc_bearer_validation_request request = {
+    .authorization_header = authorization_header,
+    .jwks_cache = &jwks_cache,
+    .jwks_policy = &jwks_policy,
+    .claim_policy = &claim_policy
+};
+lonejson_oidc_bearer_validation validation;
+
+lonejson_oidc_bearer_validation_init(&validation);
+status = lonejson_oidc_validate_bearer_token(lj, &request, &validation,
+                                             &error);
+if (status != LONEJSON_STATUS_OK || validation.failure != LONEJSON_AUTH_FAILURE_NONE) {
+    /* framework code returns 401/403 here */
+}
+lonejson_oidc_bearer_validation_cleanup(&validation);
+```
+
+The Lua facade follows the same provider model. A runtime can install an
+OpenSSL auth provider and an HTTP callback with a user-agent:
+
+```lua
+local lj = lonejson.new()
+lj:set_openssl_auth_provider()
+lj:set_http_provider(function(request)
+  return {
+    status_code = 200,
+    content_type = "application/json",
+    body = "{}"
+  }
+end, "my-product/1.0")
+```
+
+Lua M2M/API-key usage mirrors C while keeping storage explicit:
+
+```lua
+local lj = lonejson.new()
+lj:set_openssl_auth_provider()
+
+local pkce = lj:oidc_pkce_generate()
+
+local credential = lj:m2m_credential_generate({
+  claim = { scope = { "read" }, tenant = "acme" },
+  auth_modes = "bearer",
+})
+-- Show credential.api_key once. Store credential.record_json under credentials[].
+
+local store_json = '{"credentials":[' .. credential.record_json .. ']}'
+local auth = lj:m2m_verify_authorization({
+  store_json = store_json,
+  authorization_header = "Bearer " .. credential.api_key,
+  allowed_auth_modes = "bearer",
+})
+if not auth.authorized then
+  -- framework code returns 401/403 here
+end
+-- auth.client_id and auth.claim are authenticated facts; app code authorizes.
+```
+
+The Lua M2M/API-key methods are available when the Lua module is compiled with
+the OpenSSL auth provider, because generation and verification require random
+bytes and SHA-256 hashing.
+
+Lua signup helpers return store-ready JSON strings and one-time secrets:
+
+```lua
+local signup = lj:m2m_signup_generate({
+  base_url = "https://app.example/signup",
+  claim = { scope = { "write" }, plan = "trial" },
+})
+-- Send signup.url to the recipient and store signup.record_json under signups[].
+
+local complete = lj:m2m_signup_complete({
+  store_json = '{"signups":[' .. signup.record_json .. ']}',
+  signup_id = signup.signup_id,
+  signup_secret = signup.signup_secret,
+  email = "user@example.com",
+  credential_auth_modes = "bearer",
+})
+-- Show complete.credential.api_key once, insert complete.credential.record_json
+-- under credentials[], and remove complete.signup_id from signups[].
+```
+
+Remaining auth DX gaps are explicit. lonejson does not provide a built-in HTTP
+server, browser launcher, localhost callback listener, credential-store
+persistence/locking, proxy policy, redirect policy, TLS policy, or
+Kore/Vectis-specific handler wrapper. Those are application lifecycle concerns.
+Current provider-backed helpers cover discovery, JWKS refresh, token endpoint
+exchanges, token-flow refresh/retry, server-side token introspection, token
+revocation, UserInfo, fail-closed JOSE `crit`, JWK `key_ops`, OIDC `azp`,
+OAuth2 `scope`/`scp`, strict multi-audience policy, and OpenSSL-backed
+certificate-chain/thumbprint validation for certificate-backed JWKs
+(`x5c`, `x5t`, `x5t#S256`). JWE is intentionally deferred as a separate
+encryption feature. This is implemented for lonejson's JSON-centered auth
+scope, not as a full identity-provider SDK, complete OAuth2 grant matrix, or
+complete JOSE implementation.
+Potential future simplifications would be an examples-level curl HTTP provider
+callback and an examples-level Kore/Vectis adapter. Those should preserve the
+current binary dependency boundary; putting `curl_easy_*` calls directly in
+`liblonejson.so` would not.
+
+The local Docker/nerdctl development rig includes a mock OIDC/OAuth2 provider
+and API fixture. `make test-oidc-e2e` starts the compose stack, obtains a token
+from the mock provider using `curl` rather than lonejson, starts the
+lonejson-backed fixture server, and verifies discovery, JWKS refresh, token
+introspection, UserInfo, revocation, bearer rejection, and bearer acceptance
+against the live endpoints. The same e2e checks fail-closed bearer behavior for
+missing credentials, wrong audience, missing scope, wrong/missing `azp`, and
+acceptance for strict multi-audience tokens and `scp` array scopes. Compose
+commands prefer `nerdctl compose` and fall back to `docker compose`. The e2e
+also exercises refresh-token grant exchange against the mock provider and
+requires a returned access token.
+
+`make test-m2m-e2e` starts a tiny lonejson-backed API fixture and uses `curl`
+as the non-lonejson client to verify Basic client credentials, Bearer API keys,
+missing credentials, wrong-secret rejection, signup completion with email
+metadata, consumed-signup rejection, and use of signup-generated Basic and
+Bearer credentials. Detailed JOSE policy branches such as `crit`, `key_ops`,
+and `x5c` certificate-chain/thumbprint failure modes are covered by C/Lua
+regression tests and JWT fuzz seeds rather than by a separate live OIDC e2e
+scenario for each branch.
+
 Short aliases are enabled by default. Disable them if they collide with another
 project:
 
@@ -995,15 +1268,23 @@ The standard verification commands are:
 
 ```sh
 make test
-make test-all-bindings
+make test-all
+make cross-sanitizers
 make asan
 make bench-gate
 make lua-bench-gate
 make fuzz
 ```
 
-`make test-all` is the C-centric aggregate suite. Use
-`make test-all-bindings` when you also want the optional Lua binding tests.
+`make test-all` is the broader local confidence gate: debug, host, curl/auth
+host, cross presets, host sanitizers, benchmark checks, and fuzz smoke.
+`make cross-sanitizers` is an extra hardening check for the currently supported
+QEMU sanitizer route, `armhf-linux-gnu` ASan/UBSan; it is intentionally outside
+the normal release gate because the other pkt.systems C projects run sanitizer
+coverage on host debug targets. `make release` is the final clean release gate:
+it cleans generated state, runs `prerelease`, then builds, checksums, and
+verifies the release matrix. `make test-all-bindings` is a compatibility alias
+for the Lua binding suite; it no longer expands to the full world gate.
 
 ## License
 

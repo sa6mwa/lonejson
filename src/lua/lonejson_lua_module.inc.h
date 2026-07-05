@@ -1,6 +1,9 @@
 static int ljlua_runtime_gc(lua_State *L) {
   ljlua_runtime_ud *ud = ljlua_check_runtime(L, 1);
 
+#ifdef LONEJSON_WITH_OIDC
+  ljlua_auth_clear_http_provider(L, ud);
+#endif
   if (ud->runtime != NULL) {
     lonejson_free(ud->runtime);
     ud->runtime = NULL;
@@ -31,7 +34,11 @@ static int ljlua_runtime_new(lua_State *L) {
       ljlua_runtime_config_fixed_string_scratch_ref(L, 1);
   ud = (ljlua_runtime_ud *)ljlua_newuserdata_slots(L, sizeof(*ud), 0);
   memset(ud, 0, sizeof(*ud));
+  ud->L = L;
   ud->fixed_string_scratch_ref = LUA_NOREF;
+#ifdef LONEJSON_WITH_OIDC
+  ud->http_provider_ref = LUA_NOREF;
+#endif
   ud->runtime = lonejson_new(lua_isnoneornil(L, 1) ? NULL : &config, &error);
   if (ud->runtime == NULL) {
     if (fixed_string_scratch_ref != LUA_NOREF) {
@@ -50,12 +57,11 @@ static int ljlua_runtime_new(lua_State *L) {
   }
   ud->magic = LJLUA_RUNTIME_MAGIC;
   ud->clear_destination = config.clear_destination_by_default ? 1 : 0;
-  ud->reject_duplicate_keys =
-      config.reject_duplicate_keys_by_default ? 1 : 0;
+  ud->reject_duplicate_keys = config.reject_duplicate_keys_by_default ? 1 : 0;
   ud->write_pretty = config.write_pretty ? 1 : 0;
-  ud->write_max_output_bytes =
-      config.write_max_output_bytes != 0u ? config.write_max_output_bytes
-                                          : LONEJSON_WRITE_MAX_OUTPUT_BYTES;
+  ud->write_max_output_bytes = config.write_max_output_bytes != 0u
+                                   ? config.write_max_output_bytes
+                                   : LONEJSON_WRITE_MAX_OUTPUT_BYTES;
   ud->fixed_string_scratch_ref = fixed_string_scratch_ref;
   luaL_setmetatable(L, LJLUA_RUNTIME_MT);
   return 1;
@@ -115,6 +121,116 @@ static int ljlua_test_get_encode_stats_lua(lua_State *L) {
 }
 #endif
 
+static lonejson_base64_variant ljlua_base64_variant_arg(lua_State *L,
+                                                        int index) {
+  const char *variant;
+
+  if (lua_isnoneornil(L, index)) {
+    return LONEJSON_BASE64_STANDARD;
+  }
+  variant = luaL_checkstring(L, index);
+  if (strcmp(variant, "standard") == 0 || strcmp(variant, "std") == 0) {
+    return LONEJSON_BASE64_STANDARD;
+  }
+  if (strcmp(variant, "standard_raw") == 0 || strcmp(variant, "std_raw") == 0 ||
+      strcmp(variant, "raw") == 0) {
+    return LONEJSON_BASE64_STANDARD_RAW;
+  }
+  if (strcmp(variant, "url") == 0 || strcmp(variant, "base64url") == 0) {
+    return LONEJSON_BASE64_URL;
+  }
+  if (strcmp(variant, "url_raw") == 0 ||
+      strcmp(variant, "base64url_raw") == 0 || strcmp(variant, "jwt") == 0) {
+    return LONEJSON_BASE64_URL_RAW;
+  }
+  luaL_argerror(L, index,
+                "base64 variant must be standard, standard_raw, url, or "
+                "url_raw");
+  return LONEJSON_BASE64_STANDARD;
+}
+
+static int ljlua_base64_encode(lua_State *L) {
+  const char *data;
+  size_t len;
+  size_t needed;
+  char *out;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson_base64_variant variant;
+  int arg = 1;
+
+  if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
+    (void)ljlua_check_runtime(L, 1);
+    arg = 2;
+  }
+  data = luaL_checklstring(L, arg, &len);
+  variant = ljlua_base64_variant_arg(L, arg + 1);
+  lonejson_error_init(&error);
+  status = lonejson_base64_encoded_len(len, variant, &needed, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    return ljlua_push_status_result(L, status, &error);
+  }
+  out = (char *)malloc(needed == 0u ? 1u : needed);
+  if (out == NULL) {
+    lonejson_error_init(&error);
+    error.code = LONEJSON_STATUS_ALLOCATION_FAILED;
+    snprintf(error.message, sizeof(error.message),
+             "failed to allocate Lua base64 output");
+    return ljlua_push_status_result(L, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                    &error);
+  }
+  status =
+      lonejson_base64_encode(data, len, variant, out, needed, &needed, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    free(out);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushlstring(L, out, needed);
+  free(out);
+  return 1;
+}
+
+static int ljlua_base64_decode(lua_State *L) {
+  const char *data;
+  size_t len;
+  size_t needed;
+  unsigned char *out;
+  lonejson_error error;
+  lonejson_status status;
+  lonejson_base64_variant variant;
+  int arg = 1;
+
+  if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
+    (void)ljlua_check_runtime(L, 1);
+    arg = 2;
+  }
+  data = luaL_checklstring(L, arg, &len);
+  variant = ljlua_base64_variant_arg(L, arg + 1);
+  lonejson_error_init(&error);
+  status = lonejson_base64_decoded_len(data, len, variant, &needed, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    return ljlua_push_status_result(L, status, &error);
+  }
+  out = (unsigned char *)malloc(needed == 0u ? 1u : needed);
+  if (out == NULL) {
+    lonejson_error_init(&error);
+    error.code = LONEJSON_STATUS_ALLOCATION_FAILED;
+    snprintf(error.message, sizeof(error.message),
+             "failed to allocate Lua base64 output");
+    return ljlua_push_status_result(L, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                    &error);
+  }
+  status =
+      lonejson_base64_decode(data, len, variant, out, needed, &needed, &error);
+  if (status != LONEJSON_STATUS_OK) {
+    free(out);
+    return ljlua_push_status_result(L, status, &error);
+  }
+  lua_pushlstring(L, (const char *)out, needed);
+  free(out);
+  return 1;
+}
+
 static const luaL_Reg ljlua_runtime_methods[] = {
     {"schema", ljlua_schema_new},
     {"array_rewrite_string", ljlua_array_rewrite_string},
@@ -125,6 +241,8 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"encode_value_to_sink", ljlua_encode_json_to_sink},
     {"decode_json", ljlua_decode_json},
     {"decode_value", ljlua_decode_json},
+    {"base64_encode", ljlua_base64_encode},
+    {"base64_decode", ljlua_base64_decode},
     {"visit_path_value_string", ljlua_visit_path_value_string},
     {"visit_path_value_path", ljlua_visit_path_value_path},
     {"visit_path_value_file", ljlua_visit_path_value_file},
@@ -133,6 +251,53 @@ static const luaL_Reg ljlua_runtime_methods[] = {
     {"visit_candidates_path", ljlua_visit_candidates_path},
     {"visit_candidates_file", ljlua_visit_candidates_file},
     {"visit_candidates_fd", ljlua_visit_candidates_fd},
+#ifdef LONEJSON_WITH_JWT
+    {"jwt_parse_compact", ljlua_jwt_parse_compact},
+    {"jwt_decode_compact", ljlua_jwt_decode_compact},
+    {"jwt_validate_compact_claims", ljlua_jwt_validate_compact_claims},
+    {"jwt_validate_compact_signature", ljlua_jwt_validate_compact_signature},
+    {"jwk_parse_json", ljlua_jwk_parse_json},
+    {"jwks_parse_json", ljlua_jwks_parse_json},
+    {"jwks_select_json", ljlua_jwks_select_json},
+#ifdef LONEJSON_WITH_OPENSSL
+    {"set_openssl_auth_provider", ljlua_set_openssl_auth_provider},
+#endif
+#ifdef LONEJSON_WITH_OIDC
+    {"set_http_provider", ljlua_set_http_provider},
+    {"oauth2_client_credentials_body", ljlua_oauth2_client_credentials_body},
+    {"oauth2_refresh_token_body", ljlua_oauth2_refresh_token_body},
+    {"oauth2_token_introspection_body", ljlua_oauth2_token_introspection_body},
+    {"oauth2_token_revocation_body", ljlua_oauth2_token_revocation_body},
+    {"oidc_authorization_code_token_body",
+     ljlua_oidc_authorization_code_token_body},
+    {"oauth2_client_credentials_request",
+     ljlua_oauth2_client_credentials_request},
+    {"oauth2_refresh_token_request", ljlua_oauth2_refresh_token_request},
+    {"oauth2_token_flow_ensure", ljlua_oauth2_token_flow_ensure},
+    {"oauth2_introspect_token_request", ljlua_oauth2_introspect_token_request},
+    {"oauth2_revoke_token_request", ljlua_oauth2_revoke_token_request},
+    {"oidc_userinfo_request", ljlua_oidc_userinfo_request},
+    {"oidc_authorization_code_token_request",
+     ljlua_oidc_authorization_code_token_request},
+    {"oauth2_token_response_parse_json",
+     ljlua_oauth2_token_response_parse_json},
+    {"oauth2_introspection_response_parse_json",
+     ljlua_oauth2_introspection_response_parse_json},
+    {"oidc_userinfo_response_parse_json",
+     ljlua_oidc_userinfo_response_parse_json},
+    {"oidc_validate_bearer_token", ljlua_oidc_validate_bearer_token},
+    {"oidc_discovery_parse_json", ljlua_oidc_discovery_parse_json},
+    {"oidc_fetch_discovery", ljlua_oidc_fetch_discovery},
+    {"oidc_jwks_cache_select_json", ljlua_oidc_jwks_cache_select_json},
+    {"oidc_jwks_cache_refresh", ljlua_oidc_jwks_cache_refresh},
+#ifdef LONEJSON_WITH_OPENSSL
+    {"m2m_credential_generate", ljlua_m2m_credential_generate},
+    {"m2m_verify_authorization", ljlua_m2m_verify_authorization},
+    {"m2m_signup_generate", ljlua_m2m_signup_generate},
+    {"m2m_signup_complete", ljlua_m2m_signup_complete},
+#endif
+#endif
+#endif
     {NULL, NULL}};
 
 static const luaL_Reg ljlua_schema_methods[] = {
@@ -252,6 +417,8 @@ int luaopen_lonejson_core(lua_State *L) {
       {"encode_json", ljlua_encode_json},
       {"encode_json_to_sink", ljlua_encode_json_to_sink},
       {"decode_json", ljlua_decode_json},
+      {"base64_encode", ljlua_base64_encode},
+      {"base64_decode", ljlua_base64_decode},
       {"visit_path_value_string", ljlua_visit_path_value_string},
       {"visit_path_value_path", ljlua_visit_path_value_path},
       {"visit_path_value_file", ljlua_visit_path_value_file},
@@ -260,6 +427,52 @@ int luaopen_lonejson_core(lua_State *L) {
       {"visit_candidates_path", ljlua_visit_candidates_path},
       {"visit_candidates_file", ljlua_visit_candidates_file},
       {"visit_candidates_fd", ljlua_visit_candidates_fd},
+#ifdef LONEJSON_WITH_JWT
+      {"jwt_parse_compact", ljlua_jwt_parse_compact},
+      {"jwt_decode_compact", ljlua_jwt_decode_compact},
+      {"jwt_validate_compact_claims", ljlua_jwt_validate_compact_claims},
+      {"jwt_validate_compact_signature", ljlua_jwt_validate_compact_signature},
+      {"jwk_parse_json", ljlua_jwk_parse_json},
+      {"jwks_parse_json", ljlua_jwks_parse_json},
+      {"jwks_select_json", ljlua_jwks_select_json},
+#ifdef LONEJSON_WITH_OIDC
+      {"oauth2_client_credentials_body", ljlua_oauth2_client_credentials_body},
+      {"oauth2_refresh_token_body", ljlua_oauth2_refresh_token_body},
+      {"oauth2_token_introspection_body",
+       ljlua_oauth2_token_introspection_body},
+      {"oauth2_token_revocation_body", ljlua_oauth2_token_revocation_body},
+      {"oidc_authorization_code_token_body",
+       ljlua_oidc_authorization_code_token_body},
+      {"oauth2_client_credentials_request",
+       ljlua_oauth2_client_credentials_request},
+      {"oauth2_refresh_token_request", ljlua_oauth2_refresh_token_request},
+      {"oauth2_token_flow_update_response",
+       ljlua_oauth2_token_flow_update_response},
+      {"oauth2_token_flow_is_expired", ljlua_oauth2_token_flow_is_expired},
+      {"oauth2_token_flow_ensure", ljlua_oauth2_token_flow_ensure},
+      {"oauth2_introspect_token_request",
+       ljlua_oauth2_introspect_token_request},
+      {"oauth2_revoke_token_request", ljlua_oauth2_revoke_token_request},
+      {"oidc_userinfo_request", ljlua_oidc_userinfo_request},
+      {"oidc_authorization_code_token_request",
+       ljlua_oidc_authorization_code_token_request},
+      {"oauth2_token_response_parse_json",
+       ljlua_oauth2_token_response_parse_json},
+      {"oauth2_introspection_response_parse_json",
+       ljlua_oauth2_introspection_response_parse_json},
+      {"oidc_userinfo_response_parse_json",
+       ljlua_oidc_userinfo_response_parse_json},
+      {"oidc_pkce_challenge", ljlua_oidc_pkce_challenge},
+      {"oidc_pkce_generate", ljlua_oidc_pkce_generate},
+      {"oidc_authorization_url", ljlua_oidc_authorization_url},
+      {"oidc_authorization_callback_parse_query",
+       ljlua_oidc_authorization_callback_parse_query},
+      {"oidc_validate_bearer_token", ljlua_oidc_validate_bearer_token},
+      {"oidc_discovery_url", ljlua_oidc_discovery_url},
+      {"oidc_discovery_parse_json", ljlua_oidc_discovery_parse_json},
+      {"oidc_jwks_cache_select_json", ljlua_oidc_jwks_cache_select_json},
+#endif
+#endif
       {"fixed_string_scratch", ljlua_fixed_string_scratch_new},
       {"json_null", ljlua_json_null},
       {"monotonic_ns", ljlua_monotonic_ns},
@@ -677,7 +890,8 @@ static lonejson_status ljlua_json_lua_sink_write(void *user, const void *data,
   if (lua_pcall(sink->L, 1, 0, 0) != LUA_OK) {
     const char *msg = lua_tostring(sink->L, -1);
     lonejson_status status =
-        ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,                             "%s", msg != NULL ? msg : "Lua sink failed");
+        ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, "%s",
+                        msg != NULL ? msg : "Lua sink failed");
     lua_pop(sink->L, 1);
     return status;
   }

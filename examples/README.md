@@ -94,6 +94,19 @@ Start the local test rig first:
 make compose-up
 ```
 
+The same compose rig also starts a mock OIDC/OAuth2 provider and a lightweight
+API fixture. Run the live OIDC/JWKS bearer-flow check with:
+
+```sh
+make test-oidc-e2e
+```
+
+Run the server-local M2M Basic/Bearer credential check with:
+
+```sh
+make test-m2m-e2e
+```
+
 ## Lua binding
 
 Build and install the Lua module into the local LuaRocks tree:

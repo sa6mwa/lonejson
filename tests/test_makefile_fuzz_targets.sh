@@ -20,6 +20,14 @@ require_line() {
 
 require_line 'lonejson_fuzz_path_value_visitor' \
   'make fuzz does not build/run lonejson_fuzz_path_value_visitor'
+require_line 'lonejson_fuzz_base64' \
+  'make fuzz does not build/run lonejson_fuzz_base64'
+require_line 'build/fuzz/corpus/base64' \
+  'make fuzz does not reference the base64 corpus directory'
+require_line 'fuzz/corpus/base64/.' \
+  'make fuzz does not copy the base64 seed corpus'
+require_line 'artifacts/base64' \
+  'make fuzz does not prepare base64 artifacts'
 require_line 'build/fuzz/corpus/path_value_visitor' \
   'make fuzz does not reference the path value visitor corpus directory'
 require_line 'fuzz/corpus/path_value_visitor/.' \
@@ -34,6 +42,14 @@ require_line 'fuzz/corpus/candidate_stream/.' \
   'make fuzz does not copy the candidate stream seed corpus'
 require_line 'artifacts/candidate_stream' \
   'make fuzz does not prepare candidate stream artifacts'
+require_line 'lonejson_fuzz_jwt' \
+  'make fuzz does not build/run lonejson_fuzz_jwt'
+require_line 'build/fuzz/corpus/jwt' \
+  'make fuzz does not reference the JWT corpus directory'
+require_line 'fuzz/corpus/jwt/.' \
+  'make fuzz does not copy the JWT seed corpus'
+require_line 'artifacts/jwt' \
+  'make fuzz does not prepare JWT artifacts'
 require_line 'make lua-fuzz' \
   'make fuzz does not run the Lua binding fuzz smoke'
 require_line 'tests/test_lua_fuzz.lua' \

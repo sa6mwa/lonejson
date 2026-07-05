@@ -3,6 +3,21 @@ if(NOT LONEJSON_BUILD_WITH_CURL)
     "package-archive requires LONEJSON_BUILD_WITH_CURL=ON; binary releases "
     "must include the lonejson_curl_* ABI")
 endif()
+if(NOT LONEJSON_BUILD_WITH_OPENSSL)
+  message(FATAL_ERROR
+    "package-archive requires LONEJSON_BUILD_WITH_OPENSSL=ON; binary "
+    "releases must prove the c.pkt.systems OpenSSL dependency route")
+endif()
+if(NOT LONEJSON_BUILD_WITH_JWT)
+  message(FATAL_ERROR
+    "package-archive requires LONEJSON_BUILD_WITH_JWT=ON; binary releases "
+    "must include the lonejson_jwt_* ABI")
+endif()
+if(NOT LONEJSON_BUILD_WITH_OIDC)
+  message(FATAL_ERROR
+    "package-archive requires LONEJSON_BUILD_WITH_OIDC=ON; binary releases "
+    "must include the lonejson_oidc_* ABI")
+endif()
 
 set(archive_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}")
 set(package_stage_root "${LONEJSON_BINARY_DIR}/package/archive")
@@ -103,6 +118,7 @@ Name: lonejson
 Description: Strict C89 JSON parser, serializer, and streaming toolkit
 Version: ${LONEJSON_VERSION}
 Libs: -L\${libdir} -llonejson
+Libs.private: -lcrypto
 Cflags: -I\${includedir}
 ")
 
@@ -123,6 +139,7 @@ if(NOT TARGET lonejson::lonejson_static)
   set_target_properties(lonejson::lonejson_static PROPERTIES
     IMPORTED_LOCATION \"\${_lonejson_prefix}/lib/${LONEJSON_STATIC_LIB_NAME}\"
     INTERFACE_INCLUDE_DIRECTORIES \"\${_lonejson_prefix}/include\"
+    INTERFACE_LINK_LIBRARIES crypto
   )
 endif()
 

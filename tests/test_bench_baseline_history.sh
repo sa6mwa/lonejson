@@ -7,6 +7,26 @@ luarocks_exec=${3:-luarocks}
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
+if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  for path in perflogs/latest.json perflogs/lua/latest.json; do
+    if git -C "$repo_root" ls-files --error-unmatch "$path" >/dev/null 2>&1; then
+      printf '%s must be ignored local benchmark output, not tracked source\n' "$path" >&2
+      exit 1
+    fi
+    if ! git -C "$repo_root" check-ignore -q "$path"; then
+      printf '%s must be listed in .gitignore\n' "$path" >&2
+      exit 1
+    fi
+  done
+
+  for path in perflogs/baseline.json perflogs/lua/baseline.json; do
+    if ! git -C "$repo_root" ls-files --error-unmatch "$path" >/dev/null 2>&1; then
+      printf '%s must remain tracked as the frozen benchmark contract\n' "$path" >&2
+      exit 1
+    fi
+  done
+fi
+
 make --no-print-directory -C "$repo_root" lua-rock \
   LUA="$lua_exec" LUAROCKS="$luarocks_exec" >/dev/null
 eval "$("$luarocks_exec" path --tree "$repo_root/build/luarocks")"

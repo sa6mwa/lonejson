@@ -31,6 +31,7 @@ lonejson_import_cache_path(CMAKE_LINKER)
 lonejson_import_cache_path(CMAKE_OTOOL)
 lonejson_import_cache_path(CMAKE_BUILD_TYPE)
 lonejson_import_cache_path(LONEJSON_ABI_VERSION)
+lonejson_import_cache_path(LONEJSON_C_PKT_SYSTEMS_ROOT)
 lonejson_import_cache_path(LONEJSON_MACOS_DEPLOYMENT_TARGET)
 lonejson_import_cache_path(LONEJSON_OSXCROSS_HOST)
 
@@ -48,7 +49,7 @@ if(NOT LONEJSON_MACOS_DEPLOYMENT_TARGET)
   set(LONEJSON_MACOS_DEPLOYMENT_TARGET "15.0")
 endif()
 if(NOT LONEJSON_ABI_VERSION)
-  set(LONEJSON_ABI_VERSION "19")
+  message(FATAL_ERROR "LONEJSON_ABI_VERSION is required for Darwin smoke bundle")
 endif()
 
 get_filename_component(_lonejson_compiler_dir "${CMAKE_C_COMPILER}" DIRECTORY)
@@ -73,6 +74,17 @@ if(NOT CMAKE_OTOOL OR NOT EXISTS "${CMAKE_OTOOL}")
 endif()
 if(NOT EXISTS "${CMAKE_OTOOL}")
   message(FATAL_ERROR "CMAKE_OTOOL is required for Darwin smoke bundle")
+endif()
+if(NOT LONEJSON_C_PKT_SYSTEMS_ROOT)
+  message(FATAL_ERROR
+    "LONEJSON_C_PKT_SYSTEMS_ROOT is required for Darwin static smoke link")
+endif()
+set(lonejson_darwin_crypto_static
+    "${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib/libcrypto.a")
+if(NOT EXISTS "${lonejson_darwin_crypto_static}")
+  message(FATAL_ERROR
+    "missing Darwin c.pkt.systems libcrypto for static smoke link: "
+    "${lonejson_darwin_crypto_static}")
 endif()
 
 set(bundle_root "${LONEJSON_BINARY_DIR}/darwin-smoke-bundle")
@@ -127,6 +139,7 @@ set(common_compile_args
 execute_process(
   COMMAND ${common_compile_args}
     "${release_prefix}/lib/liblonejson.a"
+    "${lonejson_darwin_crypto_static}"
     -o "${consumer_bin_dir}/lonejson_static_smoke"
   RESULT_VARIABLE static_result
   OUTPUT_VARIABLE static_stdout

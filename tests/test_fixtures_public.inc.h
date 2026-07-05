@@ -747,13 +747,13 @@ static void test_public_dynamic_record_helpers(void) {
   lonejson_init(runtime, &test_person_map, &person);
   EXPECT(!lonejson_field_has_presence(&test_person_map.fields[0]));
 
-  status = lonejson_record_assign_string(
-      runtime, &test_person_map, &person, &test_person_map.fields[0],
-      "Dynamic", 7u, &error);
+  status = lonejson_record_assign_string(runtime, &test_person_map, &person,
+                                         &test_person_map.fields[0], "Dynamic",
+                                         7u, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_record_assign_string(
-      runtime, &test_person_map, &person, &test_person_map.fields[1], "dyn",
-      3u, &error);
+  status = lonejson_record_assign_string(runtime, &test_person_map, &person,
+                                         &test_person_map.fields[1], "dyn", 3u,
+                                         &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   person.age = 12;
   person.score = 1.5;
@@ -764,9 +764,9 @@ static void test_public_dynamic_record_helpers(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   person.address.zip = 62157;
 
-  status = lonejson_record_array_append_i64(
-      runtime, &test_person_map, &person, &test_person_map.fields[6],
-      &person.lucky_numbers, 7, &error);
+  status = lonejson_record_array_append_i64(runtime, &test_person_map, &person,
+                                            &test_person_map.fields[6],
+                                            &person.lucky_numbers, 7, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   status = lonejson_record_array_append_string(
       runtime, &test_person_map, &person, &test_person_map.fields[7],
@@ -778,9 +778,9 @@ static void test_public_dynamic_record_helpers(void) {
   EXPECT(item != NULL);
   if (item != NULL) {
     item->id = 9;
-    status = lonejson_record_assign_string(
-        runtime, &test_item_map, item, &test_item_map.fields[1], "nine", 4u,
-        &error);
+    status = lonejson_record_assign_string(runtime, &test_item_map, item,
+                                           &test_item_map.fields[1], "nine", 4u,
+                                           &error);
     EXPECT(status == LONEJSON_STATUS_OK);
   }
 
@@ -823,10 +823,9 @@ static void test_public_dynamic_record_helpers(void) {
       runtime, &test_nullable_primitives_map, &nullable_doc,
       &test_nullable_primitives_map.fields[3], &error);
   EXPECT(status == LONEJSON_STATUS_OK);
-  status = lonejson_record_assign_null(runtime, &test_nullable_child_map,
-                                       &nullable_doc.child,
-                                       &test_nullable_child_map.fields[0],
-                                       &error);
+  status = lonejson_record_assign_null(
+      runtime, &test_nullable_child_map, &nullable_doc.child,
+      &test_nullable_child_map.fields[0], &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(nullable_doc.count == 0);
   EXPECT(nullable_doc.has_count == 0);

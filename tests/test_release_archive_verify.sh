@@ -35,6 +35,20 @@ mkdir -p \
   "$package_root/share/lonejson" \
   "$package_root/share/doc/liblonejson"
 
+no_binary_dist_dir="$tmp_dir/no-binary-dist"
+mkdir -p "$no_binary_dist_dir"
+printf 'header\n' | gzip -9 >"$no_binary_dist_dir/lonejson-9.9.9.h.gz"
+(cd "$no_binary_dist_dir" && sha256sum lonejson-9.9.9.h.gz >lonejson-9.9.9-CHECKSUMS)
+no_binary_log="$tmp_dir/no-binary.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$no_binary_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$no_binary_log" 2>&1; then
+  printf 'expected archive verification to fail with no binary SDK archives\n' >&2
+  exit 1
+fi
+grep -F 'no binary SDK archives listed' "$no_binary_log" >/dev/null
+
 cat >"$package_root/include/lonejson.h" <<'EOF'
 #ifndef LONEJSON_H
 #define LONEJSON_H
@@ -52,6 +66,83 @@ lonejson *lonejson_new(const void *config, lonejson_error *error);
 void lonejson_free(lonejson *runtime);
 lonejson_status lonejson_validate_cstr(lonejson *runtime, const char *json, lonejson_error *error);
 void lonejson_curl_parse_init(void);
+void lonejson_jwt_parse_compact(void);
+void lonejson_jwk_parse_json(void);
+void lonejson_jwks_parse_json(void);
+void lonejson_jwks_select(void);
+void lonejson_jwk_cleanup(void);
+void lonejson_jwks_cleanup(void);
+void lonejson_jwt_decode_compact(void);
+void lonejson_jwt_validate_claims(void);
+void lonejson_jwt_validate_signature(void);
+void lonejson_jwt_header_cleanup(void);
+void lonejson_jwt_claims_cleanup(void);
+void lonejson_oidc_discovery_url(void);
+void lonejson_oidc_discovery_parse_json(void);
+void lonejson_oidc_discovery_validate_issuer(void);
+void lonejson_oidc_discovery_cleanup(void);
+void lonejson_oidc_jwks_cache_init(void);
+void lonejson_oidc_jwks_cache_cleanup(void);
+void lonejson_oidc_jwks_cache_update_json(void);
+void lonejson_oidc_jwks_cache_is_fresh(void);
+void lonejson_oidc_jwks_cache_select(void);
+void lonejson_oidc_jwks_cache_parse_init(void);
+void lonejson_oidc_jwks_cache_write_callback(void);
+void lonejson_oidc_jwks_cache_parse_finish(void);
+void lonejson_oidc_jwks_cache_parse_cleanup(void);
+void lonejson_oauth2_client_credentials_body(void);
+void lonejson_oauth2_refresh_token_body(void);
+void lonejson_oauth2_token_introspection_body(void);
+void lonejson_oauth2_token_revocation_body(void);
+void lonejson_oidc_authorization_code_token_body(void);
+void lonejson_oauth2_client_credentials_request(void);
+void lonejson_oauth2_refresh_token_request(void);
+void lonejson_oauth2_token_flow_init(void);
+void lonejson_oauth2_token_flow_cleanup(void);
+void lonejson_oauth2_token_flow_assign(void);
+void lonejson_oauth2_token_flow_is_expired(void);
+void lonejson_oauth2_token_flow_update_response(void);
+void lonejson_oauth2_token_flow_ensure(void);
+void lonejson_oauth2_introspect_token_request(void);
+void lonejson_oauth2_revoke_token_request(void);
+void lonejson_oidc_fetch_userinfo(void);
+void lonejson_oidc_authorization_code_token_request(void);
+void lonejson_oauth2_token_response_init(void);
+void lonejson_oauth2_token_response_cleanup(void);
+void lonejson_oauth2_token_response_parse_json(void);
+void lonejson_oauth2_introspection_response_init(void);
+void lonejson_oauth2_introspection_response_cleanup(void);
+void lonejson_oauth2_introspection_response_parse_json(void);
+void lonejson_oidc_userinfo_response_init(void);
+void lonejson_oidc_userinfo_response_cleanup(void);
+void lonejson_oidc_userinfo_response_parse_json(void);
+void lonejson_oidc_pkce_init(void);
+void lonejson_oidc_pkce_cleanup(void);
+void lonejson_oidc_pkce_challenge(void);
+void lonejson_oidc_pkce_challenge_with_runtime(void);
+void lonejson_oidc_pkce_generate(void);
+void lonejson_oidc_pkce_generate_with_runtime(void);
+void lonejson_oidc_authorization_url(void);
+void lonejson_oidc_authorization_callback_init(void);
+void lonejson_oidc_authorization_callback_cleanup(void);
+void lonejson_oidc_authorization_callback_parse_query(void);
+void lonejson_auth_failure_string(void);
+void lonejson_oidc_bearer_validation_init(void);
+void lonejson_oidc_bearer_validation_cleanup(void);
+void lonejson_oidc_authorization_bearer_token(void);
+void lonejson_oidc_validate_bearer_token(void);
+void lonejson_m2m_credential_init(void);
+void lonejson_m2m_credential_cleanup(void);
+void lonejson_m2m_credential_generate(void);
+void lonejson_m2m_authentication_init(void);
+void lonejson_m2m_authentication_cleanup(void);
+void lonejson_m2m_verify_authorization(void);
+void lonejson_m2m_signup_init(void);
+void lonejson_m2m_signup_cleanup(void);
+void lonejson_m2m_signup_generate(void);
+void lonejson_m2m_signup_complete_init(void);
+void lonejson_m2m_signup_complete_cleanup(void);
+void lonejson_m2m_signup_complete(void);
 
 #endif
 EOF
@@ -90,6 +181,237 @@ lonejson_status lonejson_validate_cstr(lonejson *runtime_arg, const char *json, 
 
 void lonejson_curl_parse_init(void) {
 }
+
+void lonejson_jwt_parse_compact(void) {
+}
+
+void lonejson_jwk_parse_json(void) {
+}
+
+void lonejson_jwks_parse_json(void) {
+}
+
+void lonejson_jwks_select(void) {
+}
+
+void lonejson_jwk_cleanup(void) {
+}
+
+void lonejson_jwks_cleanup(void) {
+}
+
+void lonejson_jwt_decode_compact(void) {
+}
+
+void lonejson_jwt_validate_claims(void) {
+}
+
+void lonejson_jwt_validate_signature(void) {
+}
+
+void lonejson_jwt_header_cleanup(void) {
+}
+
+void lonejson_jwt_claims_cleanup(void) {
+}
+
+void lonejson_oidc_discovery_url(void) {
+}
+
+void lonejson_oidc_discovery_parse_json(void) {
+}
+
+void lonejson_oidc_discovery_validate_issuer(void) {
+}
+
+void lonejson_oidc_discovery_cleanup(void) {
+}
+
+void lonejson_oidc_jwks_cache_init(void) {
+}
+
+void lonejson_oidc_jwks_cache_cleanup(void) {
+}
+
+void lonejson_oidc_jwks_cache_update_json(void) {
+}
+
+void lonejson_oidc_jwks_cache_is_fresh(void) {
+}
+
+void lonejson_oidc_jwks_cache_select(void) {
+}
+
+void lonejson_oidc_jwks_cache_parse_init(void) {
+}
+
+void lonejson_oidc_jwks_cache_write_callback(void) {
+}
+
+void lonejson_oidc_jwks_cache_parse_finish(void) {
+}
+
+void lonejson_oidc_jwks_cache_parse_cleanup(void) {
+}
+
+void lonejson_oauth2_client_credentials_body(void) {
+}
+
+void lonejson_oauth2_refresh_token_body(void) {
+}
+
+void lonejson_oauth2_token_introspection_body(void) {
+}
+
+void lonejson_oauth2_token_revocation_body(void) {
+}
+
+void lonejson_oidc_authorization_code_token_body(void) {
+}
+
+void lonejson_oauth2_client_credentials_request(void) {
+}
+
+void lonejson_oauth2_refresh_token_request(void) {
+}
+
+void lonejson_oauth2_token_flow_init(void) {
+}
+
+void lonejson_oauth2_token_flow_cleanup(void) {
+}
+
+void lonejson_oauth2_token_flow_assign(void) {
+}
+
+void lonejson_oauth2_token_flow_is_expired(void) {
+}
+
+void lonejson_oauth2_token_flow_update_response(void) {
+}
+
+void lonejson_oauth2_token_flow_ensure(void) {
+}
+
+void lonejson_oauth2_introspect_token_request(void) {
+}
+
+void lonejson_oauth2_revoke_token_request(void) {
+}
+
+void lonejson_oidc_fetch_userinfo(void) {
+}
+
+void lonejson_oidc_authorization_code_token_request(void) {
+}
+
+void lonejson_oauth2_token_response_init(void) {
+}
+
+void lonejson_oauth2_token_response_cleanup(void) {
+}
+
+void lonejson_oauth2_token_response_parse_json(void) {
+}
+
+void lonejson_oauth2_introspection_response_init(void) {
+}
+
+void lonejson_oauth2_introspection_response_cleanup(void) {
+}
+
+void lonejson_oauth2_introspection_response_parse_json(void) {
+}
+
+void lonejson_oidc_userinfo_response_init(void) {
+}
+
+void lonejson_oidc_userinfo_response_cleanup(void) {
+}
+
+void lonejson_oidc_userinfo_response_parse_json(void) {
+}
+
+void lonejson_oidc_pkce_init(void) {
+}
+
+void lonejson_oidc_pkce_cleanup(void) {
+}
+
+void lonejson_oidc_pkce_challenge(void) {
+}
+
+void lonejson_oidc_pkce_challenge_with_runtime(void) {
+}
+
+void lonejson_oidc_pkce_generate(void) {
+}
+
+void lonejson_oidc_pkce_generate_with_runtime(void) {
+}
+
+void lonejson_oidc_authorization_url(void) {
+}
+
+void lonejson_oidc_authorization_callback_init(void) {
+}
+
+void lonejson_oidc_authorization_callback_cleanup(void) {
+}
+
+void lonejson_oidc_authorization_callback_parse_query(void) {
+}
+
+void lonejson_auth_failure_string(void) {
+}
+
+void lonejson_oidc_bearer_validation_init(void) {
+}
+
+void lonejson_oidc_bearer_validation_cleanup(void) {
+}
+
+void lonejson_oidc_authorization_bearer_token(void) {
+}
+
+void lonejson_oidc_validate_bearer_token(void) {
+}
+
+void lonejson_m2m_credential_init(void) {
+}
+
+void lonejson_m2m_credential_cleanup(void) {
+}
+
+void lonejson_m2m_credential_generate(void) {
+}
+
+void lonejson_m2m_authentication_init(void) {
+}
+
+void lonejson_m2m_authentication_cleanup(void) {
+}
+
+void lonejson_m2m_verify_authorization(void) {
+}
+
+void lonejson_m2m_signup_init(void) {
+}
+
+void lonejson_m2m_signup_cleanup(void) {
+}
+
+void lonejson_m2m_signup_generate(void) {
+}
+
+void lonejson_m2m_signup_complete_init(void) {
+}
+
+void lonejson_m2m_signup_complete_cleanup(void) {
+}
+
+void lonejson_m2m_signup_complete(void) {
+}
 EOF
 
 cc -shared -fPIC -I"$package_root/include" "$tmp_dir/lonejson_stub.c" \
@@ -107,6 +429,7 @@ Name: lonejson
 Description: lonejson archive verifier fixture
 Version: 9.9.9
 Libs: -L${libdir} -llonejson
+Libs.private: -lcrypto
 Cflags: -I${includedir}
 EOF
 
@@ -115,6 +438,11 @@ add_library(lonejson::lonejson SHARED IMPORTED)
 set_target_properties(lonejson::lonejson PROPERTIES
   IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/../../liblonejson.so"
   INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include")
+add_library(lonejson::lonejson_static STATIC IMPORTED)
+set_target_properties(lonejson::lonejson_static PROPERTIES
+  IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/../../liblonejson.a"
+  INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include"
+  INTERFACE_LINK_LIBRARIES crypto)
 EOF
 
 cat >"$package_root/lib/cmake/lonejson/lonejsonConfigVersion.cmake" <<'EOF'
@@ -137,7 +465,11 @@ cat >"$package_root/share/lonejson/dependencies.json" <<'EOF'
       "sha256": "0e3f96cef656ad927ff952e5fb195fabaea551150017df0368f6fd30c5fa8039",
       "bundled": false,
       "external": true,
-      "role": "release-sdk-build-dependency"
+      "role": "release-sdk-build-dependency",
+      "provides": [
+        "curl",
+        "openssl"
+      ]
     }
   ]
 }
@@ -185,6 +517,70 @@ if "$repo_root/scripts/verify_release_archives.sh" \
   exit 1
 fi
 grep -F 'missing required file:' "$missing_metadata_log" >/dev/null
+
+missing_pkg_crypto_dist_dir="$tmp_dir/missing-pkg-crypto-dist"
+missing_pkg_crypto_package_dir="$tmp_dir/missing-pkg-crypto-package"
+missing_pkg_crypto_root="$missing_pkg_crypto_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$missing_pkg_crypto_dist_dir"
+cp -R "$tmp_dir/package" "$missing_pkg_crypto_package_dir"
+sed -i '/^Libs\.private: -lcrypto$/d' \
+  "$missing_pkg_crypto_root/lib/pkgconfig/lonejson.pc"
+tar -C "$missing_pkg_crypto_package_dir" -czf \
+  "$missing_pkg_crypto_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$missing_pkg_crypto_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+missing_pkg_crypto_log="$tmp_dir/missing-pkg-crypto.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$missing_pkg_crypto_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$missing_pkg_crypto_log" 2>&1; then
+  printf 'expected archive verification to fail when pkg-config omits static libcrypto\n' >&2
+  exit 1
+fi
+grep -F 'missing static libcrypto pkg-config dependency' "$missing_pkg_crypto_log" >/dev/null
+
+missing_cmake_crypto_dist_dir="$tmp_dir/missing-cmake-crypto-dist"
+missing_cmake_crypto_package_dir="$tmp_dir/missing-cmake-crypto-package"
+missing_cmake_crypto_root="$missing_cmake_crypto_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$missing_cmake_crypto_dist_dir"
+cp -R "$tmp_dir/package" "$missing_cmake_crypto_package_dir"
+sed -i '/INTERFACE_LINK_LIBRARIES crypto/d' \
+  "$missing_cmake_crypto_root/lib/cmake/lonejson/lonejsonConfig.cmake"
+tar -C "$missing_cmake_crypto_package_dir" -czf \
+  "$missing_cmake_crypto_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$missing_cmake_crypto_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+missing_cmake_crypto_log="$tmp_dir/missing-cmake-crypto.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$missing_cmake_crypto_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$missing_cmake_crypto_log" 2>&1; then
+  printf 'expected archive verification to fail when CMake omits static libcrypto\n' >&2
+  exit 1
+fi
+grep -F 'missing static libcrypto CMake link dependency' "$missing_cmake_crypto_log" >/dev/null
+
+openssl_metadata_dist_dir="$tmp_dir/openssl-metadata-dist"
+openssl_metadata_package_dir="$tmp_dir/openssl-metadata-package"
+openssl_metadata_root="$openssl_metadata_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$openssl_metadata_dist_dir"
+cp -R "$tmp_dir/package" "$openssl_metadata_package_dir"
+cat >>"$openssl_metadata_root/lib/pkgconfig/lonejson.pc" <<'EOF'
+Requires.private: openssl
+EOF
+tar -C "$openssl_metadata_package_dir" -czf \
+  "$openssl_metadata_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$openssl_metadata_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+openssl_metadata_log="$tmp_dir/openssl-metadata.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$openssl_metadata_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$openssl_metadata_log" 2>&1; then
+  printf 'expected archive verification to fail when pkg-config requires OpenSSL\n' >&2
+  exit 1
+fi
+grep -F 'unexpected curl/OpenSSL pkg-config dependency' "$openssl_metadata_log" >/dev/null
 
 broken_dist_dir="$tmp_dir/broken-dist"
 broken_package_dir="$tmp_dir/broken-package"
@@ -245,3 +641,66 @@ if "$repo_root/scripts/verify_release_archives.sh" \
   exit 1
 fi
 grep -F 'missing lonejson_curl_* ABI symbol in static library' "$broken_log" >/dev/null
+
+jwt_broken_dist_dir="$tmp_dir/jwt-broken-dist"
+jwt_broken_package_dir="$tmp_dir/jwt-broken-package"
+jwt_broken_package_root="$jwt_broken_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$jwt_broken_dist_dir"
+cp -R "$tmp_dir/package" "$jwt_broken_package_dir"
+
+cat >"$tmp_dir/lonejson_static_without_jwt.c" <<'EOF'
+#include <lonejson.h>
+
+struct lonejson {
+  int unused;
+};
+
+static lonejson runtime;
+
+void lonejson_error_init(lonejson_error *error) {
+  if (error != 0) {
+    error->code = 0;
+  }
+}
+
+lonejson *lonejson_new(const void *config, lonejson_error *error) {
+  (void)config;
+  lonejson_error_init(error);
+  return &runtime;
+}
+
+void lonejson_free(lonejson *runtime_arg) {
+  (void)runtime_arg;
+}
+
+lonejson_status lonejson_validate_cstr(lonejson *runtime_arg, const char *json, lonejson_error *error) {
+  (void)runtime_arg;
+  (void)json;
+  lonejson_error_init(error);
+  return LONEJSON_STATUS_OK;
+}
+
+void lonejson_curl_parse_init(void) {
+}
+EOF
+
+cc -c -I"$jwt_broken_package_root/include" "$tmp_dir/lonejson_static_without_jwt.c" \
+  -o "$tmp_dir/lonejson_static_without_jwt.o"
+rm -f "$jwt_broken_package_root/lib/liblonejson.a"
+ar rcs "$jwt_broken_package_root/lib/liblonejson.a" \
+  "$tmp_dir/lonejson_static_without_jwt.o"
+
+tar -C "$jwt_broken_package_dir" -czf \
+  "$jwt_broken_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$jwt_broken_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+
+jwt_broken_log="$tmp_dir/jwt-broken.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$jwt_broken_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$jwt_broken_log" 2>&1; then
+  printf 'expected archive verification to fail when static library lacks JWT ABI\n' >&2
+  exit 1
+fi
+grep -F 'missing lonejson_jwt_* ABI symbol in static library' "$jwt_broken_log" >/dev/null

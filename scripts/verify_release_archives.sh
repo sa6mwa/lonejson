@@ -219,14 +219,23 @@ require_archive_contract() {
   require_file "$package_root/lib/cmake/lonejson/lonejsonConfigVersion.cmake"
   dependency_manifest="$package_root/share/lonejson/dependencies.json"
   require_file "$dependency_manifest"
-  if grep -RE 'libcurl|c\.pkt\.systems|\.deps/|/home/|/build/' \
+  if grep -RE 'libcurl|libssl|c\.pkt\.systems|\.deps/|/home/|/build/' \
       "$package_root/lib/pkgconfig/lonejson.pc" \
       "$package_root/lib/cmake/lonejson" >/dev/null; then
     printf 'forbidden dependency or path leak in release metadata for %s\n' "$archive" >&2
     exit 1
   fi
-  if grep -Eq '^(Requires|Requires.private):.*curl' "$package_root/lib/pkgconfig/lonejson.pc"; then
-    printf 'unexpected curl pkg-config dependency in %s\n' "$archive" >&2
+  if grep -Eq '^(Requires|Requires.private):.*(curl|ssl|crypto|openssl|OpenSSL)' "$package_root/lib/pkgconfig/lonejson.pc"; then
+    printf 'unexpected curl/OpenSSL pkg-config dependency in %s\n' "$archive" >&2
+    exit 1
+  fi
+  if ! grep -Eq '^Libs\.private:.*[[:space:]]-lcrypto([[:space:]]|$)' "$package_root/lib/pkgconfig/lonejson.pc"; then
+    printf 'missing static libcrypto pkg-config dependency in %s\n' "$archive" >&2
+    exit 1
+  fi
+  if ! grep -F 'INTERFACE_LINK_LIBRARIES crypto' \
+      "$package_root/lib/cmake/lonejson/lonejsonConfig.cmake" >/dev/null; then
+    printf 'missing static libcrypto CMake link dependency in %s\n' "$archive" >&2
     exit 1
   fi
   if grep -E '\.deps/|/home/|/build/|file://' "$dependency_manifest" >/dev/null; then
@@ -241,7 +250,9 @@ require_archive_contract() {
       '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.6.0/c.pkt.systems-0.6.0-' \
       '"sha256": "' \
       '"bundled": false' \
-      '"external": true'; do
+      '"external": true' \
+      '"curl"' \
+      '"openssl"'; do
     if ! grep -F "$required_metadata" "$dependency_manifest" >/dev/null; then
       printf 'missing dependency manifest metadata in %s: %s\n' "$archive" "$required_metadata" >&2
       exit 1
@@ -266,7 +277,7 @@ require_archive_contract() {
       "$archive"
     dynamic_metadata="$("$OTOOL" -L "$shared_lib"; "$OTOOL" -l "$shared_lib")"
     case "$dynamic_metadata" in
-      *libcurl* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
+      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
         printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
         exit 1
         ;;
@@ -288,7 +299,7 @@ require_archive_contract() {
     fi
     dynamic_metadata="$("$READELF" -d "$shared_lib")"
     case "$dynamic_metadata" in
-      *libcurl* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
+      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
         printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
         exit 1
         ;;
@@ -420,6 +431,41 @@ require_curl_symbol() {
   rm -rf "$tmp_dir"
 }
 
+require_jwt_symbol() {
+  local archive=$1
+  local target_id=$2
+  local preset=$3
+  local tmp_dir package_root shared_lib static_lib
+
+  tmp_dir="$(mktemp -d)"
+  package_root="$(extract_archive "$archive" "$tmp_dir")"
+
+  if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
+    shared_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson*.dylib' | sort | head -n 1)"
+  else
+    shared_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson.so*' ! -type l | sort | head -n 1)"
+  fi
+  if [[ -z "$shared_lib" ]]; then
+    printf 'missing packaged shared library in %s\n' "$archive" >&2
+    exit 1
+  fi
+  static_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson.a' | sort | head -n 1)"
+  if [[ -z "$static_lib" ]]; then
+    printf 'missing packaged static library in %s\n' "$archive" >&2
+    exit 1
+  fi
+
+  "$repo_root/scripts/check_jwt_abi_symbols.sh" \
+    "$repo_root" \
+    "$build_root/$preset" \
+    "$target_id" \
+    "$shared_lib" \
+    "$static_lib" \
+    "$archive"
+
+  rm -rf "$tmp_dir"
+}
+
 require_command cmake
 require_command pkg-config
 require_command tar
@@ -436,9 +482,16 @@ while read -r _hash artifact; do
   preset="$(target_preset "$target_id")"
   require_archive_contract "$archive" "$target_id" "$preset"
   require_curl_symbol "$archive" "$target_id" "$preset"
+  require_jwt_symbol "$archive" "$target_id" "$preset"
   require_archive_consumer_metadata "$archive" "$target_id" "$preset"
   verified=$((verified + 1))
 done <"$checksums"
+
+if [[ "$verified" -eq 0 ]]; then
+  printf 'release archive verification failed: no binary SDK archives listed in %s\n' \
+    "$checksums" >&2
+  exit 1
+fi
 
 printf 'release archive verification passed: %s (%d binary SDK archive(s))\n' \
   "$checksums" "$verified"

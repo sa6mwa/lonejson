@@ -386,6 +386,14 @@ struct lonejson_runtime {
   lonejson__value_limits value_limits;
   lonejson__write_options write_options;
   lonejson__spool_options spool_options[3];
+#ifdef LONEJSON_WITH_JWT
+  lonejson_auth_provider auth_provider;
+  int has_auth_provider;
+#endif
+#ifdef LONEJSON_WITH_OIDC
+  lonejson_http_provider http_provider;
+  int has_http_provider;
+#endif
 };
 
 struct lonejson__runtime_handle {
@@ -1283,8 +1291,8 @@ lonejson_path_value_visitor lonejson_default_path_value_visitor(void) {
   return visitor;
 }
 
-lonejson_candidate_stream_options lonejson_default_candidate_stream_options(
-    void) {
+lonejson_candidate_stream_options
+lonejson_default_candidate_stream_options(void) {
   lonejson_candidate_stream_options options;
 
   memset(&options, 0, sizeof(options));

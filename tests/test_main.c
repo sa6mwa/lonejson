@@ -1,6 +1,7 @@
 #define LONEJSON_TEST_RUNTIME_BORROW_HOOK 1
 #include "test_support.inc.h"
 /* clang-format off */
+#include "test_base64.inc.h"
 #include "test_protocol_framing.inc.h"
 #include "test_parse_serialize.inc.h"
 #include "test_array_stream.inc.h"
@@ -13,9 +14,46 @@
 #include "test_writer.inc.h"
 #include "test_value_rewrite.inc.h"
 #include "test_curl_misc.inc.h"
+#include "test_jwt.inc.h"
 /* clang-format on */
 
 int main(void) {
+  test_base64_encode_decode_variants();
+  test_base64_padding_and_failure_modes();
+  test_base64_sink_equivalence_and_aliases();
+  test_base64_url_raw_decode_vectors();
+  test_jwt_compact_parse_segments();
+  test_jwt_compact_parse_failures();
+  test_jwk_parse_json_shapes();
+  test_jwks_parse_and_select();
+  test_jwk_parse_failures();
+  test_jwt_decode_and_validate_claims();
+  test_jwt_validate_rs256_signature();
+  test_jwt_validate_x5c_signature_policy();
+  test_jwt_validate_recommended_signatures();
+  test_jwt_auth_provider_runtime_boundary();
+  test_jwt_validate_signature_failures();
+  test_jwt_claim_validation_failures();
+  test_jwt_decode_claim_failures();
+  test_oidc_discovery_url();
+  test_oidc_discovery_parse_and_validate();
+  test_oidc_discovery_failures();
+  test_oidc_jwks_cache_update_and_select();
+  test_oidc_jwks_cache_failure_modes();
+  test_oidc_jwks_cache_curl_adapter();
+  test_oidc_http_provider_helpers();
+  test_oauth2_client_credentials_body();
+  test_oauth2_token_response_parse();
+  test_oauth2_token_flow_helpers();
+  test_oauth2_token_response_failures();
+  test_oidc_pkce_challenge_and_generate();
+  test_oidc_authorization_url();
+  test_oidc_authorization_callback_parse();
+  test_oidc_authorization_bearer_token();
+  test_oidc_validate_bearer_token();
+  test_oidc_validate_bearer_token_failures();
+  test_m2m_credential_store_auth();
+  test_m2m_signup_flow();
   test_parse_implicit_destination_reset();
   test_dynamic_allocation_cleanup_balance();
   test_dynamic_allocation_reset_reparse_balance();
