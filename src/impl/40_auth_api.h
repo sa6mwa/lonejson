@@ -3238,6 +3238,10 @@ lonejson__jwt_visit_buffer_append(lonejson__jwt_claim_visit *state,
   if (len == 0u) {
     return LONEJSON_STATUS_OK;
   }
+  if (memchr(data, '\0', len) != NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "JWT string claim contains NUL byte");
+  }
   if (state->len > SIZE_MAX - len - 1u) {
     return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                                "JWT claim value is too large");

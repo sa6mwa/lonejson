@@ -1271,6 +1271,79 @@ static void test_jwt_decode_claim_failures(void) {
       "W10."
       "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
       "c2ln";
+  static const char nul_alg[] =
+      "eyJhbGciOiJSUzI1Nlx1MDAwMG5vbmUiLCJraWQiOiJrMSJ9."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char nul_kid[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxXHUwMDAwZXZpbCJ9."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char nul_typ[] =
+      "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVFx1MDAwMGV2aWwifQ."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char nul_x5t[] =
+      "eyJhbGciOiJSUzI1NiIsIng1dCI6IkFBXHUwMDAwZXZpbCJ9."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char nul_x5t_s256[] =
+      "eyJhbGciOiJSUzI1NiIsIng1dCNTMjU2IjoiQUFcdTAwMDBldmlsIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char nul_x5c[] =
+      "eyJhbGciOiJSUzI1NiIsIng1YyI6WyJBQT09XHUwMDAwZXZpbCJdfQ."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char nul_issuer[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXJcdTAwMDBldmlsIiwiYXVkIjoiYXBpIiwiZXhwIjoyMDAw"
+      "fQ."
+      "c2ln";
+  static const char nul_sub[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJzdWIiOiJzXHUwMDAwZXZpbCIsImF1ZCI6ImFwaSIs"
+      "ImV4cCI6MjAwMH0."
+      "c2ln";
+  static const char nul_audience[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGlcdTAwMDBldmlsIiwiZXhwIjoyMDAw"
+      "fQ."
+      "c2ln";
+  static const char nul_audience_array[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOlsiYXBpXHUwMDAwZXZpbCJdLCJleHAiOjIw"
+      "MDB9."
+      "c2ln";
+  static const char nul_nonce[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJub25jZSI6Im5vbmNlXHUwMDAw"
+      "ZXZpbCIsImV4cCI6MjAwMH0."
+      "c2ln";
+  static const char nul_scope[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJzY29wZSI6InJlYWRcdTAwMDB3"
+      "cml0ZSIsImV4cCI6MjAwMH0."
+      "c2ln";
+  static const char nul_azp[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOlsiYXBpIiwiY2xpZW50Il0sImF6cCI6ImNs"
+      "aWVudFx1MDAwMGV2aWwiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char nul_scp_string[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJzY3AiOiJhZG1pblx1MDAwMGV2"
+      "aWwiLCJleHAiOjIwMDB9."
+      "c2ln";
+  static const char nul_scp[] =
+      "eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJzY3AiOlsiYWRtaW5cdTAwMDBl"
+      "dmlsIl0sImV4cCI6MjAwMH0."
+      "c2ln";
+  static const char nul_crit[] =
+      "eyJhbGciOiJSUzI1NiIsImNyaXQiOlsiZXhwLXRlc3RcdTAwMDBldmlsIl19."
+      "eyJpc3MiOiJpc3N1ZXIiLCJhdWQiOiJhcGkiLCJleHAiOjIwMDB9."
+      "c2ln";
   lonejson_jwt_header header;
   lonejson_jwt_claims claims;
   lonejson_jwt_claim_policy policy;
@@ -1326,6 +1399,59 @@ static void test_jwt_decode_claim_failures(void) {
   EXPECT(lonejson_jwt_decode_compact(
              test_default_runtime(), root_array, strlen(root_array), &policy,
              &header, &claims, &error) == LONEJSON_STATUS_TYPE_MISMATCH);
+
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_alg,
+                                     strlen(nul_alg), &policy, &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_kid,
+                                     strlen(nul_kid), &policy, &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_typ,
+                                     strlen(nul_typ), &policy, &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_x5t,
+                                     strlen(nul_x5t), &policy, &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_x5t_s256,
+                                     strlen(nul_x5t_s256), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_x5c,
+                                     strlen(nul_x5c), &policy, &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(
+             test_default_runtime(), nul_issuer, strlen(nul_issuer), &policy,
+             &header, &claims, &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_sub,
+                                     strlen(nul_sub), &policy, &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_audience,
+                                     strlen(nul_audience), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_audience_array,
+                                     strlen(nul_audience_array), &policy,
+                                     &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(
+             test_default_runtime(), nul_nonce, strlen(nul_nonce), &policy,
+             &header, &claims, &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(
+             test_default_runtime(), nul_scope, strlen(nul_scope), &policy,
+             &header, &claims, &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_azp,
+                                     strlen(nul_azp), &policy, &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_scp_string,
+                                     strlen(nul_scp_string), &policy, &header,
+                                     &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(test_default_runtime(), nul_scp,
+                                     strlen(nul_scp), &policy, &header, &claims,
+                                     &error) == LONEJSON_STATUS_INVALID_JSON);
+  EXPECT(lonejson_jwt_decode_compact(
+             test_default_runtime(), nul_crit, strlen(nul_crit), &policy,
+             &header, &claims, &error) == LONEJSON_STATUS_INVALID_JSON);
 
   policy.max_token_bytes = 8u;
   EXPECT(lonejson_jwt_decode_compact(
