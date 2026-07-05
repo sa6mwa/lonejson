@@ -3,16 +3,27 @@
 Generated benchmark artifacts live here.
 
 The standalone Lua benchmark harness writes its artifacts under
-`perflogs/lua/`. That harness is intentionally separate because it depends on
-Lua/LuaRocks and compares Lua lanes only against lonejson's C sibling lanes,
-not an external C comparator.
+the same per-host archive as the C benchmark. That harness is intentionally
+separate because it depends on Lua/LuaRocks and compares Lua lanes only against
+lonejson's C sibling lanes, not an external C comparator.
+
+Benchmark output is scoped by a privacy-preserving host id:
+
+```sh
+uname -n | md5sum
+```
+
+The first field of that command becomes `perflogs/hosts/<host-id>/`. Public
+benchmark files store that host id in the JSON `host` field rather than the raw
+hostname.
 
 Files:
 
-* `latest.json` stores the most recent benchmark run as one JSON object and is ignored because it is local run output.
-* `history.jsonl` appends every benchmark run as compact JSONL.
-* `baseline.json` stores a frozen run copied from the last history entry and is committed as the comparison baseline.
-* `runs/<timestamp_epoch_ns>.json` stores archived benchmark reports.
+* `hosts/<host-id>/latest.json` stores the most recent benchmark run as one JSON object and is ignored because it is local run output.
+* `hosts/<host-id>/history.jsonl` appends every benchmark run as compact JSONL.
+* `hosts/<host-id>/baseline.json` stores a frozen run copied from the last history entry and is committed as that host's comparison baseline.
+* `hosts/<host-id>/runs/<timestamp_epoch_ns>.json` stores archived benchmark reports.
+* `hosts/<host-id>/lua/latest.json`, `history.jsonl`, `baseline.json`, and `runs/` store the equivalent Lua benchmark artifacts for the same host id.
 
 The benchmark tool reads and writes these files using `lonejson` itself.
 
@@ -49,4 +60,4 @@ Methodology:
   once into a separate result file before failing. This keeps transient host
   scheduling noise from breaking the full test suite while still requiring
   reproducible material regressions to fail.
-* Freeze a new `baseline.json` whenever the benchmark schema, benchmark case set, or measurement method changes.
+* Freeze a new host-specific `baseline.json` whenever the benchmark schema, benchmark case set, measurement method, or benchmark host changes.

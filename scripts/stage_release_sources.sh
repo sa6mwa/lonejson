@@ -46,10 +46,12 @@ else
     --exclude='./docker/nginx/certs/server.key' \
     --exclude='./docker/nginx/certs/openssl.cnf' \
     --exclude='./docker/nginx/generated' \
-    --exclude='./perflogs/history.jsonl' \
-    --exclude='./perflogs/runs' \
-    --exclude='./perflogs/lua/history.jsonl' \
-    --exclude='./perflogs/lua/runs' \
+    --exclude='./perflogs/hosts/*/history.jsonl' \
+    --exclude='./perflogs/hosts/*/latest.json' \
+    --exclude='./perflogs/hosts/*/runs' \
+    --exclude='./perflogs/hosts/*/lua/history.jsonl' \
+    --exclude='./perflogs/hosts/*/lua/latest.json' \
+    --exclude='./perflogs/hosts/*/lua/runs' \
     --exclude='./compile_commands.json' \
     --exclude='./fuzz/generated' \
     --exclude='./src/lua/*.o' \

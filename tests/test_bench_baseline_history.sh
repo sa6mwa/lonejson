@@ -8,7 +8,13 @@ tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
 if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  for path in perflogs/latest.json perflogs/lua/latest.json; do
+  for path in \
+    perflogs/hosts/testhost/history.jsonl \
+    perflogs/hosts/testhost/latest.json \
+    perflogs/hosts/testhost/runs/1.json \
+    perflogs/hosts/testhost/lua/history.jsonl \
+    perflogs/hosts/testhost/lua/latest.json \
+    perflogs/hosts/testhost/lua/runs/1.json; do
     if git -C "$repo_root" ls-files --error-unmatch "$path" >/dev/null 2>&1; then
       printf '%s must be ignored local benchmark output, not tracked source\n' "$path" >&2
       exit 1
@@ -19,7 +25,9 @@ if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fi
   done
 
-  for path in perflogs/baseline.json perflogs/lua/baseline.json; do
+  for path in \
+    perflogs/hosts/f259bcc951a8f53802cc755f08e5e218/baseline.json \
+    perflogs/hosts/f259bcc951a8f53802cc755f08e5e218/lua/baseline.json; do
     if ! git -C "$repo_root" ls-files --error-unmatch "$path" >/dev/null 2>&1; then
       printf '%s must remain tracked as the frozen benchmark contract\n' "$path" >&2
       exit 1
@@ -36,7 +44,7 @@ export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
 git -C "$tmp_dir" init -q
 git -C "$tmp_dir" config user.email test@example.invalid
 git -C "$tmp_dir" config user.name 'lonejson test'
-mkdir -p "$tmp_dir/perflogs"
+mkdir -p "$tmp_dir/perflogs/hosts/testhost"
 
 write_baseline() {
   local alpha=$1
@@ -55,22 +63,22 @@ write_baseline() {
       printf ',{"name":"stream/gamma/lonejson","mib_per_sec":%s}' "$gamma"
     fi
     printf ']}'
-  } >"$tmp_dir/perflogs/baseline.json"
+  } >"$tmp_dir/perflogs/hosts/testhost/baseline.json"
 }
 
 write_baseline 100 50 -
-git -C "$tmp_dir" add perflogs/baseline.json
+git -C "$tmp_dir" add perflogs/hosts/testhost/baseline.json
 git -C "$tmp_dir" commit -q -m 'bench: add first baseline'
 
 write_baseline 120 - 5
-git -C "$tmp_dir" add perflogs/baseline.json
+git -C "$tmp_dir" add perflogs/hosts/testhost/baseline.json
 git -C "$tmp_dir" commit -q -m 'bench: add second baseline'
 
 write_baseline 90 55 6
-git -C "$tmp_dir" add perflogs/baseline.json
+git -C "$tmp_dir" add perflogs/hosts/testhost/baseline.json
 git -C "$tmp_dir" commit -q -m 'bench: add third baseline'
 
-output=$("$lua_exec" "$repo_root/scripts/bench_baseline_history.lua" --repo "$tmp_dir" --kind c)
+output=$("$lua_exec" "$repo_root/scripts/bench_baseline_history.lua" --repo "$tmp_dir" --kind c --host-id testhost)
 
 printf '%s\n' "$output" | grep -q 'REGRESSION: 1 metric'
 printf '%s\n' "$output" | grep -q 'NOTICE: 1 material regression'

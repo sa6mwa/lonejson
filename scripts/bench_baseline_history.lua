@@ -3,8 +3,12 @@
 local lj = require("lonejson")
 
 local BASELINES = {
-  c = "perflogs/baseline.json",
-  lua = "perflogs/lua/baseline.json",
+  c = "perflogs/hosts/%s/baseline.json",
+  lua = "perflogs/hosts/%s/lua/baseline.json",
+}
+
+local DEFAULT_HOST_IDS = {
+  "f259bcc951a8f53802cc755f08e5e218",
 }
 
 local function shell_quote(value)
@@ -46,8 +50,12 @@ local function serialize_key(run)
   return table.concat(parts, "|")
 end
 
-local function load_snapshots(repo, kind, limit)
-  local path = BASELINES[kind]
+local function format_baseline_path(kind, host_id)
+  return string.format(BASELINES[kind], host_id)
+end
+
+local function load_snapshots(repo, kind, limit, host_id)
+  local path = format_baseline_path(kind, host_id)
   local log = run_git(repo, {
     "log",
     "--reverse",
@@ -93,6 +101,7 @@ local function load_snapshots(repo, kind, limit)
             schema = run.schema_version or "?",
             run_time = run.timestamp_utc or "?",
             host = run.host or "?",
+            host_id = host_id,
             results = results,
           }
         end
@@ -237,7 +246,7 @@ local function print_kind(kind, snapshots, small, material)
     return 0
   end
 
-  print("id  commit   date        schema run-time             host results")
+  print("id  commit   date        schema run-time             host-id  results")
   for _, snapshot in ipairs(snapshots) do
     print(string.format(
       "%-3s %-7s %-10s %-6s %-20s %-8s %7d",
@@ -246,7 +255,7 @@ local function print_kind(kind, snapshots, small, material)
       snapshot.commit_date,
       tostring(snapshot.schema),
       snapshot.run_time,
-      trim(snapshot.host, 8),
+      trim(snapshot.host_id or snapshot.host, 8),
       count_results(snapshot.results)
     ))
   end
@@ -330,7 +339,14 @@ local function print_kind(kind, snapshots, small, material)
 end
 
 local function parse_args(argv)
-  local args = { repo = ".", kind = "all", limit = nil, small = 3.0, material = 10.0 }
+  local args = {
+    repo = ".",
+    kind = "all",
+    limit = nil,
+    small = 3.0,
+    material = 10.0,
+    host_ids = DEFAULT_HOST_IDS,
+  }
   local i = 1
   while i <= #argv do
     local item = argv[i]
@@ -349,9 +365,12 @@ local function parse_args(argv)
     elseif item == "--material" then
       i = i + 1
       args.material = tonumber(assert(argv[i], "--material requires a value"))
+    elseif item == "--host-id" then
+      i = i + 1
+      args.host_ids = { assert(argv[i], "--host-id requires a value") }
     elseif item == "--help" or item == "-h" then
       print("usage: bench_baseline_history.lua [--repo DIR] [--kind all|c|lua]")
-      print("                                  [--limit N] [--small PCT]")
+      print("                                  [--host-id HASH] [--limit N] [--small PCT]")
       print("                                  [--material PCT]")
       os.exit(0)
     else
@@ -368,12 +387,16 @@ end
 local args = parse_args(arg)
 local kinds = args.kind == "all" and { "c", "lua" } or { args.kind }
 local total_regressions = 0
-for index, kind in ipairs(kinds) do
-  if index > 1 then
-    print("")
+local section = 0
+for _, host_id in ipairs(args.host_ids) do
+  for _, kind in ipairs(kinds) do
+    section = section + 1
+    if section > 1 then
+      print("")
+    end
+    total_regressions = total_regressions
+      + print_kind(kind, load_snapshots(args.repo, kind, args.limit, host_id), args.small, args.material)
   end
-  total_regressions = total_regressions
-    + print_kind(kind, load_snapshots(args.repo, kind, args.limit), args.small, args.material)
 end
 if total_regressions > 0 then
   print(string.format("NOTICE: %d material regression(s); exit status remains 0.", total_regressions))
