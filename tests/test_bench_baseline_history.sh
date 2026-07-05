@@ -7,6 +7,32 @@ luarocks_exec=${3:-luarocks}
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
+if [ "$("$repo_root/scripts/bench_host_id.sh" wopr)" != \
+    "f259bcc951a8f53802cc755f08e5e218" ]; then
+  printf 'bench host id helper changed the frozen wopr host hash\n' >&2
+  exit 1
+fi
+
+mkdir -p "$tmp_dir/bin"
+cat >"$tmp_dir/bin/md5sum" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+cat >"$tmp_dir/bin/md5" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" != "-q" ]; then
+  exit 1
+fi
+cat >/dev/null
+printf '%s\n' F259BCC951A8F53802CC755F08E5E218
+EOF
+chmod +x "$tmp_dir/bin/md5sum" "$tmp_dir/bin/md5"
+if [ "$(PATH="$tmp_dir/bin:/usr/bin:/bin" "$repo_root/scripts/bench_host_id.sh" wopr)" != \
+    "f259bcc951a8f53802cc755f08e5e218" ]; then
+  printf 'bench host id helper did not normalize md5 -q fallback output\n' >&2
+  exit 1
+fi
+
 if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   for path in \
     perflogs/hosts/testhost/history.jsonl \

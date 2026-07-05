@@ -75,6 +75,7 @@ require_file CMakeLists.txt
 require_file CMakePresets.json
 require_file Makefile
 require_file include/lonejson.h
+require_file scripts/bench_host_id.sh
 require_file src/lonejson.c
 require_file src/lua/lonejson_lua.c
 require_file lua/lonejson/init.lua

@@ -995,7 +995,7 @@ static int bench_read_host_id_from_command(char *dst, size_t dst_size) {
   if (dst == NULL || dst_size == 0u) {
     return -1;
   }
-  pipe = popen("uname -n | md5sum 2>/dev/null", "r");
+  pipe = popen("./scripts/bench_host_id.sh 2>/dev/null", "r");
   if (pipe == NULL) {
     return -1;
   }

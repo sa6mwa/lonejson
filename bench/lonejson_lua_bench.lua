@@ -38,7 +38,7 @@ local function benchmark_host_id()
   if env ~= nil and env ~= "" then
     return env
   end
-  p = io.popen("uname -n | md5sum 2>/dev/null", "r")
+  p = io.popen("./scripts/bench_host_id.sh 2>/dev/null", "r")
   if p == nil then
     return "unknown"
   end
