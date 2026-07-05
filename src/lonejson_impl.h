@@ -21,5 +21,6 @@
 #include "impl/36_curl_api.h"
 #include "impl/37_array_rewrite_api.h"
 #include "impl/38_writer_api.h"
+#include "impl/39_candidate_transform_api.h"
 #include "impl/39_value_rewrite_api.h"
 #include "impl/40_auth_api.h"

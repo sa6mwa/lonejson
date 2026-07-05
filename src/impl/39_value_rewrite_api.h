@@ -899,6 +899,8 @@ static lonejson_status lonejson__value_rewrite_number_begin(void *user,
         state, state->options.old_value_visitor
                    ? state->options.old_value_visitor->number_begin
                    : NULL);
+  } else if (status == LONEJSON_STATUS_OK && state->current_emit) {
+    status = lonejson_writer_number_begin(&state->writer, state->error);
   }
   return status;
 }
@@ -927,8 +929,7 @@ static lonejson_status lonejson__value_rewrite_number_chunk(void *user,
   if (!state->current_emit) {
     return LONEJSON_STATUS_OK;
   }
-  return lonejson__byte_append(&state->number, data, len, state->number_limit,
-                               &state->allocator, state->error);
+  return lonejson_writer_number_chunk(&state->writer, data, len, state->error);
 }
 
 static lonejson_status lonejson__value_rewrite_number_end(void *user,
@@ -959,10 +960,8 @@ static lonejson_status lonejson__value_rewrite_number_end(void *user,
     state->current_emit = 0;
     return LONEJSON_STATUS_OK;
   }
-  status = lonejson_writer_number_text(&state->writer, state->number.data,
-                                       state->number.len, state->error);
+  status = lonejson_writer_number_end(&state->writer, state->error);
   state->current_emit = 0;
-  lonejson__byte_reset(&state->number);
   return status;
 }
 

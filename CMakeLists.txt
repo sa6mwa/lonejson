@@ -1230,6 +1230,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/38_writer_api.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_candidate_transform_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_value_rewrite_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/40_auth_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/bench/lonejson_bench.c"
@@ -1436,6 +1437,7 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/38_writer_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_candidate_transform_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_value_rewrite_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/40_auth_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_single_header.cmake

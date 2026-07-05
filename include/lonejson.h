@@ -2515,8 +2515,26 @@ typedef enum lonejson_candidate_capture_mode {
   /** Retain each compact JSON candidate in a temporary spooled handle until
    * end callback.
    */
-  LONEJSON_CANDIDATE_CAPTURE_SPOOLED = 3
+  LONEJSON_CANDIDATE_CAPTURE_SPOOLED = 3,
+  /** Retain the compact JSON candidate in a temporary spooled handle only when
+   * `capture_decision` returns `LONEJSON_CANDIDATE_RETAIN`.
+   */
+  LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED = 4
 } lonejson_candidate_capture_mode;
+
+/** Decision returned by gated candidate capture callbacks. */
+typedef enum lonejson_candidate_capture_decision {
+  /** Expose the callback-scoped replayable payload at candidate end. */
+  LONEJSON_CANDIDATE_RETAIN = 0,
+  /** Discard the callback-scoped replayable payload before candidate end. */
+  LONEJSON_CANDIDATE_DISCARD = 1,
+  /** Stop scanning successfully before exposing this candidate payload. */
+  LONEJSON_CANDIDATE_DECISION_STOP = 2,
+  /** Fail the candidate stream. The callback should populate `error` when it
+   * can provide a more specific diagnostic.
+   */
+  LONEJSON_CANDIDATE_DECISION_ERROR = 3
+} lonejson_candidate_capture_decision;
 
 /** Boundary information for one arbitrary JSON candidate.
  *
@@ -2542,6 +2560,11 @@ typedef lonejson_candidate_callback_result (*lonejson_candidate_event_fn)(
     void *user, const lonejson_candidate_info *candidate,
     lonejson_error *error);
 
+typedef lonejson_candidate_capture_decision (
+    *lonejson_candidate_capture_decision_fn)(
+    void *user, const lonejson_candidate_info *candidate,
+    lonejson_error *error);
+
 /** Options for arbitrary JSON candidate streams.
  *
  * The candidate stream is explicitly streaming: lonejson parses each candidate
@@ -2560,7 +2583,72 @@ typedef struct lonejson_candidate_stream_options {
   lonejson_candidate_event_fn candidate_begin;
   lonejson_candidate_event_fn candidate_end;
   void *candidate_user;
+  lonejson_candidate_capture_decision_fn capture_decision;
+  void *capture_decision_user;
 } lonejson_candidate_stream_options;
+
+/** Output framing policy for transformed candidate streams. */
+typedef enum lonejson_candidate_transform_output_framing {
+  /** Emit each transformed candidate as one JSON value followed by `\n` between
+   * emitted candidates.
+   */
+  LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON = 1
+} lonejson_candidate_transform_output_framing;
+
+/** Action returned by candidate transform callbacks for the current value. */
+typedef enum lonejson_candidate_transform_action {
+  /** Emit the current value unchanged. */
+  LONEJSON_CANDIDATE_TRANSFORM_KEEP = 0,
+  /** Suppress the current value. Legal for object members, array elements, and
+   * complete candidate roots.
+   */
+  LONEJSON_CANDIDATE_TRANSFORM_DROP = 1,
+  /** Replace the current value with JSON emitted by the callback through the
+   * provided writer.
+   */
+  LONEJSON_CANDIDATE_TRANSFORM_REPLACE = 2,
+  /** Stop transforming successfully before later candidates are parsed. */
+  LONEJSON_CANDIDATE_TRANSFORM_STOP = 3,
+  /** Fail the transform. The callback should populate `error` when possible. */
+  LONEJSON_CANDIDATE_TRANSFORM_ERROR = 4
+} lonejson_candidate_transform_action;
+
+/** Context for a transform decision about one parsed JSON value. */
+typedef struct lonejson_candidate_transform_event {
+  const lonejson_candidate_info *candidate;
+  const lonejson_value_path *path;
+  lonejson_value_type value_type;
+} lonejson_candidate_transform_event;
+
+typedef lonejson_candidate_transform_action (*lonejson_candidate_transform_fn)(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error);
+
+typedef lonejson_status (*lonejson_candidate_transform_replace_fn)(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_writer *writer, lonejson_error *error);
+
+/** Options for single-pass candidate stream transforms.
+ *
+ * LoneJSON parses each candidate once and owns output writing. `observer`
+ * receives the original parsed token stream. `transform` decides whether each
+ * value is kept, dropped, or replaced; replacement JSON must be emitted through
+ * the supplied lonejson writer before the callback returns.
+ */
+typedef struct lonejson_candidate_transform_options {
+  lonejson_candidate_framing framing;
+  lonejson_candidate_transform_output_framing output_framing;
+  lonejson_sink_fn sink;
+  void *sink_user;
+  const lonejson_path_value_visitor *observer;
+  void *observer_user;
+  lonejson_candidate_transform_fn transform;
+  lonejson_candidate_transform_replace_fn replace;
+  void *transform_user;
+  lonejson_candidate_event_fn candidate_begin;
+  lonejson_candidate_event_fn candidate_end;
+  void *candidate_user;
+} lonejson_candidate_transform_options;
 
 struct lonejson_json_value;
 typedef struct lonejson_json_value_methods {
@@ -3614,6 +3702,14 @@ struct lonejson_writer {
   /** Emits one validated JSON number token. */
   lonejson_status (*number_text)(lonejson_writer *writer, const char *data,
                                  size_t len, lonejson_error *error);
+  /** Begins a chunked JSON number value. */
+  lonejson_status (*number_begin)(lonejson_writer *writer,
+                                  lonejson_error *error);
+  /** Appends one raw token chunk to an open chunked JSON number. */
+  lonejson_status (*number_chunk)(lonejson_writer *writer, const char *data,
+                                  size_t len, lonejson_error *error);
+  /** Ends and validates a chunked JSON number value. */
+  lonejson_status (*number_end)(lonejson_writer *writer, lonejson_error *error);
   /** Emits one signed 64-bit JSON integer. */
   lonejson_status (*i64)(lonejson_writer *writer, lonejson_int64 value,
                          lonejson_error *error);
@@ -6054,6 +6150,27 @@ lonejson_visit_candidates_fd(lonejson *runtime, int fd,
                              const lonejson_candidate_stream_options *options,
                              lonejson_error *error);
 
+/** Transforms arbitrary JSON candidates from a caller buffer. */
+lonejson_status lonejson_transform_candidates_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lonejson_candidate_transform_options *options, lonejson_error *error);
+/** Transforms arbitrary JSON candidates from a caller-provided reader. */
+lonejson_status lonejson_transform_candidates_reader(
+    lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
+    const lonejson_candidate_transform_options *options, lonejson_error *error);
+/** Transforms arbitrary JSON candidates from an open `FILE *`. */
+lonejson_status lonejson_transform_candidates_filep(
+    lonejson *runtime, FILE *fp,
+    const lonejson_candidate_transform_options *options, lonejson_error *error);
+/** Transforms arbitrary JSON candidates from a filesystem path. */
+lonejson_status lonejson_transform_candidates_path(
+    lonejson *runtime, const char *path,
+    const lonejson_candidate_transform_options *options, lonejson_error *error);
+/** Transforms arbitrary JSON candidates from a file descriptor. */
+lonejson_status lonejson_transform_candidates_fd(
+    lonejson *runtime, int fd,
+    const lonejson_candidate_transform_options *options, lonejson_error *error);
+
 /** Serializes a mapped struct to a generic output sink callback using runtime
  * write policy.
  */
@@ -6188,6 +6305,23 @@ lonejson_status lonejson_writer_source_base64(lonejson_writer *writer,
 lonejson_status lonejson_writer_number_text(lonejson_writer *writer,
                                             const char *data, size_t len,
                                             lonejson_error *error);
+/** Begins a JSON number value for chunked emission.
+ *
+ * After this succeeds, append one or more raw number token chunks with
+ * `lonejson_writer_number_chunk()` and close the value with
+ * `lonejson_writer_number_end()`. The complete token is validated at end and
+ * emitted only when it is a valid JSON number.
+ */
+lonejson_status lonejson_writer_number_begin(lonejson_writer *writer,
+                                             lonejson_error *error);
+/** Appends one raw number token chunk inside an open chunked JSON number. */
+lonejson_status lonejson_writer_number_chunk(lonejson_writer *writer,
+                                             const char *data, size_t len,
+                                             lonejson_error *error);
+/** Ends and validates a JSON number opened by `lonejson_writer_number_begin()`.
+ */
+lonejson_status lonejson_writer_number_end(lonejson_writer *writer,
+                                           lonejson_error *error);
 /** Emits one signed 64-bit JSON integer value. */
 lonejson_status lonejson_writer_i64(lonejson_writer *writer,
                                     lonejson_int64 value,
@@ -7446,6 +7580,30 @@ void lonejson_oidc_jwks_cache_parse_cleanup(
 #define LJ_CANDIDATE_CAPTURE_MEMORY LONEJSON_CANDIDATE_CAPTURE_MEMORY
 /** Retain each compact candidate in a callback-scoped spooled handle. */
 #define LJ_CANDIDATE_CAPTURE_SPOOLED LONEJSON_CANDIDATE_CAPTURE_SPOOLED
+/** Retain a callback-scoped spooled handle only after a retain decision. */
+#define LJ_CANDIDATE_CAPTURE_GATED_SPOOLED                                     \
+  LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED
+/** Gated candidate capture should retain the payload. */
+#define LJ_CANDIDATE_RETAIN LONEJSON_CANDIDATE_RETAIN
+/** Gated candidate capture should discard the payload. */
+#define LJ_CANDIDATE_DISCARD LONEJSON_CANDIDATE_DISCARD
+/** Gated candidate capture should stop scanning successfully. */
+#define LJ_CANDIDATE_DECISION_STOP LONEJSON_CANDIDATE_DECISION_STOP
+/** Gated candidate capture failed the stream. */
+#define LJ_CANDIDATE_DECISION_ERROR LONEJSON_CANDIDATE_DECISION_ERROR
+/** Emit transformed candidates as NDJSON. */
+#define LJ_CANDIDATE_TRANSFORM_OUTPUT_NDJSON                                   \
+  LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON
+/** Transform should keep the current value. */
+#define LJ_CANDIDATE_TRANSFORM_KEEP LONEJSON_CANDIDATE_TRANSFORM_KEEP
+/** Transform should drop the current value. */
+#define LJ_CANDIDATE_TRANSFORM_DROP LONEJSON_CANDIDATE_TRANSFORM_DROP
+/** Transform should replace the current value. */
+#define LJ_CANDIDATE_TRANSFORM_REPLACE LONEJSON_CANDIDATE_TRANSFORM_REPLACE
+/** Transform should stop scanning successfully. */
+#define LJ_CANDIDATE_TRANSFORM_STOP LONEJSON_CANDIDATE_TRANSFORM_STOP
+/** Transform callback failed the stream. */
+#define LJ_CANDIDATE_TRANSFORM_ERROR LONEJSON_CANDIDATE_TRANSFORM_ERROR
 /** Candidate callback should continue scanning. */
 #define LJ_CANDIDATE_CONTINUE LONEJSON_CANDIDATE_CONTINUE
 /** Candidate callback should stop scanning successfully. */
@@ -7841,11 +7999,29 @@ typedef lonejson_candidate_framing lj_candidate_framing;
 typedef lonejson_candidate_callback_result lj_candidate_callback_result;
 /** Candidate payload capture policy. */
 typedef lonejson_candidate_capture_mode lj_candidate_capture_mode;
+/** Decision returned by gated candidate capture callbacks. */
+typedef lonejson_candidate_capture_decision lj_candidate_capture_decision;
 /** Boundary information for one arbitrary JSON candidate. */
 typedef lonejson_candidate_info lj_candidate_info;
 #define LJ_CANDIDATE_BYTE_SIZE_UNKNOWN LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN
 /** Candidate boundary callback signature. */
 typedef lonejson_candidate_event_fn lj_candidate_event_fn;
+/** Gated candidate capture callback signature. */
+typedef lonejson_candidate_capture_decision_fn lj_candidate_capture_decision_fn;
+/** Output framing policy for transformed candidate streams. */
+typedef lonejson_candidate_transform_output_framing
+    lj_candidate_transform_output_framing;
+/** Action returned by candidate transform callbacks. */
+typedef lonejson_candidate_transform_action lj_candidate_transform_action;
+/** Context for a transform decision about one parsed JSON value. */
+typedef lonejson_candidate_transform_event lj_candidate_transform_event;
+/** Candidate transform decision callback signature. */
+typedef lonejson_candidate_transform_fn lj_candidate_transform_fn;
+/** Candidate transform replacement callback signature. */
+typedef lonejson_candidate_transform_replace_fn
+    lj_candidate_transform_replace_fn;
+/** Options for single-pass candidate stream transforms. */
+typedef lonejson_candidate_transform_options lj_candidate_transform_options;
 /** Options for arbitrary JSON candidate streams. */
 typedef lonejson_candidate_stream_options lj_candidate_stream_options;
 #ifdef LONEJSON_WITH_JWT
@@ -9201,6 +9377,38 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_visit_candidates_fd(
     lj_error *error) {
   return lonejson_visit_candidates_fd(runtime, fd, options, error);
 }
+/** Transforms arbitrary JSON candidates from a caller-provided buffer. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_transform_candidates_buffer(
+    lonejson *runtime, const void *data, size_t len,
+    const lj_candidate_transform_options *options, lj_error *error) {
+  return lonejson_transform_candidates_buffer(runtime, data, len, options,
+                                              error);
+}
+/** Transforms arbitrary JSON candidates from a caller-provided reader. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_transform_candidates_reader(
+    lonejson *runtime, lj_reader_fn reader, void *reader_user,
+    const lj_candidate_transform_options *options, lj_error *error) {
+  return lonejson_transform_candidates_reader(runtime, reader, reader_user,
+                                              options, error);
+}
+/** Transforms arbitrary JSON candidates from an open `FILE *`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_transform_candidates_filep(
+    lonejson *runtime, FILE *fp, const lj_candidate_transform_options *options,
+    lj_error *error) {
+  return lonejson_transform_candidates_filep(runtime, fp, options, error);
+}
+/** Transforms arbitrary JSON candidates from a filesystem path. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_transform_candidates_path(
+    lonejson *runtime, const char *path,
+    const lj_candidate_transform_options *options, lj_error *error) {
+  return lonejson_transform_candidates_path(runtime, path, options, error);
+}
+/** Transforms arbitrary JSON candidates from a file descriptor. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_transform_candidates_fd(
+    lonejson *runtime, int fd, const lj_candidate_transform_options *options,
+    lj_error *error) {
+  return lonejson_transform_candidates_fd(runtime, fd, options, error);
+}
 /** Pull-style JSON generator state. */
 typedef lonejson_generator lj_generator;
 /** Serializes a mapped struct to a generic output sink callback. */
@@ -9379,6 +9587,23 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_number_text(lj_writer *writer,
                                                             size_t len,
                                                             lj_error *error) {
   return lonejson_writer_number_text(writer, data, len, error);
+}
+/** Begins a JSON number value for chunked emission. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_number_begin(lj_writer *writer,
+                                                             lj_error *error) {
+  return lonejson_writer_number_begin(writer, error);
+}
+/** Appends one raw number token chunk inside an open chunked JSON number. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_number_chunk(lj_writer *writer,
+                                                             const char *data,
+                                                             size_t len,
+                                                             lj_error *error) {
+  return lonejson_writer_number_chunk(writer, data, len, error);
+}
+/** Ends and validates a chunked JSON number value. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_number_end(lj_writer *writer,
+                                                           lj_error *error) {
+  return lonejson_writer_number_end(writer, error);
 }
 /** Emits one signed 64-bit JSON integer value. */
 LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_i64(lj_writer *writer,

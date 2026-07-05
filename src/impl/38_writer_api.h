@@ -45,6 +45,7 @@ typedef struct lonejson__writer_state {
   int root_written;
   int finished;
   int string_open;
+  int number_open;
   lonejson__writer_event_kind event_kind;
   const void *event_data;
   const void *event_data2;
@@ -64,6 +65,8 @@ typedef struct lonejson__writer_state {
   size_t string_reader_buffer_len;
   size_t string_reader_buffer_off;
   int string_reader_eof;
+  lonejson__byte_buffer number;
+  size_t max_number_bytes;
 } lonejson__writer_state;
 
 typedef struct lonejson__writer_value_stream_state {
@@ -105,6 +108,9 @@ static void lonejson__writer_assign_methods(lonejson_writer *writer) {
   writer->spooled_base64 = lonejson_writer_spooled_base64;
   writer->source_base64 = lonejson_writer_source_base64;
   writer->number_text = lonejson_writer_number_text;
+  writer->number_begin = lonejson_writer_number_begin;
+  writer->number_chunk = lonejson_writer_number_chunk;
+  writer->number_end = lonejson_writer_number_end;
   writer->i64 = lonejson_writer_i64;
   writer->u64 = lonejson_writer_u64;
   writer->f64 = lonejson_writer_f64;
@@ -210,6 +216,11 @@ lonejson__writer_require_available(lonejson_writer *writer,
     return lonejson__writer_set_error(writer, error,
                                       LONEJSON_STATUS_INVALID_JSON,
                                       "writer value stream is still open");
+  }
+  if (state->number_open) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer number is still open");
   }
   return LONEJSON_STATUS_OK;
 }
@@ -531,6 +542,11 @@ static lonejson_status lonejson__writer_before_value(lonejson_writer *writer,
                                       LONEJSON_STATUS_INVALID_JSON,
                                       "writer string is still open");
   }
+  if (state->number_open) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer number is still open");
+  }
   if (state->finished) {
     return lonejson__writer_set_error(writer, error,
                                       LONEJSON_STATUS_INVALID_ARGUMENT,
@@ -627,6 +643,9 @@ static lonejson_status lonejson__writer_init_sink_with_options(
   state->sink = sink;
   state->sink_user = sink_user;
   state->external_error = error;
+  state->max_number_bytes = state->runtime != NULL
+                                ? state->runtime->value_limits.max_number_bytes
+                                : 256u;
   writer->state = state;
   lonejson__clear_error(&writer->error);
   lonejson__writer_assign_methods(writer);
@@ -662,6 +681,7 @@ void lonejson_writer_cleanup(lonejson_writer *writer) {
   }
   state = (lonejson__writer_state *)writer->state;
   lonejson__writer_clear_event(state);
+  lonejson__byte_free(&state->number, &state->allocator);
   lonejson__buffer_free(&state->allocator, state->frames,
                         state->frame_capacity * sizeof(*state->frames));
   lonejson__runtime_free_owned_config(&state->runtime_storage);
@@ -711,6 +731,11 @@ lonejson_status lonejson_writer_end_object(lonejson_writer *writer,
     return lonejson__writer_set_error(writer, error,
                                       LONEJSON_STATUS_INVALID_JSON,
                                       "writer string is still open");
+  }
+  if (state->number_open) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer number is still open");
   }
   frame = lonejson__writer_top(state);
   if (frame == NULL || frame->kind != LONEJSON__WRITER_FRAME_OBJECT) {
@@ -773,6 +798,11 @@ lonejson_status lonejson_writer_end_array(lonejson_writer *writer,
                                       LONEJSON_STATUS_INVALID_JSON,
                                       "writer string is still open");
   }
+  if (state->number_open) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer number is still open");
+  }
   frame = lonejson__writer_top(state);
   if (frame == NULL || frame->kind != LONEJSON__WRITER_FRAME_ARRAY) {
     return lonejson__writer_set_error(writer, error,
@@ -820,6 +850,11 @@ lonejson_status lonejson_writer_key(lonejson_writer *writer, const char *key,
       return lonejson__writer_set_error(writer, error,
                                         LONEJSON_STATUS_INVALID_JSON,
                                         "writer string is still open");
+    }
+    if (state->number_open) {
+      return lonejson__writer_set_error(writer, error,
+                                        LONEJSON_STATUS_INVALID_JSON,
+                                        "writer number is still open");
     }
     if (lonejson__writer_output_blocked(writer)) {
       return LONEJSON_STATUS_TRUNCATED;
@@ -1312,6 +1347,102 @@ lonejson_status lonejson_writer_number_text(lonejson_writer *writer,
   status = lonejson__writer_emit_bytes_event(writer, error);
   if (status == LONEJSON_STATUS_OK) {
     lonejson__writer_clear_event(state);
+  }
+  return status;
+}
+
+lonejson_status lonejson_writer_number_begin(lonejson_writer *writer,
+                                             lonejson_error *error) {
+  lonejson__writer_state *state;
+  lonejson_status status;
+
+  status = lonejson__writer_before_value(writer, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  state = (lonejson__writer_state *)writer->state;
+  lonejson__byte_reset(&state->number);
+  state->number_open = 1;
+  return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_writer_number_chunk(lonejson_writer *writer,
+                                             const char *data, size_t len,
+                                             lonejson_error *error) {
+  lonejson__writer_state *state;
+  lonejson_status status;
+
+  if (writer == NULL || writer->state == NULL || (data == NULL && len != 0u)) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_ARGUMENT,
+                                      "writer and number chunk are required");
+  }
+  state = (lonejson__writer_state *)writer->state;
+  if (state->failed) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer is in a failed state");
+  }
+  if (state->value_stream_active) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer value stream is still open");
+  }
+  if (!state->number_open) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer number is not open");
+  }
+  status = lonejson__byte_append(&state->number, data, len,
+                                 state->max_number_bytes, &state->allocator,
+                                 error != NULL ? error : &writer->error);
+  if (status != LONEJSON_STATUS_OK) {
+    state->failed = 1;
+  }
+  return status;
+}
+
+lonejson_status lonejson_writer_number_end(lonejson_writer *writer,
+                                           lonejson_error *error) {
+  lonejson__writer_state *state;
+  lonejson_status status;
+
+  if (writer == NULL || writer->state == NULL) {
+    return lonejson__writer_set_error(
+        writer, error, LONEJSON_STATUS_INVALID_ARGUMENT, "writer is required");
+  }
+  state = (lonejson__writer_state *)writer->state;
+  if (!state->number_open) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer number is not open");
+  }
+  if (state->number.len == 0u) {
+    return lonejson__writer_fail(writer, error, LONEJSON_STATUS_INVALID_JSON,
+                                 "number text must be a JSON number");
+  }
+  if (!lonejson__is_valid_json_number(state->number.data, state->number.len)) {
+    return lonejson__writer_fail(writer, error, LONEJSON_STATUS_INVALID_JSON,
+                                 "number text must be a JSON number");
+  }
+  if (state->event_kind == LONEJSON__WRITER_EVENT_NONE) {
+    state->event_kind = LONEJSON__WRITER_EVENT_BYTES;
+    state->event_data = state->number.data;
+    state->event_len = state->number.len;
+    state->event_off = 0u;
+    state->event_phase = 1u;
+  } else if (state->event_kind != LONEJSON__WRITER_EVENT_BYTES ||
+             state->event_data != state->number.data ||
+             state->event_len != state->number.len) {
+    return lonejson__writer_set_error(
+        writer, error, LONEJSON_STATUS_INVALID_ARGUMENT,
+        "active writer event must be resumed with the same arguments");
+  }
+  status = lonejson__writer_emit_bytes_event(writer, error);
+  if (status == LONEJSON_STATUS_OK) {
+    lonejson__writer_clear_event(state);
+    lonejson__byte_reset(&state->number);
+    state->number_open = 0;
   }
   return status;
 }
@@ -2796,6 +2927,11 @@ lonejson_status lonejson_writer_finish(lonejson_writer *writer,
     return lonejson__writer_set_error(writer, error,
                                       LONEJSON_STATUS_INVALID_JSON,
                                       "writer string is still open");
+  }
+  if (state->number_open) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer number is still open");
   }
   if (!state->root_written) {
     return lonejson__writer_set_error(writer, error,
