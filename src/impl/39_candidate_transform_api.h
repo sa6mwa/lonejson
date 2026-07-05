@@ -262,10 +262,15 @@ static lonejson_status lonejson__candidate_transform_begin_container(
     state->skip_depth++;
     return LONEJSON_STATUS_OK;
   }
+  if (state->stopped) {
+    state->skipping = 1;
+    state->skip_depth = 1u;
+    return LONEJSON_STATUS_OK;
+  }
   action = lonejson__candidate_transform_decide(state, path, type);
   status =
       lonejson__candidate_transform_action_status(state, action, path, type, 1);
-  if (status != LONEJSON_STATUS_OK || state->stopped) {
+  if (status != LONEJSON_STATUS_OK) {
     return status;
   }
   if (action == LONEJSON_CANDIDATE_TRANSFORM_KEEP) {
@@ -278,6 +283,11 @@ static lonejson_status lonejson__candidate_transform_begin_container(
       return status;
     }
     return lonejson__candidate_transform_push(state, frame_kind);
+  }
+  if (action == LONEJSON_CANDIDATE_TRANSFORM_STOP) {
+    state->skipping = 1;
+    state->skip_depth = 1u;
+    return LONEJSON_STATUS_OK;
   }
   state->skipping = 1;
   state->skip_depth = 1u;
@@ -441,7 +451,7 @@ static lonejson_status lonejson__candidate_transform_scalar_begin(
 
   state->current_emit = 0;
   state->current_scalar_replace = 0;
-  if (state->skipping) {
+  if (state->skipping || state->stopped) {
     return LONEJSON_STATUS_OK;
   }
   action = lonejson__candidate_transform_decide(state, path, type);

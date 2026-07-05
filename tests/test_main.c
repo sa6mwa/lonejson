@@ -438,6 +438,7 @@ int main(void) {
   test_candidate_stream_capture_path_visitor_user();
   test_candidate_stream_transform_pass_drop_replace();
   test_candidate_stream_transform_fragmented_reader();
+  test_candidate_stream_transform_stop_container();
   test_candidate_stream_transform_failure_modes();
 #ifdef LONEJSON_WITH_CURL
   test_curl_parse_survives_runtime_free();

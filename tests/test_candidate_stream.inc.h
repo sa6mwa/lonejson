@@ -1327,6 +1327,31 @@ static lonejson_candidate_transform_action test_candidate_transform_drop_only(
   return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
 }
 
+static lonejson_candidate_transform_action
+test_candidate_transform_stop_root_array(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  (void)user;
+  (void)error;
+  if (event->path != NULL && event->path->segment_count == 0u &&
+      event->value_type == LONEJSON_VALUE_ARRAY) {
+    return LONEJSON_CANDIDATE_TRANSFORM_STOP;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
+static lonejson_candidate_transform_action test_candidate_transform_stop_at_a(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  (void)user;
+  (void)error;
+  if (test_candidate_transform_path_is(event, "a") &&
+      event->value_type == LONEJSON_VALUE_ARRAY) {
+    return LONEJSON_CANDIDATE_TRANSFORM_STOP;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
 static lonejson_status test_candidate_transform_replace(
     void *user, const lonejson_candidate_transform_event *event,
     lonejson_writer *writer, lonejson_error *error) {
@@ -1424,6 +1449,44 @@ static void test_candidate_stream_transform_fragmented_reader(void) {
   out[sink.length] = '\0';
   EXPECT(strcmp((const char *)out, "{\"keep\":99,\"s\":\"x\"}\n[99,true]") ==
          0);
+}
+
+static void test_candidate_stream_transform_stop_container(void) {
+  static const char root_stop_json[] = "[1,{\"x\":2}]\n{\"later\":3}";
+  static const char nested_stop_json[] = "{\"a\":[1],\"b\":2}\n{\"later\":3}";
+  unsigned char out[128];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+  options.output_framing = LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_stop_root_array;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(),
+                                                root_stop_json,
+                                                strlen(root_stop_json),
+                                                &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(sink.length == 0u);
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  options.transform = test_candidate_transform_stop_at_a;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(),
+                                                nested_stop_json,
+                                                strlen(nested_stop_json),
+                                                &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{}") == 0);
 }
 
 static void test_candidate_stream_transform_failure_modes(void) {
