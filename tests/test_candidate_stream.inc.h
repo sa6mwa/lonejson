@@ -1316,6 +1316,17 @@ static lonejson_candidate_transform_action test_candidate_transform_decide(
   return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
 }
 
+static lonejson_candidate_transform_action test_candidate_transform_drop_only(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  (void)user;
+  (void)error;
+  if (test_candidate_transform_path_is(event, "drop")) {
+    return LONEJSON_CANDIDATE_TRANSFORM_DROP;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
 static lonejson_status test_candidate_transform_replace(
     void *user, const lonejson_candidate_transform_event *event,
     lonejson_writer *writer, lonejson_error *error) {
@@ -1416,7 +1427,7 @@ static void test_candidate_stream_transform_fragmented_reader(void) {
 }
 
 static void test_candidate_stream_transform_failure_modes(void) {
-  static const char json[] = "{\"keep\":1}";
+  static const char json[] = "{\"keep\":1,\"drop\":2}";
   unsigned char out[64];
   test_buffer_sink sink;
   test_failing_sink failing_sink;
@@ -1426,7 +1437,25 @@ static void test_candidate_stream_transform_failure_modes(void) {
   lonejson_error error;
 
   memset(&options, 0, sizeof(options));
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
   options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_drop_only;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{\"keep\":1}") == 0);
+
+  memset(&options, 0, sizeof(options));
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
   options.transform = test_candidate_transform_decide;
   status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
                                                 strlen(json), &options,

@@ -50,8 +50,7 @@ static lonejson_status lonejson__candidate_transform_push(
         next_cap * sizeof(*state->frames));
     if (next == NULL) {
       return lonejson__set_error(state->error,
-                                 LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                                 0u,
+                                 LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
                                  "failed to allocate candidate transform "
                                  "frame stack");
     }
@@ -96,8 +95,8 @@ static void lonejson__candidate_transform_cleanup(
 }
 
 static lonejson_status lonejson__candidate_transform_forward_event(
-    lonejson__candidate_transform_state *state,
-    lonejson_path_value_event_fn fn, const lonejson_value_path *path) {
+    lonejson__candidate_transform_state *state, lonejson_path_value_event_fn fn,
+    const lonejson_value_path *path) {
   if (fn == NULL) {
     return LONEJSON_STATUS_OK;
   }
@@ -105,9 +104,8 @@ static lonejson_status lonejson__candidate_transform_forward_event(
 }
 
 static lonejson_status lonejson__candidate_transform_forward_chunk(
-    lonejson__candidate_transform_state *state,
-    lonejson_path_value_chunk_fn fn, const lonejson_value_path *path,
-    const char *data, size_t len) {
+    lonejson__candidate_transform_state *state, lonejson_path_value_chunk_fn fn,
+    const lonejson_value_path *path, const char *data, size_t len) {
   if (fn == NULL) {
     return LONEJSON_STATUS_OK;
   }
@@ -115,26 +113,26 @@ static lonejson_status lonejson__candidate_transform_forward_chunk(
 }
 
 static lonejson_status lonejson__candidate_transform_forward_bool(
-    lonejson__candidate_transform_state *state,
-    const lonejson_value_path *path, int value) {
+    lonejson__candidate_transform_state *state, const lonejson_value_path *path,
+    int value) {
   if (state->options->observer == NULL ||
       state->options->observer->boolean_value == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  return state->options->observer->boolean_value(
-      state->options->observer_user, path, value, state->error);
+  return state->options->observer->boolean_value(state->options->observer_user,
+                                                 path, value, state->error);
 }
 
-static lonejson_status
-lonejson__candidate_transform_prefix(lonejson__candidate_transform_state *state) {
+static lonejson_status lonejson__candidate_transform_prefix(
+    lonejson__candidate_transform_state *state) {
   lonejson_status status;
 
   if (state->candidate_output_started) {
     return LONEJSON_STATUS_OK;
   }
   if (state->emitted_any_candidate) {
-    status = state->options->sink(state->options->sink_user, "\n", 1u,
-                                  state->error);
+    status =
+        state->options->sink(state->options->sink_user, "\n", 1u, state->error);
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
@@ -168,16 +166,15 @@ static lonejson_status lonejson__candidate_transform_prepare_emit(
   return lonejson__candidate_transform_emit_key(state);
 }
 
-static lonejson_status
-lonejson__candidate_transform_replace(lonejson__candidate_transform_state *state,
-                                      const lonejson_value_path *path,
-                                      lonejson_value_type type) {
+static lonejson_status lonejson__candidate_transform_replace(
+    lonejson__candidate_transform_state *state, const lonejson_value_path *path,
+    lonejson_value_type type) {
   lonejson_candidate_transform_event event;
   lonejson_status status;
 
   if (state->options->replace == NULL) {
-    return lonejson__set_error(state->error,
-                               LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+    return lonejson__set_error(state->error, LONEJSON_STATUS_INVALID_ARGUMENT,
+                               0u, 0u, 0u,
                                "candidate transform replacement callback is "
                                "required");
   }
@@ -194,9 +191,9 @@ lonejson__candidate_transform_replace(lonejson__candidate_transform_state *state
 }
 
 static lonejson_candidate_transform_action
-lonejson__candidate_transform_decide(
-    lonejson__candidate_transform_state *state, const lonejson_value_path *path,
-    lonejson_value_type type) {
+lonejson__candidate_transform_decide(lonejson__candidate_transform_state *state,
+                                     const lonejson_value_path *path,
+                                     lonejson_value_type type) {
   lonejson_candidate_transform_event event;
   lonejson_candidate_transform_action action;
 
@@ -218,9 +215,8 @@ lonejson__candidate_transform_decide(
 
 static lonejson_status lonejson__candidate_transform_action_status(
     lonejson__candidate_transform_state *state,
-    lonejson_candidate_transform_action action,
-    const lonejson_value_path *path, lonejson_value_type type,
-    int container_value) {
+    lonejson_candidate_transform_action action, const lonejson_value_path *path,
+    lonejson_value_type type, int container_value) {
   lonejson_status status;
 
   if (action == LONEJSON_CANDIDATE_TRANSFORM_KEEP) {
@@ -267,8 +263,8 @@ static lonejson_status lonejson__candidate_transform_begin_container(
     return LONEJSON_STATUS_OK;
   }
   action = lonejson__candidate_transform_decide(state, path, type);
-  status = lonejson__candidate_transform_action_status(state, action, path,
-                                                       type, 1);
+  status =
+      lonejson__candidate_transform_action_status(state, action, path, type, 1);
   if (status != LONEJSON_STATUS_OK || state->stopped) {
     return status;
   }
@@ -295,9 +291,9 @@ static lonejson_status lonejson__candidate_transform_object_begin(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->object_begin
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->object_begin
+                                       : NULL,
       path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
@@ -313,9 +309,9 @@ static lonejson_status lonejson__candidate_transform_array_begin(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->array_begin
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->array_begin
+                                       : NULL,
       path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
@@ -350,9 +346,9 @@ static lonejson_status lonejson__candidate_transform_object_end(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->object_end
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->object_end
+                                       : NULL,
       path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
@@ -368,9 +364,9 @@ static lonejson_status lonejson__candidate_transform_array_end(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->array_end
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->array_end
+                                       : NULL,
       path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
@@ -392,9 +388,10 @@ static lonejson_status lonejson__candidate_transform_key_begin(
     }
   }
   return lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->object_key_begin
-                 : NULL,
+      state,
+      state->options->observer != NULL
+          ? state->options->observer->object_key_begin
+          : NULL,
       path);
 }
 
@@ -417,9 +414,10 @@ static lonejson_status lonejson__candidate_transform_key_chunk(
     }
   }
   return lonejson__candidate_transform_forward_chunk(
-      state, state->options->observer != NULL
-                 ? state->options->observer->object_key_chunk
-                 : NULL,
+      state,
+      state->options->observer != NULL
+          ? state->options->observer->object_key_chunk
+          : NULL,
       path, data, len);
 }
 
@@ -429,9 +427,10 @@ static lonejson_status lonejson__candidate_transform_key_end(
       (lonejson__candidate_transform_state *)user;
   (void)error;
   return lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->object_key_end
-                 : NULL,
+      state,
+      state->options->observer != NULL
+          ? state->options->observer->object_key_end
+          : NULL,
       path);
 }
 
@@ -457,15 +456,15 @@ static lonejson_status lonejson__candidate_transform_string_begin(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->string_begin
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->string_begin
+                                       : NULL,
       path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson__candidate_transform_scalar_begin(
-      state, path, LONEJSON_VALUE_STRING);
+  status = lonejson__candidate_transform_scalar_begin(state, path,
+                                                      LONEJSON_VALUE_STRING);
   if (status == LONEJSON_STATUS_OK && state->current_emit) {
     status = lonejson_writer_string_begin(&state->writer, state->error);
   }
@@ -480,9 +479,9 @@ static lonejson_status lonejson__candidate_transform_string_chunk(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_chunk(
-      state, state->options->observer != NULL
-                 ? state->options->observer->string_chunk
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->string_chunk
+                                       : NULL,
       path, data, len);
   if (status != LONEJSON_STATUS_OK || !state->current_emit) {
     return status;
@@ -497,9 +496,9 @@ static lonejson_status lonejson__candidate_transform_string_end(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->string_end
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->string_end
+                                       : NULL,
       path);
   if (status != LONEJSON_STATUS_OK || !state->current_emit) {
     state->current_emit = 0;
@@ -516,15 +515,15 @@ static lonejson_status lonejson__candidate_transform_number_begin(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->number_begin
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->number_begin
+                                       : NULL,
       path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson__candidate_transform_scalar_begin(
-      state, path, LONEJSON_VALUE_NUMBER);
+  status = lonejson__candidate_transform_scalar_begin(state, path,
+                                                      LONEJSON_VALUE_NUMBER);
   if (status == LONEJSON_STATUS_OK && state->current_emit) {
     status = lonejson_writer_number_begin(&state->writer, state->error);
   }
@@ -539,9 +538,9 @@ static lonejson_status lonejson__candidate_transform_number_chunk(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_chunk(
-      state, state->options->observer != NULL
-                 ? state->options->observer->number_chunk
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->number_chunk
+                                       : NULL,
       path, data, len);
   if (status != LONEJSON_STATUS_OK || !state->current_emit) {
     return status;
@@ -556,9 +555,9 @@ static lonejson_status lonejson__candidate_transform_number_end(
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->number_end
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->number_end
+                                       : NULL,
       path);
   if (status != LONEJSON_STATUS_OK || !state->current_emit) {
     state->current_emit = 0;
@@ -568,9 +567,9 @@ static lonejson_status lonejson__candidate_transform_number_end(
   return lonejson_writer_number_end(&state->writer, state->error);
 }
 
-static lonejson_status lonejson__candidate_transform_bool(
-    void *user, const lonejson_value_path *path, int value,
-    lonejson_error *error) {
+static lonejson_status
+lonejson__candidate_transform_bool(void *user, const lonejson_value_path *path,
+                                   int value, lonejson_error *error) {
   lonejson__candidate_transform_state *state =
       (lonejson__candidate_transform_state *)user;
   lonejson_status status;
@@ -579,8 +578,8 @@ static lonejson_status lonejson__candidate_transform_bool(
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson__candidate_transform_scalar_begin(
-      state, path, LONEJSON_VALUE_BOOL);
+  status = lonejson__candidate_transform_scalar_begin(state, path,
+                                                      LONEJSON_VALUE_BOOL);
   if (status == LONEJSON_STATUS_OK && state->current_emit) {
     status = lonejson_writer_bool(&state->writer, value, state->error);
   }
@@ -588,22 +587,23 @@ static lonejson_status lonejson__candidate_transform_bool(
   return status;
 }
 
-static lonejson_status lonejson__candidate_transform_null(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+lonejson__candidate_transform_null(void *user, const lonejson_value_path *path,
+                                   lonejson_error *error) {
   lonejson__candidate_transform_state *state =
       (lonejson__candidate_transform_state *)user;
   lonejson_status status;
   (void)error;
   status = lonejson__candidate_transform_forward_event(
-      state, state->options->observer != NULL
-                 ? state->options->observer->null_value
-                 : NULL,
+      state,
+      state->options->observer != NULL ? state->options->observer->null_value
+                                       : NULL,
       path);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson__candidate_transform_scalar_begin(
-      state, path, LONEJSON_VALUE_NULL);
+  status = lonejson__candidate_transform_scalar_begin(state, path,
+                                                      LONEJSON_VALUE_NULL);
   if (status == LONEJSON_STATUS_OK && state->current_emit) {
     status = lonejson_writer_null(&state->writer, state->error);
   }
@@ -705,17 +705,8 @@ static lonejson_status lonejson__transform_candidates_reader_common(
   if (local.transform == NULL) {
     lonejson__runtime_borrow_release(&borrow);
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u,
-                               "candidate transform callback is required");
+                               0u, "candidate transform callback is required");
   }
-  if (local.replace == NULL) {
-    lonejson__runtime_borrow_release(&borrow);
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u,
-                               "candidate transform replacement callback is "
-                               "required");
-  }
-
   memset(&state, 0, sizeof(state));
   state.options = &local;
   state.runtime = runtime_state;
@@ -755,9 +746,8 @@ lonejson_status lonejson_transform_candidates_reader(
     lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
     const lonejson_candidate_transform_options *options,
     lonejson_error *error) {
-  return lonejson__transform_candidates_reader_common(runtime, reader,
-                                                     reader_user, options,
-                                                     error);
+  return lonejson__transform_candidates_reader_common(
+      runtime, reader, reader_user, options, error);
 }
 
 lonejson_status lonejson_transform_candidates_buffer(
@@ -784,7 +774,7 @@ lonejson_status lonejson_transform_candidates_filep(
                                0u, "candidate transform file is required");
   }
   return lonejson_transform_candidates_reader(runtime, lonejson__file_reader,
-                                             fp, options, error);
+                                              fp, options, error);
 }
 
 lonejson_status lonejson_transform_candidates_path(
@@ -820,5 +810,5 @@ lonejson_status lonejson_transform_candidates_fd(
                                0u, "candidate transform fd is required");
   }
   return lonejson_transform_candidates_reader(runtime, lonejson__fd_reader, &fd,
-                                             options, error);
+                                              options, error);
 }
