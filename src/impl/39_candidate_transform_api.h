@@ -24,6 +24,7 @@ typedef struct lonejson__candidate_transform_state {
   int candidate_output_started;
   int emitted_any_candidate;
   int stopped;
+  lonejson_status deferred_status;
   int skipping;
   size_t skip_depth;
   int current_emit;
@@ -94,33 +95,51 @@ static void lonejson__candidate_transform_cleanup(
   memset(state, 0, sizeof(*state));
 }
 
+static lonejson_status lonejson__candidate_transform_record_status(
+    lonejson__candidate_transform_state *state, lonejson_status status) {
+  if (status == LONEJSON_STATUS_TRUNCATED &&
+      state->deferred_status == LONEJSON_STATUS_OK) {
+    state->deferred_status = status;
+  }
+  return status;
+}
+
 static lonejson_status lonejson__candidate_transform_forward_event(
     lonejson__candidate_transform_state *state, lonejson_path_value_event_fn fn,
     const lonejson_value_path *path) {
+  lonejson_status status;
+
   if (fn == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  return fn(state->options->observer_user, path, state->error);
+  status = fn(state->options->observer_user, path, state->error);
+  return lonejson__candidate_transform_record_status(state, status);
 }
 
 static lonejson_status lonejson__candidate_transform_forward_chunk(
     lonejson__candidate_transform_state *state, lonejson_path_value_chunk_fn fn,
     const lonejson_value_path *path, const char *data, size_t len) {
+  lonejson_status status;
+
   if (fn == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  return fn(state->options->observer_user, path, data, len, state->error);
+  status = fn(state->options->observer_user, path, data, len, state->error);
+  return lonejson__candidate_transform_record_status(state, status);
 }
 
 static lonejson_status lonejson__candidate_transform_forward_bool(
     lonejson__candidate_transform_state *state, const lonejson_value_path *path,
     int value) {
+  lonejson_status status;
+
   if (state->options->observer == NULL ||
       state->options->observer->boolean_value == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  return state->options->observer->boolean_value(state->options->observer_user,
-                                                 path, value, state->error);
+  status = state->options->observer->boolean_value(
+      state->options->observer_user, path, value, state->error);
+  return lonejson__candidate_transform_record_status(state, status);
 }
 
 static lonejson_status lonejson__candidate_transform_prefix(
@@ -133,6 +152,7 @@ static lonejson_status lonejson__candidate_transform_prefix(
   if (state->emitted_any_candidate) {
     status =
         state->options->sink(state->options->sink_user, "\n", 1u, state->error);
+    lonejson__candidate_transform_record_status(state, status);
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
@@ -150,9 +170,10 @@ static lonejson_status lonejson__candidate_transform_emit_key(
   if (frame == NULL || frame->kind != LONEJSON__CANDIDATE_TRANSFORM_OBJECT) {
     return LONEJSON_STATUS_OK;
   }
-  return lonejson_writer_key(&state->writer,
-                             frame->key.data != NULL ? frame->key.data : "",
-                             frame->key.len, state->error);
+  return lonejson__candidate_transform_record_status(
+      state, lonejson_writer_key(&state->writer,
+                                 frame->key.data != NULL ? frame->key.data : "",
+                                 frame->key.len, state->error));
 }
 
 static lonejson_status lonejson__candidate_transform_prepare_emit(
@@ -186,8 +207,9 @@ static lonejson_status lonejson__candidate_transform_replace(
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  return state->options->replace(state->options->transform_user, &event,
-                                 &state->writer, state->error);
+  return lonejson__candidate_transform_record_status(
+      state, state->options->replace(state->options->transform_user, &event,
+                                     &state->writer, state->error));
 }
 
 static lonejson_candidate_transform_action
@@ -279,6 +301,7 @@ static lonejson_status lonejson__candidate_transform_begin_container(
     } else {
       status = lonejson_writer_begin_array(&state->writer, state->error);
     }
+    lonejson__candidate_transform_record_status(state, status);
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
@@ -343,10 +366,12 @@ static lonejson_status lonejson__candidate_transform_end_container(
   }
   if (type == LONEJSON_VALUE_OBJECT) {
     lonejson__candidate_transform_pop(state);
-    return lonejson_writer_end_object(&state->writer, state->error);
+    return lonejson__candidate_transform_record_status(
+        state, lonejson_writer_end_object(&state->writer, state->error));
   }
   lonejson__candidate_transform_pop(state);
-  return lonejson_writer_end_array(&state->writer, state->error);
+  return lonejson__candidate_transform_record_status(
+      state, lonejson_writer_end_array(&state->writer, state->error));
 }
 
 static lonejson_status lonejson__candidate_transform_object_end(
@@ -477,6 +502,7 @@ static lonejson_status lonejson__candidate_transform_string_begin(
                                                       LONEJSON_VALUE_STRING);
   if (status == LONEJSON_STATUS_OK && state->current_emit) {
     status = lonejson_writer_string_begin(&state->writer, state->error);
+    lonejson__candidate_transform_record_status(state, status);
   }
   return status;
 }
@@ -496,7 +522,9 @@ static lonejson_status lonejson__candidate_transform_string_chunk(
   if (status != LONEJSON_STATUS_OK || !state->current_emit) {
     return status;
   }
-  return lonejson_writer_string_chunk(&state->writer, data, len, state->error);
+  return lonejson__candidate_transform_record_status(
+      state,
+      lonejson_writer_string_chunk(&state->writer, data, len, state->error));
 }
 
 static lonejson_status lonejson__candidate_transform_string_end(
@@ -515,7 +543,8 @@ static lonejson_status lonejson__candidate_transform_string_end(
     return status;
   }
   state->current_emit = 0;
-  return lonejson_writer_string_end(&state->writer, state->error);
+  return lonejson__candidate_transform_record_status(
+      state, lonejson_writer_string_end(&state->writer, state->error));
 }
 
 static lonejson_status lonejson__candidate_transform_number_begin(
@@ -536,6 +565,7 @@ static lonejson_status lonejson__candidate_transform_number_begin(
                                                       LONEJSON_VALUE_NUMBER);
   if (status == LONEJSON_STATUS_OK && state->current_emit) {
     status = lonejson_writer_number_begin(&state->writer, state->error);
+    lonejson__candidate_transform_record_status(state, status);
   }
   return status;
 }
@@ -555,7 +585,9 @@ static lonejson_status lonejson__candidate_transform_number_chunk(
   if (status != LONEJSON_STATUS_OK || !state->current_emit) {
     return status;
   }
-  return lonejson_writer_number_chunk(&state->writer, data, len, state->error);
+  return lonejson__candidate_transform_record_status(
+      state,
+      lonejson_writer_number_chunk(&state->writer, data, len, state->error));
 }
 
 static lonejson_status lonejson__candidate_transform_number_end(
@@ -574,7 +606,8 @@ static lonejson_status lonejson__candidate_transform_number_end(
     return status;
   }
   state->current_emit = 0;
-  return lonejson_writer_number_end(&state->writer, state->error);
+  return lonejson__candidate_transform_record_status(
+      state, lonejson_writer_number_end(&state->writer, state->error));
 }
 
 static lonejson_status
@@ -592,6 +625,7 @@ lonejson__candidate_transform_bool(void *user, const lonejson_value_path *path,
                                                       LONEJSON_VALUE_BOOL);
   if (status == LONEJSON_STATUS_OK && state->current_emit) {
     status = lonejson_writer_bool(&state->writer, value, state->error);
+    lonejson__candidate_transform_record_status(state, status);
   }
   state->current_emit = 0;
   return status;
@@ -616,6 +650,7 @@ lonejson__candidate_transform_null(void *user, const lonejson_value_path *path,
                                                       LONEJSON_VALUE_NULL);
   if (status == LONEJSON_STATUS_OK && state->current_emit) {
     status = lonejson_writer_null(&state->writer, state->error);
+    lonejson__candidate_transform_record_status(state, status);
   }
   state->current_emit = 0;
   return status;
@@ -656,11 +691,15 @@ lonejson__candidate_transform_end(void *user,
   lonejson__candidate_transform_state *state =
       (lonejson__candidate_transform_state *)user;
   lonejson_candidate_callback_result result;
+  lonejson_status status;
 
   state->candidate = *candidate;
-  if (state->candidate_output_started &&
-      lonejson_writer_finish(&state->writer, error) != LONEJSON_STATUS_OK) {
-    return LONEJSON_CANDIDATE_ERROR;
+  if (state->candidate_output_started) {
+    status = lonejson_writer_finish(&state->writer, error);
+    lonejson__candidate_transform_record_status(state, status);
+    if (status != LONEJSON_STATUS_OK) {
+      return LONEJSON_CANDIDATE_ERROR;
+    }
   }
   lonejson_writer_cleanup(&state->writer);
   state->writer_open = 0;
@@ -722,6 +761,7 @@ static lonejson_status lonejson__transform_candidates_reader_common(
   state.runtime = runtime_state;
   state.allocator = runtime_state->config.allocator;
   state.error = error;
+  state.deferred_status = LONEJSON_STATUS_OK;
   state.visitor = lonejson_default_path_value_visitor();
   state.visitor.object_begin = lonejson__candidate_transform_object_begin;
   state.visitor.object_end = lonejson__candidate_transform_object_end;
@@ -747,6 +787,16 @@ static lonejson_status lonejson__transform_candidates_reader_common(
   state.candidate_options.candidate_user = &state;
   status = lonejson_visit_candidates_reader(runtime, reader, reader_user,
                                             &state.candidate_options, error);
+  if ((status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED ||
+       status == LONEJSON_STATUS_CALLBACK_FAILED) &&
+      state.deferred_status != LONEJSON_STATUS_OK) {
+    status = state.deferred_status;
+    if (status == LONEJSON_STATUS_TRUNCATED && error != NULL &&
+        error->code != LONEJSON_STATUS_TRUNCATED) {
+      lonejson__set_error(error, LONEJSON_STATUS_TRUNCATED, 0u, 0u, 0u,
+                          "candidate transform output truncated");
+    }
+  }
   lonejson__candidate_transform_cleanup(&state);
   lonejson__runtime_borrow_release(&borrow);
   return status;
