@@ -1982,6 +1982,40 @@ struct lonejson_map {
   lonejson_uint64 _map_cookie;
 };
 
+/** ABI version for public borrowed schema and record view structs. */
+#define LONEJSON_VIEW_ABI_VERSION 1u
+
+/** Borrowed view of a lonejson schema owned by another API layer.
+ *
+ * Callers must initialize `size` to `sizeof(lonejson_schema_view)` and
+ * `abi_version` to `LONEJSON_VIEW_ABI_VERSION` before passing the view to an
+ * adapter API. The returned pointers are borrowed from the owning layer and
+ * remain valid only under that layer's documented lifetime rules.
+ */
+typedef struct lonejson_schema_view {
+  size_t size;
+  unsigned int abi_version;
+  lonejson *runtime;
+  const lonejson_map *map;
+  size_t record_size;
+  unsigned int flags;
+} lonejson_schema_view;
+
+/** Borrowed view of a mapped record owned by another API layer.
+ *
+ * Callers must initialize `size` to `sizeof(lonejson_record_view)` and
+ * `abi_version` to `LONEJSON_VIEW_ABI_VERSION` before passing the view as an
+ * output parameter. `record` is borrowed and remains valid only under the
+ * owning layer's documented lifetime rules.
+ */
+typedef struct lonejson_record_view {
+  size_t size;
+  unsigned int abi_version;
+  lonejson_schema_view schema;
+  void *record;
+  unsigned int flags;
+} lonejson_record_view;
+
 /** Optional controls for mapped parsing and streaming. Use
  * `lonejson__default_parse_options()` instead of manual zeroing so new fields
  * keep their intended defaults.
@@ -7457,6 +7491,8 @@ void lonejson_oidc_jwks_cache_parse_cleanup(
 #define LJ_VERSION_PATCH LONEJSON_VERSION_PATCH
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
 #define LJ_ABI_VERSION LONEJSON_ABI_VERSION
+/** ABI version for public borrowed schema and record view structs. */
+#define LJ_VIEW_ABI_VERSION LONEJSON_VIEW_ABI_VERSION
 
 #define LJ_UINT64_MAX LONEJSON_UINT64_MAX
 /** Marks a mapping field as required during parse. */
@@ -8198,6 +8234,10 @@ typedef lonejson_object_array lj_object_array;
 typedef lonejson_field lj_field;
 /** Forward declaration for one schema map describing a C struct. */
 typedef lonejson_map lj_map;
+/** Borrowed view of a lonejson schema owned by another API layer. */
+typedef lonejson_schema_view lj_schema_view;
+/** Borrowed view of a mapped record owned by another API layer. */
+typedef lonejson_record_view lj_record_view;
 /** Streaming JSON writer state.
  *
  * A writer owns JSON syntax for dynamically shaped documents: object and array

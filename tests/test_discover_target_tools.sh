@@ -77,7 +77,7 @@ cat >"$build_dir/CMakeCache.txt" <<EOF
 CMAKE_C_COMPILER:FILEPATH=$darwin_cc_only/arm64-apple-darwin25-clang
 EOF
 
-eval "$(PATH="$host_bin:$PATH" "$repo_root/scripts/discover_target_tools.sh" \
+eval "$(PATH="$host_bin:/usr/bin:/bin" "$repo_root/scripts/discover_target_tools.sh" \
   --build-dir "$build_dir" \
   --target-id arm64-apple-darwin)"
 

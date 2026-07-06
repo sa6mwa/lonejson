@@ -31,11 +31,15 @@ if [[ -z "$module_path" || ! -f "$module_path" ]]; then
 fi
 
 if command -v nm >/dev/null 2>&1; then
-  if nm -D --defined-only "$module_path" 2>/dev/null |
-       awk '{print $NF}' | grep -E '^lonejson_' >/dev/null; then
-    printf 'Lua module exports lonejson core API symbols:\n' >&2
+  leaked_symbols=$(
     nm -D --defined-only "$module_path" 2>/dev/null |
-      awk '{print $NF}' | grep -E '^lonejson_' >&2
+      awk '{print $NF}' |
+      grep -E '^lonejson_' |
+      grep -Ev '^lonejson_lua_' || true
+  )
+  if [[ -n "$leaked_symbols" ]]; then
+    printf 'Lua module exports lonejson core API symbols:\n' >&2
+    printf '%s\n' "$leaked_symbols" >&2
     exit 1
   fi
 fi

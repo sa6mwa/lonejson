@@ -625,6 +625,47 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_fuzz.lua"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.lua"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.lua")
+
+    add_executable(lonejson_lua_interop_tests
+      src/lua/lonejson_lua.c
+      tests/test_lua_interop.c)
+    target_include_directories(lonejson_lua_interop_tests PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}"
+      "${LONEJSON_TARGET_LUA_INCLUDE_DIR}")
+    target_compile_definitions(lonejson_lua_interop_tests PRIVATE
+      LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
+      LONEJSON_TEST_MAP_ANALYSIS_COUNTER=1
+      LONEJSON_TEST_LUA_ENCODE_STATS=1
+      LONEJSON_TEST_LUA_CANDIDATE_INFO=1
+      LONEJSON_TEST_LUA_SIMULATE_NO_MAXINTEGER=1)
+    target_link_libraries(lonejson_lua_interop_tests PRIVATE
+      lonejson_shared
+      "${LONEJSON_TARGET_LUA_LIBRARY}")
+    set_target_properties(lonejson_lua_interop_tests PROPERTIES
+      BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR};${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
+    if(LONEJSON_BUILD_WITH_CURL)
+      target_compile_definitions(lonejson_lua_interop_tests PRIVATE
+        LONEJSON_WITH_CURL)
+      lonejson_target_include_curl(lonejson_lua_interop_tests)
+      target_link_libraries(lonejson_lua_interop_tests PRIVATE CURL::libcurl)
+    endif()
+    if(LONEJSON_BUILD_WITH_OPENSSL AND LONEJSON_BUILD_WITH_JWT)
+      target_compile_definitions(lonejson_lua_interop_tests PRIVATE
+        LONEJSON_WITH_OPENSSL)
+    endif()
+    if(LONEJSON_BUILD_WITH_JWT)
+      target_compile_definitions(lonejson_lua_interop_tests PRIVATE
+        LONEJSON_WITH_JWT)
+    endif()
+    if(LONEJSON_BUILD_WITH_OIDC)
+      target_compile_definitions(lonejson_lua_interop_tests PRIVATE
+        LONEJSON_WITH_OIDC)
+    endif()
+    lonejson_configure_lua_c_target(lonejson_lua_interop_tests)
+    add_test(
+      NAME lonejson_lua_interop_tests
+      COMMAND lonejson_lua_interop_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
   if(LONEJSON_BASH_EXECUTABLE)
     add_test(
@@ -1236,6 +1277,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/bench/lonejson_bench.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_auth.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_interop.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_module.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_record.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_schema.inc.h"
@@ -1243,7 +1285,9 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_stream_spool.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_support.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_visitor_facade.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/lonejson_lua.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_embedded_runner.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_interop.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_validate.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_base64.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_mapped_parse.c"

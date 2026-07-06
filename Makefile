@@ -128,6 +128,7 @@ LUA_ROCK_SOURCES := \
 	scripts/release_version.sh \
 	scripts/stage_lua_rock_sources.sh \
 	include/lonejson.h \
+	include/lonejson_lua.h \
 	src/lua/lonejson_lua.c \
 	$(wildcard src/lua/*.inc.h) \
 	lua/lonejson/init.lua
