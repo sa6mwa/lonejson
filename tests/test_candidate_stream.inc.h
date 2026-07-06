@@ -1540,6 +1540,21 @@ static void test_candidate_stream_transform_failure_modes(void) {
   EXPECT(error.code == LONEJSON_STATUS_TRUNCATED);
   EXPECT(sink.length == 0u);
 
+  memset(&options, 0, sizeof(options));
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = 1u;
+  options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+  options.output_framing = LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_drop_only;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), "[1]",
+                                                3u, &options, &error);
+  EXPECT(status == LONEJSON_STATUS_TRUNCATED);
+  EXPECT(error.code == LONEJSON_STATUS_TRUNCATED);
+  EXPECT(sink.length == 0u);
+
   memset(&failing_sink, 0, sizeof(failing_sink));
   memset(&state, 0, sizeof(state));
   failing_sink.fail_after = 2u;

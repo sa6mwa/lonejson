@@ -100,6 +100,8 @@ static lonejson_status lonejson__candidate_transform_record_status(
   if (status == LONEJSON_STATUS_TRUNCATED &&
       state->deferred_status == LONEJSON_STATUS_OK) {
     state->deferred_status = status;
+    state->stopped = 1;
+    state->current_emit = 0;
   }
   return status;
 }
@@ -303,6 +305,8 @@ static lonejson_status lonejson__candidate_transform_begin_container(
     }
     lonejson__candidate_transform_record_status(state, status);
     if (status != LONEJSON_STATUS_OK) {
+      state->skipping = 1;
+      state->skip_depth = 1u;
       return status;
     }
     return lonejson__candidate_transform_push(state, frame_kind);
