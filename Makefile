@@ -417,6 +417,15 @@ bench:
 	fi
 
 bench-check:
+ifeq ($(and $(wildcard $(PERF_BASELINE)),$(wildcard $(LUA_PERF_BASELINE))),)
+	@if [ ! -f "$(PERF_BASELINE)" ] || [ ! -f "$(LUA_PERF_BASELINE)" ]; then \
+		printf '%s\n' "bench-check skipped: missing frozen benchmark baseline for host $(PERF_HOST_ID)" >&2; \
+		printf '%s\n' "  C baseline: $(PERF_BASELINE)" >&2; \
+		printf '%s\n' "  Lua baseline: $(LUA_PERF_BASELINE)" >&2; \
+		printf '%s\n' "run 'make bench-freeze-baseline lua-bench-freeze-baseline' on this host to create one" >&2; \
+		exit 0; \
+	fi
+else
 	@$(MAKE) lua-rock
 	@tmp_dir="$$(mktemp -d)"; \
 	trap 'rm -rf "$$tmp_dir"' EXIT; \
@@ -444,6 +453,7 @@ bench-check:
 		printf '%s\n' 'Lua benchmark gate failed once; rerunning only failing cases once to confirm.' >&2; \
 		$(LUA) bench/lonejson_lua_bench.lua confirm-lua "$$c_latest" "$(LUA_PERF_BASELINE)" "$$lua_latest" "$(LUA_PERF_ITERATIONS)"; \
 	fi
+endif
 
 bench-freeze-baseline:
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \

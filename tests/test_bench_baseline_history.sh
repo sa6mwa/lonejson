@@ -61,6 +61,19 @@ if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   done
 fi
 
+missing_host_output=$(
+  make --no-print-directory -C "$repo_root" bench-check \
+    PERF_HOST_ID=missing-test-host \
+    LUA="$lua_exec" \
+    LUAROCKS="$luarocks_exec" 2>&1
+)
+printf '%s\n' "$missing_host_output" | \
+  grep -F 'bench-check skipped: missing frozen benchmark baseline for host missing-test-host' >/dev/null
+printf '%s\n' "$missing_host_output" | \
+  grep -F 'perflogs/hosts/missing-test-host/baseline.json' >/dev/null
+printf '%s\n' "$missing_host_output" | \
+  grep -F 'perflogs/hosts/missing-test-host/lua/baseline.json' >/dev/null
+
 make --no-print-directory -C "$repo_root" lua-rock \
   LUA="$lua_exec" LUAROCKS="$luarocks_exec" >/dev/null
 eval "$("$luarocks_exec" path --tree "$repo_root/build/luarocks")"
