@@ -631,6 +631,7 @@ if(LONEJSON_BUILD_TESTS)
       tests/test_lua_interop.c)
     target_include_directories(lonejson_lua_interop_tests PRIVATE
       "${LONEJSON_PUBLIC_INCLUDE_DIR}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua"
       "${LONEJSON_TARGET_LUA_INCLUDE_DIR}")
     target_compile_definitions(lonejson_lua_interop_tests PRIVATE
       LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
@@ -1280,7 +1281,7 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_stream_spool.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_support.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua_visitor_facade.inc.h"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/lonejson_lua.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lua/lonejson_lua.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_embedded_runner.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_interop.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_validate.c"
