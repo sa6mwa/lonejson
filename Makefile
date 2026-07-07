@@ -604,7 +604,7 @@ fuzz:
 	if [ "$$missing" -ne 0 ]; then \
 		./scripts/generate_fuzz_large_seeds.sh; \
 	fi
-	cmake --preset $(FUZZ_PRESET)
+	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_base64 lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_path_value_visitor lonejson_fuzz_candidate_stream lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries lonejson_fuzz_jwt
 	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -P cmake/check_fuzz_instrumentation.cmake
 	cmake -E rm -rf "$(FUZZ_BASE64_CORPUS_DIR)" "$(FUZZ_VALIDATE_CORPUS_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)" "$(FUZZ_CANDIDATE_STREAM_CORPUS_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)" "$(FUZZ_JWT_CORPUS_DIR)"

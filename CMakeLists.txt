@@ -216,7 +216,7 @@ function(lonejson_find_openssl)
     if(NOT EXISTS "${_cpkt_openssl_config}")
       message(FATAL_ERROR
         "LONEJSON_C_PKT_SYSTEMS_ROOT is missing OpenSSLConfig.cmake: "
-        "${_cpkt_openssl_config}. Use a c.pkt.systems v0.6.0 or newer "
+        "${_cpkt_openssl_config}. Use a c.pkt.systems v0.7.0 or newer "
         "bundle, or unset LONEJSON_C_PKT_SYSTEMS_ROOT to use system OpenSSL.")
     endif()
     set(LONEJSON_C_PKT_SYSTEMS_ROOT "${_cpkt_root}" CACHE PATH
