@@ -7,8 +7,40 @@ luarocks_exec=${3:-luarocks}
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
+if [ "$("$repo_root/scripts/bench_host_id.sh" wopr)" != \
+    "f259bcc951a8f53802cc755f08e5e218" ]; then
+  printf 'bench host id helper changed the frozen wopr host hash\n' >&2
+  exit 1
+fi
+
+mkdir -p "$tmp_dir/bin"
+cat >"$tmp_dir/bin/md5sum" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+cat >"$tmp_dir/bin/md5" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" != "-q" ]; then
+  exit 1
+fi
+cat >/dev/null
+printf '%s\n' F259BCC951A8F53802CC755F08E5E218
+EOF
+chmod +x "$tmp_dir/bin/md5sum" "$tmp_dir/bin/md5"
+if [ "$(PATH="$tmp_dir/bin:/usr/bin:/bin" "$repo_root/scripts/bench_host_id.sh" wopr)" != \
+    "f259bcc951a8f53802cc755f08e5e218" ]; then
+  printf 'bench host id helper did not normalize md5 -q fallback output\n' >&2
+  exit 1
+fi
+
 if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  for path in perflogs/latest.json perflogs/lua/latest.json; do
+  for path in \
+    perflogs/hosts/testhost/history.jsonl \
+    perflogs/hosts/testhost/latest.json \
+    perflogs/hosts/testhost/runs/1.json \
+    perflogs/hosts/testhost/lua/history.jsonl \
+    perflogs/hosts/testhost/lua/latest.json \
+    perflogs/hosts/testhost/lua/runs/1.json; do
     if git -C "$repo_root" ls-files --error-unmatch "$path" >/dev/null 2>&1; then
       printf '%s must be ignored local benchmark output, not tracked source\n' "$path" >&2
       exit 1
@@ -19,13 +51,28 @@ if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fi
   done
 
-  for path in perflogs/baseline.json perflogs/lua/baseline.json; do
+  for path in \
+    perflogs/hosts/f259bcc951a8f53802cc755f08e5e218/baseline.json \
+    perflogs/hosts/f259bcc951a8f53802cc755f08e5e218/lua/baseline.json; do
     if ! git -C "$repo_root" ls-files --error-unmatch "$path" >/dev/null 2>&1; then
       printf '%s must remain tracked as the frozen benchmark contract\n' "$path" >&2
       exit 1
     fi
   done
 fi
+
+missing_host_output=$(
+  make --no-print-directory -C "$repo_root" bench-check \
+    PERF_HOST_ID=missing-test-host \
+    LUA="$lua_exec" \
+    LUAROCKS="$luarocks_exec" 2>&1
+)
+printf '%s\n' "$missing_host_output" | \
+  grep -F 'bench-check skipped: missing frozen benchmark baseline for host missing-test-host' >/dev/null
+printf '%s\n' "$missing_host_output" | \
+  grep -F 'perflogs/hosts/missing-test-host/baseline.json' >/dev/null
+printf '%s\n' "$missing_host_output" | \
+  grep -F 'perflogs/hosts/missing-test-host/lua/baseline.json' >/dev/null
 
 make --no-print-directory -C "$repo_root" lua-rock \
   LUA="$lua_exec" LUAROCKS="$luarocks_exec" >/dev/null
@@ -36,7 +83,7 @@ export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
 git -C "$tmp_dir" init -q
 git -C "$tmp_dir" config user.email test@example.invalid
 git -C "$tmp_dir" config user.name 'lonejson test'
-mkdir -p "$tmp_dir/perflogs"
+mkdir -p "$tmp_dir/perflogs/hosts/testhost"
 
 write_baseline() {
   local alpha=$1
@@ -55,22 +102,22 @@ write_baseline() {
       printf ',{"name":"stream/gamma/lonejson","mib_per_sec":%s}' "$gamma"
     fi
     printf ']}'
-  } >"$tmp_dir/perflogs/baseline.json"
+  } >"$tmp_dir/perflogs/hosts/testhost/baseline.json"
 }
 
 write_baseline 100 50 -
-git -C "$tmp_dir" add perflogs/baseline.json
+git -C "$tmp_dir" add perflogs/hosts/testhost/baseline.json
 git -C "$tmp_dir" commit -q -m 'bench: add first baseline'
 
 write_baseline 120 - 5
-git -C "$tmp_dir" add perflogs/baseline.json
+git -C "$tmp_dir" add perflogs/hosts/testhost/baseline.json
 git -C "$tmp_dir" commit -q -m 'bench: add second baseline'
 
 write_baseline 90 55 6
-git -C "$tmp_dir" add perflogs/baseline.json
+git -C "$tmp_dir" add perflogs/hosts/testhost/baseline.json
 git -C "$tmp_dir" commit -q -m 'bench: add third baseline'
 
-output=$("$lua_exec" "$repo_root/scripts/bench_baseline_history.lua" --repo "$tmp_dir" --kind c)
+output=$("$lua_exec" "$repo_root/scripts/bench_baseline_history.lua" --repo "$tmp_dir" --kind c --host-id testhost)
 
 printf '%s\n' "$output" | grep -q 'REGRESSION: 1 metric'
 printf '%s\n' "$output" | grep -q 'NOTICE: 1 material regression'

@@ -459,10 +459,10 @@ cat >"$package_root/share/lonejson/dependencies.json" <<'EOF'
   "dependencies": [
     {
       "name": "c.pkt.systems",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "target_id": "x86_64-linux-gnu",
-      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.6.0/c.pkt.systems-0.6.0-x86_64-linux-gnu.tar.gz",
-      "sha256": "0e3f96cef656ad927ff952e5fb195fabaea551150017df0368f6fd30c5fa8039",
+      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.7.0/c.pkt.systems-0.7.0-x86_64-linux-gnu.tar.gz",
+      "sha256": "35e50e02ca4b0f7ba7ff0e3683c1c19b1ae07aa0c47b349e52025e45e0e35b28",
       "bundled": false,
       "external": true,
       "role": "release-sdk-build-dependency",

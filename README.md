@@ -1151,10 +1151,13 @@ lonejson_free(lj);
 The repository includes two benchmark harnesses:
 
 - `make bench` runs the C benchmark suite and compares lonejson against the
-  frozen baseline in `perflogs/baseline.json`
+  frozen baseline in `perflogs/hosts/<host-id>/baseline.json`
 - `make lua-bench` runs the Lua benchmark suite and compares Lua lanes against
-  `perflogs/lua/baseline.json`, with informational sibling ratios against the
-  latest C lonejson run
+  `perflogs/hosts/<host-id>/lua/baseline.json`, with informational sibling
+  ratios against the latest C lonejson run for the same host id
+
+`<host-id>` is the first field of `uname -n | md5sum`; benchmark JSON stores
+that hash instead of the raw hostname.
 
 The C benchmark harness is now self-contained. It no longer depends on YAJL or
 another external C comparator library. When the benchmark schema, case set, or

@@ -62,9 +62,24 @@ printf '%s\n' "$matrix_script" | grep -F -- 'missing c.pkt.systems OpenSSL CMake
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OPENSSL=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_JWT=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OIDC=ON' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'host_policy_ctest_exclude=' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'run_target linux-gnu-release x86_64-linux-gnu package-archive-linux-gnu full' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset" -E "$host_policy_ctest_exclude"' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset"' >/dev/null
+if printf '%s\n' "$matrix_script" | grep -F -- 'host_policy_ctest_exclude=' >/dev/null; then
+  printf 'release matrix must not keep a filtered cross-target CTest replay surface\n' >&2
+  exit 1
+fi
+if printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset" -E' >/dev/null; then
+  printf 'release matrix must not rerun prerelease CTest subsets for package targets\n' >&2
+  exit 1
+fi
+for non_host_target in \
+    'run_target linux-musl-release x86_64-linux-musl package-archive-linux-musl' \
+    'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu' \
+    'run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl' \
+    'run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu' \
+    'run_target armhf-linux-musl-release armhf-linux-musl package-archive-armhf-linux-musl'; do
+  printf '%s\n' "$matrix_script" | grep -F -- "$non_host_target" >/dev/null
+done
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OPENSSL=${LONEJSON_BUILD_WITH_OPENSSL}' >/dev/null
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_JWT=${LONEJSON_BUILD_WITH_JWT}' >/dev/null
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OIDC=${LONEJSON_BUILD_WITH_OIDC}' >/dev/null

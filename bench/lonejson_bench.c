@@ -987,8 +987,41 @@ static void bench_fill_timestamp(bench_run *run) {
   }
 }
 
+static int bench_read_host_id_from_command(char *dst, size_t dst_size) {
+  FILE *pipe;
+  char buffer[128];
+  size_t len;
+
+  if (dst == NULL || dst_size == 0u) {
+    return -1;
+  }
+  pipe = popen("./scripts/bench_host_id.sh 2>/dev/null", "r");
+  if (pipe == NULL) {
+    return -1;
+  }
+  if (fgets(buffer, sizeof(buffer), pipe) == NULL) {
+    pclose(pipe);
+    return -1;
+  }
+  if (pclose(pipe) == -1) {
+    return -1;
+  }
+  len = strcspn(buffer, " \t\r\n");
+  if (len == 0u || len >= dst_size) {
+    return -1;
+  }
+  memcpy(dst, buffer, len);
+  dst[len] = '\0';
+  return 0;
+}
+
 static void bench_fill_host_and_compiler(bench_run *run) {
-  if (gethostname(run->host, sizeof(run->host) - 1u) != 0) {
+  const char *host_id = getenv("LONEJSON_BENCH_HOST_ID");
+
+  if (host_id != NULL && host_id[0] != '\0') {
+    snprintf(run->host, sizeof(run->host), "%s", host_id);
+  } else if (bench_read_host_id_from_command(run->host, sizeof(run->host)) !=
+             0) {
     snprintf(run->host, sizeof(run->host), "unknown");
   }
   run->host[sizeof(run->host) - 1u] = '\0';

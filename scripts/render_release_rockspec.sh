@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -eu
 
-if [ "$#" -lt 2 ] || [ "$#" -gt 5 ]; then
-  printf '%s\n' "usage: $0 VERSION OUTPUT_PATH [SOURCE_URL] [SOURCE_TAG] [LIB_EXTENSION]" >&2
+if [ "$#" -lt 2 ] || [ "$#" -gt 6 ]; then
+  printf '%s\n' "usage: $0 VERSION OUTPUT_PATH [SOURCE_URL] [SOURCE_TAG] [LIB_EXTENSION] [SOURCE_DIR]" >&2
   exit 1
 fi
 
@@ -11,7 +11,10 @@ output_path="$2"
 source_url="git+https://github.com/sa6mwa/lonejson.git"
 source_tag=""
 tag_line=""
+dir_line=""
 lib_extension="so"
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+template_path="lonejson.rockspec.in"
 
 if [ "$#" -ge 3 ]; then
   source_url="$3"
@@ -27,13 +30,22 @@ if [ "$#" -ge 5 ]; then
   lib_extension="$5"
 fi
 
+if [ "$#" -ge 6 ] && [ -n "$6" ]; then
+  dir_line='  dir = "'"$6"'",'
+fi
+
 if [ -n "$source_tag" ]; then
   tag_line='  tag = "'"$source_tag"'",'
+fi
+
+if [ ! -f "$template_path" ]; then
+  template_path="$script_dir/../lonejson.rockspec.in"
 fi
 
 sed \
   -e "s|@VERSION@|$version|g" \
   -e "s|@SOURCE_URL@|$source_url|g" \
   -e "s|@SOURCE_TAG_LINE@|$tag_line|g" \
+  -e "s|@SOURCE_DIR_LINE@|$dir_line|g" \
   -e "s|@LIB_EXTENSION@|$lib_extension|g" \
-  lonejson.rockspec.in >"$output_path"
+  "$template_path" >"$output_path"

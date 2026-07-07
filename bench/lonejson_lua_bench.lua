@@ -31,15 +31,20 @@ local VENDOR_EXTREME_NUMBERS_JSON = '{ "min": -1.0e+28, "max": 1.0e+28 }'
 local VENDOR_STRING_UNICODE_JSON =
     '{"title":"\\u041f\\u043e\\u043b\\u0442\\u043e\\u0440\\u0430 \\u0417\\u0435\\u043c\\u043b\\u0435\\u043a\\u043e\\u043f\\u0430" }'
 
-local function hostname()
-  local p = io.popen("hostname -s 2>/dev/null || hostname 2>/dev/null", "r")
+local function benchmark_host_id()
+  local env = os.getenv("LONEJSON_BENCH_HOST_ID")
+  local p
   local out
+  if env ~= nil and env ~= "" then
+    return env
+  end
+  p = io.popen("./scripts/bench_host_id.sh 2>/dev/null", "r")
   if p == nil then
     return "unknown"
   end
   out = p:read("*a") or ""
   p:close()
-  out = out:gsub("%s+$", "")
+  out = out:match("^(%S+)") or ""
   if out == "" then
     return "unknown"
   end
@@ -1291,7 +1296,7 @@ local function build_run(iterations, c_latest_path)
     schema_version = BENCH_SCHEMA_VERSION,
     timestamp_epoch_ns = now_ns,
     timestamp_utc = utc_timestamp_from_ns(now_ns),
-    host = hostname(),
+    host = benchmark_host_id(),
     lua_version = _VERSION,
     c_latest_path = portable_path(c_latest_path),
     iterations = iterations,

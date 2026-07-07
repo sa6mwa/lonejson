@@ -364,6 +364,8 @@ int main(void) {
   test_writer_primitive_string_sources();
   test_writer_invalid_state_and_sink_failure();
   test_writer_number_text_rejects_non_numbers();
+  test_writer_chunked_numbers();
+  test_writer_chunked_number_failures();
   test_writer_value_stream_success_and_commas();
   test_writer_value_stream_method_initializers();
   test_writer_value_stream_root_scalars();
@@ -430,8 +432,14 @@ int main(void) {
   test_candidate_stream_file_path_fd_and_large_reader();
   test_candidate_stream_capture_sink_and_memory();
   test_candidate_stream_capture_spooled_and_cleanup();
+  test_candidate_stream_capture_gated_spooled();
+  test_candidate_stream_capture_gated_stop_and_failure();
   test_candidate_stream_capture_failure_modes();
   test_candidate_stream_capture_path_visitor_user();
+  test_candidate_stream_transform_pass_drop_replace();
+  test_candidate_stream_transform_fragmented_reader();
+  test_candidate_stream_transform_stop_container();
+  test_candidate_stream_transform_failure_modes();
 #ifdef LONEJSON_WITH_CURL
   test_curl_parse_survives_runtime_free();
   test_curl_parse_reinit_releases_previous_parser();

@@ -92,6 +92,24 @@ initialization rule as the rest of lonejson: instantiate one runtime with
 `lonejson_new()`/`lonejson_default_config()` and use the public `*_init`
 helpers for public structs instead of manual `memset` or `{0}`.
 
+## C embedder interop
+
+The installed C SDK remains Lua-agnostic. Its public `include/lonejson.h`
+defines generic borrowed views such as `lonejson_schema_view` and
+`lonejson_record_view`, but it does not include `<lua.h>` or declare Lua adapter
+functions.
+
+The Lua-specific adapter header lives with the Lua binding sources as
+`src/lua/lonejson_lua.h` and is staged into the Lua source rock. That header is
+for C embedders that compile against the Lua module source surface and need to
+borrow Lua-created schemas or records. The adapter functions validate Lua
+userdata and fill the generic views from `lonejson.h`.
+
+Borrowed views do not transfer ownership. Lua-created objects remain owned by
+their `lua_State`; if C code retains one beyond the current stack frame, it must
+hold a Lua registry reference to the userdata and must not free, resize, or
+retain raw record pointers beyond the documented userdata lifetime.
+
 ## Auth facade
 
 When the Lua module is built with JWT/OIDC support, auth helpers are a facade

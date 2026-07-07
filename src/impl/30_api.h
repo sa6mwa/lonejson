@@ -3771,8 +3771,11 @@ lonejson__candidate_capture_string_end(void *user, lonejson_error *error) {
 static lonejson_status
 lonejson__candidate_capture_number_begin(void *user, lonejson_error *error) {
   lonejson__candidate_capture *capture = (lonejson__candidate_capture *)user;
-  (void)error;
-  lonejson__byte_reset(&capture->number);
+  lonejson_status status =
+      lonejson_writer_number_begin(&capture->writer, error);
+  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    return status;
+  }
   return lonejson__candidate_capture_forward_event(
       capture, capture->user_visitor != NULL
                    ? capture->user_visitor->number_begin
@@ -3783,9 +3786,8 @@ static lonejson_status
 lonejson__candidate_capture_number_chunk(void *user, const char *data,
                                          size_t len, lonejson_error *error) {
   lonejson__candidate_capture *capture = (lonejson__candidate_capture *)user;
-  lonejson_status status = lonejson__byte_append(&capture->number, data, len,
-                                                 capture->max_number_bytes,
-                                                 capture->allocator, error);
+  lonejson_status status =
+      lonejson_writer_number_chunk(&capture->writer, data, len, error);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return status;
   }
@@ -3800,10 +3802,7 @@ lonejson__candidate_capture_number_chunk(void *user, const char *data,
 static lonejson_status
 lonejson__candidate_capture_number_end(void *user, lonejson_error *error) {
   lonejson__candidate_capture *capture = (lonejson__candidate_capture *)user;
-  lonejson_status status = lonejson_writer_number_text(
-      &capture->writer,
-      capture->number.data != NULL ? capture->number.data : "",
-      capture->number.len, error);
+  lonejson_status status = lonejson_writer_number_end(&capture->writer, error);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return status;
   }
@@ -3947,7 +3946,8 @@ lonejson__candidate_capture_open(lonejson__candidate_scan *scan,
                                     : SIZE_MAX - 1u;
     sink = lonejson__candidate_memory_sink;
     sink_user = &capture->memory;
-  } else if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_SPOOLED) {
+  } else if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_SPOOLED ||
+             capture->mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
     lonejson_spooled_init_with_allocator(
         &capture->spool,
         &scan->runtime->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT],
@@ -3990,7 +3990,8 @@ lonejson__candidate_capture_close(lonejson__candidate_scan *scan,
                                  "candidate payload size exceeds uint64 range");
     }
     info->payload_size = (lonejson_uint64)payload_size;
-  } else if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_SPOOLED) {
+  } else if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_SPOOLED ||
+             capture->mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
     info->payload_spool = &capture->spool;
     payload_size = lonejson_spooled_size(&capture->spool);
     if ((size_t)(lonejson_uint64)payload_size != payload_size) {
@@ -4001,6 +4002,48 @@ lonejson__candidate_capture_close(lonejson__candidate_scan *scan,
     info->payload_size = (lonejson_uint64)payload_size;
   }
   return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+lonejson__candidate_capture_decision_status(lonejson__candidate_scan *scan,
+                                            const lonejson_candidate_info *info,
+                                            int *retain) {
+  lonejson_candidate_capture_decision decision;
+
+  if (retain != NULL) {
+    *retain = 1;
+  }
+  if (scan->options->capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (retain != NULL) {
+    *retain = 0;
+  }
+  lonejson__clear_error(scan->error);
+  decision = scan->options->capture_decision(
+      scan->options->capture_decision_user, info, scan->error);
+  if (decision == LONEJSON_CANDIDATE_RETAIN) {
+    if (retain != NULL) {
+      *retain = 1;
+    }
+    return LONEJSON_STATUS_OK;
+  }
+  if (decision == LONEJSON_CANDIDATE_DISCARD) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (decision == LONEJSON_CANDIDATE_DECISION_STOP) {
+    scan->stopped = 1;
+    return LONEJSON_STATUS_OK;
+  }
+  if (scan->error != NULL && (scan->error->code == LONEJSON_STATUS_OK ||
+                              scan->error->code == (lonejson_status)0)) {
+    return lonejson__set_error(
+        scan->error, LONEJSON_STATUS_CALLBACK_FAILED,
+        info != NULL ? lonejson__candidate_error_offset(info->stream_offset)
+                     : 0u,
+        0u, 0u, "candidate capture decision callback failed");
+  }
+  return LONEJSON_STATUS_CALLBACK_FAILED;
 }
 
 static void lonejson__candidate_io_take_pushback(lonejson__candidate_scan *scan,
@@ -4229,7 +4272,19 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
                                0u, "candidate byte range overflow");
   }
   info.byte_size = end - start;
-  status = lonejson__candidate_capture_close(scan, &capture, &info);
+  {
+    int retain_payload = 1;
+
+    status = lonejson__candidate_capture_decision_status(scan, &info,
+                                                         &retain_payload);
+    if (status != LONEJSON_STATUS_OK || scan->stopped) {
+      lonejson__candidate_capture_cleanup(&capture);
+      return status;
+    }
+    if (retain_payload) {
+      status = lonejson__candidate_capture_close(scan, &capture, &info);
+    }
+  }
   if (status != LONEJSON_STATUS_OK) {
     lonejson__candidate_capture_cleanup(&capture);
     return status;
@@ -4466,7 +4521,8 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
   if (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
       local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_SINK &&
       local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_MEMORY &&
-      local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_SPOOLED) {
+      local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_SPOOLED &&
+      local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "invalid candidate capture mode");
   }
@@ -4474,6 +4530,13 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
       local.payload_sink == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "candidate payload sink is required");
+  }
+  if (local.capture_mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
+      local.capture_decision == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "candidate capture decision callback is "
+                               "required");
   }
 
   memset(&scan, 0, sizeof(scan));

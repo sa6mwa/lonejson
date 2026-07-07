@@ -66,6 +66,28 @@ resolve_staged_include() {
 
 require_manifest_entry src/lua/lonejson_lua_visitor_facade.inc.h
 
+(
+  cd "$stage_dir"
+  ./scripts/render_release_rockspec.sh \
+    "0.0.0" "$tmp_dir/packed.rockspec" \
+    "file://lonejson-lua-0.0.0.tar.gz" "" "so" "lonejson-0.0.0"
+)
+if ! grep -Fx '  dir = "lonejson-0.0.0",' "$tmp_dir/packed.rockspec" >/dev/null; then
+  printf 'packed Lua rockspec is missing source.dir\n' >&2
+  exit 1
+fi
+
+"$repo_root/scripts/render_release_rockspec.sh" \
+  "0.0.0" "$tmp_dir/default.rockspec"
+if grep -F '@SOURCE_DIR_LINE@' "$tmp_dir/default.rockspec" >/dev/null; then
+  printf 'default Lua rockspec still contains source dir placeholder\n' >&2
+  exit 1
+fi
+if grep -F '  dir = ' "$tmp_dir/default.rockspec" >/dev/null; then
+  printf 'default Lua rockspec unexpectedly contains source.dir\n' >&2
+  exit 1
+fi
+
 while IFS= read -r staged_file; do
   rel_file=${staged_file#"$stage_dir"/}
   while IFS= read -r line; do
