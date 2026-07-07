@@ -229,6 +229,8 @@ static void test_writer_chunked_number_failures(void) {
   unsigned char out[128];
   test_buffer_sink sink;
   lonejson_writer writer;
+  lonejson *runtime;
+  lonejson_config config;
   lonejson_error error;
 
   memset(&sink, 0, sizeof(sink));
@@ -268,6 +270,31 @@ static void test_writer_chunked_number_failures(void) {
   EXPECT(lonejson_writer_finish(&writer, &error) ==
          LONEJSON_STATUS_INVALID_JSON);
   lonejson_writer_cleanup(&writer);
+
+  config = lonejson_default_config();
+  config.json_value_max_number_bytes = 2u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime != NULL) {
+    memset(&sink, 0, sizeof(sink));
+    sink.buffer = out;
+    sink.capacity = sizeof(out);
+    EXPECT(lonejson_writer_init_sink(runtime, &writer, test_buffer_sink_write,
+                                     &sink, &error) == LONEJSON_STATUS_OK);
+    EXPECT(lonejson_writer_number_begin(&writer, &error) == LONEJSON_STATUS_OK);
+    EXPECT(lonejson_writer_number_chunk(&writer, "12", 2u, &error) ==
+           LONEJSON_STATUS_OK);
+    EXPECT(lonejson_writer_number_chunk(&writer, "3", 1u, &error) ==
+           LONEJSON_STATUS_OVERFLOW);
+    EXPECT(lonejson_writer_number_end(&writer, &error) ==
+           LONEJSON_STATUS_INVALID_JSON);
+    EXPECT(sink.length == 0u);
+    EXPECT(lonejson_writer_finish(&writer, &error) ==
+           LONEJSON_STATUS_INVALID_JSON);
+    EXPECT(sink.length == 0u);
+    lonejson_writer_cleanup(&writer);
+    lonejson_free(runtime);
+  }
 }
 
 static lonejson_status

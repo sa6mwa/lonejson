@@ -1412,6 +1412,11 @@ lonejson_status lonejson_writer_number_end(lonejson_writer *writer,
         writer, error, LONEJSON_STATUS_INVALID_ARGUMENT, "writer is required");
   }
   state = (lonejson__writer_state *)writer->state;
+  if (state->failed) {
+    return lonejson__writer_set_error(writer, error,
+                                      LONEJSON_STATUS_INVALID_JSON,
+                                      "writer is in a failed state");
+  }
   if (!state->number_open) {
     return lonejson__writer_set_error(writer, error,
                                       LONEJSON_STATUS_INVALID_JSON,
