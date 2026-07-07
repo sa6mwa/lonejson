@@ -8,6 +8,7 @@ ASAN_PRESET := asan
 TSAN_PRESET := tsan
 MSAN_PRESET := msan
 FUZZ_PRESET := fuzz
+TIME_STEP := ./scripts/time_step.sh
 LONEJSON_HAVE_CLANG ?= $(shell if command -v clang >/dev/null 2>&1; then printf '1'; else printf '0'; fi)
 LONEJSON_HAVE_TSAN ?= $(shell bash "$(CURDIR)/scripts/check_clang_sanitizer_support.sh" thread)
 LONEJSON_HAVE_MSAN ?= $(shell bash "$(CURDIR)/scripts/check_clang_sanitizer_support.sh" memory)
@@ -397,16 +398,16 @@ prerelease-live:
 	@test "$${LONEJSON_ENABLE_LIVE_TESTS:-}" = "1" || (printf '%s\n' 'Set LONEJSON_ENABLE_LIVE_TESTS=1 to run live prerelease checks; no live prerelease checks are currently defined.' >&2; exit 1)
 
 prerelease-hardening:
-	$(MAKE) prerelease
-	$(MAKE) release-matrix
+	+$(TIME_STEP) prerelease $(MAKE) prerelease
+	+$(TIME_STEP) release-matrix $(MAKE) release-matrix
 
 release-matrix:
 	./scripts/run_release_matrix.sh
 
 release:
-	./scripts/clean.sh
-	$(MAKE) prerelease
-	$(MAKE) release-matrix
+	$(TIME_STEP) release/clean ./scripts/clean.sh
+	+$(TIME_STEP) release/prerelease $(MAKE) prerelease
+	+$(TIME_STEP) release/release-matrix $(MAKE) release-matrix
 
 bench:
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
@@ -507,23 +508,23 @@ cross-sanitizers: deps-cross
 	./scripts/run_cross_sanitizer_matrix.sh
 
 test-all:
-	$(MAKE) test
-	$(MAKE) test-host
-	$(MAKE) test-host-curl
-	$(MAKE) test-cross
-	$(MAKE) asan
+	+$(TIME_STEP) test $(MAKE) test
+	+$(TIME_STEP) test-host $(MAKE) test-host
+	+$(TIME_STEP) test-host-curl $(MAKE) test-host-curl
+	+$(TIME_STEP) test-cross $(MAKE) test-cross
+	+$(TIME_STEP) asan $(MAKE) asan
 ifeq ($(LONEJSON_HAVE_TSAN),1)
-	$(MAKE) tsan
+	+$(TIME_STEP) tsan $(MAKE) tsan
 else
 	@printf '%s\n' 'Skipping tsan: unsupported toolchain'
 endif
 ifeq ($(LONEJSON_HAVE_MSAN),1)
-	$(MAKE) msan
+	+$(TIME_STEP) msan $(MAKE) msan
 else
 	@printf '%s\n' 'Skipping msan: unsupported toolchain'
 endif
-	$(MAKE) bench-check
-	$(MAKE) fuzz-smoke
+	+$(TIME_STEP) bench-check $(MAKE) bench-check
+	+$(TIME_STEP) fuzz-smoke $(MAKE) fuzz-smoke
 
 test-all-bindings:
 	$(MAKE) lua-test
@@ -684,24 +685,24 @@ fuzz:
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/parser_boundaries"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/jwt"
 	cmake -E make_directory "build/$(FUZZ_PRESET)/artifacts/base64"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_base64 -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_BASE64_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/base64/ "$(FUZZ_BASE64_GENERATED_DIR)" "$(FUZZ_BASE64_CORPUS_DIR)/base64"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_validate -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALIDATE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/validate/ "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_MAPPED_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/mapped/ "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_array_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ARRAY_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/array_stream/ "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_json_value -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_JSON_VALUE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/json_value/ "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/json_value" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/mapped" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/value_visitor"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_value_visitor -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALUE_VISITOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_visitor/ "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_path_value_visitor -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PATH_VALUE_VISITOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/path_value_visitor/ "$(FUZZ_PATH_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/path_value_visitor" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/languages"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_candidate_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_CANDIDATE_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/candidate_stream/ "$(FUZZ_CANDIDATE_STREAM_GENERATED_DIR)" "$(FUZZ_CANDIDATE_STREAM_CORPUS_DIR)/candidate_stream" "$(FUZZ_CANDIDATE_STREAM_CORPUS_DIR)/path_value_visitor" "$(FUZZ_CANDIDATE_STREAM_CORPUS_DIR)/json_value"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_value_rewrite -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALUE_REWRITE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_rewrite/ "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/spec"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_reader_stream_generator -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_READER_STREAM_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/reader_stream_generator/ "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/spec" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/languages"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_generator_backpressure -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_generator/ "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_value_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_VALUE_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_value_stream/ "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/value_visitor" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/spec"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_protocol_framing -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PROTOCOL_FRAMING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/protocol_framing/ "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_fixed_string_paths -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_FIXED_STRING_PATHS_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/fixed_string_paths/ "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)/fixed_string_paths"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_alloc_ceiling -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ALLOC_CEILING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/alloc_ceiling/ "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)/alloc_ceiling"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_parser_boundaries -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PARSER_BOUNDARIES_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/parser_boundaries/ "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)/parser_boundaries"
-	./build/$(FUZZ_PRESET)/lonejson_fuzz_jwt -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_JWT_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/jwt/ "$(FUZZ_JWT_GENERATED_DIR)" "$(FUZZ_JWT_CORPUS_DIR)/jwt"
-	$(MAKE) lua-fuzz
+	$(TIME_STEP) fuzz/base64 ./build/$(FUZZ_PRESET)/lonejson_fuzz_base64 -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_BASE64_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/base64/ "$(FUZZ_BASE64_GENERATED_DIR)" "$(FUZZ_BASE64_CORPUS_DIR)/base64"
+	$(TIME_STEP) fuzz/validate ./build/$(FUZZ_PRESET)/lonejson_fuzz_validate -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALIDATE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/validate/ "$(FUZZ_VALIDATE_GENERATED_DIR)" "$(FUZZ_VALIDATE_CORPUS_DIR)/vendor" "$(FUZZ_VALIDATE_CORPUS_DIR)/spec" "$(FUZZ_VALIDATE_CORPUS_DIR)/languages"
+	$(TIME_STEP) fuzz/mapped_parse ./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_MAPPED_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/mapped/ "$(FUZZ_MAPPED_GENERATED_DIR)" "$(FUZZ_MAPPED_CORPUS_DIR)/mapped" "$(FUZZ_MAPPED_CORPUS_DIR)/spec" "$(FUZZ_MAPPED_CORPUS_DIR)/languages"
+	$(TIME_STEP) fuzz/array_stream ./build/$(FUZZ_PRESET)/lonejson_fuzz_array_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ARRAY_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/array_stream/ "$(FUZZ_ARRAY_STREAM_GENERATED_DIR)" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/array_stream" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/mapped" "$(FUZZ_ARRAY_STREAM_CORPUS_DIR)/spec"
+	$(TIME_STEP) fuzz/json_value ./build/$(FUZZ_PRESET)/lonejson_fuzz_json_value -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_JSON_VALUE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/json_value/ "$(FUZZ_JSON_VALUE_GENERATED_DIR)" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/json_value" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/mapped" "$(FUZZ_JSON_VALUE_CORPUS_DIR)/value_visitor"
+	$(TIME_STEP) fuzz/value_visitor ./build/$(FUZZ_PRESET)/lonejson_fuzz_value_visitor -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALUE_VISITOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_visitor/ "$(FUZZ_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_VISITOR_CORPUS_DIR)/languages"
+	$(TIME_STEP) fuzz/path_value_visitor ./build/$(FUZZ_PRESET)/lonejson_fuzz_path_value_visitor -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PATH_VALUE_VISITOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/path_value_visitor/ "$(FUZZ_PATH_VALUE_VISITOR_GENERATED_DIR)" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/path_value_visitor" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/value_visitor" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/json_value" "$(FUZZ_PATH_VALUE_VISITOR_CORPUS_DIR)/languages"
+	$(TIME_STEP) fuzz/candidate_stream ./build/$(FUZZ_PRESET)/lonejson_fuzz_candidate_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_CANDIDATE_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/candidate_stream/ "$(FUZZ_CANDIDATE_STREAM_GENERATED_DIR)" "$(FUZZ_CANDIDATE_STREAM_CORPUS_DIR)/candidate_stream" "$(FUZZ_CANDIDATE_STREAM_CORPUS_DIR)/path_value_visitor" "$(FUZZ_CANDIDATE_STREAM_CORPUS_DIR)/json_value"
+	$(TIME_STEP) fuzz/value_rewrite ./build/$(FUZZ_PRESET)/lonejson_fuzz_value_rewrite -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_VALUE_REWRITE_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/value_rewrite/ "$(FUZZ_VALUE_REWRITE_GENERATED_DIR)" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/value_rewrite" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/json_value" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/mapped" "$(FUZZ_VALUE_REWRITE_CORPUS_DIR)/spec"
+	$(TIME_STEP) fuzz/reader_stream_generator ./build/$(FUZZ_PRESET)/lonejson_fuzz_reader_stream_generator -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_READER_STREAM_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/reader_stream_generator/ "$(FUZZ_READER_STREAM_GENERATOR_GENERATED_DIR)" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/spec" "$(FUZZ_READER_STREAM_GENERATOR_CORPUS_DIR)/languages"
+	$(TIME_STEP) fuzz/writer_generator_backpressure ./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_generator_backpressure -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_GENERATOR_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_generator/ "$(FUZZ_WRITER_GENERATOR_GENERATED_DIR)" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/mapped" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_GENERATOR_CORPUS_DIR)/spec"
+	$(TIME_STEP) fuzz/writer_value_stream ./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_value_stream -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_WRITER_VALUE_STREAM_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/writer_value_stream/ "$(FUZZ_WRITER_VALUE_STREAM_GENERATED_DIR)" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/json_value" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/value_visitor" "$(FUZZ_WRITER_VALUE_STREAM_CORPUS_DIR)/spec"
+	$(TIME_STEP) fuzz/protocol_framing ./build/$(FUZZ_PRESET)/lonejson_fuzz_protocol_framing -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PROTOCOL_FRAMING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/protocol_framing/ "$(FUZZ_PROTOCOL_FRAMING_GENERATED_DIR)" "$(FUZZ_PROTOCOL_FRAMING_CORPUS_DIR)/protocol_framing"
+	$(TIME_STEP) fuzz/fixed_string_paths ./build/$(FUZZ_PRESET)/lonejson_fuzz_fixed_string_paths -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_FIXED_STRING_PATHS_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/fixed_string_paths/ "$(FUZZ_FIXED_STRING_PATHS_GENERATED_DIR)" "$(FUZZ_FIXED_STRING_PATHS_CORPUS_DIR)/fixed_string_paths"
+	$(TIME_STEP) fuzz/alloc_ceiling ./build/$(FUZZ_PRESET)/lonejson_fuzz_alloc_ceiling -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_ALLOC_CEILING_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/alloc_ceiling/ "$(FUZZ_ALLOC_CEILING_GENERATED_DIR)" "$(FUZZ_ALLOC_CEILING_CORPUS_DIR)/alloc_ceiling"
+	$(TIME_STEP) fuzz/parser_boundaries ./build/$(FUZZ_PRESET)/lonejson_fuzz_parser_boundaries -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_PARSER_BOUNDARIES_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/parser_boundaries/ "$(FUZZ_PARSER_BOUNDARIES_GENERATED_DIR)" "$(FUZZ_PARSER_BOUNDARIES_CORPUS_DIR)/parser_boundaries"
+	$(TIME_STEP) fuzz/jwt ./build/$(FUZZ_PRESET)/lonejson_fuzz_jwt -max_total_time=$(FUZZ_TIME) -max_len=$(FUZZ_JWT_MAX_LEN) -artifact_prefix=build/$(FUZZ_PRESET)/artifacts/jwt/ "$(FUZZ_JWT_GENERATED_DIR)" "$(FUZZ_JWT_CORPUS_DIR)/jwt"
+	+$(TIME_STEP) fuzz/lua $(MAKE) lua-fuzz
 
 fuzz-long:
 	$(MAKE) fuzz FUZZ_TIME=$(FUZZ_LONG_TIME)
