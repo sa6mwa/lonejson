@@ -11,6 +11,8 @@ darwin_smoke_script="$(cat "$darwin_smoke_script_path")"
 darwin_release_smoke_script_path="$repo_root/scripts/smoke_darwin_release.sh"
 darwin_release_smoke_script="$(cat "$darwin_release_smoke_script_path")"
 cmake_lists="$(cat "$repo_root/CMakeLists.txt")"
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
 
 printf '%s\n' "$verify_script" | grep -F -- 'darwin_deployment_target="$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- '-D "LONEJSON_MACOS_DEPLOYMENT_TARGET=$darwin_deployment_target"' >/dev/null
@@ -106,3 +108,54 @@ if printf '%s\n' "$matrix_script" | grep -F -- '-U OPENSSL_' >/dev/null; then
   printf 'run_release_matrix.sh must not clean legacy OPENSSL cache variables\n' >&2
   exit 1
 fi
+
+fake_bin="$tmp_dir/bin"
+aarch64_musl_prefix="$tmp_dir/aarch64-linux-musl"
+armhf_musl_prefix="$tmp_dir/arm-linux-musleabihf"
+mkdir -p \
+  "$fake_bin" \
+  "$aarch64_musl_prefix/bin" \
+  "$aarch64_musl_prefix/aarch64-linux-musl/lib" \
+  "$armhf_musl_prefix/bin" \
+  "$armhf_musl_prefix/arm-linux-musleabihf/lib"
+for tool in \
+  cmake \
+  ctest \
+  gzip \
+  tar \
+  shasum \
+  make \
+  lua \
+  luarocks \
+  musl-gcc \
+  aarch64-linux-gnu-gcc \
+  arm-linux-gnueabihf-gcc \
+  qemu-aarch64 \
+  qemu-arm; do
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_bin/$tool"
+  chmod +x "$fake_bin/$tool"
+done
+for tool in \
+  aarch64-linux-musl-gcc \
+  aarch64-linux-musl-ar \
+  aarch64-linux-musl-ranlib; do
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$aarch64_musl_prefix/bin/$tool"
+  chmod +x "$aarch64_musl_prefix/bin/$tool"
+done
+for tool in \
+  arm-linux-musleabihf-gcc \
+  arm-linux-musleabihf-ar \
+  arm-linux-musleabihf-ranlib; do
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$armhf_musl_prefix/bin/$tool"
+  chmod +x "$armhf_musl_prefix/bin/$tool"
+done
+touch \
+  "$aarch64_musl_prefix/aarch64-linux-musl/lib/ld-musl-aarch64.so.1" \
+  "$armhf_musl_prefix/arm-linux-musleabihf/lib/ld-musl-armhf.so.1"
+
+preflight_output="$(PATH="$fake_bin:/usr/bin:/bin" \
+  CPKT_AARCH64_MUSL_PREFIX="$aarch64_musl_prefix" \
+  CPKT_ARMHF_MUSL_PREFIX="$armhf_musl_prefix" \
+  LONEJSON_RELEASE_MATRIX_PREFLIGHT_ONLY=1 \
+  "$matrix_script_path")"
+[[ "$preflight_output" == "Release matrix preflight completed successfully." ]]

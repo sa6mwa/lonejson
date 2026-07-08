@@ -1409,6 +1409,8 @@ const char *lonejson_status_string(lonejson_status status) {
     return "callback_failed";
   case LONEJSON_STATUS_IO_ERROR:
     return "io_error";
+  case LONEJSON_STATUS_UNSUPPORTED:
+    return "unsupported";
   case LONEJSON_STATUS_INTERNAL_ERROR:
     return "internal_error";
   default:
@@ -3409,6 +3411,7 @@ typedef struct lonejson__candidate_capture {
   size_t max_number_bytes;
   lonejson__candidate_memory_capture memory;
   lonejson_spooled spool;
+  lonejson__spool_options spool_options;
   int writer_open;
   int spool_init;
 } lonejson__candidate_capture;
@@ -3948,9 +3951,15 @@ lonejson__candidate_capture_open(lonejson__candidate_scan *scan,
     sink_user = &capture->memory;
   } else if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_SPOOLED ||
              capture->mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
+    capture->spool_options =
+        *lonejson__runtime_spool_options_for_class(scan->runtime,
+                                                   scan->options->spool_class);
+    if (scan->options->max_spooled_payload_bytes != 0u) {
+      capture->spool_options.max_bytes =
+          scan->options->max_spooled_payload_bytes;
+    }
     lonejson_spooled_init_with_allocator(
-        &capture->spool,
-        &scan->runtime->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT],
+        &capture->spool, &capture->spool_options,
         scan->runtime->config.allocator);
     capture->spool_init = 1;
     sink = lonejson__candidate_spooled_sink;
@@ -4389,9 +4398,9 @@ lonejson__candidate_scan_single(lonejson__candidate_scan *scan, int first) {
       scan, "candidate stream contains data after single JSON value");
 }
 
-static lonejson_status
-lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
-                                     int array_first) {
+static lonejson_status lonejson__candidate_scan_array_items_ex(
+    lonejson__candidate_scan *scan, int array_first, int recursive,
+    int require_eof) {
   lonejson_status status;
   int ch;
 
@@ -4418,8 +4427,11 @@ lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
   }
   if (ch == ']') {
     (void)lonejson__candidate_get_nonspace(scan);
-    return lonejson__candidate_require_eof(
-        scan, "candidate stream contains data after top-level array");
+    if (require_eof) {
+      return lonejson__candidate_require_eof(
+          scan, "candidate stream contains data after top-level array");
+    }
+    return LONEJSON_STATUS_OK;
   }
   if (ch == EOF) {
     return lonejson__set_error(
@@ -4430,7 +4442,16 @@ lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
   }
 
   for (;;) {
-    status = lonejson__candidate_visit_one(scan);
+    ch = lonejson__candidate_peek_nonspace(scan);
+    if (ch == -2) {
+      return scan->error != NULL ? scan->error->code
+                                 : LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (recursive && ch == '[') {
+      status = lonejson__candidate_scan_array_items_ex(scan, -1, 1, 0);
+    } else {
+      status = lonejson__candidate_visit_one(scan);
+    }
     if (status != LONEJSON_STATUS_OK || scan->stopped) {
       return status;
     }
@@ -4455,8 +4476,11 @@ lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
       continue;
     }
     if (ch == ']') {
-      return lonejson__candidate_require_eof(
-          scan, "candidate stream contains data after top-level array");
+      if (require_eof) {
+        return lonejson__candidate_require_eof(
+            scan, "candidate stream contains data after top-level array");
+      }
+      return LONEJSON_STATUS_OK;
     }
     if (ch == EOF) {
       return lonejson__set_error(
@@ -4471,6 +4495,18 @@ lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
             lonejson__json_cursor_next_offset(scan->cursor)),
         0u, 0u, "candidate array expected comma or ']'");
   }
+}
+
+static lonejson_status
+lonejson__candidate_scan_array_items(lonejson__candidate_scan *scan,
+                                     int array_first) {
+  return lonejson__candidate_scan_array_items_ex(scan, array_first, 0, 1);
+}
+
+static lonejson_status
+lonejson__candidate_scan_recursive_array_items(lonejson__candidate_scan *scan,
+                                               int array_first) {
+  return lonejson__candidate_scan_array_items_ex(scan, array_first, 1, 1);
 }
 
 static lonejson_status
@@ -4509,7 +4545,8 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
   if (local.framing != LONEJSON_CANDIDATE_FRAMING_AUTO &&
       local.framing != LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE &&
       local.framing != LONEJSON_CANDIDATE_FRAMING_NDJSON &&
-      local.framing != LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS) {
+      local.framing != LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS &&
+      local.framing != LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "invalid candidate stream framing");
   }
@@ -4525,6 +4562,12 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
       local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "invalid candidate capture mode");
+  }
+  if (local.spool_class != LONEJSON_SPOOL_CLASS_DEFAULT &&
+      local.spool_class != LONEJSON_SPOOL_CLASS_BLOB &&
+      local.spool_class != LONEJSON_SPOOL_CLASS_LARGE_TEXT) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "invalid candidate capture spool class");
   }
   if (local.capture_mode == LONEJSON_CANDIDATE_CAPTURE_SINK &&
       local.payload_sink == NULL) {
@@ -4559,6 +4602,9 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
     break;
   case LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS:
     status = lonejson__candidate_scan_array_items(&scan, -1);
+    break;
+  case LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS:
+    status = lonejson__candidate_scan_recursive_array_items(&scan, -1);
     break;
   default:
     status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,

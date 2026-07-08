@@ -508,7 +508,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 21
+#define LONEJSON_ABI_VERSION 22
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -638,6 +638,8 @@ typedef enum lonejson_status {
   LONEJSON_STATUS_CALLBACK_FAILED,
   /** An underlying file descriptor or `FILE *` operation failed. */
   LONEJSON_STATUS_IO_ERROR,
+  /** The operation is valid, but unsupported for the selected runtime shape. */
+  LONEJSON_STATUS_UNSUPPORTED,
   /** lonejson encountered an unexpected internal state. */
   LONEJSON_STATUS_INTERNAL_ERROR
 } lonejson_status;
@@ -2524,7 +2526,11 @@ typedef enum lonejson_candidate_framing {
   /** The input must be a top-level JSON array and each array item is one
    * candidate.
    */
-  LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS = 3
+  LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS = 3,
+  /** The input must be a top-level JSON array; nested arrays are flattened
+   * recursively and only non-array values become logical candidates.
+   */
+  LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS = 4
 } lonejson_candidate_framing;
 
 /** Result returned by candidate boundary callbacks. */
@@ -2610,6 +2616,13 @@ typedef lonejson_candidate_capture_decision (
 typedef struct lonejson_candidate_stream_options {
   lonejson_candidate_framing framing;
   lonejson_candidate_capture_mode capture_mode;
+  /** Runtime spool class used by spooled capture modes; zero selects default.
+   */
+  lonejson_spool_class spool_class;
+  /** Optional hard byte limit for one spooled candidate payload. Zero uses the
+   * selected runtime spool policy.
+   */
+  size_t max_spooled_payload_bytes;
   lonejson_sink_fn payload_sink;
   void *payload_sink_user;
   size_t max_memory_payload_bytes;
@@ -2625,11 +2638,124 @@ typedef struct lonejson_candidate_stream_options {
 
 /** Output framing policy for transformed candidate streams. */
 typedef enum lonejson_candidate_transform_output_framing {
-  /** Emit each transformed candidate as one JSON value followed by `\n` between
-   * emitted candidates.
+  /** Emit each transformed candidate as one JSON value followed by `\n`.
+   *
+   * Dropped candidates emit no bytes. When no candidates are emitted, no
+   * newline is emitted. This is the liblql-compatible candidate stream framing.
    */
   LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON = 1
 } lonejson_candidate_transform_output_framing;
+
+/** Execution mode selected before transformed candidate output is committed. */
+typedef enum lonejson_candidate_transform_mode {
+  /** Stream source values directly to the transform writer when safe. */
+  LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING = 0,
+  /** Retain each logical candidate in a bounded spool before replay. */
+  LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED = 1,
+  /** Deliberately report unsupported for the selected transform shape. */
+  LONEJSON_CANDIDATE_TRANSFORM_MODE_UNSUPPORTED = 2
+} lonejson_candidate_transform_mode;
+
+/** Per-logical-candidate execution metadata reported by transforms. */
+typedef struct lonejson_candidate_transform_candidate_info {
+  /** Execution mode selected before this candidate can emit transformed output.
+   */
+  lonejson_candidate_transform_mode mode;
+  /** Physical candidate index in the parsed source candidate stream. */
+  lonejson_uint64 physical_index;
+  /** Logical candidate index after transform-specific candidate flattening. */
+  lonejson_uint64 logical_index;
+  /** Source-relative byte offset when known, never a spool/replay offset. */
+  lonejson_uint64 stream_offset;
+  /** Source-relative byte size, or `LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN`. */
+  lonejson_uint64 byte_size;
+  /** Non-zero when this candidate used gated spooling before output. */
+  int gated_spooled;
+  /** Total semantic candidate bytes written to the gated spool. */
+  lonejson_uint64 bytes_spooled;
+  /** Non-zero when gated spooling spilled from memory to file-backed storage. */
+  int spilled;
+  /** Candidate bytes retained in memory-backed spool storage. */
+  lonejson_uint64 memory_bytes;
+  /** Candidate bytes retained in file-backed spill storage. */
+  lonejson_uint64 spill_bytes;
+  /** Number of same-executor transform replays performed for this candidate. */
+  lonejson_uint64 replay_count;
+} lonejson_candidate_transform_candidate_info;
+
+/** Aggregate execution metadata for one candidate transform call. */
+typedef struct lonejson_candidate_transform_result {
+  /** Logical candidates completed in streaming mode. */
+  lonejson_uint64 candidates_streamed;
+  /** Logical candidates completed in gated-spooled mode. */
+  lonejson_uint64 candidates_spooled;
+  /** Logical candidates whose gated spool spilled to file-backed storage. */
+  lonejson_uint64 candidates_spilled;
+  /** Total semantic candidate bytes written to gated spools. */
+  lonejson_uint64 total_bytes_spooled;
+  /** Total bytes written to file-backed spill storage. */
+  lonejson_uint64 total_spill_bytes;
+  /** Total same-executor transform replay count. */
+  lonejson_uint64 candidates_replayed;
+  /** Metadata for the most recently completed logical candidate. */
+  lonejson_candidate_transform_candidate_info last_candidate;
+} lonejson_candidate_transform_result;
+
+/** Old scalar materialization policy for transform callbacks. */
+typedef enum lonejson_candidate_transform_old_scalar_mode {
+  /** Do not retain complete string or number values for `old_value`. */
+  LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE = 0,
+  /** Retain the current complete string or number until its callback returns. */
+  LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE = 1
+} lonejson_candidate_transform_old_scalar_mode;
+
+/** Object insertion phase for structural transform callbacks. */
+typedef enum lonejson_candidate_transform_insert_phase {
+  /** No insertion callback is active. */
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_NONE = 0,
+  /** Called immediately after an emitted object begins, before source members. */
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_BEGIN = 1,
+  /** Called after an object key is known, before that source member is emitted.
+   */
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_BEFORE_MEMBER = 2,
+  /** Called after one source object member has completed. */
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_AFTER_MEMBER = 3,
+  /** Called immediately before an emitted object ends. */
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_END = 4
+} lonejson_candidate_transform_insert_phase;
+
+/** Segment kind used by structural candidate projection paths. */
+typedef enum lonejson_candidate_transform_projection_segment_kind {
+  /** Segment selects an object member by byte string key. */
+  LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER = 1,
+  /** Segment selects an array element by zero-based index. */
+  LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX = 2
+} lonejson_candidate_transform_projection_segment_kind;
+
+/** One segment in a structural candidate projection path.
+ *
+ * Object member segments use `key` and `key_len`. Array index segments use
+ * `index`. Projection paths are borrowed for the duration of one transform
+ * call; lonejson does not retain these pointers after the call returns.
+ */
+typedef struct lonejson_candidate_transform_projection_segment {
+  lonejson_candidate_transform_projection_segment_kind kind;
+  const char *key;
+  size_t key_len;
+  lonejson_uint64 index;
+} lonejson_candidate_transform_projection_segment;
+
+/** Structural projection path emitted by the candidate transform executor.
+ *
+ * A matching source value is emitted at the projected path. Missing object
+ * members or array indexes are synthesized structurally with `null` leaves.
+ * Object and array punctuation, keys, separators, and array placeholders are
+ * always written by lonejson.
+ */
+typedef struct lonejson_candidate_transform_projection_path {
+  const lonejson_candidate_transform_projection_segment *segments;
+  size_t segment_count;
+} lonejson_candidate_transform_projection_path;
 
 /** Action returned by candidate transform callbacks for the current value. */
 typedef enum lonejson_candidate_transform_action {
@@ -2649,11 +2775,44 @@ typedef enum lonejson_candidate_transform_action {
   LONEJSON_CANDIDATE_TRANSFORM_ERROR = 4
 } lonejson_candidate_transform_action;
 
-/** Context for a transform decision about one parsed JSON value. */
-typedef struct lonejson_candidate_transform_event {
-  const lonejson_candidate_info *candidate;
-  const lonejson_value_path *path;
+/** Callback-scoped view of the current original scalar value.
+ *
+ * For strings, `data` points to decoded UTF-8 bytes. For numbers, `data`
+ * points to the validated raw JSON number token. For booleans, `boolean_value`
+ * is non-zero for `true`. The pointed-to storage is owned by lonejson and is
+ * valid only for the duration of the transform or replacement callback.
+ */
+typedef struct lonejson_candidate_transform_old_value {
   lonejson_value_type value_type;
+  const char *data;
+  size_t len;
+  int boolean_value;
+} lonejson_candidate_transform_old_value;
+
+/** Context for a transform decision about one parsed JSON value.
+ *
+ * Scalar transform decisions are requested after the observer has received the
+ * complete original scalar. In those callbacks, `old_value` points at the
+ * callback-scoped original scalar view. Container transform decisions are
+ * requested after the matching begin observation and before child traversal.
+ */
+typedef struct lonejson_candidate_transform_event {
+  /** Physical source candidate metadata for the current callback. */
+  const lonejson_candidate_info *candidate;
+  /** Transform execution metadata for the current logical candidate. */
+  const lonejson_candidate_transform_candidate_info *transform_candidate;
+  /** Parser-owned normalized path of the current value. */
+  const lonejson_value_path *path;
+  /** JSON value category being decided or replaced. */
+  lonejson_value_type value_type;
+  /** Callback-scoped scalar data; `NULL` for container decisions. */
+  const lonejson_candidate_transform_old_value *old_value;
+  /** Active insertion phase, or `INSERT_NONE` for transform/replace calls. */
+  lonejson_candidate_transform_insert_phase insert_phase;
+  /** Current source object member key for before/after-member insertion. */
+  const char *object_key;
+  /** Byte length of `object_key`. */
+  size_t object_key_len;
 } lonejson_candidate_transform_event;
 
 typedef lonejson_candidate_transform_action (*lonejson_candidate_transform_fn)(
@@ -2664,26 +2823,70 @@ typedef lonejson_status (*lonejson_candidate_transform_replace_fn)(
     void *user, const lonejson_candidate_transform_event *event,
     lonejson_writer *writer, lonejson_error *error);
 
+typedef lonejson_status (*lonejson_candidate_transform_insert_fn)(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_writer *writer, lonejson_error *error);
+
 /** Options for single-pass candidate stream transforms.
  *
- * LoneJSON parses each candidate once and owns output writing. `observer`
- * receives the original parsed token stream. `transform` decides whether each
- * value is kept, dropped, or replaced; replacement JSON must be emitted through
- * the supplied lonejson writer before the callback returns.
+ * LoneJSON parses each candidate once and owns output writing. Streaming mode
+ * does not spool or replay reader input. Gated-spooled mode explicitly retains
+ * and replays each logical candidate. `observer` receives the original parsed
+ * token stream. Complete string/number old-value views are opt-in through
+ * `old_scalar_mode`; otherwise kept strings and numbers are streamed without
+ * retaining their complete decoded payload.
+ * `transform` decides whether each value is kept, dropped, stopped, or
+ * replaced; replacement JSON must be emitted through the supplied lonejson
+ * writer before the callback returns. `insert`, when set, is called only while
+ * lonejson's writer is positioned inside an emitted object; inserted members
+ * must be emitted with writer key/value calls.
+ *
+ * Dropping an object member suppresses both its key and value. Dropping an
+ * array element preserves valid array separators. Dropping a candidate root
+ * emits no candidate bytes. Emitted candidates are terminated by `\n`, including
+ * the final emitted candidate.
  */
 typedef struct lonejson_candidate_transform_options {
+  /** Input framing policy; zero defaults to auto-detection. */
   lonejson_candidate_framing framing;
+  /** Output framing policy; zero defaults to NDJSON. */
   lonejson_candidate_transform_output_framing output_framing;
+  /** Transform execution mode; zero selects real streaming mode. */
+  lonejson_candidate_transform_mode mode;
+  /** Runtime spool class used by gated-spooled mode; zero selects default. */
+  lonejson_spool_class spool_class;
+  /** Optional per-call gated-spooled candidate byte limit; zero uses runtime. */
+  size_t max_spooled_candidate_bytes;
+  /** Complete old string/number policy; zero keeps large scalars streaming. */
+  lonejson_candidate_transform_old_scalar_mode old_scalar_mode;
+  /** Required sink for transformed JSON output bytes. */
   lonejson_sink_fn sink;
+  /** Caller state passed to `sink`. */
   void *sink_user;
+  /** Optional observer that receives the original parsed token stream. */
   const lonejson_path_value_visitor *observer;
+  /** Caller state passed to `observer` callbacks. */
   void *observer_user;
+  /** Required transform decision callback. */
   lonejson_candidate_transform_fn transform;
+  /** Required only when `transform` returns `REPLACE`. */
   lonejson_candidate_transform_replace_fn replace;
+  /** Optional object-member insertion callback. */
+  lonejson_candidate_transform_insert_fn insert;
+  /** Optional structural projection paths; empty means no projection. */
+  const lonejson_candidate_transform_projection_path *projection_paths;
+  /** Number of entries in `projection_paths`. */
+  size_t projection_path_count;
+  /** Caller state passed to `transform`, `replace`, and `insert`. */
   void *transform_user;
+  /** Optional physical candidate begin callback. */
   lonejson_candidate_event_fn candidate_begin;
+  /** Optional physical candidate end callback. */
   lonejson_candidate_event_fn candidate_end;
+  /** Caller state passed to candidate boundary callbacks. */
   void *candidate_user;
+  /** Optional aggregate result record, zeroed before each transform call. */
+  lonejson_candidate_transform_result *result;
 } lonejson_candidate_transform_options;
 
 struct lonejson_json_value;
@@ -7608,6 +7811,8 @@ void lonejson_oidc_jwks_cache_parse_cleanup(
 #define LJ_STATUS_CALLBACK_FAILED LONEJSON_STATUS_CALLBACK_FAILED
 /** An underlying file descriptor or `FILE *` operation failed. */
 #define LJ_STATUS_IO_ERROR LONEJSON_STATUS_IO_ERROR
+/** The operation is valid, but unsupported for the selected runtime shape. */
+#define LJ_STATUS_UNSUPPORTED LONEJSON_STATUS_UNSUPPORTED
 /** lonejson encountered an unexpected internal state. */
 #define LJ_STATUS_INTERNAL_ERROR LONEJSON_STATUS_INTERNAL_ERROR
 
@@ -7620,6 +7825,9 @@ void lonejson_oidc_jwks_cache_parse_cleanup(
 #define LJ_CANDIDATE_FRAMING_NDJSON LONEJSON_CANDIDATE_FRAMING_NDJSON
 /** Parse each top-level array item as one candidate. */
 #define LJ_CANDIDATE_FRAMING_ARRAY_ITEMS LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS
+/** Parse nested root-array items recursively as logical candidates. */
+#define LJ_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS                             \
+  LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS
 /** Do not retain or emit candidate payload bytes. */
 #define LJ_CANDIDATE_CAPTURE_NONE LONEJSON_CANDIDATE_CAPTURE_NONE
 /** Stream each compact candidate to a caller sink. */
@@ -7642,6 +7850,42 @@ void lonejson_oidc_jwks_cache_parse_cleanup(
 /** Emit transformed candidates as NDJSON. */
 #define LJ_CANDIDATE_TRANSFORM_OUTPUT_NDJSON                                   \
   LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON
+/** Transform candidates by streaming when output can be committed safely. */
+#define LJ_CANDIDATE_TRANSFORM_MODE_STREAMING                                  \
+  LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING
+/** Transform candidates through explicit gated spooling and replay. */
+#define LJ_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED                              \
+  LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED
+/** Report the selected transform shape as unsupported. */
+#define LJ_CANDIDATE_TRANSFORM_MODE_UNSUPPORTED                                \
+  LONEJSON_CANDIDATE_TRANSFORM_MODE_UNSUPPORTED
+/** Do not retain complete string or number old values. */
+#define LJ_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE                                 \
+  LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE
+/** Retain complete string or number old values for callbacks. */
+#define LJ_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE                             \
+  LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE
+/** No object insertion callback is active. */
+#define LJ_CANDIDATE_TRANSFORM_INSERT_NONE                                     \
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_NONE
+/** Insert immediately after an emitted object begins. */
+#define LJ_CANDIDATE_TRANSFORM_INSERT_OBJECT_BEGIN                             \
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_BEGIN
+/** Insert before the current source object member. */
+#define LJ_CANDIDATE_TRANSFORM_INSERT_BEFORE_MEMBER                            \
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_BEFORE_MEMBER
+/** Insert after the current source object member. */
+#define LJ_CANDIDATE_TRANSFORM_INSERT_AFTER_MEMBER                             \
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_AFTER_MEMBER
+/** Insert immediately before an emitted object ends. */
+#define LJ_CANDIDATE_TRANSFORM_INSERT_OBJECT_END                               \
+  LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_END
+/** Projection segment selects an object member key. */
+#define LJ_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER                           \
+  LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER
+/** Projection segment selects an array index. */
+#define LJ_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX                             \
+  LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX
 /** Transform should keep the current value. */
 #define LJ_CANDIDATE_TRANSFORM_KEEP LONEJSON_CANDIDATE_TRANSFORM_KEEP
 /** Transform should drop the current value. */
@@ -8059,8 +8303,33 @@ typedef lonejson_candidate_capture_decision_fn lj_candidate_capture_decision_fn;
 /** Output framing policy for transformed candidate streams. */
 typedef lonejson_candidate_transform_output_framing
     lj_candidate_transform_output_framing;
+/** Execution mode selected before transformed candidate output is committed. */
+typedef lonejson_candidate_transform_mode lj_candidate_transform_mode;
+/** Per-logical-candidate execution metadata reported by transforms. */
+typedef lonejson_candidate_transform_candidate_info
+    lj_candidate_transform_candidate_info;
+/** Aggregate execution metadata for one candidate transform call. */
+typedef lonejson_candidate_transform_result lj_candidate_transform_result;
+/** Old scalar materialization policy for transform callbacks. */
+typedef lonejson_candidate_transform_old_scalar_mode
+    lj_candidate_transform_old_scalar_mode;
+/** Object insertion phase for structural transform callbacks. */
+typedef lonejson_candidate_transform_insert_phase
+    lj_candidate_transform_insert_phase;
+/** Segment kind used by structural candidate projection paths. */
+typedef lonejson_candidate_transform_projection_segment_kind
+    lj_candidate_transform_projection_segment_kind;
+/** One segment in a structural candidate projection path. */
+typedef lonejson_candidate_transform_projection_segment
+    lj_candidate_transform_projection_segment;
+/** Structural projection path emitted by the candidate transform executor. */
+typedef lonejson_candidate_transform_projection_path
+    lj_candidate_transform_projection_path;
 /** Action returned by candidate transform callbacks. */
 typedef lonejson_candidate_transform_action lj_candidate_transform_action;
+/** Callback-scoped view of the current original scalar value. */
+typedef lonejson_candidate_transform_old_value
+    lj_candidate_transform_old_value;
 /** Context for a transform decision about one parsed JSON value. */
 typedef lonejson_candidate_transform_event lj_candidate_transform_event;
 /** Candidate transform decision callback signature. */
@@ -8068,6 +8337,9 @@ typedef lonejson_candidate_transform_fn lj_candidate_transform_fn;
 /** Candidate transform replacement callback signature. */
 typedef lonejson_candidate_transform_replace_fn
     lj_candidate_transform_replace_fn;
+/** Candidate transform insertion callback signature. */
+typedef lonejson_candidate_transform_insert_fn
+    lj_candidate_transform_insert_fn;
 /** Options for single-pass candidate stream transforms. */
 typedef lonejson_candidate_transform_options lj_candidate_transform_options;
 /** Options for arbitrary JSON candidate streams. */

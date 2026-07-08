@@ -89,3 +89,50 @@ eval "$(PATH="$host_bin:/usr/bin:/bin" "$repo_root/scripts/discover_target_tools
 [[ -z "$NM" ]]
 [[ -z "$OTOOL" ]]
 [[ -z "$INSTALL_NAME_TOOL" ]]
+
+aarch64_musl_prefix="$tmp_dir/aarch64-linux-musl"
+armhf_musl_prefix="$tmp_dir/arm-linux-musleabihf"
+mkdir -p "$aarch64_musl_prefix/bin" "$armhf_musl_prefix/bin"
+for tool in \
+  aarch64-linux-musl-gcc \
+  aarch64-linux-musl-ld \
+  aarch64-linux-musl-ar \
+  aarch64-linux-musl-strip \
+  aarch64-linux-musl-nm \
+  aarch64-linux-musl-readelf; do
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$aarch64_musl_prefix/bin/$tool"
+  chmod +x "$aarch64_musl_prefix/bin/$tool"
+done
+for tool in \
+  arm-linux-musleabihf-gcc \
+  arm-linux-musleabihf-ld \
+  arm-linux-musleabihf-ar \
+  arm-linux-musleabihf-strip \
+  arm-linux-musleabihf-nm \
+  arm-linux-musleabihf-readelf; do
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$armhf_musl_prefix/bin/$tool"
+  chmod +x "$armhf_musl_prefix/bin/$tool"
+done
+rm -f "$build_dir/CMakeCache.txt"
+
+eval "$(PATH="/usr/bin:/bin" \
+  CPKT_AARCH64_MUSL_PREFIX="$aarch64_musl_prefix" \
+  "$repo_root/scripts/discover_target_tools.sh" \
+    --build-dir "$build_dir" \
+    --target-id aarch64-linux-musl)"
+
+[[ "$CC" == "$aarch64_musl_prefix/bin/aarch64-linux-musl-gcc" ]]
+[[ "$TARGET_HOST_PREFIX" == "aarch64-linux-musl" ]]
+[[ "$AR" == "$aarch64_musl_prefix/bin/aarch64-linux-musl-ar" ]]
+[[ "$READELF" == "$aarch64_musl_prefix/bin/aarch64-linux-musl-readelf" ]]
+
+eval "$(PATH="/usr/bin:/bin" \
+  CPKT_ARMHF_MUSL_PREFIX="$armhf_musl_prefix" \
+  "$repo_root/scripts/discover_target_tools.sh" \
+    --build-dir "$build_dir" \
+    --target-id armhf-linux-musl)"
+
+[[ "$CC" == "$armhf_musl_prefix/bin/arm-linux-musleabihf-gcc" ]]
+[[ "$TARGET_HOST_PREFIX" == "arm-linux-musleabihf" ]]
+[[ "$AR" == "$armhf_musl_prefix/bin/arm-linux-musleabihf-ar" ]]
+[[ "$READELF" == "$armhf_musl_prefix/bin/arm-linux-musleabihf-readelf" ]]

@@ -3,10 +3,21 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+CPKT_AARCH64_MUSL_PREFIX="${CPKT_AARCH64_MUSL_PREFIX:-$HOME/.local/cross/aarch64-linux-musl}"
+CPKT_ARMHF_MUSL_PREFIX="${CPKT_ARMHF_MUSL_PREFIX:-$HOME/.local/cross/arm-linux-musleabihf}"
+export CPKT_AARCH64_MUSL_PREFIX
+export CPKT_ARMHF_MUSL_PREFIX
 
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
         printf 'missing required command: %s\n' "$1" >&2
+        exit 1
+    fi
+}
+
+require_executable() {
+    if [ ! -x "$1" ]; then
+        printf 'missing required executable: %s\n' "$1" >&2
         exit 1
     fi
 }
@@ -74,15 +85,24 @@ require_command luarocks
 require_command musl-gcc
 require_command aarch64-linux-gnu-gcc
 require_command arm-linux-gnueabihf-gcc
-require_command aarch64-linux-musl-gcc
-require_command arm-linux-musleabihf-gcc
 require_command qemu-aarch64
 require_command qemu-arm
 
-require_file "$HOME/.local/cross/aarch64-linux-musl/aarch64-linux-musl/lib/ld-musl-aarch64.so.1"
-require_file "$HOME/.local/cross/arm-linux-musleabihf/arm-linux-musleabihf/lib/ld-musl-armhf.so.1"
+require_executable "$CPKT_AARCH64_MUSL_PREFIX/bin/aarch64-linux-musl-gcc"
+require_executable "$CPKT_AARCH64_MUSL_PREFIX/bin/aarch64-linux-musl-ar"
+require_executable "$CPKT_AARCH64_MUSL_PREFIX/bin/aarch64-linux-musl-ranlib"
+require_executable "$CPKT_ARMHF_MUSL_PREFIX/bin/arm-linux-musleabihf-gcc"
+require_executable "$CPKT_ARMHF_MUSL_PREFIX/bin/arm-linux-musleabihf-ar"
+require_executable "$CPKT_ARMHF_MUSL_PREFIX/bin/arm-linux-musleabihf-ranlib"
+require_file "$CPKT_AARCH64_MUSL_PREFIX/aarch64-linux-musl/lib/ld-musl-aarch64.so.1"
+require_file "$CPKT_ARMHF_MUSL_PREFIX/arm-linux-musleabihf/lib/ld-musl-armhf.so.1"
 
 darwin_toolchain="${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/arm64-apple-darwin25-clang"
+
+if [ "${LONEJSON_RELEASE_MATRIX_PREFLIGHT_ONLY:-0}" = "1" ]; then
+    printf 'Release matrix preflight completed successfully.\n'
+    exit 0
+fi
 
 cd "$repo_root"
 

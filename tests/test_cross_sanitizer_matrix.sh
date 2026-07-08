@@ -50,6 +50,17 @@ if printf '%s\n' "$script_text" | grep -F -- 'PKT_SKIP' >/dev/null; then
   exit 1
 fi
 
+printf '%s\n' "$script_text" | grep -F -- 'CPKT_AARCH64_MUSL_PREFIX' >/dev/null
+printf '%s\n' "$script_text" | grep -F -- 'CPKT_ARMHF_MUSL_PREFIX' >/dev/null
+if printf '%s\n' "$script_text" | grep -F -- '$HOME/.local/cross/aarch64-linux-musl/bin' >/dev/null; then
+  printf 'cross sanitizer matrix must resolve aarch64 musl tools through the lifecycle prefix override\n' >&2
+  exit 1
+fi
+if printf '%s\n' "$script_text" | grep -F -- '$HOME/.local/cross/arm-linux-musleabihf/bin' >/dev/null; then
+  printf 'cross sanitizer matrix must resolve armhf musl tools through the lifecycle prefix override\n' >&2
+  exit 1
+fi
+
 if printf '%s\n' "$script_text" | grep -F -- 'return 0' | grep -F -- 'run_probe' >/dev/null; then
   printf 'cross sanitizer probes must be release-blocking\n' >&2
   exit 1

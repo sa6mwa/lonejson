@@ -800,6 +800,47 @@ events are streamed and balanced, and the complete old value is not materialized
 See `examples/value_rewrite_replace_with.c` for a complete integer increment
 program.
 
+### Transform candidate streams
+
+Use `lonejson_transform_candidates_*` when a stream of JSON candidates should be
+validated once and rewritten as candidates are parsed. The input can be a
+buffer, reader callback, `FILE *`, path, or file descriptor, with the same
+candidate framing modes used by `lonejson_visit_candidates_*`: repeated values,
+JSON Lines, a single value, or top-level array items.
+
+The transform mode is explicit and selected before output can leak.
+`LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING` streams source values directly
+when a plan can commit output as it parses. Kept strings and numbers stream by
+default; complete old string/number views are opt-in with
+`LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE`.
+`LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED` retains each logical
+candidate in a bounded `lonejson_spooled` handle and replays matched candidates
+through the same transform executor. Result counters report streamed, spooled,
+spilled, and replayed candidates plus per-candidate spool bytes.
+
+`observer` receives the original token stream first. Replacement JSON is emitted
+only through `lonejson_writer`, so callers never write raw commas, colons,
+string escapes, object keys, separators, or container punctuation. `insert`
+callbacks can add object members at object begin, before or after source
+members, and at object end.
+
+`LONEJSON_CANDIDATE_TRANSFORM_DROP` suppresses an object member, array element,
+or complete candidate root while preserving valid output. Emitted candidates are
+JSON Lines values terminated with `\n`, including the final emitted candidate.
+Dropped candidates emit no bytes, and an all-dropped transform emits no newline.
+
+Structural projection is configured with
+`lonejson_candidate_transform_projection_path` entries. Projection segment kinds
+distinguish object members from array indexes, so object key `"0"` and array
+index `0` are unambiguous. LoneJSON emits projection parent objects/arrays,
+groups missing object-member descendants, and writes `null` placeholders for
+projected sparse array indexes. Invalid projection shapes, such as mixed object
+and array roots, fail with `LONEJSON_STATUS_UNSUPPORTED` before partial output.
+
+`LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS` flattens nested root arrays
+into logical candidates. Transform mode, projection, mutation, gated spooling,
+replay, and candidate metadata apply to each logical candidate independently.
+
 ### Parse Server-Sent Events and multipart streams
 
 `lonejson_sse_*` incrementally parses Server-Sent Events. `lonejson_sse_push`

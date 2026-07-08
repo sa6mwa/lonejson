@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cpkt_aarch64_musl_prefix="${CPKT_AARCH64_MUSL_PREFIX:-$HOME/.local/cross/aarch64-linux-musl}"
+cpkt_armhf_musl_prefix="${CPKT_ARMHF_MUSL_PREFIX:-$HOME/.local/cross/arm-linux-musleabihf}"
 host_policy_ctest_exclude='lonejson_(discover_target_tools_tests|darwin_macho_metadata_tests|darwin_linker_route_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|cmake_c_pkt_systems_root_tests|test_all_clang_optional_tests|check_clang_sanitizer_support_tests|cmake_fuzz_sanitizer_conflict_tests|cmake_fuzz_auth_optional_tests|release_werror_tests|source_release_tarball_tests|lua_src_rock_privacy_tests|lua_public_boundary_tests|lua_surface_coverage_tests|release_artifact_verify_tests|release_archive_verify_tests|lua_native_test_target_filter_tests|run_release_matrix_darwin_target_tests|release_checksum_manifest_tests|ctest_metadata_tests|short_names_tests|short_names_disabled_tests|single_header_strict_warning_tests|single_header_strict_warning_build_tests|single_header_strict_clang_build_tests|single_header_config_default|single_header_config_omit_protocol|single_header_config_lj_implementation|single_header_config_lj_config_aliases|single_header_config_short_names_disabled|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|bench_gate_tests)'
 
 usage() {
@@ -63,9 +65,9 @@ run_or_print() {
 target_compiler() {
     case "$1" in
         aarch64-linux-gnu) printf '%s\n' /usr/bin/aarch64-linux-gnu-gcc ;;
-        aarch64-linux-musl) printf '%s\n' "$HOME/.local/cross/aarch64-linux-musl/bin/aarch64-linux-musl-gcc" ;;
+        aarch64-linux-musl) printf '%s\n' "$cpkt_aarch64_musl_prefix/bin/aarch64-linux-musl-gcc" ;;
         armhf-linux-gnu) printf '%s\n' /usr/bin/arm-linux-gnueabihf-gcc ;;
-        armhf-linux-musl) printf '%s\n' "$HOME/.local/cross/arm-linux-musleabihf/bin/arm-linux-musleabihf-gcc" ;;
+        armhf-linux-musl) printf '%s\n' "$cpkt_armhf_musl_prefix/bin/arm-linux-musleabihf-gcc" ;;
         *) return 1 ;;
     esac
 }
@@ -73,9 +75,9 @@ target_compiler() {
 target_sysroot() {
     case "$1" in
         aarch64-linux-gnu) printf '%s\n' /usr/aarch64-linux-gnu ;;
-        aarch64-linux-musl) printf '%s\n' "$HOME/.local/cross/aarch64-linux-musl/aarch64-linux-musl" ;;
+        aarch64-linux-musl) printf '%s\n' "$cpkt_aarch64_musl_prefix/aarch64-linux-musl" ;;
         armhf-linux-gnu) printf '%s\n' /usr/arm-linux-gnueabihf ;;
-        armhf-linux-musl) printf '%s\n' "$HOME/.local/cross/arm-linux-musleabihf/arm-linux-musleabihf" ;;
+        armhf-linux-musl) printf '%s\n' "$cpkt_armhf_musl_prefix/arm-linux-musleabihf" ;;
         *) return 1 ;;
     esac
 }

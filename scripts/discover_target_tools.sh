@@ -56,9 +56,9 @@ target_default_compiler() {
     x86_64-linux-gnu) printf '%s\n' cc ;;
     x86_64-linux-musl) printf '%s\n' musl-gcc ;;
     aarch64-linux-gnu) printf '%s\n' aarch64-linux-gnu-gcc ;;
-    aarch64-linux-musl) printf '%s\n' aarch64-linux-musl-gcc ;;
+    aarch64-linux-musl) printf '%s\n' "${CPKT_AARCH64_MUSL_PREFIX:-$HOME/.local/cross/aarch64-linux-musl}/bin/aarch64-linux-musl-gcc" ;;
     armhf-linux-gnu) printf '%s\n' arm-linux-gnueabihf-gcc ;;
-    armhf-linux-musl) printf '%s\n' arm-linux-musleabihf-gcc ;;
+    armhf-linux-musl) printf '%s\n' "${CPKT_ARMHF_MUSL_PREFIX:-$HOME/.local/cross/arm-linux-musleabihf}/bin/arm-linux-musleabihf-gcc" ;;
     arm64-apple-darwin)
       printf '%s\n' "${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/${CPKT_OSXCROSS_HOST:-arm64-apple-darwin25}-clang"
       ;;

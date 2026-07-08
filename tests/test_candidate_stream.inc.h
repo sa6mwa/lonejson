@@ -1053,6 +1053,44 @@ static void test_candidate_stream_capture_sink_and_memory(void) {
   EXPECT(state.payload_sizes[1] == strlen("true"));
 }
 
+static void test_candidate_stream_capture_recursive_array_items(void) {
+  static const char json[] =
+      "[ { \"id\" : \"a\" }, [ { \"id\" : \"b\" }, [ { \"id\" : \"c\" } ] ], "
+      "{ \"id\" : \"d\" } ]";
+  test_candidate_stream_state state;
+  lonejson_candidate_stream_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&state, 0, sizeof(state));
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_MEMORY;
+  options.candidate_begin = test_candidate_begin;
+  options.candidate_end = test_candidate_end;
+  options.candidate_user = &state;
+  status = lonejson_visit_candidates_buffer(test_default_runtime(), json,
+                                            strlen(json), &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(state.begin_count == 4u);
+  EXPECT(state.end_count == 4u);
+  EXPECT(state.begin_indices[0] == 0u);
+  EXPECT(state.begin_indices[1] == 1u);
+  EXPECT(state.begin_indices[2] == 2u);
+  EXPECT(state.begin_indices[3] == 3u);
+  EXPECT(strcmp(state.payloads[0], "{\"id\":\"a\"}") == 0);
+  EXPECT(strcmp(state.payloads[1], "{\"id\":\"b\"}") == 0);
+  EXPECT(strcmp(state.payloads[2], "{\"id\":\"c\"}") == 0);
+  EXPECT(strcmp(state.payloads[3], "{\"id\":\"d\"}") == 0);
+  EXPECT(state.end_offsets[0] < state.end_offsets[1]);
+  EXPECT(state.end_offsets[1] < state.end_offsets[2]);
+  EXPECT(state.end_offsets[2] < state.end_offsets[3]);
+  EXPECT(state.end_sizes[0] != LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(state.end_sizes[1] != LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(state.end_sizes[2] != LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(state.end_sizes[3] != LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+}
+
 static void test_candidate_stream_capture_spooled_and_cleanup(void) {
   static const char json[] = "[ { \"long\" : \"abcdef\" }, 2 ]";
   char dir_template[] = "/tmp/lonejson-candidate-spool-XXXXXX";
@@ -1286,6 +1324,16 @@ static void test_candidate_stream_capture_path_visitor_user(void) {
 
 typedef struct test_candidate_transform_state {
   size_t number_chunks;
+  size_t transforms_after_number_chunks;
+  size_t old_number_seen;
+  size_t old_string_seen;
+  size_t old_bool_seen;
+  size_t transform_metadata_seen;
+  size_t gated_metadata_seen;
+  size_t insert_object_begin_seen;
+  size_t insert_before_member_seen;
+  size_t insert_after_member_seen;
+  size_t insert_object_end_seen;
   int fail_replace;
 } test_candidate_transform_state;
 
@@ -1305,13 +1353,67 @@ static int test_candidate_transform_path_is(
 static lonejson_candidate_transform_action test_candidate_transform_decide(
     void *user, const lonejson_candidate_transform_event *event,
     lonejson_error *error) {
-  (void)user;
   (void)error;
+  if (user != NULL && event != NULL && event->transform_candidate != NULL) {
+    test_candidate_transform_state *state =
+        (test_candidate_transform_state *)user;
+    EXPECT(event->transform_candidate->mode ==
+               LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING ||
+           event->transform_candidate->mode ==
+               LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED);
+    EXPECT(event->transform_candidate->physical_index ==
+           event->candidate->index);
+    EXPECT(event->transform_candidate->logical_index ==
+           event->candidate->index);
+    if (event->transform_candidate->mode ==
+        LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING) {
+      EXPECT(event->transform_candidate->byte_size ==
+             LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+      EXPECT(event->transform_candidate->gated_spooled == 0);
+    } else {
+      EXPECT(event->transform_candidate->byte_size !=
+             LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+      EXPECT(event->transform_candidate->gated_spooled != 0);
+      EXPECT(event->transform_candidate->bytes_spooled != 0u);
+      EXPECT(event->transform_candidate->replay_count == 1u);
+      ++state->gated_metadata_seen;
+    }
+    ++state->transform_metadata_seen;
+  }
+  if (event->value_type == LONEJSON_VALUE_NUMBER) {
+    test_candidate_transform_state *state =
+        (test_candidate_transform_state *)user;
+    if (state != NULL && event->old_value != NULL &&
+        event->old_value->value_type == LONEJSON_VALUE_NUMBER &&
+        event->old_value->data != NULL && event->old_value->len != 0u) {
+      ++state->old_number_seen;
+    }
+    if (state != NULL && state->number_chunks != 0u) {
+      ++state->transforms_after_number_chunks;
+    }
+  }
   if (test_candidate_transform_path_is(event, "drop")) {
     return LONEJSON_CANDIDATE_TRANSFORM_DROP;
   }
   if (event->value_type == LONEJSON_VALUE_NUMBER) {
     return LONEJSON_CANDIDATE_TRANSFORM_REPLACE;
+  }
+  if (event->value_type == LONEJSON_VALUE_STRING &&
+      event->old_value != NULL &&
+      event->old_value->value_type == LONEJSON_VALUE_STRING &&
+      event->old_value->data != NULL && event->old_value->len == 1u &&
+      event->old_value->data[0] == 'x') {
+    test_candidate_transform_state *state =
+        (test_candidate_transform_state *)user;
+    ++state->old_string_seen;
+  }
+  if (event->value_type == LONEJSON_VALUE_BOOL &&
+      event->old_value != NULL &&
+      event->old_value->value_type == LONEJSON_VALUE_BOOL &&
+      event->old_value->boolean_value) {
+    test_candidate_transform_state *state =
+        (test_candidate_transform_state *)user;
+    ++state->old_bool_seen;
   }
   return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
 }
@@ -1328,6 +1430,64 @@ static lonejson_candidate_transform_action test_candidate_transform_drop_only(
 }
 
 static lonejson_candidate_transform_action
+test_candidate_transform_drop_array_index_one(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  (void)user;
+  (void)error;
+  if (event->path != NULL && event->path->segment_count == 1u &&
+      event->path->segments[0].len == 1u &&
+      event->path->segments[0].data[0] == '1') {
+    return LONEJSON_CANDIDATE_TRANSFORM_DROP;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
+static lonejson_candidate_transform_action test_candidate_transform_drop_id(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  (void)user;
+  (void)error;
+  if (test_candidate_transform_path_is(event, "id")) {
+    return LONEJSON_CANDIDATE_TRANSFORM_DROP;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
+static lonejson_candidate_transform_action test_candidate_transform_drop_a(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  (void)user;
+  (void)error;
+  if (test_candidate_transform_path_is(event, "a")) {
+    return LONEJSON_CANDIDATE_TRANSFORM_DROP;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
+static lonejson_candidate_transform_action test_candidate_transform_replace_a(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  (void)user;
+  (void)error;
+  if (test_candidate_transform_path_is(event, "a")) {
+    return LONEJSON_CANDIDATE_TRANSFORM_REPLACE;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
+static lonejson_candidate_transform_action test_candidate_transform_replace_root(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  (void)user;
+  (void)error;
+  if (event->path != NULL && event->path->segment_count == 0u) {
+    return LONEJSON_CANDIDATE_TRANSFORM_REPLACE;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
+static lonejson_candidate_transform_action
 test_candidate_transform_stop_root_array(
     void *user, const lonejson_candidate_transform_event *event,
     lonejson_error *error) {
@@ -1335,6 +1495,19 @@ test_candidate_transform_stop_root_array(
   (void)error;
   if (event->path != NULL && event->path->segment_count == 0u &&
       event->value_type == LONEJSON_VALUE_ARRAY) {
+    return LONEJSON_CANDIDATE_TRANSFORM_STOP;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
+static lonejson_candidate_transform_action
+test_candidate_transform_stop_root_object(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  (void)user;
+  (void)error;
+  if (event->path != NULL && event->path->segment_count == 0u &&
+      event->value_type == LONEJSON_VALUE_OBJECT) {
     return LONEJSON_CANDIDATE_TRANSFORM_STOP;
   }
   return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
@@ -1357,13 +1530,24 @@ static lonejson_status test_candidate_transform_replace(
     lonejson_writer *writer, lonejson_error *error) {
   test_candidate_transform_state *state =
       (test_candidate_transform_state *)user;
+  char number[32];
+  long old_number;
 
-  (void)event;
   if (state->fail_replace) {
     return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
                                0u, "test transform replacement failed");
   }
-  return lonejson_writer_number_text(writer, "99", 2u, error);
+  if (event->old_value == NULL ||
+      event->old_value->value_type != LONEJSON_VALUE_NUMBER ||
+      event->old_value->data == NULL || event->old_value->len >= 20u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u,
+                               0u, "test transform old number missing");
+  }
+  memcpy(number, event->old_value->data, event->old_value->len);
+  number[event->old_value->len] = '\0';
+  old_number = strtol(number, NULL, 10);
+  sprintf(number, "%ld", old_number + 1L);
+  return lonejson_writer_number_text(writer, number, strlen(number), error);
 }
 
 static lonejson_status test_candidate_transform_observe_number(
@@ -1379,6 +1563,109 @@ static lonejson_status test_candidate_transform_observe_number(
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status test_candidate_transform_replace_with_nine(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_writer *writer, lonejson_error *error) {
+  (void)user;
+  (void)event;
+  return lonejson_writer_number_text(writer, "9", 1u, error);
+}
+
+static lonejson_candidate_transform_action test_candidate_transform_keep_stream(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error) {
+  test_candidate_transform_state *state =
+      (test_candidate_transform_state *)user;
+  (void)error;
+  if (event->value_type == LONEJSON_VALUE_STRING) {
+    EXPECT(event->old_value == NULL);
+    ++state->transform_metadata_seen;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+}
+
+static lonejson_status test_candidate_transform_insert_members(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_writer *writer, lonejson_error *error) {
+  test_candidate_transform_state *state =
+      (test_candidate_transform_state *)user;
+
+  EXPECT(event != NULL);
+  EXPECT(writer != NULL);
+  if (event == NULL || writer == NULL) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (event->insert_phase ==
+      LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_BEGIN) {
+    ++state->insert_object_begin_seen;
+    EXPECT(event->object_key == NULL);
+    EXPECT(lonejson_writer_key(writer, "first", 5u, error) ==
+           LONEJSON_STATUS_OK);
+    return lonejson_writer_number_text(writer, "0", 1u, error);
+  }
+  if (event->insert_phase ==
+      LONEJSON_CANDIDATE_TRANSFORM_INSERT_BEFORE_MEMBER) {
+    if (event->object_key_len == 1u && event->object_key != NULL &&
+        event->object_key[0] == 'a') {
+      ++state->insert_before_member_seen;
+      EXPECT(lonejson_writer_key(writer, "before_a", 8u, error) ==
+             LONEJSON_STATUS_OK);
+      return lonejson_writer_number_text(writer, "1", 1u, error);
+    }
+    return LONEJSON_STATUS_OK;
+  }
+  if (event->insert_phase ==
+      LONEJSON_CANDIDATE_TRANSFORM_INSERT_AFTER_MEMBER) {
+    if (event->object_key_len == 1u && event->object_key != NULL &&
+        event->object_key[0] == 'a') {
+      ++state->insert_after_member_seen;
+      EXPECT(lonejson_writer_key(writer, "after_a", 7u, error) ==
+             LONEJSON_STATUS_OK);
+      return lonejson_writer_number_text(writer, "2", 1u, error);
+    }
+    return LONEJSON_STATUS_OK;
+  }
+  if (event->insert_phase ==
+      LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_END) {
+    ++state->insert_object_end_seen;
+    EXPECT(lonejson_writer_key(writer, "last", 4u, error) ==
+           LONEJSON_STATUS_OK);
+    EXPECT(lonejson_writer_begin_object(writer, error) == LONEJSON_STATUS_OK);
+    EXPECT(lonejson_writer_key(writer, "nested", 6u, error) ==
+           LONEJSON_STATUS_OK);
+    EXPECT(lonejson_writer_bool(writer, 1, error) == LONEJSON_STATUS_OK);
+    return lonejson_writer_end_object(writer, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status test_candidate_transform_insert_before_each_member(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_writer *writer, lonejson_error *error) {
+  test_candidate_transform_state *state =
+      (test_candidate_transform_state *)user;
+
+  EXPECT(event != NULL);
+  EXPECT(writer != NULL);
+  if (event == NULL || writer == NULL) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (event->insert_phase !=
+      LONEJSON_CANDIDATE_TRANSFORM_INSERT_BEFORE_MEMBER) {
+    return LONEJSON_STATUS_OK;
+  }
+  ++state->insert_before_member_seen;
+  EXPECT(event->object_key != NULL);
+  if (event->object_key_len == 4u &&
+      memcmp(event->object_key, "drop", 4u) == 0) {
+    EXPECT(0 && "insert callback saw projected-out member");
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  EXPECT(lonejson_writer_key(writer, "before", 6u, error) ==
+         LONEJSON_STATUS_OK);
+  return lonejson_writer_number_text(writer, "0", 1u, error);
+}
+
 static void test_candidate_stream_transform_pass_drop_replace(void) {
   static const char json[] =
       "{\"keep\":1,\"drop\":2,\"s\":\"x\"}\n[3,true]";
@@ -1386,12 +1673,20 @@ static void test_candidate_stream_transform_pass_drop_replace(void) {
   test_buffer_sink sink;
   test_candidate_transform_state state;
   lonejson_candidate_transform_options options;
+  lonejson_candidate_transform_result result;
+  lj_candidate_transform_result short_result;
+  lj_candidate_transform_mode short_mode;
   lonejson_path_value_visitor observer;
   lonejson_status status;
   lonejson_error error;
 
   memset(&sink, 0, sizeof(sink));
   memset(&state, 0, sizeof(state));
+  memset(&result, 0xff, sizeof(result));
+  memset(&short_result, 0, sizeof(short_result));
+  short_mode = LJ_CANDIDATE_TRANSFORM_MODE_STREAMING;
+  EXPECT(short_mode == LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING);
+  EXPECT(lj_status_string(LJ_STATUS_UNSUPPORTED) != NULL);
   sink.buffer = out;
   sink.capacity = sizeof(out);
   observer = lonejson_default_path_value_visitor();
@@ -1399,6 +1694,7 @@ static void test_candidate_stream_transform_pass_drop_replace(void) {
   memset(&options, 0, sizeof(options));
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.output_framing = LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON;
+  options.old_scalar_mode = LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE;
   options.sink = test_buffer_sink_write;
   options.sink_user = &sink;
   options.observer = &observer;
@@ -1406,14 +1702,34 @@ static void test_candidate_stream_transform_pass_drop_replace(void) {
   options.transform = test_candidate_transform_decide;
   options.replace = test_candidate_transform_replace;
   options.transform_user = &state;
+  options.result = &result;
   status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
                                                 strlen(json), &options,
                                                 &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   out[sink.length] = '\0';
-  EXPECT(strcmp((const char *)out, "{\"keep\":99,\"s\":\"x\"}\n[99,true]") ==
+  EXPECT(strcmp((const char *)out, "{\"keep\":2,\"s\":\"x\"}\n[4,true]\n") ==
          0);
   EXPECT(state.number_chunks == 3u);
+  EXPECT(state.transforms_after_number_chunks == 3u);
+  EXPECT(state.old_number_seen == 3u);
+  EXPECT(state.old_string_seen == 1u);
+  EXPECT(state.old_bool_seen == 1u);
+  EXPECT(state.transform_metadata_seen != 0u);
+  EXPECT(result.candidates_streamed == 2u);
+  EXPECT(result.candidates_spooled == 0u);
+  EXPECT(result.candidates_spilled == 0u);
+  EXPECT(result.total_bytes_spooled == 0u);
+  EXPECT(result.total_spill_bytes == 0u);
+  EXPECT(result.candidates_replayed == 0u);
+  EXPECT(result.last_candidate.mode ==
+         LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING);
+  EXPECT(result.last_candidate.physical_index == 1u);
+  EXPECT(result.last_candidate.logical_index == 1u);
+  EXPECT(result.last_candidate.byte_size !=
+         LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(result.last_candidate.gated_spooled == 0);
+  EXPECT(short_result.candidates_streamed == 0u);
 }
 
 static void test_candidate_stream_transform_fragmented_reader(void) {
@@ -1437,6 +1753,7 @@ static void test_candidate_stream_transform_fragmented_reader(void) {
   memset(&options, 0, sizeof(options));
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.output_framing = LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON;
+  options.old_scalar_mode = LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE;
   options.sink = test_buffer_sink_write;
   options.sink_user = &sink;
   options.transform = test_candidate_transform_decide;
@@ -1447,8 +1764,917 @@ static void test_candidate_stream_transform_fragmented_reader(void) {
                                                 &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   out[sink.length] = '\0';
-  EXPECT(strcmp((const char *)out, "{\"keep\":99,\"s\":\"x\"}\n[99,true]") ==
+  EXPECT(strcmp((const char *)out, "{\"keep\":2,\"s\":\"x\"}\n[4,true]\n") ==
          0);
+  EXPECT(state.old_number_seen == 3u);
+}
+
+static void test_candidate_stream_transform_gated_spooled_replay(void) {
+  static const char json[] = "[{\"keep\":1,\"drop\":2},{\"keep\":3}]";
+  char dir_template[] = "/tmp/lonejson-transform-spool-XXXXXX";
+  char *dir;
+  unsigned char out[128];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_candidate_transform_result result;
+  lonejson_path_value_visitor observer;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_status status;
+  lonejson_error error;
+
+  dir = mkdtemp(dir_template);
+  EXPECT(dir != NULL);
+  if (dir == NULL) {
+    return;
+  }
+  config = lonejson_default_config();
+  config.spool_default.memory_limit = 1u;
+  config.spool_default.temp_dir = dir;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    rmdir(dir);
+    return;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  memset(&result, 0, sizeof(result));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  observer = lonejson_default_path_value_visitor();
+  observer.number_chunk = test_candidate_transform_observe_number;
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
+  options.mode = LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
+  options.old_scalar_mode = LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.observer = &observer;
+  options.observer_user = &state;
+  options.transform = test_candidate_transform_decide;
+  options.replace = test_candidate_transform_replace;
+  options.transform_user = &state;
+  options.result = &result;
+  status = lonejson_transform_candidates_buffer(runtime, json, strlen(json),
+                                                &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{\"keep\":2}\n{\"keep\":4}\n") == 0);
+  EXPECT(state.number_chunks == 3u);
+  EXPECT(state.old_number_seen == 3u);
+  EXPECT(state.gated_metadata_seen != 0u);
+  EXPECT(result.candidates_streamed == 0u);
+  EXPECT(result.candidates_spooled == 2u);
+  EXPECT(result.candidates_spilled == 2u);
+  EXPECT(result.candidates_replayed == 2u);
+  EXPECT(result.total_bytes_spooled != 0u);
+  EXPECT(result.total_spill_bytes != 0u);
+  EXPECT(result.last_candidate.mode ==
+         LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED);
+  EXPECT(result.last_candidate.physical_index == 1u);
+  EXPECT(result.last_candidate.logical_index == 1u);
+  EXPECT(result.last_candidate.gated_spooled != 0);
+  EXPECT(result.last_candidate.spilled != 0);
+  EXPECT(result.last_candidate.replay_count == 1u);
+  EXPECT(result.last_candidate.stream_offset != 0u);
+  EXPECT(result.last_candidate.byte_size !=
+         LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+
+  lonejson_free(runtime);
+  rmdir(dir);
+}
+
+static void test_candidate_stream_transform_streams_large_string_keep(void) {
+  char json[4099];
+  test_counting_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_status status;
+  lonejson_error error;
+  size_t i;
+
+  json[0] = '"';
+  for (i = 1u; i < sizeof(json) - 2u; ++i) {
+    json[i] = 'a';
+  }
+  json[sizeof(json) - 2u] = '"';
+  json[sizeof(json) - 1u] = '\0';
+  config = lonejson_default_config();
+  config.max_alloc_bytes = 1024u;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    return;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+  options.sink = test_counting_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  status = lonejson_transform_candidates_buffer(runtime, json, strlen(json),
+                                                &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(sink.total == strlen(json) + 1u);
+  EXPECT(state.transform_metadata_seen == 1u);
+
+  lonejson_free(runtime);
+}
+
+static void test_candidate_stream_transform_inserts_object_members(void) {
+  static const char json[] = "{\"a\":3}";
+  unsigned char out[160];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+  lj_candidate_transform_insert_phase short_phase;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  short_phase = LJ_CANDIDATE_TRANSFORM_INSERT_OBJECT_END;
+  EXPECT(short_phase == LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_END);
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.insert = test_candidate_transform_insert_members;
+  options.transform_user = &state;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "{\"first\":0,\"before_a\":1,\"a\":3,\"after_a\":2,"
+                "\"last\":{\"nested\":true}}\n") == 0);
+  EXPECT(state.insert_object_begin_seen == 1u);
+  EXPECT(state.insert_before_member_seen == 1u);
+  EXPECT(state.insert_after_member_seen == 1u);
+  EXPECT(state.insert_object_end_seen == 1u);
+}
+
+static void
+test_candidate_stream_transform_inserts_after_dropped_container_member(void) {
+  static const char json[] = "{\"a\":{\"nested\":true}}";
+  unsigned char out[160];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_drop_a;
+  options.insert = test_candidate_transform_insert_members;
+  options.transform_user = &state;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "{\"first\":0,\"before_a\":1,\"after_a\":2,"
+                "\"last\":{\"nested\":true}}\n") == 0);
+  EXPECT(state.insert_after_member_seen == 1u);
+}
+
+static void
+test_candidate_stream_transform_inserts_after_replaced_container_member(void) {
+  static const char json[] = "{\"a\":{\"nested\":true}}";
+  unsigned char out[160];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_replace_a;
+  options.replace = test_candidate_transform_replace_with_nine;
+  options.insert = test_candidate_transform_insert_members;
+  options.transform_user = &state;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "{\"first\":0,\"before_a\":1,\"a\":9,\"after_a\":2,"
+                "\"last\":{\"nested\":true}}\n") == 0);
+  EXPECT(state.insert_after_member_seen == 1u);
+}
+
+static void test_candidate_stream_transform_recursive_array_items(void) {
+  static const char json[] =
+      "[{\"id\":\"a\"},[{\"id\":\"b\"},[{\"id\":\"c\"}]],{\"id\":\"d\"}]";
+  char dir_template[] = "/tmp/lonejson-transform-recursive-XXXXXX";
+  char *dir;
+  unsigned char out[192];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_candidate_transform_result result;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  memset(&result, 0, sizeof(result));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.result = &result;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "{\"id\":\"a\"}\n{\"id\":\"b\"}\n{\"id\":\"c\"}\n"
+                "{\"id\":\"d\"}\n") == 0);
+  EXPECT(result.candidates_streamed == 4u);
+  EXPECT(result.last_candidate.physical_index == 3u);
+  EXPECT(result.last_candidate.logical_index == 3u);
+  EXPECT(result.last_candidate.stream_offset !=
+         LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+  EXPECT(result.last_candidate.byte_size !=
+         LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN);
+
+  dir = mkdtemp(dir_template);
+  EXPECT(dir != NULL);
+  if (dir == NULL) {
+    return;
+  }
+  config = lonejson_default_config();
+  config.spool_default.memory_limit = 1u;
+  config.spool_default.temp_dir = dir;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    rmdir(dir);
+    return;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  memset(&result, 0, sizeof(result));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  options.mode = LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
+  options.result = &result;
+  status = lonejson_transform_candidates_buffer(runtime, json, strlen(json),
+                                                &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "{\"id\":\"a\"}\n{\"id\":\"b\"}\n{\"id\":\"c\"}\n"
+                "{\"id\":\"d\"}\n") == 0);
+  EXPECT(result.candidates_spooled == 4u);
+  EXPECT(result.candidates_replayed == 4u);
+  EXPECT(result.candidates_spilled == 4u);
+  EXPECT(result.last_candidate.mode ==
+         LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED);
+  EXPECT(result.last_candidate.physical_index == 3u);
+  EXPECT(result.last_candidate.logical_index == 3u);
+
+  lonejson_free(runtime);
+  rmdir(dir);
+}
+
+static void test_candidate_stream_transform_projects_structural_paths(void) {
+  static const char json[] =
+      "{\"id\":\"a\",\"drop\":1,\"nested\":{\"keep\":\"x\"},"
+      "\"arr\":[\"zero\",\"one\",\"two\"]}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "id", 2u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "nested", 6u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "keep", 4u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "missing", 7u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "a", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "missing", 7u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "b", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "arr", 3u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX, NULL, 0u, 2u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {&segments[0], 1u}, {&segments[1], 2u}, {&segments[3], 2u},
+      {&segments[5], 2u}, {&segments[7], 2u}};
+  unsigned char out[192];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = sizeof(paths) / sizeof(paths[0]);
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "{\"id\":\"a\",\"nested\":{\"keep\":\"x\"},"
+                "\"arr\":[null,null,\"two\"],"
+                "\"missing\":{\"a\":null,\"b\":null}}\n") == 0);
+}
+
+static void
+test_candidate_stream_transform_projection_inserts_only_emitted_members(void) {
+  static const char json[] = "{\"drop\":1,\"keep\":2}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "keep", 4u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 1u}};
+  unsigned char out[96];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.insert = test_candidate_transform_insert_before_each_member;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{\"before\":0,\"keep\":2}\n") == 0);
+  EXPECT(state.insert_before_member_seen == 1u);
+}
+
+static void test_candidate_stream_transform_projection_unsupported_shapes(void) {
+  static const char json[] = "{\"id\":\"a\"}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "id", 2u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX, NULL, 0u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {&segments[0], 1u}, {&segments[1], 1u}};
+  unsigned char out[64];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.projection_paths = paths;
+  options.projection_path_count = sizeof(paths) / sizeof(paths[0]);
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_UNSUPPORTED);
+  EXPECT(sink.length == 0u);
+}
+
+static void test_candidate_stream_transform_projects_container_value(void) {
+  static const char json[] =
+      "{\"nested\":{\"keep\":\"x\",\"n\":1},\"id\":2}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "nested", 6u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 1u}};
+  unsigned char out[128];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "{\"nested\":{\"keep\":\"x\",\"n\":1}}\n") == 0);
+}
+
+static void
+test_candidate_stream_transform_projects_wrong_shape_parent(void) {
+  static const char json[] = "{\"a\":1,\"arr\":1}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "a", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "b", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "arr", 3u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX, NULL, 0u, 2u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {&segments[0], 2u}, {&segments[2], 2u}};
+  unsigned char out[128];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = sizeof(paths) / sizeof(paths[0]);
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "{\"a\":{\"b\":null},\"arr\":[null,null,null]}\n") == 0);
+}
+
+static void
+test_candidate_stream_transform_projects_wrong_shape_container_parent(void) {
+  static const char json[] = "{\"a\":[],\"arr\":{}}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "a", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "b", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "arr", 3u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX, NULL, 0u, 2u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {&segments[0], 2u}, {&segments[2], 2u}};
+  unsigned char out[128];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = sizeof(paths) / sizeof(paths[0]);
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "{\"a\":{\"b\":null},\"arr\":[null,null,null]}\n") == 0);
+}
+
+static void
+test_candidate_stream_transform_projects_wrong_shape_scalar_array_item(void) {
+  static const char json[] = "[0,1,\"x\",3,\"ok\"]";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX, NULL, 0u, 2u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "a", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX, NULL, 0u, 4u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {&segments[0], 2u}, {&segments[2], 1u}};
+  unsigned char out[128];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = sizeof(paths) / sizeof(paths[0]);
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out,
+                "[null,null,{\"a\":null},null,\"ok\"]\n") == 0);
+}
+
+static void
+test_candidate_stream_transform_projects_wrong_shape_scalar_object_member(void) {
+  static const char json[] = "{\"a\":1,\"z\":2}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "a", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "b", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "z", 1u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {&segments[0], 2u}, {&segments[2], 1u}};
+  unsigned char out[128];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = sizeof(paths) / sizeof(paths[0]);
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{\"a\":{\"b\":null},\"z\":2}\n") == 0);
+}
+
+static void
+test_candidate_stream_transform_projection_drops_wrong_shape_scalar_ancestor(
+    void) {
+  static const char json[] = "{\"a\":1,\"z\":2}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "a", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "b", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "z", 1u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {&segments[0], 2u}, {&segments[2], 1u}};
+  unsigned char out[64];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_drop_a;
+  options.projection_paths = paths;
+  options.projection_path_count = sizeof(paths) / sizeof(paths[0]);
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{\"z\":2}\n") == 0);
+}
+
+static void test_candidate_stream_transform_projection_drop_stays_dropped(void) {
+  static const char json[] = "{\"id\":\"a\",\"x\":1}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "id", 2u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 1u}};
+  unsigned char out[64];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_drop_id;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{}\n") == 0);
+}
+
+static void
+test_candidate_stream_transform_projection_honors_ancestor_drop(void) {
+  static const char json[] = "{\"a\":{\"b\":1},\"x\":2}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "a", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "b", 1u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 2u}};
+  unsigned char out[64];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_drop_a;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{}\n") == 0);
+}
+
+static void
+test_candidate_stream_transform_projection_honors_ancestor_replace(void) {
+  static const char json[] = "{\"a\":{\"b\":1},\"x\":2}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "a", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "b", 1u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 2u}};
+  unsigned char out[64];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_replace_a;
+  options.replace = test_candidate_transform_replace_with_nine;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{\"a\":9}\n") == 0);
+}
+
+static void
+test_candidate_stream_transform_projection_honors_root_replace(void) {
+  static const char json[] = "{\"a\":{\"b\":1},\"x\":2}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "a", 1u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "b", 1u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 2u}};
+  unsigned char out[64];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_replace_root;
+  options.replace = test_candidate_transform_replace_with_nine;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "9\n") == 0);
+}
+
+static void test_candidate_stream_transform_projection_rejects_scalar_root(void) {
+  static const char json[] = "1";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "id", 2u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 1u}};
+  unsigned char out[64];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_UNSUPPORTED);
+  EXPECT(sink.length == 0u);
+}
+
+static void test_candidate_stream_transform_projection_nul_key_seen(void) {
+  static const char json[] = "{\"a\\u0000b\":1}";
+  static const char key[] = {'a', '\0', 'b'};
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, key, 3u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 1u}};
+  unsigned char out[128];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{\"a\\u0000b\":1}\n") == 0);
+}
+
+static void test_candidate_stream_transform_projection_empty_key_seen(void) {
+  static const char json[] = "{\"\":1}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, NULL, 0u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 1u}};
+  unsigned char out[64];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{\"\":1}\n") == 0);
+}
+
+static void test_candidate_stream_transform_projects_gated_spooled(void) {
+  static const char json[] =
+      "{\"drop\":1,\"nested\":{\"keep\":\"x\"},\"tail\":true}";
+  static const lonejson_candidate_transform_projection_segment segments[] = {
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "nested", 6u, 0u},
+      {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, "keep", 4u, 0u}};
+  static const lonejson_candidate_transform_projection_path paths[] = {
+      {segments, 2u}};
+  char dir_template[] = "/tmp/lonejson-transform-project-XXXXXX";
+  char *dir;
+  unsigned char out[96];
+  test_buffer_sink sink;
+  test_candidate_transform_state state;
+  lonejson_candidate_transform_options options;
+  lonejson_candidate_transform_result result;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_status status;
+  lonejson_error error;
+
+  dir = mkdtemp(dir_template);
+  EXPECT(dir != NULL);
+  if (dir == NULL) {
+    return;
+  }
+  config = lonejson_default_config();
+  config.spool_default.memory_limit = 1u;
+  config.spool_default.temp_dir = dir;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    rmdir(dir);
+    return;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&state, 0, sizeof(state));
+  memset(&result, 0, sizeof(result));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.mode = LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_keep_stream;
+  options.transform_user = &state;
+  options.projection_paths = paths;
+  options.projection_path_count = 1u;
+  options.result = &result;
+  status = lonejson_transform_candidates_buffer(runtime, json, strlen(json),
+                                                &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "{\"nested\":{\"keep\":\"x\"}}\n") == 0);
+  EXPECT(result.candidates_spooled == 1u);
+  EXPECT(result.candidates_replayed == 1u);
+  EXPECT(result.candidates_spilled == 1u);
+
+  lonejson_free(runtime);
+  rmdir(dir);
 }
 
 static void test_candidate_stream_transform_stop_container(void) {
@@ -1486,7 +2712,81 @@ static void test_candidate_stream_transform_stop_container(void) {
                                                 &options, &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   out[sink.length] = '\0';
-  EXPECT(strcmp((const char *)out, "{}") == 0);
+  EXPECT(strcmp((const char *)out, "{}\n") == 0);
+}
+
+static void test_candidate_stream_transform_drop_array_element_compacts(void) {
+  static const char json[] = "[1,2,3]";
+  unsigned char out[64];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_status status;
+  lonejson_error error;
+
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_drop_array_index_one;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  out[sink.length] = '\0';
+  EXPECT(strcmp((const char *)out, "[1,3]\n") == 0);
+}
+
+static void test_candidate_stream_transform_gated_stop_propagates(void) {
+  static const char json[] = "{\"a\":1}\n{\"a\":2}";
+  char dir_template[] = "/tmp/lonejson-transform-stop-XXXXXX";
+  char *dir;
+  unsigned char out[64];
+  test_buffer_sink sink;
+  lonejson_candidate_transform_options options;
+  lonejson_candidate_transform_result result;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_status status;
+  lonejson_error error;
+
+  dir = mkdtemp(dir_template);
+  EXPECT(dir != NULL);
+  if (dir == NULL) {
+    return;
+  }
+  config = lonejson_default_config();
+  config.spool_default.memory_limit = 1u;
+  config.spool_default.temp_dir = dir;
+  runtime = lonejson_new(&config, &error);
+  EXPECT(runtime != NULL);
+  if (runtime == NULL) {
+    rmdir(dir);
+    return;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&result, 0, sizeof(result));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  memset(&options, 0, sizeof(options));
+  options.mode = LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.transform = test_candidate_transform_stop_root_object;
+  options.result = &result;
+  status = lonejson_transform_candidates_buffer(runtime, json, strlen(json),
+                                                &options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(sink.length == 0u);
+  EXPECT(result.candidates_spooled == 1u);
+  EXPECT(result.candidates_replayed == 1u);
+  EXPECT(result.last_candidate.logical_index == 0u);
+
+  lonejson_free(runtime);
+  rmdir(dir);
 }
 
 static void test_candidate_stream_transform_failure_modes(void) {
@@ -1511,7 +2811,7 @@ static void test_candidate_stream_transform_failure_modes(void) {
                                                 &error);
   EXPECT(status == LONEJSON_STATUS_OK);
   out[sink.length] = '\0';
-  EXPECT(strcmp((const char *)out, "{\"keep\":1}") == 0);
+  EXPECT(strcmp((const char *)out, "{\"keep\":1}\n") == 0);
 
   memset(&options, 0, sizeof(options));
   memset(&sink, 0, sizeof(sink));
@@ -1524,6 +2824,61 @@ static void test_candidate_stream_transform_failure_modes(void) {
                                                 strlen(json), &options,
                                                 &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  memset(&options, 0, sizeof(options));
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.mode = (lonejson_candidate_transform_mode)99;
+  options.transform = test_candidate_transform_drop_only;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  memset(&options, 0, sizeof(options));
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.spool_class = (lonejson_spool_class)99;
+  options.transform = test_candidate_transform_drop_only;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+
+  memset(&options, 0, sizeof(options));
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.mode = LONEJSON_CANDIDATE_TRANSFORM_MODE_UNSUPPORTED;
+  options.transform = test_candidate_transform_drop_only;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_UNSUPPORTED);
+  EXPECT(strcmp(lonejson_status_string(LONEJSON_STATUS_UNSUPPORTED),
+                "unsupported") == 0);
+
+  memset(&options, 0, sizeof(options));
+  memset(&sink, 0, sizeof(sink));
+  sink.buffer = out;
+  sink.capacity = sizeof(out);
+  options.sink = test_buffer_sink_write;
+  options.sink_user = &sink;
+  options.mode = LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
+  options.max_spooled_candidate_bytes = 4u;
+  options.transform = test_candidate_transform_drop_only;
+  status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                strlen(json), &options,
+                                                &error);
+  EXPECT(status == LONEJSON_STATUS_OVERFLOW);
 
   memset(&options, 0, sizeof(options));
   memset(&sink, 0, sizeof(sink));
@@ -1555,6 +2910,87 @@ static void test_candidate_stream_transform_failure_modes(void) {
   EXPECT(error.code == LONEJSON_STATUS_TRUNCATED);
   EXPECT(sink.length == 0u);
 
+  {
+    static const lonejson_candidate_transform_projection_path paths[] = {
+        {NULL, 0u}};
+    memset(&options, 0, sizeof(options));
+    memset(&sink, 0, sizeof(sink));
+    sink.buffer = out;
+    sink.capacity = sizeof(out);
+    options.sink = test_buffer_sink_write;
+    options.sink_user = &sink;
+    options.transform = test_candidate_transform_drop_only;
+    options.projection_paths = paths;
+    options.projection_path_count = 1u;
+    status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                  strlen(json), &options,
+                                                  &error);
+    EXPECT(status == LONEJSON_STATUS_UNSUPPORTED);
+    EXPECT(sink.length == 0u);
+  }
+
+  {
+    static const lonejson_candidate_transform_projection_path paths[] = {
+        {NULL, 1u}};
+    memset(&options, 0, sizeof(options));
+    memset(&sink, 0, sizeof(sink));
+    sink.buffer = out;
+    sink.capacity = sizeof(out);
+    options.sink = test_buffer_sink_write;
+    options.sink_user = &sink;
+    options.transform = test_candidate_transform_drop_only;
+    options.projection_paths = paths;
+    options.projection_path_count = 1u;
+    status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                  strlen(json), &options,
+                                                  &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+    EXPECT(sink.length == 0u);
+  }
+
+  {
+    static const lonejson_candidate_transform_projection_segment segments[] = {
+        {LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER, NULL, 1u, 0u}};
+    static const lonejson_candidate_transform_projection_path paths[] = {
+        {segments, 1u}};
+    memset(&options, 0, sizeof(options));
+    memset(&sink, 0, sizeof(sink));
+    sink.buffer = out;
+    sink.capacity = sizeof(out);
+    options.sink = test_buffer_sink_write;
+    options.sink_user = &sink;
+    options.transform = test_candidate_transform_drop_only;
+    options.projection_paths = paths;
+    options.projection_path_count = 1u;
+    status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                  strlen(json), &options,
+                                                  &error);
+    EXPECT(status == LONEJSON_STATUS_INVALID_ARGUMENT);
+    EXPECT(sink.length == 0u);
+  }
+
+  {
+    static const lonejson_candidate_transform_projection_segment segments[] = {
+        {(lonejson_candidate_transform_projection_segment_kind)99, NULL, 0u,
+         0u}};
+    static const lonejson_candidate_transform_projection_path paths[] = {
+        {segments, 1u}};
+    memset(&options, 0, sizeof(options));
+    memset(&sink, 0, sizeof(sink));
+    sink.buffer = out;
+    sink.capacity = sizeof(out);
+    options.sink = test_buffer_sink_write;
+    options.sink_user = &sink;
+    options.transform = test_candidate_transform_drop_only;
+    options.projection_paths = paths;
+    options.projection_path_count = 1u;
+    status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
+                                                  strlen(json), &options,
+                                                  &error);
+    EXPECT(status == LONEJSON_STATUS_UNSUPPORTED);
+    EXPECT(sink.length == 0u);
+  }
+
   memset(&failing_sink, 0, sizeof(failing_sink));
   memset(&state, 0, sizeof(state));
   failing_sink.fail_after = 2u;
@@ -1563,6 +2999,7 @@ static void test_candidate_stream_transform_failure_modes(void) {
   options.output_framing = LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON;
   options.sink = test_failing_sink_write;
   options.sink_user = &failing_sink;
+  options.old_scalar_mode = LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE;
   options.transform = test_candidate_transform_decide;
   options.replace = test_candidate_transform_replace;
   options.transform_user = &state;
@@ -1576,6 +3013,7 @@ static void test_candidate_stream_transform_failure_modes(void) {
   sink.buffer = out;
   sink.capacity = sizeof(out);
   state.fail_replace = 1;
+  options.old_scalar_mode = LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE;
   options.sink = test_buffer_sink_write;
   options.sink_user = &sink;
   status = lonejson_transform_candidates_buffer(test_default_runtime(), json,
