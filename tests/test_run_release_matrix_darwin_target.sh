@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: release-matrix is the only non-clean rehearsal for every shipped
+# binary SDK. This test prevents Darwin packaging, package verification, and
+# optional integration metadata from drifting back into script-local shortcuts
+# that bypass package-verify or force hard dependencies into core consumers.
+
 repo_root=$1
 matrix_script_path="$repo_root/scripts/run_release_matrix.sh"
 matrix_script="$(cat "$matrix_script_path")"
@@ -17,10 +22,13 @@ trap 'rm -rf "$tmp_dir"' EXIT
 printf '%s\n' "$verify_script" | grep -F -- 'darwin_deployment_target="$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- '-D "LONEJSON_MACOS_DEPLOYMENT_TARGET=$darwin_deployment_target"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- '-D "CMAKE_OSX_DEPLOYMENT_TARGET=$darwin_deployment_target"' >/dev/null
+printf '%s\n' "$verify_script" | grep -F -- '-D "LONEJSON_C_PKT_SYSTEMS_ROOT=$adapter_dependency_root"' >/dev/null
+grep -F 'list(APPEND _lonejson_find_root_path "${LONEJSON_C_PKT_SYSTEMS_ROOT}")' \
+  "$repo_root/cmake/toolchains/arm64-apple-darwin.cmake" >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'target_raw_compile_flags()' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-mmacosx-version-min=$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'raw_compile_flags="$(target_raw_compile_flags "$target_id")"' >/dev/null
-printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-fuse-ld=$LINKER"' >/dev/null
+printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "--ld-path=$LINKER"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'scripts/discover_target_tools.sh' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'package-darwin-smoke-bundle' >/dev/null
@@ -34,22 +42,22 @@ if grep -E 'set\(LONEJSON_ABI_VERSION "[0-9]+"\)' \
   printf 'Darwin smoke bundle must not hard-code an ABI fallback\n' >&2
   exit 1
 fi
-printf '%s\n' "$darwin_smoke_script" | \
-  grep -F -- 'lonejson_import_cache_path(LONEJSON_C_PKT_SYSTEMS_ROOT)' >/dev/null
-printf '%s\n' "$darwin_smoke_script" | \
-  grep -F -- 'LONEJSON_C_PKT_SYSTEMS_ROOT is required for Darwin static smoke link' >/dev/null
-printf '%s\n' "$darwin_smoke_script" | \
-  grep -F -- '${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib/libcrypto.a' >/dev/null
-printf '%s\n' "$darwin_smoke_script" | \
-  grep -F -- '"${lonejson_darwin_crypto_static}"' >/dev/null
-printf '%s\n' "$darwin_release_smoke_script" | \
-  grep -F -- 'cache_value LONEJSON_C_PKT_SYSTEMS_ROOT' >/dev/null
-printf '%s\n' "$darwin_release_smoke_script" | \
-  grep -F -- 'missing LONEJSON_C_PKT_SYSTEMS_ROOT for Darwin static smoke link' >/dev/null
-printf '%s\n' "$darwin_release_smoke_script" | \
-  grep -F -- 'crypto_static="${cpkt_root}/lib/libcrypto.a"' >/dev/null
-printf '%s\n' "$darwin_release_smoke_script" | \
-  grep -F -- '"$crypto_static"' >/dev/null
+if printf '%s\n' "$darwin_smoke_script" | grep -F -- 'libcrypto' >/dev/null; then
+  printf 'Darwin smoke bundle must not link libcrypto for core static SDK smoke\n' >&2
+  exit 1
+fi
+if printf '%s\n' "$darwin_smoke_script" | grep -F -- 'LONEJSON_C_PKT_SYSTEMS_ROOT is required for Darwin static smoke link' >/dev/null; then
+  printf 'Darwin smoke bundle must not require c.pkt.systems for core static SDK smoke\n' >&2
+  exit 1
+fi
+if printf '%s\n' "$darwin_release_smoke_script" | grep -F -- 'libcrypto' >/dev/null; then
+  printf 'Darwin release smoke must not link libcrypto for core static SDK smoke\n' >&2
+  exit 1
+fi
+if printf '%s\n' "$darwin_release_smoke_script" | grep -F -- 'LONEJSON_C_PKT_SYSTEMS_ROOT for Darwin static smoke link' >/dev/null; then
+  printf 'Darwin release smoke must not require c.pkt.systems for core static SDK smoke\n' >&2
+  exit 1
+fi
 if grep -F 'liblonejson.4.dylib' \
     "$darwin_smoke_script_path" >/dev/null; then
   printf 'Darwin smoke bundle must not hard-code ABI dylib aliases\n' >&2
@@ -60,7 +68,10 @@ if printf '%s\n' "$matrix_script" | grep -F -- 'require_archive_contract' >/dev/
   exit 1
 fi
 printf '%s\n' "$matrix_script" | grep -F -- 'missing c.pkt.systems CURL CMake package' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'missing c.pkt.systems OpenSSL CMake package' >/dev/null
+if printf '%s\n' "$matrix_script" | grep -F -- 'missing c.pkt.systems OpenSSL CMake package' >/dev/null; then
+  printf 'release matrix must not add a script-specific OpenSSL precheck\n' >&2
+  exit 1
+fi
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OPENSSL=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_JWT=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OIDC=ON' >/dev/null

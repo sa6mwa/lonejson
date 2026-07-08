@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: thread support is optional for consumers; disabling Threads must
+# not break the core C build graph.
+
 repo_root=$1
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT

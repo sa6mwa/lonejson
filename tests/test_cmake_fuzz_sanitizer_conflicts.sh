@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: fuzzing owns its sanitizer/instrumentation mode, and incompatible
+# sanitizer presets must fail at configure time with an intentional diagnostic.
+
 repo_root=$1
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT

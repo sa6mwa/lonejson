@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: checksum-listed release artifacts are the upload set and must fail
+# on sanitizer markers, repository paths, and other non-releasable payloads.
+
 repo_root=$1
 
 tmp_dir="$(mktemp -d)"

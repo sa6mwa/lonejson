@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: the public Make fuzz target must exercise every maintained fuzzer
+# and seed corpus, including Lua fuzz smoke, from one predictable command.
+
 repo_root=$1
 
 dry_run=$(make --no-print-directory -C "$repo_root" -n fuzz FUZZ_TIME=0)

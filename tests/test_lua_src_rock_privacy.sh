@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: LuaRocks release artifacts are public packages and must reject
+# local source URLs or repository paths before release.
+
 repo_root=$1
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: package verification must use the tools that match the configured
+# target build, not whatever similarly named host tool appears on PATH.
+
 repo_root=$1
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT

@@ -42,14 +42,6 @@ require_file "$otool"
 require_file "$ar"
 require_file "$archive"
 
-cpkt_root="${LONEJSON_C_PKT_SYSTEMS_ROOT:-$(cache_value LONEJSON_C_PKT_SYSTEMS_ROOT || true)}"
-if [ -z "$cpkt_root" ]; then
-    printf 'missing LONEJSON_C_PKT_SYSTEMS_ROOT for Darwin static smoke link\n' >&2
-    exit 1
-fi
-crypto_static="${cpkt_root}/lib/libcrypto.a"
-require_file "$crypto_static"
-
 dylib="$(find "$build_dir" -maxdepth 1 -type f -name 'liblonejson*.dylib' | sort | head -n 1)"
 static_lib="${build_dir}/liblonejson.a"
 if [ -z "$dylib" ]; then
@@ -99,14 +91,13 @@ if [ -z "$packaged_dylib" ]; then
     exit 1
 fi
 
-"$cc" -std=c89 -Wall -Wextra -Werror -Wno-fuse-ld-path -I "${package_root}/include" \
-    "-mmacosx-version-min=${deployment_target}" "-fuse-ld=${ld}" \
+"$cc" -std=c89 -Wall -Wextra -Werror -I "${package_root}/include" \
+    "-mmacosx-version-min=${deployment_target}" "--ld-path=${ld}" \
     "${repo_root}/tests/test_link_consumer.c" \
     "${package_root}/lib/liblonejson.a" \
-    "$crypto_static" \
     -o "${smoke_dir}/bin/static-link-smoke"
-"$cc" -std=c89 -Wall -Wextra -Werror -Wno-fuse-ld-path -I "${package_root}/include" \
-    "-mmacosx-version-min=${deployment_target}" "-fuse-ld=${ld}" \
+"$cc" -std=c89 -Wall -Wextra -Werror -I "${package_root}/include" \
+    "-mmacosx-version-min=${deployment_target}" "--ld-path=${ld}" \
     "${repo_root}/tests/test_link_consumer.c" "$packaged_dylib" \
     -o "${smoke_dir}/bin/shared-link-smoke"
 

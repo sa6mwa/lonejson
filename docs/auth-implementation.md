@@ -35,10 +35,10 @@ without JWT is a configure error. JWT and OIDC builds without OpenSSL/curl are
 valid and must compile; trust operations that need crypto fail with an
 actionable missing-provider error until an auth provider is installed.
 
-When `LONEJSON_C_PKT_SYSTEMS_ROOT` is set, curl and OpenSSL are resolved through
-the c.pkt.systems bundle. OIDC-capable release/package builds require the
-c.pkt.systems route to provide curl and OpenSSL package metadata for the
-optional adapters. Normal consumers, and JWT/OIDC core consumers that provide
+When `LONEJSON_C_PKT_SYSTEMS_ROOT` is set, enabled integrations are resolved
+through the c.pkt.systems bundle. OIDC-capable release/package builds enable the
+curl and JWT/OIDC integration surfaces but keep the OpenSSL adapter disabled for
+the plain core SDK. Normal consumers, and JWT/OIDC core consumers that provide
 their own auth providers, do not need curl or OpenSSL headers.
 
 ## Dependency And Packaging Posture
@@ -57,9 +57,10 @@ The provider vtable is receiver-style and narrow: verify one JWS, produce
 random bytes, and compute SHA-256. Signature validation uses `verify_jws`;
 PKCE challenge generation uses `sha256`; PKCE verifier generation and M2M
 credential/signup helpers use both `random_bytes` and `sha256`. Downstream
-projects that already own OpenSSL can use the OpenSSL initializer. Projects
-using another crypto stack can provide equivalent callbacks without exposing
-that stack through `lonejson.h`.
+projects that already own OpenSSL can use the optimized OpenSSL initializer.
+Projects using another crypto stack can provide equivalent callbacks without
+exposing that stack through `lonejson.h`. Both choices are valid; OpenSSL is a
+convenience adapter, not the auth contract.
 Runtime userdata also exposes method pointers for runtime-backed auth helpers,
 including JWT decode/signature verification, JWK/JWKS parsing, OIDC discovery
 fetch/parse, JWKS cache update/refresh, OAuth2 token response parsing and
@@ -68,14 +69,23 @@ pointers are wired to the same implementation as the free functions; there is
 no separate runtime code path.
 
 OpenSSL-enabled builds link OpenSSL Crypto only for the optional OpenSSL auth
-adapter. The dependency is private to the implementation from the public ABI
-perspective: release verification checks that exported shared-library symbols do
-not leak OpenSSL symbol names.
+adapter. That adapter is an integration, not a baseline package dependency. The
+plain release SDK must not expose OpenSSL, libcrypto, or libssl in pkg-config
+or CMake consumer metadata.
+
+HTTP follows the same rule. OAuth2/OIDC fetch helpers call a
+`lonejson_http_provider`; the provider implementation may use libcurl or any
+other transport that satisfies the callback contract. Curl helpers are
+optimized adapters for the libcurl path, not a mandatory dependency of the
+plain SDK.
 
 Release archive verification also checks that public package metadata does not
 unconditionally expose curl/OpenSSL requirements to consumers of the plain
 `lonejson` package. Binary release archives must still include and verify the
 auth/curl ABI symbols when built as release artifacts.
+
+The general third-party integration contract is documented in
+`docs/third-party-integrations.md`.
 
 The important release checks are:
 
@@ -329,11 +339,12 @@ Implemented algorithm support:
 - `ES256`,
 - `EdDSA` for Ed25519 OKP keys.
 
-The compatibility free function validates signatures with the built-in OpenSSL
-adapter when compiled with `LONEJSON_WITH_OPENSSL`. The preferred API is
-`lonejson_jwt_validate_signature_with_runtime`, which dispatches to the auth
-provider installed on the runtime. Without a provider capable of `verify_jws`,
-runtime-backed signature validation fails before claims are trusted.
+The compatibility free function has no built-in crypto dependency. The
+preferred API is `lonejson_jwt_validate_signature_with_runtime`, which
+dispatches to the auth provider installed on the runtime. Consumers that want
+the OpenSSL easy path can compile with `LONEJSON_WITH_OPENSSL` and initialize
+that provider with `lonejson_auth_provider_init_openssl()`. Without a provider
+capable of `verify_jws`, signature validation fails before claims are trusted.
 
 Signature validation enforces:
 
@@ -662,13 +673,13 @@ PKCE support:
 - base64url encodes without padding.
 
 The compatibility free functions `lonejson_oidc_pkce_challenge()` and
-`lonejson_oidc_pkce_generate()` use lonejson's built-in OpenSSL adapter when
-compiled with `LONEJSON_WITH_OPENSSL`. Builds without that adapter should call
+`lonejson_oidc_pkce_generate()` have no built-in crypto dependency. Call
 `lonejson_oidc_pkce_challenge_with_runtime()` or
 `lonejson_oidc_pkce_generate_with_runtime()` after installing an auth provider.
 `sha256` is required for challenge computation; both `random_bytes` and
-`sha256` are required for verifier generation. OpenSSL-enabled runtime helpers
-fall back to the built-in adapter only when the runtime has no provider.
+`sha256` are required for verifier generation. Consumers that want the OpenSSL
+easy path can compile with `LONEJSON_WITH_OPENSSL` and initialize that provider
+with `lonejson_auth_provider_init_openssl()`.
 
 Authorization URL construction requires:
 
@@ -823,8 +834,8 @@ OIDC/OAuth2 Lua facade:
 userdata. Runtime form uses the installed auth provider, so Lua builds without
 the OpenSSL adapter can still support PKCE when the embedding application
 installs provider callbacks. Calls without an explicit runtime use a temporary
-runtime and therefore rely on the built-in OpenSSL adapter fallback for
-cryptographic work when no provider is installed.
+runtime; when the Lua module is compiled with OpenSSL, that temporary runtime
+installs the optional OpenSSL provider before cryptographic work.
 
 M2M/API-key Lua facade on runtime userdata:
 
@@ -843,13 +854,16 @@ SHA-256 hashing.
 
 The functions are registered both on the module table and runtime userdata
 where applicable. Provider-backed helpers are runtime-only because they require
-the runtime's installed provider. Lua runtimes install the built-in OpenSSL auth
-provider with `runtime:set_openssl_auth_provider()` when the OpenSSL adapter is
-compiled. Runtime-form `runtime:jwt_validate_compact_signature(...)` uses that
+the runtime's installed provider. Lua runtimes install the optional OpenSSL auth
+provider with `runtime:set_openssl_auth_provider()` when the Lua module is
+compiled with that adapter. Runtime-form
+`runtime:jwt_validate_compact_signature(...)` uses that
 runtime auth provider; runtime-form PKCE helpers use the same provider's
 `sha256`/`random_bytes` callbacks. Module-table calls may also receive a
-runtime as their first argument; otherwise they use a temporary runtime and keep
-the C compatibility fallback behavior. Lua runtimes install the HTTP provider
+runtime as their first argument; otherwise they use a temporary runtime. When
+the Lua module is compiled with OpenSSL, module-table temporary runtimes install
+the optional OpenSSL provider in the Lua binding layer. Lua runtimes install the
+HTTP provider
 with `runtime:set_http_provider(callback, user_agent)`. The callback receives a
 bounded request table containing `method`, `url`, optional `content_type`,
 optional `authorization`, optional `user_agent`, optional `body`, `body_len`,
@@ -1089,8 +1103,8 @@ CLI or desktop authorization-code with PKCE:
 1. Fetch and validate OIDC discovery metadata with
    `lonejson_oidc_fetch_discovery` and a configured HTTP provider.
 2. Generate PKCE with `lonejson_oidc_pkce_generate_with_runtime` on a runtime
-   with an auth provider, or with `lonejson_oidc_pkce_generate` when using the
-   built-in OpenSSL adapter fallback.
+   with an auth provider. The OpenSSL easy path is available by initializing
+   that provider with `lonejson_auth_provider_init_openssl()`.
 3. Build the authorization URL with `lonejson_oidc_authorization_url`.
 4. Open the browser using caller-owned platform code.
 5. Receive callback query through caller-owned local HTTP code.

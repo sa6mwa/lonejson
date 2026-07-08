@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: source archives must build outside git from injected release
+# metadata and must not depend on generated state from the live worktree.
+
 repo_root=$1
 cmake_bin=${2:-cmake}
 

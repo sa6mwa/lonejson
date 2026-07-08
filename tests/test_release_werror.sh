@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: release builds must treat project-owned warnings as errors so
+# packaged consumers do not inherit warning debt from generated artifacts.
+
 repo_root=$1
 cmake_bin=$2
 generator=$3

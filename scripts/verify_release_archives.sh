@@ -71,7 +71,6 @@ target_raw_compile_flags() {
   case "$target_id" in
     arm64-apple-darwin)
       printf '%s\n' "-mmacosx-version-min=$(target_darwin_deployment_target)"
-      printf '%s\n' "-Wno-fuse-ld-path"
       ;;
     *) printf '%s\n' "" ;;
   esac
@@ -85,7 +84,7 @@ target_raw_link_flags() {
         printf 'missing target linker for %s\n' "$target_id" >&2
         exit 1
       fi
-      printf '%s\n' "-fuse-ld=$LINKER"
+      printf '%s\n' "--ld-path=$LINKER"
       ;;
     *) printf '%s\n' "" ;;
   esac
@@ -98,6 +97,51 @@ load_target_tools() {
   eval "$("$repo_root/scripts/discover_target_tools.sh" \
     --build-dir "$build_root/$preset" \
     --target-id "$target_id")"
+}
+
+target_cache_value() {
+  local preset=$1
+  local name=$2
+  local cache_file="$build_root/$preset/CMakeCache.txt"
+
+  if [[ -f "$cache_file" ]]; then
+    sed -n "s/^${name}:[^=]*=//p" "$cache_file" | tail -n 1
+  fi
+}
+
+target_dependency_root() {
+  local preset=$1
+
+  target_cache_value "$preset" LONEJSON_C_PKT_SYSTEMS_ROOT
+}
+
+target_pkg_config_path() {
+  local package_root=$1
+  local preset=$2
+  local dependency_root
+
+  dependency_root="$(target_dependency_root "$preset")"
+  printf '%s' "$package_root/lib/pkgconfig"
+  if [[ -n "$dependency_root" && -d "$dependency_root/lib/pkgconfig" ]]; then
+    printf ':%s' "$dependency_root/lib/pkgconfig"
+  fi
+  if [[ -n "${PKG_CONFIG_PATH:-}" ]]; then
+    printf ':%s' "$PKG_CONFIG_PATH"
+  fi
+  printf '\n'
+}
+
+target_cmake_prefix_path() {
+  local package_root=$1
+  local preset=$2
+  local dependency_root
+
+  dependency_root="$(target_dependency_root "$preset")"
+  printf '%s' "$package_root"
+  if [[ -n "$dependency_root" ]]; then
+    printf ';%s' "$dependency_root"
+  fi
+  printf '\n'
 }
 
 run_with_target_path() {
@@ -175,6 +219,7 @@ require_archive_contract() {
   local target_id=$2
   local preset=$3
   local tmp_dir package_root shared_lib dynamic_metadata rpath_paths dependency_manifest
+  local forbidden_metadata_pattern
 
   load_target_tools "$preset" "$target_id"
 
@@ -195,6 +240,10 @@ require_archive_contract() {
       "lib/liblonejson.dylib" | \
       "lib/liblonejson."*".dylib" | \
       "lib/pkgconfig/" | \
+      "lib/pkgconfig/lonejson-curl.pc" | \
+      "lib/pkgconfig/lonejson-jwt.pc" | \
+      "lib/pkgconfig/lonejson-oidc.pc" | \
+      "lib/pkgconfig/lonejson-openssl.pc" | \
       "lib/pkgconfig/lonejson.pc" | \
       "share/" | \
       "share/lonejson/" | \
@@ -219,23 +268,29 @@ require_archive_contract() {
   require_file "$package_root/lib/cmake/lonejson/lonejsonConfigVersion.cmake"
   dependency_manifest="$package_root/share/lonejson/dependencies.json"
   require_file "$dependency_manifest"
-  if grep -RE 'libcurl|libssl|c\.pkt\.systems|\.deps/|/home/|/build/' \
+  forbidden_metadata_pattern='(^|[^[:alnum:]_])(CURL::libcurl|OpenSSL::|openssl|OpenSSL|libcurl|libssl|libcrypto|-lcurl|-lssl|-lcrypto|crypto)([^[:alnum:]_]|$)'
+  require_file "$package_root/lib/pkgconfig/lonejson-curl.pc"
+  require_file "$package_root/lib/pkgconfig/lonejson-jwt.pc"
+  require_file "$package_root/lib/pkgconfig/lonejson-oidc.pc"
+  require_file "$package_root/lib/pkgconfig/lonejson-openssl.pc"
+  if grep -RE 'c\.pkt\.systems|\.deps/|/home/|/build/' \
       "$package_root/lib/pkgconfig/lonejson.pc" \
       "$package_root/lib/cmake/lonejson" >/dev/null; then
     printf 'forbidden dependency or path leak in release metadata for %s\n' "$archive" >&2
     exit 1
   fi
-  if grep -Eq '^(Requires|Requires.private):.*(curl|ssl|crypto|openssl|OpenSSL)' "$package_root/lib/pkgconfig/lonejson.pc"; then
-    printf 'unexpected curl/OpenSSL pkg-config dependency in %s\n' "$archive" >&2
+  if grep -Eq "$forbidden_metadata_pattern" "$package_root/lib/pkgconfig/lonejson.pc"; then
+    printf 'unexpected third-party pkg-config dependency in core lonejson SDK: %s\n' "$archive" >&2
     exit 1
   fi
-  if ! grep -Eq '^Libs\.private:.*[[:space:]]-lcrypto([[:space:]]|$)' "$package_root/lib/pkgconfig/lonejson.pc"; then
-    printf 'missing static libcrypto pkg-config dependency in %s\n' "$archive" >&2
-    exit 1
-  fi
-  if ! grep -F 'INTERFACE_LINK_LIBRARIES crypto' \
-      "$package_root/lib/cmake/lonejson/lonejsonConfig.cmake" >/dev/null; then
-    printf 'missing static libcrypto CMake link dependency in %s\n' "$archive" >&2
+  if awk '
+      /add_library\(lonejson::lonejson SHARED IMPORTED\)/ { in_core = 1 }
+      /add_library\(lonejson::lonejson_static STATIC IMPORTED\)/ { in_core = 1 }
+      in_core { print }
+      in_core && /^endif\(\)/ { in_core = 0 }
+    ' "$package_root/lib/cmake/lonejson/lonejsonConfig.cmake" |
+      grep -Eq "$forbidden_metadata_pattern"; then
+    printf 'unexpected third-party CMake dependency in core lonejson SDK: %s\n' "$archive" >&2
     exit 1
   fi
   if grep -E '\.deps/|/home/|/build/|file://' "$dependency_manifest" >/dev/null; then
@@ -250,14 +305,18 @@ require_archive_contract() {
       '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.7.0/c.pkt.systems-0.7.0-' \
       '"sha256": "' \
       '"bundled": false' \
-      '"external": true' \
-      '"curl"' \
-      '"openssl"'; do
+      '"external": false' \
+      '"role": "release-sdk-build-input"' \
+      '"curl"'; do
     if ! grep -F "$required_metadata" "$dependency_manifest" >/dev/null; then
       printf 'missing dependency manifest metadata in %s: %s\n' "$archive" "$required_metadata" >&2
       exit 1
     fi
   done
+  if grep -F '"openssl"' "$dependency_manifest" >/dev/null; then
+    printf 'unexpected OpenSSL build input in core lonejson SDK metadata: %s\n' "$archive" >&2
+    exit 1
+  fi
 
   if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
     shared_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson*.dylib' | sort | head -n 1)"
@@ -315,13 +374,18 @@ require_archive_consumer_metadata() {
   local target_id=$2
   local preset=$3
   local tmp_dir package_root consumer_source pkg_config_flags raw_compile_flags
-  local raw_link_flags cmake_source_dir cmake_build_dir darwin_deployment_target
-  local cmake_system_name
+  local pkg_config_static_flags raw_link_flags cmake_source_dir cmake_build_dir
+  local adapter_source adapter_cmake_source_dir adapter_cmake_build_dir
+  local adapter_pkg_config_flags adapter_c89_flags cmake_prefix_path pkg_config_path
+  local adapter_dependency_root darwin_deployment_target cmake_system_name
 
   load_target_tools "$preset" "$target_id"
 
   tmp_dir="$(mktemp -d)"
   package_root="$(extract_archive "$archive" "$tmp_dir")"
+  pkg_config_path="$(target_pkg_config_path "$package_root" "$preset")"
+  cmake_prefix_path="$(target_cmake_prefix_path "$package_root" "$preset")"
+  adapter_dependency_root="$(target_dependency_root "$preset")"
 
   consumer_source="$tmp_dir/consumer.c"
   cat >"$consumer_source" <<'EOF'
@@ -347,11 +411,14 @@ int main(void) {
 EOF
 
   require_command pkg-config
-  pkg_config_flags="$(PKG_CONFIG_PATH="$package_root/lib/pkgconfig" pkg-config --cflags --libs lonejson)"
+  pkg_config_flags="$(PKG_CONFIG_PATH="$pkg_config_path" pkg-config --cflags --libs lonejson)"
+  pkg_config_static_flags="$(PKG_CONFIG_PATH="$pkg_config_path" pkg-config --cflags --static --libs lonejson)"
   raw_compile_flags="$(target_raw_compile_flags "$target_id")"
   raw_link_flags="$(target_raw_link_flags "$target_id")"
   # shellcheck disable=SC2086
   run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
+  # shellcheck disable=SC2086
+  run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_static_flags $raw_link_flags -o "$tmp_dir/pkg-config-static-consumer"
 
   cmake_source_dir="$tmp_dir/cmake-consumer"
   cmake_build_dir="$tmp_dir/cmake-build"
@@ -361,8 +428,10 @@ EOF
 cmake_minimum_required(VERSION 3.21)
 project(lonejson_archive_consumer C)
 find_package(lonejson CONFIG REQUIRED)
-add_executable(lonejson_archive_consumer main.c)
-target_link_libraries(lonejson_archive_consumer PRIVATE lonejson::lonejson)
+add_executable(lonejson_archive_consumer_shared main.c)
+target_link_libraries(lonejson_archive_consumer_shared PRIVATE lonejson::lonejson)
+add_executable(lonejson_archive_consumer_static main.c)
+target_link_libraries(lonejson_archive_consumer_static PRIVATE lonejson::lonejson_static)
 EOF
 
   if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
@@ -371,11 +440,12 @@ EOF
       -S "$cmake_source_dir"
       -B "$cmake_build_dir"
       -G Ninja
-      -D "CMAKE_PREFIX_PATH=$package_root"
+      -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
       -D "CMAKE_TOOLCHAIN_FILE=$repo_root/cmake/toolchains/arm64-apple-darwin.cmake"
       -D "LONEJSON_MACOS_DEPLOYMENT_TARGET=$darwin_deployment_target"
       -D "CMAKE_OSX_DEPLOYMENT_TARGET=$darwin_deployment_target"
+      -D "LONEJSON_C_PKT_SYSTEMS_ROOT=$adapter_dependency_root"
     )
   else
     cmake_system_name="$(target_cmake_system_name "$target_id")"
@@ -383,7 +453,7 @@ EOF
       -S "$cmake_source_dir"
       -B "$cmake_build_dir"
       -G Ninja
-      -D "CMAKE_PREFIX_PATH=$package_root"
+      -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
       -D "CMAKE_C_COMPILER=$CC"
       -D "CMAKE_SYSTEM_NAME=$cmake_system_name"
@@ -392,6 +462,101 @@ EOF
   fi
   run_with_target_path "$target_id" cmake "${cmake_args[@]}"
   run_with_target_path "$target_id" cmake --build "$cmake_build_dir"
+
+  if [[ -z "$adapter_dependency_root" ]]; then
+    rm -rf "$tmp_dir"
+    return
+  fi
+
+  adapter_source="$tmp_dir/adapter-consumer.c"
+  cat >"$adapter_source" <<'EOF'
+#include <lonejson.h>
+#include <stddef.h>
+
+#ifndef LONEJSON_WITH_CURL
+#error "lonejson curl adapter target did not define LONEJSON_WITH_CURL"
+#endif
+#ifndef LONEJSON_WITH_JWT
+#error "lonejson jwt/openssl adapter target did not define LONEJSON_WITH_JWT"
+#endif
+#ifndef LONEJSON_WITH_OIDC
+#error "lonejson oidc adapter target did not define LONEJSON_WITH_OIDC"
+#endif
+#ifndef LONEJSON_WITH_OPENSSL
+#error "lonejson openssl adapter target did not define LONEJSON_WITH_OPENSSL"
+#endif
+
+int main(void) {
+    lonejson_error error;
+    lonejson_auth_provider provider;
+    lonejson_curl_parse curl_parse;
+    lonejson_oidc_pkce pkce;
+
+    lonejson_error_init(&error);
+    lonejson_oidc_pkce_init(&pkce);
+    (void)sizeof(curl_parse);
+    if (lonejson_auth_provider_init_openssl(&provider, NULL, &error) != LONEJSON_STATUS_OK) {
+        lonejson_oidc_pkce_cleanup(&pkce);
+        return 1;
+    }
+    lonejson_oidc_pkce_cleanup(&pkce);
+    return 0;
+}
+EOF
+
+  adapter_pkg_config_flags="$(PKG_CONFIG_PATH="$pkg_config_path" pkg-config --cflags --libs lonejson-curl lonejson-oidc lonejson-openssl)"
+  adapter_c89_flags="-std=c89 -Wall -Wextra -Werror -Werror=implicit-function-declaration"
+  # shellcheck disable=SC2086
+  run_with_target_path "$target_id" "$CC" "$adapter_source" $raw_compile_flags $adapter_c89_flags $adapter_pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-adapter-consumer"
+
+  adapter_cmake_source_dir="$tmp_dir/cmake-adapter-consumer"
+  adapter_cmake_build_dir="$tmp_dir/cmake-adapter-build"
+  mkdir -p "$adapter_cmake_source_dir"
+  cp "$adapter_source" "$adapter_cmake_source_dir/main.c"
+  cat >"$adapter_cmake_source_dir/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.21)
+project(lonejson_archive_adapter_consumer C)
+find_package(lonejson CONFIG REQUIRED COMPONENTS curl oidc openssl)
+add_executable(lonejson_archive_adapter_consumer main.c)
+target_compile_options(lonejson_archive_adapter_consumer PRIVATE
+  -std=c89
+  -Wall
+  -Wextra
+  -Werror
+  -Werror=implicit-function-declaration)
+target_link_libraries(lonejson_archive_adapter_consumer PRIVATE
+  lonejson::lonejson
+  lonejson::curl
+  lonejson::oidc
+  lonejson::openssl)
+EOF
+
+  if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
+    cmake_args=(
+      -S "$adapter_cmake_source_dir"
+      -B "$adapter_cmake_build_dir"
+      -G Ninja
+      -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
+      -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
+      -D "CMAKE_TOOLCHAIN_FILE=$repo_root/cmake/toolchains/arm64-apple-darwin.cmake"
+      -D "LONEJSON_MACOS_DEPLOYMENT_TARGET=$darwin_deployment_target"
+      -D "CMAKE_OSX_DEPLOYMENT_TARGET=$darwin_deployment_target"
+      -D "LONEJSON_C_PKT_SYSTEMS_ROOT=$adapter_dependency_root"
+    )
+  else
+    cmake_args=(
+      -S "$adapter_cmake_source_dir"
+      -B "$adapter_cmake_build_dir"
+      -G Ninja
+      -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
+      -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
+      -D "CMAKE_C_COMPILER=$CC"
+      -D "CMAKE_SYSTEM_NAME=$cmake_system_name"
+      -D CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+    )
+  fi
+  run_with_target_path "$target_id" cmake "${cmake_args[@]}"
+  run_with_target_path "$target_id" cmake --build "$adapter_cmake_build_dir"
 
   rm -rf "$tmp_dir"
 }

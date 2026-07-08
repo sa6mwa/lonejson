@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: test-all must include supported sanitizer gates while giving
+# explicit skips for unavailable compiler support, not silent omissions.
+
 repo_root=$1
 
 without_support=$(make -C "$repo_root" -n test-all LONEJSON_HAVE_TSAN=0 LONEJSON_HAVE_MSAN=0)

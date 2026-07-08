@@ -265,6 +265,16 @@ function(lonejson_target_include_curl target)
   endif()
 endfunction()
 
+function(lonejson_target_include_openssl target)
+  get_target_property(openssl_include_dirs OpenSSL::Crypto
+    INTERFACE_INCLUDE_DIRECTORIES)
+  if(openssl_include_dirs)
+    target_include_directories(${target} SYSTEM PRIVATE ${openssl_include_dirs})
+  elseif(OPENSSL_INCLUDE_DIR)
+    target_include_directories(${target} SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
+  endif()
+endfunction()
+
 set(LONEJSON_ENABLED_SANITIZER_COUNT 0)
 if(LONEJSON_ENABLE_ASAN)
   math(EXPR LONEJSON_ENABLED_SANITIZER_COUNT
@@ -347,7 +357,7 @@ foreach(target lonejson_shared lonejson_static)
   endif()
   if(LONEJSON_BUILD_WITH_OPENSSL)
     target_compile_definitions(${target} PRIVATE LONEJSON_WITH_OPENSSL)
-    target_link_libraries(${target} PRIVATE OpenSSL::Crypto)
+    lonejson_target_include_openssl(${target})
   endif()
   if(LONEJSON_BUILD_WITH_JWT)
     target_compile_definitions(${target} PRIVATE LONEJSON_WITH_JWT)
@@ -595,6 +605,8 @@ if(LONEJSON_BUILD_TESTS)
     if(LONEJSON_BUILD_WITH_OPENSSL AND LONEJSON_BUILD_WITH_JWT)
       target_compile_definitions(lonejson_lua_target_core PRIVATE
         LONEJSON_WITH_OPENSSL)
+      lonejson_target_include_openssl(lonejson_lua_target_core)
+      target_link_libraries(lonejson_lua_target_core PRIVATE OpenSSL::Crypto)
     endif()
     if(LONEJSON_BUILD_WITH_JWT)
       target_compile_definitions(lonejson_lua_target_core PRIVATE
@@ -653,6 +665,8 @@ if(LONEJSON_BUILD_TESTS)
     if(LONEJSON_BUILD_WITH_OPENSSL AND LONEJSON_BUILD_WITH_JWT)
       target_compile_definitions(lonejson_lua_interop_tests PRIVATE
         LONEJSON_WITH_OPENSSL)
+      lonejson_target_include_openssl(lonejson_lua_interop_tests)
+      target_link_libraries(lonejson_lua_interop_tests PRIVATE OpenSSL::Crypto)
     endif()
     if(LONEJSON_BUILD_WITH_JWT)
       target_compile_definitions(lonejson_lua_interop_tests PRIVATE
@@ -793,6 +807,11 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_run_release_matrix_darwin_target_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_run_release_matrix_darwin_target.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_release_pipeline_makefile_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_pipeline_makefile.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_release_checksum_manifest_tests
@@ -1223,6 +1242,8 @@ if(LONEJSON_BUILD_FUZZERS)
       "${LONEJSON_PUBLIC_INCLUDE_DIR}")
     target_link_libraries(lonejson_fuzz_jwt PRIVATE lonejson)
     lonejson_target_include_curl(lonejson_fuzz_jwt)
+    lonejson_target_include_openssl(lonejson_fuzz_jwt)
+    target_link_libraries(lonejson_fuzz_jwt PRIVATE OpenSSL::Crypto)
     target_compile_definitions(lonejson_fuzz_jwt PRIVATE
       LONEJSON_WITH_CURL
       LONEJSON_WITH_OPENSSL

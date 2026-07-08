@@ -5,8 +5,8 @@ if(NOT LONEJSON_BUILD_WITH_CURL)
 endif()
 if(NOT LONEJSON_BUILD_WITH_OPENSSL)
   message(FATAL_ERROR
-    "package-archive requires LONEJSON_BUILD_WITH_OPENSSL=ON; binary "
-    "releases must prove the c.pkt.systems OpenSSL dependency route")
+    "package-archive requires LONEJSON_BUILD_WITH_OPENSSL=ON; binary releases "
+    "must expose the OpenSSL provider integration surface")
 endif()
 if(NOT LONEJSON_BUILD_WITH_JWT)
   message(FATAL_ERROR
@@ -96,11 +96,10 @@ file(WRITE "${dependencies_file}"
       \"source_url\": \"${c_pkt_systems_url}\",
       \"sha256\": \"${c_pkt_systems_sha256}\",
       \"bundled\": false,
-      \"external\": true,
-      \"role\": \"release-sdk-build-dependency\",
+      \"external\": false,
+      \"role\": \"release-sdk-build-input\",
       \"provides\": [
-        \"curl\",
-        \"openssl\"
+        \"curl\"
       ]
     }
   ]
@@ -118,8 +117,63 @@ Name: lonejson
 Description: Strict C89 JSON parser, serializer, and streaming toolkit
 Version: ${LONEJSON_VERSION}
 Libs: -L\${libdir} -llonejson
-Libs.private: -lcrypto
 Cflags: -I\${includedir}
+")
+
+set(pkgconfig_jwt_file "${package_root}/lib/pkgconfig/lonejson-jwt.pc")
+file(WRITE "${pkgconfig_jwt_file}"
+"prefix=\${pcfiledir}/../..
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: lonejson-jwt
+Description: lonejson JWT/JWK/JWKS public API opt-in
+Version: ${LONEJSON_VERSION}
+Requires: lonejson
+Cflags: -DLONEJSON_WITH_JWT
+")
+
+set(pkgconfig_oidc_file "${package_root}/lib/pkgconfig/lonejson-oidc.pc")
+file(WRITE "${pkgconfig_oidc_file}"
+"prefix=\${pcfiledir}/../..
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: lonejson-oidc
+Description: lonejson OAuth2/OIDC public API opt-in
+Version: ${LONEJSON_VERSION}
+Requires: lonejson-jwt
+Cflags: -DLONEJSON_WITH_OIDC
+")
+
+set(pkgconfig_curl_file "${package_root}/lib/pkgconfig/lonejson-curl.pc")
+file(WRITE "${pkgconfig_curl_file}"
+"prefix=\${pcfiledir}/../..
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: lonejson-curl
+Description: lonejson libcurl adapter opt-in
+Version: ${LONEJSON_VERSION}
+Requires: lonejson libcurl
+Cflags: -DLONEJSON_WITH_CURL
+")
+
+set(pkgconfig_openssl_file "${package_root}/lib/pkgconfig/lonejson-openssl.pc")
+file(WRITE "${pkgconfig_openssl_file}"
+"prefix=\${pcfiledir}/../..
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: lonejson-openssl
+Description: lonejson OpenSSL auth provider opt-in
+Version: ${LONEJSON_VERSION}
+Requires: lonejson-jwt openssl
+Cflags: -DLONEJSON_WITH_OPENSSL
 ")
 
 set(cmake_config_file "${package_root}/lib/cmake/lonejson/lonejsonConfig.cmake")
@@ -139,11 +193,67 @@ if(NOT TARGET lonejson::lonejson_static)
   set_target_properties(lonejson::lonejson_static PROPERTIES
     IMPORTED_LOCATION \"\${_lonejson_prefix}/lib/${LONEJSON_STATIC_LIB_NAME}\"
     INTERFACE_INCLUDE_DIRECTORIES \"\${_lonejson_prefix}/include\"
-    INTERFACE_LINK_LIBRARIES crypto
+  )
+endif()
+
+set(lonejson_jwt_FOUND TRUE)
+set(lonejson_oidc_FOUND TRUE)
+set(lonejson_curl_FOUND TRUE)
+set(lonejson_openssl_FOUND TRUE)
+
+if(lonejson_FIND_COMPONENTS)
+  include(CMakeFindDependencyMacro)
+endif()
+
+if(NOT TARGET lonejson::jwt AND (NOT lonejson_FIND_COMPONENTS OR \"jwt\" IN_LIST lonejson_FIND_COMPONENTS OR \"oidc\" IN_LIST lonejson_FIND_COMPONENTS OR \"openssl\" IN_LIST lonejson_FIND_COMPONENTS))
+  add_library(lonejson::jwt INTERFACE IMPORTED)
+  set_target_properties(lonejson::jwt PROPERTIES
+    INTERFACE_COMPILE_DEFINITIONS LONEJSON_WITH_JWT
+  )
+endif()
+
+if(NOT TARGET lonejson::oidc AND (NOT lonejson_FIND_COMPONENTS OR \"oidc\" IN_LIST lonejson_FIND_COMPONENTS))
+  add_library(lonejson::oidc INTERFACE IMPORTED)
+  set_target_properties(lonejson::oidc PROPERTIES
+    INTERFACE_COMPILE_DEFINITIONS LONEJSON_WITH_OIDC
+    INTERFACE_LINK_LIBRARIES lonejson::jwt
+  )
+endif()
+
+if(\"curl\" IN_LIST lonejson_FIND_COMPONENTS)
+  find_dependency(CURL)
+endif()
+if(NOT TARGET lonejson::curl AND (\"curl\" IN_LIST lonejson_FIND_COMPONENTS OR TARGET CURL::libcurl))
+  add_library(lonejson::curl INTERFACE IMPORTED)
+  set_target_properties(lonejson::curl PROPERTIES
+    INTERFACE_COMPILE_DEFINITIONS LONEJSON_WITH_CURL
+    INTERFACE_LINK_LIBRARIES CURL::libcurl
+  )
+endif()
+
+if(\"openssl\" IN_LIST lonejson_FIND_COMPONENTS)
+  find_dependency(OpenSSL)
+endif()
+if(NOT TARGET lonejson::openssl AND (\"openssl\" IN_LIST lonejson_FIND_COMPONENTS OR TARGET OpenSSL::Crypto))
+  add_library(lonejson::openssl INTERFACE IMPORTED)
+  set_target_properties(lonejson::openssl PROPERTIES
+    INTERFACE_COMPILE_DEFINITIONS LONEJSON_WITH_OPENSSL
+    INTERFACE_LINK_LIBRARIES \"lonejson::jwt;OpenSSL::Crypto\"
   )
 endif()
 
 set(lonejson_FOUND TRUE)
+set(lonejson_known_components jwt oidc curl openssl)
+foreach(_lonejson_component IN LISTS lonejson_FIND_COMPONENTS)
+  if(NOT _lonejson_component IN_LIST lonejson_known_components)
+    set(lonejson_\${_lonejson_component}_FOUND FALSE)
+    if(lonejson_FIND_REQUIRED_\${_lonejson_component})
+      set(lonejson_FOUND FALSE)
+    endif()
+  endif()
+endforeach()
+unset(_lonejson_component)
+unset(lonejson_known_components)
 unset(_lonejson_prefix)
 ")
 

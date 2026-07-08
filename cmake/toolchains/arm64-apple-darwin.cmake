@@ -58,8 +58,8 @@ foreach(_lonejson_required_tool
   endif()
 endforeach()
 
-set(_lonejson_darwin_linker_flag "-fuse-ld=${CMAKE_LINKER}")
-string(CONCAT _lonejson_legacy_darwin_linker_regex "(^| )--" "ld-path=[^ ]+")
+set(_lonejson_darwin_linker_flag "--ld-path=${CMAKE_LINKER}")
+string(CONCAT _lonejson_legacy_darwin_linker_regex "(^| )-fuse-ld=[^ ]+")
 foreach(_lonejson_linker_flags
         CMAKE_EXE_LINKER_FLAGS
         CMAKE_SHARED_LINKER_FLAGS
@@ -69,7 +69,7 @@ foreach(_lonejson_linker_flags
          _lonejson_current_linker_flags "${_lonejson_current_linker_flags}")
   string(STRIP "${_lonejson_current_linker_flags}"
          _lonejson_current_linker_flags)
-  if(NOT "${_lonejson_current_linker_flags}" MATCHES "(^| )-fuse-ld=")
+  if(NOT "${_lonejson_current_linker_flags}" MATCHES "(^| )--ld-path=")
     set(_lonejson_current_linker_flags
         "${_lonejson_darwin_linker_flag} ${_lonejson_current_linker_flags}")
   endif()
@@ -98,7 +98,12 @@ if(NOT EXISTS "${LONEJSON_OSXCROSS_SDK}/usr/include")
 endif()
 
 set(CMAKE_OSX_SYSROOT "${LONEJSON_OSXCROSS_SDK}" CACHE PATH "" FORCE)
-set(CMAKE_FIND_ROOT_PATH "${LONEJSON_OSXCROSS_SDK}")
+set(_lonejson_find_root_path "${LONEJSON_OSXCROSS_SDK}")
+if(DEFINED LONEJSON_C_PKT_SYSTEMS_ROOT AND
+    NOT "${LONEJSON_C_PKT_SYSTEMS_ROOT}" STREQUAL "")
+  list(APPEND _lonejson_find_root_path "${LONEJSON_C_PKT_SYSTEMS_ROOT}")
+endif()
+set(CMAKE_FIND_ROOT_PATH ${_lonejson_find_root_path})
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)

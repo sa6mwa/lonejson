@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: c.pkt.systems integration must resolve dependencies from the
+# selected SDK root and reject invalid feature/root combinations before build.
+
 repo_root=$1
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT

@@ -1,5 +1,5 @@
 #ifdef LONEJSON_WITH_JWT
-#ifdef LONEJSON_WITH_OPENSSL
+#if defined(LONEJSON_INTERNAL_OPENSSL_IMPLEMENTATION)
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/ec.h>
@@ -1436,7 +1436,7 @@ static lonejson_status lonejson__oidc_pkce_provider(
       candidate = &runtime_state->auth_provider;
     }
   }
-#ifdef LONEJSON_WITH_OPENSSL
+#if defined(LONEJSON_INTERNAL_OPENSSL_IMPLEMENTATION)
   if (candidate == NULL) {
     if (lonejson_auth_provider_init_openssl(fallback, NULL, error) !=
         LONEJSON_STATUS_OK) {
@@ -4298,7 +4298,7 @@ lonejson_status lonejson_jwt_validate_claims(
   return LONEJSON_STATUS_OK;
 }
 
-#ifdef LONEJSON_WITH_OPENSSL
+#if defined(LONEJSON_INTERNAL_OPENSSL_IMPLEMENTATION)
 static unsigned char *
 lonejson__jwt_decode_base64url_alloc(const char *data, size_t len,
                                      size_t *out_len, const char *what,
@@ -5142,7 +5142,7 @@ lonejson_status lonejson_jwt_validate_signature(
     const lonejson_jwt_compact *jwt, const lonejson_jwt_header *header,
     const lonejson_jwk *jwk, lonejson_error *error) {
   lonejson_jws_verify_request request;
-#ifdef LONEJSON_WITH_OPENSSL
+#if defined(LONEJSON_INTERNAL_OPENSSL_IMPLEMENTATION)
   lonejson_auth_provider provider;
 #endif
 
@@ -5171,7 +5171,7 @@ lonejson_status lonejson_jwt_validate_signature(
   request.jwt = jwt;
   request.header = header;
   request.jwk = jwk;
-#ifdef LONEJSON_WITH_OPENSSL
+#if defined(LONEJSON_INTERNAL_OPENSSL_IMPLEMENTATION)
   if (lonejson_auth_provider_init_openssl(&provider, NULL, error) !=
       LONEJSON_STATUS_OK) {
     return error != NULL ? error->code : LONEJSON_STATUS_INTERNAL_ERROR;

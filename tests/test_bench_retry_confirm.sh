@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: benchmark retries should confirm material regressions without
+# hiding real slowdowns behind a single noisy measurement.
+
 repo_root=$1
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}

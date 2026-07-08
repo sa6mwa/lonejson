@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: sanitizer targets must skip only when the selected compiler truly
+# lacks support, not because the lifecycle guessed from compiler names.
+
 repo_root=$1
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: benchmark gates are release blockers only if the host identity,
+# baseline format, and comparison semantics are stable across runs.
+
 repo_root=$1
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}

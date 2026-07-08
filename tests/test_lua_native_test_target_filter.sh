@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: Lua native test targets must stay selectable without accidentally
+# expanding into cross-target or non-native release work.
+
 repo_root=$1
 cmake_cmd=$2
 cmake_generator=$3

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: registered tests need labels/timeouts so local gates can select
+# meaningful subsets and long-running failures remain bounded.
+
 build_dir=$1
 
 if ! command -v python3 >/dev/null 2>&1; then

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: the cross sanitizer matrix is a narrow hardening route; this test
+# keeps it pointed at the supported target/preset instead of growing ad hoc.
+
 repo_root=$1
 script="$repo_root/scripts/run_cross_sanitizer_matrix.sh"
 script_text=$(cat "$script")

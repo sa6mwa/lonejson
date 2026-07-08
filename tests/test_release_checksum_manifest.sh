@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: release uploads are selected from the checksum manifest, so stale
+# or omitted release-looking artifacts must fail before publishing.
+
 repo_root=$1
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT

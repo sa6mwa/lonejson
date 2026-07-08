@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: binary SDK archives must be verified through extracted downstream
+# CMake/pkg-config consumers so metadata drift is caught before upload.
+
 repo_root=${1:?usage: test_release_archive_verify.sh REPO_ROOT}
 
 require_command() {
@@ -15,6 +18,7 @@ require_command ar
 require_command cmake
 require_command ninja
 require_command nm
+require_command perl
 require_command pkg-config
 require_command readelf
 require_command sha256sum
@@ -26,9 +30,13 @@ trap 'rm -rf "$tmp_dir"' EXIT
 dist_dir="$tmp_dir/dist"
 build_root="$tmp_dir/build"
 package_root="$tmp_dir/package/liblonejson-9.9.9-x86_64-linux-gnu"
+dependency_root="$tmp_dir/deps"
 mkdir -p \
   "$dist_dir" \
   "$build_root/linux-gnu-release" \
+  "$dependency_root/lib/cmake/CURL" \
+  "$dependency_root/lib/cmake/OpenSSL" \
+  "$dependency_root/lib/pkgconfig" \
   "$package_root/include" \
   "$package_root/lib/cmake/lonejson" \
   "$package_root/lib/pkgconfig" \
@@ -60,6 +68,15 @@ typedef enum lonejson_status {
 typedef struct lonejson_error {
   int code;
 } lonejson_error;
+typedef struct lonejson_auth_provider {
+  void *user_data;
+} lonejson_auth_provider;
+typedef struct lonejson_curl_parse {
+  int unused;
+} lonejson_curl_parse;
+typedef struct lonejson_oidc_pkce {
+  int unused;
+} lonejson_oidc_pkce;
 
 void lonejson_error_init(lonejson_error *error);
 lonejson *lonejson_new(const void *config, lonejson_error *error);
@@ -116,8 +133,8 @@ void lonejson_oauth2_introspection_response_parse_json(void);
 void lonejson_oidc_userinfo_response_init(void);
 void lonejson_oidc_userinfo_response_cleanup(void);
 void lonejson_oidc_userinfo_response_parse_json(void);
-void lonejson_oidc_pkce_init(void);
-void lonejson_oidc_pkce_cleanup(void);
+void lonejson_oidc_pkce_init(lonejson_oidc_pkce *pkce);
+void lonejson_oidc_pkce_cleanup(lonejson_oidc_pkce *pkce);
 void lonejson_oidc_pkce_challenge(void);
 void lonejson_oidc_pkce_challenge_with_runtime(void);
 void lonejson_oidc_pkce_generate(void);
@@ -143,6 +160,10 @@ void lonejson_m2m_signup_generate(void);
 void lonejson_m2m_signup_complete_init(void);
 void lonejson_m2m_signup_complete_cleanup(void);
 void lonejson_m2m_signup_complete(void);
+
+lonejson_status lonejson_auth_provider_init_openssl(
+    lonejson_auth_provider *provider, const void *config,
+    lonejson_error *error);
 
 #endif
 EOF
@@ -332,10 +353,14 @@ void lonejson_oidc_userinfo_response_cleanup(void) {
 void lonejson_oidc_userinfo_response_parse_json(void) {
 }
 
-void lonejson_oidc_pkce_init(void) {
+void lonejson_oidc_pkce_init(lonejson_oidc_pkce *pkce) {
+  if (pkce != 0) {
+    pkce->unused = 0;
+  }
 }
 
-void lonejson_oidc_pkce_cleanup(void) {
+void lonejson_oidc_pkce_cleanup(lonejson_oidc_pkce *pkce) {
+  (void)pkce;
 }
 
 void lonejson_oidc_pkce_challenge(void) {
@@ -412,6 +437,17 @@ void lonejson_m2m_signup_complete_cleanup(void) {
 
 void lonejson_m2m_signup_complete(void) {
 }
+
+lonejson_status lonejson_auth_provider_init_openssl(
+    lonejson_auth_provider *provider, const void *config,
+    lonejson_error *error) {
+  (void)config;
+  lonejson_error_init(error);
+  if (provider != 0) {
+    provider->user_data = 0;
+  }
+  return LONEJSON_STATUS_OK;
+}
 EOF
 
 cc -shared -fPIC -I"$package_root/include" "$tmp_dir/lonejson_stub.c" \
@@ -429,20 +465,84 @@ Name: lonejson
 Description: lonejson archive verifier fixture
 Version: 9.9.9
 Libs: -L${libdir} -llonejson
-Libs.private: -lcrypto
 Cflags: -I${includedir}
 EOF
 
+cat >"$package_root/lib/pkgconfig/lonejson-jwt.pc" <<'EOF'
+prefix=${pcfiledir}/../..
+
+Name: lonejson-jwt
+Description: lonejson JWT adapter fixture
+Version: 9.9.9
+Requires: lonejson
+Cflags: -DLONEJSON_WITH_JWT
+EOF
+
+cat >"$package_root/lib/pkgconfig/lonejson-oidc.pc" <<'EOF'
+prefix=${pcfiledir}/../..
+
+Name: lonejson-oidc
+Description: lonejson OIDC adapter fixture
+Version: 9.9.9
+Requires: lonejson-jwt
+Cflags: -DLONEJSON_WITH_OIDC
+EOF
+
+cat >"$package_root/lib/pkgconfig/lonejson-curl.pc" <<'EOF'
+prefix=${pcfiledir}/../..
+
+Name: lonejson-curl
+Description: lonejson curl adapter fixture
+Version: 9.9.9
+Requires: lonejson libcurl
+Cflags: -DLONEJSON_WITH_CURL
+EOF
+
+cat >"$package_root/lib/pkgconfig/lonejson-openssl.pc" <<'EOF'
+prefix=${pcfiledir}/../..
+
+Name: lonejson-openssl
+Description: lonejson OpenSSL adapter fixture
+Version: 9.9.9
+Requires: lonejson-jwt openssl
+Cflags: -DLONEJSON_WITH_OPENSSL
+EOF
+
 cat >"$package_root/lib/cmake/lonejson/lonejsonConfig.cmake" <<'EOF'
-add_library(lonejson::lonejson SHARED IMPORTED)
-set_target_properties(lonejson::lonejson PROPERTIES
-  IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/../../liblonejson.so"
-  INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include")
-add_library(lonejson::lonejson_static STATIC IMPORTED)
-set_target_properties(lonejson::lonejson_static PROPERTIES
-  IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/../../liblonejson.a"
-  INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include"
-  INTERFACE_LINK_LIBRARIES crypto)
+include(CMakeFindDependencyMacro)
+if(NOT TARGET lonejson::lonejson)
+  add_library(lonejson::lonejson SHARED IMPORTED)
+  set_target_properties(lonejson::lonejson PROPERTIES
+    IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/../../liblonejson.so"
+    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include")
+endif()
+if(NOT TARGET lonejson::lonejson_static)
+  add_library(lonejson::lonejson_static STATIC IMPORTED)
+  set_target_properties(lonejson::lonejson_static PROPERTIES
+    IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/../../liblonejson.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include")
+endif()
+add_library(lonejson::jwt INTERFACE IMPORTED)
+set_target_properties(lonejson::jwt PROPERTIES
+  INTERFACE_COMPILE_DEFINITIONS LONEJSON_WITH_JWT)
+add_library(lonejson::oidc INTERFACE IMPORTED)
+set_target_properties(lonejson::oidc PROPERTIES
+  INTERFACE_COMPILE_DEFINITIONS LONEJSON_WITH_OIDC
+  INTERFACE_LINK_LIBRARIES lonejson::jwt)
+if("curl" IN_LIST lonejson_FIND_COMPONENTS)
+  find_dependency(CURL)
+  add_library(lonejson::curl INTERFACE IMPORTED)
+  set_target_properties(lonejson::curl PROPERTIES
+    INTERFACE_COMPILE_DEFINITIONS LONEJSON_WITH_CURL
+    INTERFACE_LINK_LIBRARIES CURL::libcurl)
+endif()
+if("openssl" IN_LIST lonejson_FIND_COMPONENTS)
+  find_dependency(OpenSSL)
+  add_library(lonejson::openssl INTERFACE IMPORTED)
+  set_target_properties(lonejson::openssl PROPERTIES
+    INTERFACE_COMPILE_DEFINITIONS LONEJSON_WITH_OPENSSL
+    INTERFACE_LINK_LIBRARIES "lonejson::jwt;OpenSSL::Crypto")
+endif()
 EOF
 
 cat >"$package_root/lib/cmake/lonejson/lonejsonConfigVersion.cmake" <<'EOF'
@@ -464,11 +564,10 @@ cat >"$package_root/share/lonejson/dependencies.json" <<'EOF'
       "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.7.0/c.pkt.systems-0.7.0-x86_64-linux-gnu.tar.gz",
       "sha256": "35e50e02ca4b0f7ba7ff0e3683c1c19b1ae07aa0c47b349e52025e45e0e35b28",
       "bundled": false,
-      "external": true,
-      "role": "release-sdk-build-dependency",
+      "external": false,
+      "role": "release-sdk-build-input",
       "provides": [
-        "curl",
-        "openssl"
+        "curl"
       ]
     }
   ]
@@ -482,6 +581,39 @@ cat >"$build_root/linux-gnu-release/CMakeCache.txt" <<EOF
 CMAKE_C_COMPILER:FILEPATH=$(command -v cc)
 CMAKE_NM:FILEPATH=$(command -v nm)
 CMAKE_READELF:FILEPATH=$(command -v readelf)
+LONEJSON_C_PKT_SYSTEMS_ROOT:PATH=$dependency_root
+EOF
+
+ar rcs "$dependency_root/lib/libcurl.a"
+ar rcs "$dependency_root/lib/libcrypto.a"
+cat >"$dependency_root/lib/pkgconfig/libcurl.pc" <<EOF
+prefix=$dependency_root
+libdir=\${prefix}/lib
+
+Name: libcurl
+Description: fake libcurl fixture
+Version: 8.0.0
+Libs: -L\${libdir} -lcurl
+EOF
+cat >"$dependency_root/lib/pkgconfig/openssl.pc" <<EOF
+prefix=$dependency_root
+libdir=\${prefix}/lib
+
+Name: OpenSSL
+Description: fake OpenSSL fixture
+Version: 3.0.0
+Libs: -L\${libdir} -lcrypto
+EOF
+cat >"$dependency_root/lib/cmake/CURL/CURLConfig.cmake" <<EOF
+add_library(CURL::libcurl STATIC IMPORTED)
+set_target_properties(CURL::libcurl PROPERTIES
+  IMPORTED_LOCATION "$dependency_root/lib/libcurl.a")
+EOF
+cat >"$dependency_root/lib/cmake/OpenSSL/OpenSSLConfig.cmake" <<EOF
+add_library(OpenSSL::Crypto STATIC IMPORTED)
+set_target_properties(OpenSSL::Crypto PROPERTIES
+  IMPORTED_LOCATION "$dependency_root/lib/libcrypto.a")
+add_library(OpenSSL::SSL INTERFACE IMPORTED)
 EOF
 
 tar -C "$tmp_dir/package" -czf \
@@ -518,47 +650,48 @@ if "$repo_root/scripts/verify_release_archives.sh" \
 fi
 grep -F 'missing required file:' "$missing_metadata_log" >/dev/null
 
-missing_pkg_crypto_dist_dir="$tmp_dir/missing-pkg-crypto-dist"
-missing_pkg_crypto_package_dir="$tmp_dir/missing-pkg-crypto-package"
-missing_pkg_crypto_root="$missing_pkg_crypto_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
-mkdir -p "$missing_pkg_crypto_dist_dir"
-cp -R "$tmp_dir/package" "$missing_pkg_crypto_package_dir"
-sed -i '/^Libs\.private: -lcrypto$/d' \
-  "$missing_pkg_crypto_root/lib/pkgconfig/lonejson.pc"
-tar -C "$missing_pkg_crypto_package_dir" -czf \
-  "$missing_pkg_crypto_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+pkg_crypto_dist_dir="$tmp_dir/pkg-crypto-dist"
+pkg_crypto_package_dir="$tmp_dir/pkg-crypto-package"
+pkg_crypto_root="$pkg_crypto_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$pkg_crypto_dist_dir"
+cp -R "$tmp_dir/package" "$pkg_crypto_package_dir"
+cat >>"$pkg_crypto_root/lib/pkgconfig/lonejson.pc" <<'EOF'
+Libs.private: -lcrypto
+EOF
+tar -C "$pkg_crypto_package_dir" -czf \
+  "$pkg_crypto_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
   "liblonejson-9.9.9-x86_64-linux-gnu"
-(cd "$missing_pkg_crypto_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
-missing_pkg_crypto_log="$tmp_dir/missing-pkg-crypto.log"
+(cd "$pkg_crypto_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+pkg_crypto_log="$tmp_dir/pkg-crypto.log"
 if "$repo_root/scripts/verify_release_archives.sh" \
   "$repo_root" \
-  "$missing_pkg_crypto_dist_dir/lonejson-9.9.9-CHECKSUMS" \
-  "$build_root" >"$missing_pkg_crypto_log" 2>&1; then
-  printf 'expected archive verification to fail when pkg-config omits static libcrypto\n' >&2
+  "$pkg_crypto_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$pkg_crypto_log" 2>&1; then
+  printf 'expected archive verification to fail when pkg-config forces libcrypto\n' >&2
   exit 1
 fi
-grep -F 'missing static libcrypto pkg-config dependency' "$missing_pkg_crypto_log" >/dev/null
+grep -F 'unexpected third-party pkg-config dependency in core lonejson SDK' "$pkg_crypto_log" >/dev/null
 
-missing_cmake_crypto_dist_dir="$tmp_dir/missing-cmake-crypto-dist"
-missing_cmake_crypto_package_dir="$tmp_dir/missing-cmake-crypto-package"
-missing_cmake_crypto_root="$missing_cmake_crypto_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
-mkdir -p "$missing_cmake_crypto_dist_dir"
-cp -R "$tmp_dir/package" "$missing_cmake_crypto_package_dir"
-sed -i '/INTERFACE_LINK_LIBRARIES crypto/d' \
-  "$missing_cmake_crypto_root/lib/cmake/lonejson/lonejsonConfig.cmake"
-tar -C "$missing_cmake_crypto_package_dir" -czf \
-  "$missing_cmake_crypto_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+cmake_crypto_dist_dir="$tmp_dir/cmake-crypto-dist"
+cmake_crypto_package_dir="$tmp_dir/cmake-crypto-package"
+cmake_crypto_root="$cmake_crypto_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$cmake_crypto_dist_dir"
+cp -R "$tmp_dir/package" "$cmake_crypto_package_dir"
+perl -0pi -e 's/INTERFACE_INCLUDE_DIRECTORIES "\$\{CMAKE_CURRENT_LIST_DIR\}\/\.\.\/\.\.\/\.\.\/include"\)/INTERFACE_INCLUDE_DIRECTORIES "\$\{CMAKE_CURRENT_LIST_DIR\}\/\.\.\/\.\.\/\.\.\/include"\n  INTERFACE_LINK_LIBRARIES crypto)/' \
+  "$cmake_crypto_root/lib/cmake/lonejson/lonejsonConfig.cmake"
+tar -C "$cmake_crypto_package_dir" -czf \
+  "$cmake_crypto_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
   "liblonejson-9.9.9-x86_64-linux-gnu"
-(cd "$missing_cmake_crypto_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
-missing_cmake_crypto_log="$tmp_dir/missing-cmake-crypto.log"
+(cd "$cmake_crypto_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+cmake_crypto_log="$tmp_dir/cmake-crypto.log"
 if "$repo_root/scripts/verify_release_archives.sh" \
   "$repo_root" \
-  "$missing_cmake_crypto_dist_dir/lonejson-9.9.9-CHECKSUMS" \
-  "$build_root" >"$missing_cmake_crypto_log" 2>&1; then
-  printf 'expected archive verification to fail when CMake omits static libcrypto\n' >&2
+  "$cmake_crypto_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$cmake_crypto_log" 2>&1; then
+  printf 'expected archive verification to fail when CMake forces libcrypto\n' >&2
   exit 1
 fi
-grep -F 'missing static libcrypto CMake link dependency' "$missing_cmake_crypto_log" >/dev/null
+grep -F 'unexpected third-party CMake dependency in core lonejson SDK' "$cmake_crypto_log" >/dev/null
 
 openssl_metadata_dist_dir="$tmp_dir/openssl-metadata-dist"
 openssl_metadata_package_dir="$tmp_dir/openssl-metadata-package"
@@ -580,7 +713,28 @@ if "$repo_root/scripts/verify_release_archives.sh" \
   printf 'expected archive verification to fail when pkg-config requires OpenSSL\n' >&2
   exit 1
 fi
-grep -F 'unexpected curl/OpenSSL pkg-config dependency' "$openssl_metadata_log" >/dev/null
+grep -F 'unexpected third-party pkg-config dependency in core lonejson SDK' "$openssl_metadata_log" >/dev/null
+
+openssl_build_input_dist_dir="$tmp_dir/openssl-build-input-dist"
+openssl_build_input_package_dir="$tmp_dir/openssl-build-input-package"
+openssl_build_input_root="$openssl_build_input_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$openssl_build_input_dist_dir"
+cp -R "$tmp_dir/package" "$openssl_build_input_package_dir"
+perl -0pi -e 's/"curl"/"curl",\n        "openssl"/' \
+  "$openssl_build_input_root/share/lonejson/dependencies.json"
+tar -C "$openssl_build_input_package_dir" -czf \
+  "$openssl_build_input_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$openssl_build_input_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+openssl_build_input_log="$tmp_dir/openssl-build-input.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+  "$repo_root" \
+  "$openssl_build_input_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+  "$build_root" >"$openssl_build_input_log" 2>&1; then
+  printf 'expected archive verification to fail when core metadata advertises OpenSSL build input\n' >&2
+  exit 1
+fi
+grep -F 'unexpected OpenSSL build input in core lonejson SDK metadata' "$openssl_build_input_log" >/dev/null
 
 broken_dist_dir="$tmp_dir/broken-dist"
 broken_package_dir="$tmp_dir/broken-package"

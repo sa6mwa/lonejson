@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: Lua rock installation is part of the build lifecycle and must
+# rebuild only when its source/dependency inputs change.
+
 repo_root=$1
 luarocks_exec=${2:-luarocks}
 tmp_dir=$(mktemp -d)

@@ -166,6 +166,7 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 	prerelease \
 	prerelease-live \
 	prerelease-hardening \
+	release-pipeline \
 	release-matrix \
 	release \
 	lua-rock \
@@ -228,7 +229,7 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 
 help:
 	@printf '%s\n' \
-		'make finalize-slice         Format, build, and run the debug CTest suite before committing a slice.' \
+		'make finalize-slice         Format, build, and run the make test debug gate before committing a slice.' \
 		'make build                  Configure and build the full debug tree (tests and standalone examples, excluding lua-* and curl-examples).' \
 		'make build-debug            Alias for make build.' \
 		'make build-host             Configure and build the host-native release preset.' \
@@ -241,11 +242,12 @@ help:
 		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
 		'make verify-release-archives Alias for make package-verify.' \
 		'make verify-release-privacy Alias for make package-verify.' \
-		'make prerelease             Run the deterministic local pre-release confidence gate.' \
+		'make prerelease             Run the full release pipeline without cleaning generated state first.' \
 		'make prerelease-live        Refuse live external-provider release checks unless explicitly enabled.' \
-		'make prerelease-hardening   Run prerelease, then the release-matrix rehearsal.' \
+		'make prerelease-hardening   Compatibility alias for make prerelease.' \
+		'make release-pipeline       Internal shared release proof used by prerelease and release.' \
 		'make release-matrix         Build host release tests, then package, checksum, and verify every release target without cleaning first.' \
-		'make release                Clean generated state, then run prerelease and the release matrix.' \
+		'make release                Clean generated state, then run the same pipeline as prerelease.' \
 		'make release-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make release-darwin-smoke-bundle Build the Darwin smoke ZIP with example and link-smoke binaries.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
@@ -261,7 +263,7 @@ help:
 		'make bench-compare          Run a fresh C benchmark, then compare against the committed C baseline.' \
 		'make bench-baseline-history Compare frozen C/Lua benchmark baselines across git history.' \
 		'make bench-gate             Run a fresh C benchmark, then enforce the C benchmark gate against the committed C baseline.' \
-		'make test                   Build and run the debug test preset.' \
+		'make test                   Build debug artifacts, run CTest, then Lua tests; this is the debug lifecycle gate.' \
 		'make test-debug             Alias for make test.' \
 		'make test-host              Build and run the host-native test preset.' \
 		'make test-host-curl         Build and run the host-native curl-enabled test preset.' \
@@ -392,22 +394,23 @@ verify-release-archives: package-verify
 
 verify-release-privacy: package-verify
 
-prerelease: test-all
+prerelease: release-pipeline
 
 prerelease-live:
 	@test "$${LONEJSON_ENABLE_LIVE_TESTS:-}" = "1" || (printf '%s\n' 'Set LONEJSON_ENABLE_LIVE_TESTS=1 to run live prerelease checks; no live prerelease checks are currently defined.' >&2; exit 1)
 
-prerelease-hardening:
-	+$(TIME_STEP) prerelease $(MAKE) prerelease
-	+$(TIME_STEP) release-matrix $(MAKE) release-matrix
+prerelease-hardening: prerelease
+
+release-pipeline:
+	+$(TIME_STEP) prerelease/test-all $(MAKE) test-all
+	+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix
 
 release-matrix:
 	./scripts/run_release_matrix.sh
 
 release:
 	$(TIME_STEP) release/clean ./scripts/clean.sh
-	+$(TIME_STEP) release/prerelease $(MAKE) prerelease
-	+$(TIME_STEP) release/release-matrix $(MAKE) release-matrix
+	+$(TIME_STEP) release/pipeline $(MAKE) release-pipeline
 
 bench:
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \

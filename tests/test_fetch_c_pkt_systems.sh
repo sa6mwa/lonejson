@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Rationale: SDK acquisition must be cache-stable, checksum-verified, and
+# retryable without turning transient downloads into corrupted dependency roots.
+
 repo_root=$1
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT

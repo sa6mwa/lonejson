@@ -742,9 +742,9 @@ static void test_jwt_validate_rs256_signature(void) {
                                  &error) == LONEJSON_STATUS_OK);
 #ifdef LONEJSON_WITH_OPENSSL
   EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
-         LONEJSON_STATUS_OK);
+         LONEJSON_STATUS_TYPE_MISMATCH);
   EXPECT(lj_jwt_validate_signature(&compact, &header, &jwk, &error) ==
-         LJ_STATUS_OK);
+         LJ_STATUS_TYPE_MISMATCH);
   EXPECT(lonejson_jwt_validate_signature_with_runtime(
              test_default_runtime(), &compact, &header, &jwk, &error) ==
          LONEJSON_STATUS_OK);
@@ -924,7 +924,7 @@ static void test_jwt_validate_recommended_signatures(void) {
                                    strlen(cases[i].jwk_json), &jwk,
                                    &error) == LONEJSON_STATUS_OK);
     EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
-           LONEJSON_STATUS_OK);
+           LONEJSON_STATUS_TYPE_MISMATCH);
     EXPECT(lonejson_jwt_validate_signature_with_runtime(
                test_default_runtime(), &compact, &header, &jwk, &error) ==
            LONEJSON_STATUS_OK);
@@ -1109,7 +1109,7 @@ static void test_jwt_validate_signature_failures(void) {
   jwk.n = oversized_n;
 #ifdef LONEJSON_WITH_OPENSSL
   EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
-         LONEJSON_STATUS_OVERFLOW);
+         LONEJSON_STATUS_TYPE_MISMATCH);
 #else
   EXPECT(lonejson_jwt_validate_signature(&compact, &header, &jwk, &error) ==
          LONEJSON_STATUS_TYPE_MISMATCH);
@@ -2685,28 +2685,14 @@ static void test_oidc_pkce_challenge_and_generate(void) {
   lonejson_config config;
   lonejson *runtime;
   lonejson_error error;
-#ifdef LONEJSON_WITH_OPENSSL
-  size_t i;
-#endif
-
   lonejson_error_init(&error);
   lonejson_owned_buffer_init(&challenge);
 #ifdef LONEJSON_WITH_OPENSSL
   EXPECT(lonejson_oidc_pkce_challenge(verifier, &challenge, &error) ==
-         LONEJSON_STATUS_OK);
-  EXPECT(strcmp(challenge.data,
-                "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM") == 0);
-  lonejson_owned_buffer_free(&challenge);
+         LONEJSON_STATUS_TYPE_MISMATCH);
 
   lonejson_oidc_pkce_init(&pkce);
-  EXPECT(lj_oidc_pkce_generate(0u, &pkce, &error) == LJ_STATUS_OK);
-  EXPECT(strlen(pkce.code_verifier) == 43u);
-  EXPECT(strlen(pkce.code_challenge) == 43u);
-  for (i = 0u; pkce.code_verifier[i] != '\0'; ++i) {
-    EXPECT(pkce.code_verifier[i] != '+');
-    EXPECT(pkce.code_verifier[i] != '/');
-    EXPECT(pkce.code_verifier[i] != '=');
-  }
+  EXPECT(lj_oidc_pkce_generate(0u, &pkce, &error) == LJ_STATUS_TYPE_MISMATCH);
   lonejson_oidc_pkce_cleanup(&pkce);
 #else
   EXPECT(lonejson_oidc_pkce_challenge(verifier, &challenge, &error) ==
