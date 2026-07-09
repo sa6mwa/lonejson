@@ -37,7 +37,7 @@ option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled."
 option(LONEJSON_BUILD_WITH_OPENSSL "Build lonejson with OpenSSL-backed auth/crypto support enabled." OFF)
 option(LONEJSON_BUILD_WITH_JWT "Build lonejson with JWT/JWK auth APIs enabled." OFF)
 option(LONEJSON_BUILD_WITH_OIDC "Build lonejson with OIDC/OAuth2 helper APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "23" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "24" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -918,6 +918,9 @@ if(LONEJSON_BUILD_TESTS)
     lonejson_single_header_config_lj_config_aliases
     TEST_LJ_CONFIG_ALIASES
     TEST_USE_SHORT_NAMES)
+  lonejson_add_single_header_config_test(
+    lonejson_single_header_config_small_parser_default_candidate_rejects
+    TEST_SMALL_PARSER_DEFAULT_CANDIDATE_REJECTS)
   lonejson_add_single_header_config_test(
     lonejson_single_header_config_short_names_disabled
     TEST_DISABLE_SHORT_NAMES)

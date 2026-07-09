@@ -437,6 +437,12 @@ int main(void) {
   test_candidate_stream_capture_gated_stop_and_failure();
   test_candidate_stream_capture_failure_modes();
   test_candidate_stream_capture_path_visitor_user();
+  test_candidate_stream_runtime_read_buffer_config();
+  test_candidate_stream_runtime_read_buffer_preserves_behavior();
+  test_candidate_stream_runtime_read_buffer_file_path_fd_config();
+  test_candidate_stream_runtime_read_buffer_buffer_transform_ignored();
+  test_candidate_stream_runtime_read_buffer_buffer_visit_ignored();
+  test_candidate_stream_runtime_read_buffer_rejects_invalid();
   test_candidate_stream_transform_pass_drop_replace();
   test_candidate_stream_transform_fragmented_reader();
   test_candidate_stream_transform_gated_spooled_replay();

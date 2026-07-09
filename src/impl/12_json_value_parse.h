@@ -42,7 +42,8 @@ lonejson__json_parse_string(lonejson__json_io *io) {
     } else if (!io->has_pushback &&
                io->cursor->read_buffer_off < io->cursor->read_buffer_len) {
       const unsigned char *span =
-          io->cursor->read_buffer + io->cursor->read_buffer_off;
+          lonejson__json_cursor_read_buffer(io->cursor) +
+          io->cursor->read_buffer_off;
       size_t available =
           io->cursor->read_buffer_len - io->cursor->read_buffer_off;
       size_t plain_span = 0u;

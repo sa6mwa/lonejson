@@ -92,6 +92,20 @@
 #if defined(LJ_STREAM_BUFFER_SIZE) && !defined(LONEJSON_STREAM_BUFFER_SIZE)
 #define LONEJSON_STREAM_BUFFER_SIZE LJ_STREAM_BUFFER_SIZE
 #endif
+#if defined(LJ_CANDIDATE_READ_BUFFER_SIZE) &&                                  \
+    !defined(LONEJSON_CANDIDATE_READ_BUFFER_SIZE)
+#define LONEJSON_CANDIDATE_READ_BUFFER_SIZE LJ_CANDIDATE_READ_BUFFER_SIZE
+#endif
+#if defined(LJ_CANDIDATE_READ_BUFFER_MIN_SIZE) &&                              \
+    !defined(LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE)
+#define LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE                                \
+  LJ_CANDIDATE_READ_BUFFER_MIN_SIZE
+#endif
+#if defined(LJ_CANDIDATE_READ_BUFFER_MAX_SIZE) &&                              \
+    !defined(LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE)
+#define LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE                                \
+  LJ_CANDIDATE_READ_BUFFER_MAX_SIZE
+#endif
 #if defined(LJ_SPOOL_MEMORY_LIMIT) && !defined(LONEJSON_SPOOL_MEMORY_LIMIT)
 #define LONEJSON_SPOOL_MEMORY_LIMIT LJ_SPOOL_MEMORY_LIMIT
 #endif
@@ -523,7 +537,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 23
+#define LONEJSON_ABI_VERSION 24
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -588,6 +602,36 @@ extern "C" {
  * `LONEJSON_READER_BUFFER_SIZE`. */
 #ifndef LONEJSON_STREAM_BUFFER_SIZE
 #define LONEJSON_STREAM_BUFFER_SIZE LONEJSON_READER_BUFFER_SIZE
+#endif
+/** Default runtime candidate reader/file/path/fd transport buffer size.
+ *
+ * `lonejson_default_config()` copies this value into
+ * `lonejson_config.candidate_read_buffer_size`. Buffer-backed candidate APIs
+ * ignore it because the complete input is already caller-owned memory.
+ *
+ * The default intentionally follows `LONEJSON_PARSER_BUFFER_SIZE`. Builds that
+ * lower the parser buffer below `LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE` must
+ * also set `LONEJSON_CANDIDATE_READ_BUFFER_SIZE` to a supported value;
+ * otherwise `lonejson_new()` rejects the runtime config before candidate APIs
+ * are used.
+ */
+#ifndef LONEJSON_CANDIDATE_READ_BUFFER_SIZE
+#define LONEJSON_CANDIDATE_READ_BUFFER_SIZE LONEJSON_PARSER_BUFFER_SIZE
+#endif
+/** Minimum accepted `lonejson_config.candidate_read_buffer_size`.
+ *
+ * `lonejson_new()` rejects non-zero candidate read buffers smaller than this
+ * bound. Zero is accepted as "use `LONEJSON_CANDIDATE_READ_BUFFER_SIZE`".
+ */
+#ifndef LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE
+#define LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE 1024u
+#endif
+/** Maximum accepted `lonejson_config.candidate_read_buffer_size`.
+ *
+ * `lonejson_new()` rejects candidate read buffers larger than this bound.
+ */
+#ifndef LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE
+#define LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE (1024u * 1024u)
 #endif
 /** Default in-memory threshold before streamed fields spill into a temporary
  * file. */
@@ -902,6 +946,18 @@ typedef struct lonejson_config {
   int write_pretty;
   /** Maximum serializer-owned output bytes. Zero keeps the library default. */
   size_t write_max_output_bytes;
+  /** Candidate reader/file/path/fd transport buffer bytes.
+   *
+   * Zero keeps `LONEJSON_CANDIDATE_READ_BUFFER_SIZE`. Non-zero values must be
+   * within `LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE` and
+   * `LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE`. The setting applies to
+   * `lonejson_visit_candidates_reader/filep/path/fd()` and
+   * `lonejson_transform_candidates_reader/filep/path/fd()`. It changes only
+   * the transient source-read chunk size; it does not materialize the complete
+   * input, does not change candidate framing, and does not affect
+   * buffer-backed candidate APIs.
+   */
+  size_t candidate_read_buffer_size;
   /** Default spool policy for streamed mapped fields. */
   lonejson_spool_policy spool_default;
   /** Blob-oriented spool policy for streamed mapped fields. */
@@ -3562,27 +3618,47 @@ struct lonejson {
   lonejson_status (*visit_path_value_fd)(
       lonejson *runtime, int fd, const lonejson_path_value_visitor *visitor,
       void *user, lonejson_error *error);
-  /** Streams arbitrary JSON candidates from a caller-owned buffer. */
+  /** Streams arbitrary JSON candidates from a caller-owned buffer.
+   *
+   * The runtime candidate read-buffer setting is ignored because the input is
+   * already memory-resident.
+   */
   lonejson_status (*visit_candidates_buffer)(
       lonejson *runtime, const void *data, size_t len,
       const struct lonejson_candidate_stream_options *options,
       lonejson_error *error);
-  /** Streams arbitrary JSON candidates from a reader callback. */
+  /** Streams arbitrary JSON candidates from a reader callback.
+   *
+   * Reads through `lonejson_config.candidate_read_buffer_size` without
+   * materializing the whole source.
+   */
   lonejson_status (*visit_candidates_reader)(
       lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
       const struct lonejson_candidate_stream_options *options,
       lonejson_error *error);
-  /** Streams arbitrary JSON candidates from an open `FILE *`. */
+  /** Streams arbitrary JSON candidates from an open `FILE *`.
+   *
+   * Reads through `lonejson_config.candidate_read_buffer_size` without
+   * materializing the whole file.
+   */
   lonejson_status (*visit_candidates_filep)(
       lonejson *runtime, FILE *fp,
       const struct lonejson_candidate_stream_options *options,
       lonejson_error *error);
-  /** Streams arbitrary JSON candidates from a filesystem path. */
+  /** Streams arbitrary JSON candidates from a filesystem path.
+   *
+   * Reads through `lonejson_config.candidate_read_buffer_size` without
+   * materializing the whole file.
+   */
   lonejson_status (*visit_candidates_path)(
       lonejson *runtime, const char *path,
       const struct lonejson_candidate_stream_options *options,
       lonejson_error *error);
-  /** Streams arbitrary JSON candidates from a file descriptor. */
+  /** Streams arbitrary JSON candidates from a file descriptor.
+   *
+   * Reads through `lonejson_config.candidate_read_buffer_size` without
+   * materializing the whole descriptor.
+   */
   lonejson_status (*visit_candidates_fd)(
       lonejson *runtime, int fd,
       const struct lonejson_candidate_stream_options *options,
@@ -6512,42 +6588,82 @@ lonejson_visit_path_value_fd(lonejson *runtime, int fd,
 lonejson_status lonejson_visit_candidates_buffer(
     lonejson *runtime, const void *data, size_t len,
     const lonejson_candidate_stream_options *options, lonejson_error *error);
-/** Streams arbitrary JSON candidates from a caller-provided reader callback. */
+/** Streams arbitrary JSON candidates from a caller-provided reader callback.
+ *
+ * Reads through `lonejson_config.candidate_read_buffer_size` without
+ * materializing the whole source.
+ */
 lonejson_status lonejson_visit_candidates_reader(
     lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
     const lonejson_candidate_stream_options *options, lonejson_error *error);
-/** Streams arbitrary JSON candidates from an open `FILE *`. */
+/** Streams arbitrary JSON candidates from an open `FILE *`.
+ *
+ * Reads through `lonejson_config.candidate_read_buffer_size` without
+ * materializing the whole file.
+ */
 lonejson_status lonejson_visit_candidates_filep(
     lonejson *runtime, FILE *fp,
     const lonejson_candidate_stream_options *options, lonejson_error *error);
-/** Streams arbitrary JSON candidates from a filesystem path. */
+/** Streams arbitrary JSON candidates from a filesystem path.
+ *
+ * Reads through `lonejson_config.candidate_read_buffer_size` without
+ * materializing the whole file.
+ */
 lonejson_status
 lonejson_visit_candidates_path(lonejson *runtime, const char *path,
                                const lonejson_candidate_stream_options *options,
                                lonejson_error *error);
-/** Streams arbitrary JSON candidates from a file descriptor. */
+/** Streams arbitrary JSON candidates from a file descriptor.
+ *
+ * Reads through `lonejson_config.candidate_read_buffer_size` without
+ * materializing the whole descriptor.
+ */
 lonejson_status
 lonejson_visit_candidates_fd(lonejson *runtime, int fd,
                              const lonejson_candidate_stream_options *options,
                              lonejson_error *error);
 
-/** Transforms arbitrary JSON candidates from a caller buffer. */
+/** Transforms arbitrary JSON candidates from a caller buffer.
+ *
+ * The runtime candidate read-buffer setting is ignored because the input is
+ * already memory-resident.
+ */
 lonejson_status lonejson_transform_candidates_buffer(
     lonejson *runtime, const void *data, size_t len,
     const lonejson_candidate_transform_options *options, lonejson_error *error);
-/** Transforms arbitrary JSON candidates from a caller-provided reader. */
+/** Transforms arbitrary JSON candidates from a caller-provided reader.
+ *
+ * Reads through `lonejson_config.candidate_read_buffer_size` without
+ * materializing the whole source. Gated transforms may still spool individual
+ * candidates according to the selected transform options.
+ */
 lonejson_status lonejson_transform_candidates_reader(
     lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
     const lonejson_candidate_transform_options *options, lonejson_error *error);
-/** Transforms arbitrary JSON candidates from an open `FILE *`. */
+/** Transforms arbitrary JSON candidates from an open `FILE *`.
+ *
+ * Reads through `lonejson_config.candidate_read_buffer_size` without
+ * materializing the whole file. Gated transforms may still spool individual
+ * candidates according to the selected transform options.
+ */
 lonejson_status lonejson_transform_candidates_filep(
     lonejson *runtime, FILE *fp,
     const lonejson_candidate_transform_options *options, lonejson_error *error);
-/** Transforms arbitrary JSON candidates from a filesystem path. */
+/** Transforms arbitrary JSON candidates from a filesystem path.
+ *
+ * Reads through `lonejson_config.candidate_read_buffer_size` without
+ * materializing the whole file. Gated transforms may still spool individual
+ * candidates according to the selected transform options.
+ */
 lonejson_status lonejson_transform_candidates_path(
     lonejson *runtime, const char *path,
     const lonejson_candidate_transform_options *options, lonejson_error *error);
-/** Transforms arbitrary JSON candidates from a file descriptor. */
+/** Transforms arbitrary JSON candidates from a file descriptor.
+ *
+ * Reads through `lonejson_config.candidate_read_buffer_size` without
+ * materializing the whole descriptor. Gated transforms may still spool
+ * individual candidates according to the selected transform options.
+ */
 lonejson_status lonejson_transform_candidates_fd(
     lonejson *runtime, int fd,
     const lonejson_candidate_transform_options *options, lonejson_error *error);
@@ -8831,6 +8947,22 @@ void lonejson_oidc_jwks_cache_parse_cleanup(
 /** Private read-buffer size used by object-framed streaming APIs. Defaults to
  * `LONEJSON_READER_BUFFER_SIZE`. */
 #define LJ_STREAM_BUFFER_SIZE LONEJSON_STREAM_BUFFER_SIZE
+#endif
+#ifndef LJ_CANDIDATE_READ_BUFFER_SIZE
+/** Short-name alias for the default runtime candidate reader/file/path/fd
+ * transport buffer size.
+ */
+#define LJ_CANDIDATE_READ_BUFFER_SIZE LONEJSON_CANDIDATE_READ_BUFFER_SIZE
+#endif
+#ifndef LJ_CANDIDATE_READ_BUFFER_MIN_SIZE
+/** Short-name alias for the minimum accepted runtime candidate read buffer. */
+#define LJ_CANDIDATE_READ_BUFFER_MIN_SIZE                                      \
+  LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE
+#endif
+#ifndef LJ_CANDIDATE_READ_BUFFER_MAX_SIZE
+/** Short-name alias for the maximum accepted runtime candidate read buffer. */
+#define LJ_CANDIDATE_READ_BUFFER_MAX_SIZE                                      \
+  LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE
 #endif
 #ifndef LJ_SPOOL_MEMORY_LIMIT
 /** Default in-memory threshold before streamed fields spill into a temporary

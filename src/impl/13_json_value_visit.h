@@ -192,7 +192,8 @@ lonejson__json_cursor_plain_span(lonejson__json_io *io, size_t *available,
     if (uses_read_buffer != NULL) {
       *uses_read_buffer = 1;
     }
-    return io->cursor->read_buffer + io->cursor->read_buffer_off;
+    return lonejson__json_cursor_read_buffer(io->cursor) +
+           io->cursor->read_buffer_off;
   }
   return NULL;
 }

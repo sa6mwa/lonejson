@@ -186,8 +186,9 @@ lonejson__json_cursor_refill_source_getc(lonejson__json_io *io) {
   lonejson_status status;
 
   if (io->cursor->use_fd) {
-    got = read(io->cursor->value->fd, io->cursor->read_buffer,
-               sizeof(io->cursor->read_buffer));
+    got = read(io->cursor->value->fd,
+               lonejson__json_cursor_read_buffer(io->cursor),
+               lonejson__json_cursor_read_buffer_capacity(io->cursor));
     if (got < 0) {
       if (io->error != NULL) {
         io->error->system_errno = errno;
@@ -205,10 +206,12 @@ lonejson__json_cursor_refill_source_getc(lonejson__json_io *io) {
     if (status != LONEJSON_STATUS_OK) {
       return -2;
     }
-    return io->cursor->read_buffer[io->cursor->read_buffer_off++];
+    return lonejson__json_cursor_read_buffer(
+        io->cursor)[io->cursor->read_buffer_off++];
   }
-  got = (ssize_t)fread(io->cursor->read_buffer, 1u,
-                       sizeof(io->cursor->read_buffer), io->cursor->fp);
+  got = (ssize_t)fread(lonejson__json_cursor_read_buffer(io->cursor), 1u,
+                       lonejson__json_cursor_read_buffer_capacity(io->cursor),
+                       io->cursor->fp);
   if (got <= 0) {
     if (ferror(io->cursor->fp)) {
       if (io->error != NULL) {
@@ -226,7 +229,8 @@ lonejson__json_cursor_refill_source_getc(lonejson__json_io *io) {
   if (status != LONEJSON_STATUS_OK) {
     return -2;
   }
-  byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
+  byte = lonejson__json_cursor_read_buffer(
+      io->cursor)[io->cursor->read_buffer_off++];
   return (int)byte;
 }
 
@@ -239,9 +243,9 @@ lonejson__json_cursor_refill_getc(lonejson__json_io *io) {
     return lonejson__json_cursor_refill_source_getc(io);
   }
   for (;;) {
-    result =
-        io->cursor->reader(io->cursor->reader_user, io->cursor->read_buffer,
-                           sizeof(io->cursor->read_buffer));
+    result = io->cursor->reader(
+        io->cursor->reader_user, lonejson__json_cursor_read_buffer(io->cursor),
+        lonejson__json_cursor_read_buffer_capacity(io->cursor));
     if (result.error_code != 0) {
       if (io->error != NULL) {
         io->error->system_errno = result.error_code;
@@ -257,7 +261,8 @@ lonejson__json_cursor_refill_getc(lonejson__json_io *io) {
       if (status != LONEJSON_STATUS_OK) {
         return -2;
       }
-      return io->cursor->read_buffer[io->cursor->read_buffer_off++];
+      return lonejson__json_cursor_read_buffer(
+          io->cursor)[io->cursor->read_buffer_off++];
     }
     if (result.eof) {
       return EOF;
@@ -299,7 +304,8 @@ lonejson__json_cursor_getc(lonejson__json_io *io) {
   }
   if (LONEJSON__LIKELY(io->cursor->read_buffer_off <
                        io->cursor->read_buffer_len)) {
-    byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
+    byte = lonejson__json_cursor_read_buffer(
+        io->cursor)[io->cursor->read_buffer_off++];
     goto counted;
   }
   ch = lonejson__json_cursor_refill_getc(io);
@@ -341,7 +347,8 @@ lonejson__json_cursor_getc_lookahead(lonejson__json_io *io) {
   }
   if (LONEJSON__LIKELY(io->cursor->read_buffer_off <
                        io->cursor->read_buffer_len)) {
-    byte = io->cursor->read_buffer[io->cursor->read_buffer_off++];
+    byte = lonejson__json_cursor_read_buffer(
+        io->cursor)[io->cursor->read_buffer_off++];
     goto counted;
   }
   ch = lonejson__json_cursor_refill_getc(io);

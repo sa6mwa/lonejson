@@ -75,6 +75,21 @@ static lonejson_status lonejson__transform_candidates_reader_core(
     lonejson__candidate_transform_projection_trace *projection_trace,
     int *stopped_out);
 
+static lonejson_status lonejson__transform_candidates_cursor_core(
+    const lonejson_runtime *runtime_state, lonejson__json_cursor *cursor,
+    const lonejson_candidate_transform_options *options, lonejson_error *error,
+    const lonejson_candidate_info *candidate_override,
+    const lonejson_candidate_transform_candidate_info *transform_override,
+    void *candidate_policy, int suppress_result,
+    lonejson_candidate_transform_event_origin event_origin,
+    lonejson_candidate_transform_event_phase event_phase,
+    lonejson__candidate_transform_projection_trace *projection_trace,
+    int *stopped_out);
+
+static lonejson_status lonejson__transform_candidates_cursor_gated(
+    const lonejson_runtime *runtime_state, lonejson__json_cursor *cursor,
+    const lonejson_candidate_transform_options *options, lonejson_error *error);
+
 static lonejson_status lonejson__candidate_transform_validate_projection(
     const lonejson_candidate_transform_options *options,
     lonejson__candidate_transform_frame_kind *root_kind, lonejson_error *error);
@@ -2129,7 +2144,6 @@ lonejson__candidate_transform_begin(void *user,
                                     lonejson_error *error) {
   lonejson__candidate_transform_state *state =
       (lonejson__candidate_transform_state *)user;
-  lonejson_status status;
 
   state->candidate = state->candidate_override != NULL
                          ? *state->candidate_override
@@ -2152,13 +2166,6 @@ lonejson__candidate_transform_begin(void *user,
   state->skip_after_member = 0;
   state->current_emit = 0;
   state->current_scalar_replace = 0;
-  status = lonejson__writer_init_sink_with_options(
-      &state->writer, state->options->sink, state->options->sink_user,
-      &state->runtime->write_options, state->runtime, error);
-  if (status != LONEJSON_STATUS_OK) {
-    return LONEJSON_CANDIDATE_ERROR;
-  }
-  state->writer_open = 1;
   if (state->options->candidate_begin != NULL) {
     return state->options->candidate_begin(state->options->candidate_user,
                                            candidate, error);
@@ -2195,8 +2202,7 @@ lonejson__candidate_transform_end(void *user,
       return LONEJSON_CANDIDATE_ERROR;
     }
   }
-  lonejson_writer_cleanup(&state->writer);
-  state->writer_open = 0;
+  lonejson__writer_reset_for_reuse(&state->writer);
   while (state->frame_count != 0u) {
     lonejson__candidate_transform_pop(state);
   }
@@ -2266,6 +2272,42 @@ static void lonejson__candidate_transform_count_replay(
   }
 }
 
+static lonejson_status lonejson__candidate_transform_replay_spool(
+    lonejson__candidate_transform_gated_state *state,
+    const lonejson_spooled *spool,
+    const lonejson_candidate_transform_options *options, lonejson_error *error,
+    void *candidate_policy,
+    lonejson_candidate_transform_event_phase event_phase,
+    lonejson__candidate_transform_projection_trace *projection_trace,
+    int *replay_stopped) {
+  lonejson__json_cursor cursor;
+  lonejson_spooled spool_cursor;
+
+  if (spool == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
+                               0u,
+                               "candidate transform replay spool is missing");
+  }
+  if (!lonejson_spooled_spilled(spool)) {
+    memset(&cursor, 0, sizeof(cursor));
+    cursor.buffer = spool->memory;
+    cursor.buffer_len = spool->memory_len;
+    return lonejson__transform_candidates_cursor_core(
+        state->runtime, &cursor, options, error, &state->candidate,
+        &state->transform_candidate, candidate_policy, 1,
+        LONEJSON_CANDIDATE_TRANSFORM_EVENT_REPLAY, event_phase,
+        projection_trace, replay_stopped);
+  }
+  spool_cursor = *spool;
+  spool_cursor.read_offset = 0u;
+  return lonejson__transform_candidates_reader_core(
+      state->runtime, lonejson__candidate_transform_spooled_reader,
+      &spool_cursor, options, error, &state->candidate,
+      &state->transform_candidate, candidate_policy, 1,
+      LONEJSON_CANDIDATE_TRANSFORM_EVENT_REPLAY, event_phase, projection_trace,
+      replay_stopped);
+}
+
 static lonejson_status lonejson__candidate_transform_project_then_replay(
     lonejson__candidate_transform_gated_state *state,
     const lonejson_spooled *source_spool, lonejson_error *error,
@@ -2276,8 +2318,6 @@ static lonejson_status lonejson__candidate_transform_project_then_replay(
   const lonejson__spool_options *base_spool_options;
   lonejson__spool_options spool_options;
   lonejson_spooled projection_spool;
-  lonejson_spooled source_cursor;
-  lonejson_spooled projected_cursor;
   lonejson_status status;
   size_t projected_size;
   int projection_stopped;
@@ -2303,8 +2343,6 @@ static lonejson_status lonejson__candidate_transform_project_then_replay(
   lonejson_spooled_init_with_allocator(&projection_spool, &spool_options,
                                        state->runtime->config.allocator);
 
-  source_cursor = *source_spool;
-  source_cursor.read_offset = 0u;
   projection_options = *state->options;
   projection_options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
   projection_options.mode = LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING;
@@ -2328,11 +2366,8 @@ static lonejson_status lonejson__candidate_transform_project_then_replay(
   projection_options.result = NULL;
 
   lonejson__candidate_transform_count_replay(state);
-  status = lonejson__transform_candidates_reader_core(
-      state->runtime, lonejson__candidate_transform_spooled_reader,
-      &source_cursor, &projection_options, error, &state->candidate,
-      &state->transform_candidate, NULL, 1,
-      LONEJSON_CANDIDATE_TRANSFORM_EVENT_REPLAY,
+  status = lonejson__candidate_transform_replay_spool(
+      state, source_spool, &projection_options, error, NULL,
       LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_REPLAY, &projection_trace,
       &projection_stopped);
   if (status != LONEJSON_STATUS_OK) {
@@ -2350,8 +2385,6 @@ static lonejson_status lonejson__candidate_transform_project_then_replay(
     state->options->result->last_candidate = state->transform_candidate;
   }
 
-  projected_cursor = projection_spool;
-  projected_cursor.read_offset = 0u;
   replay_options = *state->options;
   replay_options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   replay_options.mode = LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING;
@@ -2367,11 +2400,8 @@ static lonejson_status lonejson__candidate_transform_project_then_replay(
   replay_options.result = NULL;
 
   lonejson__candidate_transform_count_replay(state);
-  status = lonejson__transform_candidates_reader_core(
-      state->runtime, lonejson__candidate_transform_spooled_reader,
-      &projected_cursor, &replay_options, error, &state->candidate,
-      &state->transform_candidate, state->candidate_policy, 1,
-      LONEJSON_CANDIDATE_TRANSFORM_EVENT_REPLAY,
+  status = lonejson__candidate_transform_replay_spool(
+      state, &projection_spool, &replay_options, error, state->candidate_policy,
       LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_PROJECTED_REPLAY,
       &projection_trace, replay_stopped);
   lonejson__candidate_transform_projection_trace_cleanup(&projection_trace);
@@ -2387,7 +2417,6 @@ lonejson__candidate_transform_gated_end(
       (lonejson__candidate_transform_gated_state *)user;
   lonejson_candidate_transform_options replay_options;
   lonejson_candidate_callback_result result;
-  lonejson_spooled spool_cursor;
   const lonejson_spooled *spool;
   lonejson_status status;
   size_t spool_size;
@@ -2500,8 +2529,6 @@ lonejson__candidate_transform_gated_end(
     return LONEJSON_CANDIDATE_CONTINUE;
   }
   lonejson__candidate_transform_count_replay(state);
-  spool_cursor = *spool;
-  spool_cursor.read_offset = 0u;
   replay_options = *state->options;
   replay_options.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
   replay_options.mode = LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING;
@@ -2513,11 +2540,8 @@ lonejson__candidate_transform_gated_end(
   replay_options.candidate_decision = NULL;
   replay_options.candidate_decision_user = NULL;
   replay_options.result = NULL;
-  status = lonejson__transform_candidates_reader_core(
-      state->runtime, lonejson__candidate_transform_spooled_reader,
-      &spool_cursor, &replay_options, error, &state->candidate,
-      &state->transform_candidate, state->candidate_policy, 1,
-      LONEJSON_CANDIDATE_TRANSFORM_EVENT_REPLAY,
+  status = lonejson__candidate_transform_replay_spool(
+      state, spool, &replay_options, error, state->candidate_policy,
       LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_REPLAY, NULL, &replay_stopped);
   if (status != LONEJSON_STATUS_OK) {
     state->deferred_status = status;
@@ -2542,6 +2566,48 @@ static lonejson_status lonejson__transform_candidates_reader_gated(
     const lonejson_runtime *runtime_state, lonejson_reader_fn reader,
     void *reader_user, const lonejson_candidate_transform_options *options,
     lonejson_error *error) {
+  lonejson__json_cursor cursor;
+  unsigned char *read_buffer;
+  const lonejson_allocator *allocator;
+  size_t read_buffer_size;
+  lonejson_status status;
+
+  if (reader == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "candidate transform reader is required");
+  }
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.reader = reader;
+  cursor.reader_user = reader_user;
+  read_buffer = NULL;
+  allocator = runtime_state != NULL ? runtime_state->config.allocator : NULL;
+  read_buffer_size = runtime_state != NULL
+                         ? runtime_state->config.candidate_read_buffer_size
+                         : LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
+  if (read_buffer_size == 0u) {
+    read_buffer_size = LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
+  }
+  if (read_buffer_size != sizeof(cursor.read_buffer)) {
+    read_buffer =
+        (unsigned char *)lonejson__owned_malloc(allocator, read_buffer_size);
+    if (read_buffer == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate candidate read buffer");
+    }
+    cursor.read_buffer_external = read_buffer;
+    cursor.read_buffer_capacity = read_buffer_size;
+  }
+  status = lonejson__transform_candidates_cursor_gated(runtime_state, &cursor,
+                                                       options, error);
+  lonejson__owned_free(read_buffer);
+  return status;
+}
+
+static lonejson_status lonejson__transform_candidates_cursor_gated(
+    const lonejson_runtime *runtime_state, lonejson__json_cursor *cursor,
+    const lonejson_candidate_transform_options *options,
+    lonejson_error *error) {
   lonejson__candidate_transform_gated_state state;
   lonejson_candidate_stream_options candidate_options;
   lonejson_status status;
@@ -2562,9 +2628,9 @@ static lonejson_status lonejson__transform_candidates_reader_gated(
   candidate_options.candidate_begin = lonejson__candidate_transform_gated_begin;
   candidate_options.candidate_end = lonejson__candidate_transform_gated_end;
   candidate_options.candidate_user = &state;
-  status = lonejson__visit_candidates_reader_with_limits(
-      reader, reader_user, &candidate_options, runtime_state,
-      &runtime_state->value_limits, runtime_state->config.allocator, error);
+  status = lonejson__visit_candidates_cursor_with_limits(
+      cursor, &candidate_options, runtime_state, &runtime_state->value_limits,
+      runtime_state->config.allocator, error);
   if (status == LONEJSON_STATUS_CALLBACK_FAILED &&
       state.deferred_status != LONEJSON_STATUS_OK) {
     status = state.deferred_status;
@@ -2572,10 +2638,10 @@ static lonejson_status lonejson__transform_candidates_reader_gated(
   return status;
 }
 
-static lonejson_status lonejson__transform_candidates_reader_core(
-    const lonejson_runtime *runtime_state, lonejson_reader_fn reader,
-    void *reader_user, const lonejson_candidate_transform_options *options,
-    lonejson_error *error, const lonejson_candidate_info *candidate_override,
+static lonejson_status lonejson__transform_candidates_cursor_core(
+    const lonejson_runtime *runtime_state, lonejson__json_cursor *cursor,
+    const lonejson_candidate_transform_options *options, lonejson_error *error,
+    const lonejson_candidate_info *candidate_override,
     const lonejson_candidate_transform_candidate_info *transform_override,
     void *candidate_policy, int suppress_result,
     lonejson_candidate_transform_event_origin event_origin,
@@ -2607,6 +2673,13 @@ static lonejson_status lonejson__transform_candidates_reader_core(
       return status;
     }
   }
+  status = lonejson__writer_init_sink_with_options(
+      &state.writer, state.options->sink, state.options->sink_user,
+      &state.runtime->write_options, state.runtime, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  state.writer_open = 1;
   state.visitor = lonejson_default_path_value_visitor();
   state.visitor.object_begin = lonejson__candidate_transform_object_begin;
   state.visitor.object_end = lonejson__candidate_transform_object_end;
@@ -2630,8 +2703,8 @@ static lonejson_status lonejson__transform_candidates_reader_core(
   state.candidate_options.candidate_begin = lonejson__candidate_transform_begin;
   state.candidate_options.candidate_end = lonejson__candidate_transform_end;
   state.candidate_options.candidate_user = &state;
-  status = lonejson__visit_candidates_reader_with_limits(
-      reader, reader_user, &state.candidate_options, runtime_state,
+  status = lonejson__visit_candidates_cursor_with_limits(
+      cursor, &state.candidate_options, runtime_state,
       &runtime_state->value_limits, runtime_state->config.allocator, error);
   if ((status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED ||
        status == LONEJSON_STATUS_CALLBACK_FAILED) &&
@@ -2647,6 +2720,56 @@ static lonejson_status lonejson__transform_candidates_reader_core(
     *stopped_out = state.stopped;
   }
   lonejson__candidate_transform_cleanup(&state);
+  return status;
+}
+
+static lonejson_status lonejson__transform_candidates_reader_core(
+    const lonejson_runtime *runtime_state, lonejson_reader_fn reader,
+    void *reader_user, const lonejson_candidate_transform_options *options,
+    lonejson_error *error, const lonejson_candidate_info *candidate_override,
+    const lonejson_candidate_transform_candidate_info *transform_override,
+    void *candidate_policy, int suppress_result,
+    lonejson_candidate_transform_event_origin event_origin,
+    lonejson_candidate_transform_event_phase event_phase,
+    lonejson__candidate_transform_projection_trace *projection_trace,
+    int *stopped_out) {
+  lonejson__json_cursor cursor;
+  unsigned char *read_buffer;
+  const lonejson_allocator *allocator;
+  size_t read_buffer_size;
+  lonejson_status status;
+
+  if (reader == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "candidate transform reader is required");
+  }
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.reader = reader;
+  cursor.reader_user = reader_user;
+  read_buffer = NULL;
+  allocator = runtime_state != NULL ? runtime_state->config.allocator : NULL;
+  read_buffer_size = runtime_state != NULL
+                         ? runtime_state->config.candidate_read_buffer_size
+                         : LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
+  if (read_buffer_size == 0u) {
+    read_buffer_size = LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
+  }
+  if (read_buffer_size != sizeof(cursor.read_buffer)) {
+    read_buffer =
+        (unsigned char *)lonejson__owned_malloc(allocator, read_buffer_size);
+    if (read_buffer == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate candidate read buffer");
+    }
+    cursor.read_buffer_external = read_buffer;
+    cursor.read_buffer_capacity = read_buffer_size;
+  }
+  status = lonejson__transform_candidates_cursor_core(
+      runtime_state, &cursor, options, error, candidate_override,
+      transform_override, candidate_policy, suppress_result, event_origin,
+      event_phase, projection_trace, stopped_out);
+  lonejson__owned_free(read_buffer);
   return status;
 }
 
@@ -2821,6 +2944,103 @@ static lonejson_status lonejson__transform_candidates_reader_common(
   return status;
 }
 
+static lonejson_status lonejson__transform_candidates_cursor_common(
+    lonejson *runtime, lonejson__json_cursor *cursor,
+    const lonejson_candidate_transform_options *options,
+    lonejson_error *error) {
+  lonejson_candidate_transform_options local;
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  lonejson__candidate_transform_frame_kind projection_root_kind;
+  lonejson_status status;
+
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  memset(&local, 0, sizeof(local));
+  if (options != NULL) {
+    local = *options;
+  }
+  if (local.result != NULL) {
+    memset(local.result, 0, sizeof(*local.result));
+  }
+  if (cursor == NULL || local.sink == NULL) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "candidate transform buffer and sink are "
+                               "required");
+  }
+  if (local.output_framing == 0) {
+    local.output_framing = LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON;
+  }
+  if (local.output_framing != LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "invalid candidate transform output framing");
+  }
+  if (local.mode != LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING &&
+      local.mode != LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED &&
+      local.mode != LONEJSON_CANDIDATE_TRANSFORM_MODE_UNSUPPORTED) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "invalid candidate transform mode");
+  }
+  if (local.composition !=
+          LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_SOURCE_EVENTS &&
+      local.composition !=
+          LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "invalid candidate transform composition");
+  }
+  if (local.composition ==
+          LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM &&
+      local.mode != LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED &&
+      lonejson__candidate_transform_projection_has(&local)) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_UNSUPPORTED, 0u, 0u, 0u,
+                               "candidate projected transform composition "
+                               "requires gated-spooled mode");
+  }
+  if (local.spool_class != LONEJSON_SPOOL_CLASS_DEFAULT &&
+      local.spool_class != LONEJSON_SPOOL_CLASS_BLOB &&
+      local.spool_class != LONEJSON_SPOOL_CLASS_LARGE_TEXT) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "invalid candidate transform spool class");
+  }
+  status = lonejson__candidate_transform_validate_projection(
+      &local, &projection_root_kind, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__runtime_borrow_release(&borrow);
+    return status;
+  }
+  if (local.mode == LONEJSON_CANDIDATE_TRANSFORM_MODE_UNSUPPORTED) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_UNSUPPORTED, 0u, 0u, 0u,
+                               "candidate transform mode is unsupported");
+  }
+  if (local.transform == NULL) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "candidate transform callback is required");
+  }
+  if (local.mode == LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED) {
+    status = lonejson__transform_candidates_cursor_gated(runtime_state, cursor,
+                                                         &local, error);
+  } else {
+    status = lonejson__transform_candidates_cursor_core(
+        runtime_state, cursor, &local, error, NULL, NULL, NULL, 0,
+        LONEJSON_CANDIDATE_TRANSFORM_EVENT_SOURCE,
+        LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_SOURCE, NULL, NULL);
+  }
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
+}
+
 lonejson_status lonejson_transform_candidates_reader(
     lonejson *runtime, lonejson_reader_fn reader, void *reader_user,
     const lonejson_candidate_transform_options *options,
@@ -2833,15 +3053,17 @@ lonejson_status lonejson_transform_candidates_buffer(
     lonejson *runtime, const void *data, size_t len,
     const lonejson_candidate_transform_options *options,
     lonejson_error *error) {
-  lonejson_buffer_reader reader;
+  lonejson__json_cursor cursor;
 
   if (data == NULL && len != 0u) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "candidate transform buffer is required");
   }
-  lonejson_buffer_reader_init(&reader, data, len);
-  return lonejson_transform_candidates_reader(
-      runtime, lonejson_buffer_reader_read, &reader, options, error);
+  memset(&cursor, 0, sizeof(cursor));
+  cursor.buffer = (const unsigned char *)data;
+  cursor.buffer_len = len;
+  return lonejson__transform_candidates_cursor_common(runtime, &cursor, options,
+                                                      error);
 }
 
 lonejson_status lonejson_transform_candidates_filep(

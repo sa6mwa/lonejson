@@ -11,6 +11,8 @@ typedef struct lonejson__json_cursor {
   size_t buffer_len;
   size_t buffer_off;
   unsigned char read_buffer[4096];
+  unsigned char *read_buffer_external;
+  size_t read_buffer_capacity;
   size_t read_buffer_len;
   size_t read_buffer_off;
   lonejson_uint64 stream_offset;
@@ -24,6 +26,24 @@ typedef struct lonejson__json_cursor {
   int close_fp;
   int use_fd;
 } lonejson__json_cursor;
+
+static LONEJSON__INLINE unsigned char *
+lonejson__json_cursor_read_buffer(lonejson__json_cursor *cursor) {
+  return cursor->read_buffer_external != NULL ? cursor->read_buffer_external
+                                              : cursor->read_buffer;
+}
+
+static LONEJSON__INLINE const unsigned char *
+lonejson__json_cursor_read_buffer_const(const lonejson__json_cursor *cursor) {
+  return cursor->read_buffer_external != NULL ? cursor->read_buffer_external
+                                              : cursor->read_buffer;
+}
+
+static LONEJSON__INLINE size_t lonejson__json_cursor_read_buffer_capacity(
+    const lonejson__json_cursor *cursor) {
+  return cursor->read_buffer_external != NULL ? cursor->read_buffer_capacity
+                                              : sizeof(cursor->read_buffer);
+}
 
 typedef struct lonejson__json_io {
   lonejson__json_cursor *cursor;

@@ -475,6 +475,14 @@ covers the lower-level case where one arbitrary JSON value should be visited
 without a schema. Parse, write, and arbitrary-value limits are configured on
 the instantiated `lonejson` runtime through `lonejson_config`.
 
+Candidate stream and candidate transform reader/file/path/fd APIs use the
+runtime's `candidate_read_buffer_size` as their transport buffer size. The
+default is `LONEJSON_CANDIDATE_READ_BUFFER_SIZE`, currently the parser buffer
+size. Reader-heavy candidate workloads can raise it, for example to `64 KiB`,
+to reduce callback or file-read churn without materializing the whole input.
+Buffer-backed candidate APIs ignore this setting because their input is already
+memory-resident.
+
 Every public operation hangs off one instantiated runtime. You can call the
 free functions such as `lonejson_parse_cstr(lj, ...)` or the equivalent method
 pointer route `lj->parse_cstr(lj, ...)`; they are intentionally the same API

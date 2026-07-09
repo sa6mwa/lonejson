@@ -11,9 +11,16 @@
 #define LJ_READER_BUFFER_SIZE 17
 #define LJ_PUSH_PARSER_BUFFER_SIZE 129
 #define LJ_STREAM_BUFFER_SIZE 19
+#define LJ_CANDIDATE_READ_BUFFER_SIZE 2048
+#define LJ_CANDIDATE_READ_BUFFER_MIN_SIZE 1024
+#define LJ_CANDIDATE_READ_BUFFER_MAX_SIZE 4096
 #define LJ_SPOOL_MEMORY_LIMIT 23
 #define LJ_WRITE_MAX_OUTPUT_BYTES 4096
 #define LJ_TRACK_WORKSPACE_USAGE 1
+#endif
+
+#if defined(TEST_SMALL_PARSER_DEFAULT_CANDIDATE_REJECTS)
+#define LJ_PARSER_BUFFER_SIZE 128
 #endif
 
 #if defined(TEST_DISABLE_SHORT_NAMES)
@@ -39,6 +46,15 @@
 #if LONEJSON_STREAM_BUFFER_SIZE != 19
 #error LJ_STREAM_BUFFER_SIZE must configure LONEJSON_STREAM_BUFFER_SIZE
 #endif
+#if LONEJSON_CANDIDATE_READ_BUFFER_SIZE != 2048
+#error LJ_CANDIDATE_READ_BUFFER_SIZE must configure LONEJSON_CANDIDATE_READ_BUFFER_SIZE
+#endif
+#if LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE != 1024
+#error LJ_CANDIDATE_READ_BUFFER_MIN_SIZE must configure LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE
+#endif
+#if LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE != 4096
+#error LJ_CANDIDATE_READ_BUFFER_MAX_SIZE must configure LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE
+#endif
 #if LONEJSON_SPOOL_MEMORY_LIMIT != 23
 #error LJ_SPOOL_MEMORY_LIMIT must configure LONEJSON_SPOOL_MEMORY_LIMIT
 #endif
@@ -60,6 +76,15 @@
 #if LJ_STREAM_BUFFER_SIZE != 19
 #error caller-provided LJ_STREAM_BUFFER_SIZE must not be redefined
 #endif
+#if LJ_CANDIDATE_READ_BUFFER_SIZE != 2048
+#error caller-provided LJ_CANDIDATE_READ_BUFFER_SIZE must not be redefined
+#endif
+#if LJ_CANDIDATE_READ_BUFFER_MIN_SIZE != 1024
+#error caller-provided LJ_CANDIDATE_READ_BUFFER_MIN_SIZE must not be redefined
+#endif
+#if LJ_CANDIDATE_READ_BUFFER_MAX_SIZE != 4096
+#error caller-provided LJ_CANDIDATE_READ_BUFFER_MAX_SIZE must not be redefined
+#endif
 #if LJ_SPOOL_MEMORY_LIMIT != 23
 #error caller-provided LJ_SPOOL_MEMORY_LIMIT must not be redefined
 #endif
@@ -78,6 +103,21 @@
 #if defined(LJ_FIELD_I64)
 #error short field aliases must be disabled
 #endif
+#endif
+
+#if defined(TEST_SMALL_PARSER_DEFAULT_CANDIDATE_REJECTS)
+static int config_test_small_parser_default_candidate_rejects(void) {
+  lonejson_error error;
+  lonejson *runtime;
+
+  lonejson_error_init(&error);
+  runtime = lonejson_new(NULL, &error);
+  if (runtime != NULL) {
+    lonejson_free(runtime);
+    return 1;
+  }
+  return error.code == LONEJSON_STATUS_INVALID_ARGUMENT ? 0 : 1;
+}
 #endif
 
 typedef struct config_item {
@@ -250,6 +290,9 @@ static int config_test_short_aliases(void) {
 #endif
 
 int main(void) {
+#if defined(TEST_SMALL_PARSER_DEFAULT_CANDIDATE_REJECTS)
+  return config_test_small_parser_default_candidate_rejects();
+#endif
   if (config_test_parse_and_serialize() != 0) {
     return 1;
   }

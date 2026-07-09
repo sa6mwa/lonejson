@@ -78,6 +78,7 @@ lonejson_config lonejson_default_config(void) {
   config.write_overflow_policy = write_options.overflow_policy;
   config.write_pretty = write_options.pretty;
   config.write_max_output_bytes = write_options.max_output_bytes;
+  config.candidate_read_buffer_size = LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
   config.spool_default.memory_limit = spool_options.memory_limit;
   config.spool_default.max_bytes = spool_options.max_bytes;
   config.spool_default.temp_dir = spool_options.temp_dir;
@@ -981,6 +982,18 @@ lonejson *lonejson_new(const lonejson_config *config, lonejson_error *error) {
   if (allocator != NULL && !LONEJSON__ALLOCATOR_IS_VALID_CONFIG(allocator)) {
     lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
                         "allocator must provide either all callbacks or none");
+    return NULL;
+  }
+  if (resolved.candidate_read_buffer_size == 0u) {
+    resolved.candidate_read_buffer_size = LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
+  }
+  if (resolved.candidate_read_buffer_size <
+          LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE ||
+      resolved.candidate_read_buffer_size >
+          LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE) {
+    lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+                        "candidate_read_buffer_size is outside supported "
+                        "bounds");
     return NULL;
   }
   runtime = (lonejson *)lonejson__buffer_alloc(allocator, alloc_size);
@@ -3864,6 +3877,9 @@ lonejson__candidate_capture_cleanup(lonejson__candidate_capture *capture) {
   if (capture == NULL) {
     return;
   }
+  if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_NONE) {
+    return;
+  }
   if (capture->writer_open) {
     lonejson_writer_cleanup(&capture->writer);
   }
@@ -3883,11 +3899,12 @@ lonejson__candidate_capture_open(lonejson__candidate_scan *scan,
   void *sink_user = NULL;
   lonejson_status status;
 
-  memset(capture, 0, sizeof(*capture));
-  capture->mode = scan->options->capture_mode;
-  if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_NONE) {
+  if (scan->options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE) {
+    capture->mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
     return LONEJSON_STATUS_OK;
   }
+  memset(capture, 0, sizeof(*capture));
+  capture->mode = scan->options->capture_mode;
   capture->allocator = scan->allocator;
   capture->max_key_bytes = scan->limits->max_key_bytes;
   capture->max_number_bytes = scan->limits->max_number_bytes;
@@ -4259,7 +4276,6 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
     visitor_user = scan->options->visitor_user;
   }
   if (visitor == NULL && path_visitor == NULL) {
-    scan->empty_visitor = lonejson_default_value_visitor();
     visitor = &scan->empty_visitor;
   }
   status = lonejson__json_visit_one_cursor(scan->cursor, scan->allocator,
@@ -4280,7 +4296,7 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
                                0u, "candidate byte range overflow");
   }
   info.byte_size = end - start;
-  {
+  if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
     int retain_payload = 1;
 
     status = lonejson__candidate_capture_decision_status(scan, &info,
@@ -4292,6 +4308,8 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
     if (retain_payload) {
       status = lonejson__candidate_capture_close(scan, &capture, &info);
     }
+  } else if (capture.mode != LONEJSON_CANDIDATE_CAPTURE_NONE) {
+    status = lonejson__candidate_capture_close(scan, &capture, &info);
   }
   if (status != LONEJSON_STATUS_OK) {
     lonejson__candidate_capture_cleanup(&capture);
@@ -4589,6 +4607,10 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
   scan.allocator = allocator;
   scan.limits = limits;
   scan.error = error;
+  if (local.capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
+      local.visitor == NULL && local.path_visitor == NULL) {
+    scan.empty_visitor = lonejson_default_value_visitor();
+  }
 
   switch (local.framing) {
   case LONEJSON_CANDIDATE_FRAMING_AUTO:
@@ -4641,6 +4663,9 @@ static lonejson_status lonejson__visit_candidates_reader_with_limits(
     const lonejson_runtime *runtime, const lonejson__value_limits *limits,
     const lonejson_allocator *allocator, lonejson_error *error) {
   lonejson__json_cursor cursor;
+  unsigned char *read_buffer;
+  size_t read_buffer_size;
+  lonejson_status status;
 
   if (reader == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
@@ -4649,8 +4674,28 @@ static lonejson_status lonejson__visit_candidates_reader_with_limits(
   memset(&cursor, 0, sizeof(cursor));
   cursor.reader = reader;
   cursor.reader_user = reader_user;
-  return lonejson__visit_candidates_cursor_with_limits(
+  read_buffer = NULL;
+  read_buffer_size = runtime != NULL
+                         ? runtime->config.candidate_read_buffer_size
+                         : LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
+  if (read_buffer_size == 0u) {
+    read_buffer_size = LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
+  }
+  if (read_buffer_size != sizeof(cursor.read_buffer)) {
+    read_buffer =
+        (unsigned char *)lonejson__owned_malloc(allocator, read_buffer_size);
+    if (read_buffer == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate candidate read buffer");
+    }
+    cursor.read_buffer_external = read_buffer;
+    cursor.read_buffer_capacity = read_buffer_size;
+  }
+  status = lonejson__visit_candidates_cursor_with_limits(
       &cursor, options, runtime, limits, allocator, error);
+  lonejson__owned_free(read_buffer);
+  return status;
 }
 
 lonejson_status lonejson_visit_candidates_buffer(
