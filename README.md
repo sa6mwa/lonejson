@@ -864,17 +864,23 @@ The transform mode is explicit and selected before output can leak.
 `LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING` streams source values directly
 when a plan can commit output as it parses. Kept strings and numbers stream by
 default; complete old string/number views are opt-in with
-`LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE`.
+`LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE`, either call-wide or through
+the per-event `old_scalar` policy callback for values whose replacement logic
+needs the complete old scalar.
 `LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED` retains each logical
-candidate in a bounded `lonejson_spooled` handle and replays matched candidates
-through the same transform executor. Result counters report streamed, spooled,
-spilled, and replayed candidates plus per-candidate spool bytes.
+candidate in a bounded `lonejson_spooled` handle, spills according to the
+selected runtime spool policy, asks `candidate_decision` whether to emit, drop,
+stop, or error, and replays emitted candidates through the same transform
+executor. Result counters report streamed, spooled, spilled, replayed, dropped,
+stopped, and projected candidates plus per-candidate spool bytes.
 
-`observer` receives the original token stream first. Replacement JSON is emitted
-only through `lonejson_writer`, so callers never write raw commas, colons,
-string escapes, object keys, separators, or container punctuation. `insert`
-callbacks can add object members at object begin, before or after source
-members, and at object end.
+`observer` receives the original token stream first. In gated-spooled mode,
+replay callbacks receive the caller-owned candidate policy returned by
+`candidate_decision`; replay does not call `observer` again. Replacement JSON is
+emitted only through `lonejson_writer`, so callers never write raw commas,
+colons, string escapes, object keys, separators, or container punctuation.
+`insert` callbacks can add object members at object begin, before or after
+source members, and at object end.
 
 `LONEJSON_CANDIDATE_TRANSFORM_DROP` suppresses an object member, array element,
 or complete candidate root while preserving valid output. Emitted candidates are
@@ -888,6 +894,12 @@ index `0` are unambiguous. LoneJSON emits projection parent objects/arrays,
 groups missing object-member descendants, and writes `null` placeholders for
 projected sparse array indexes. Invalid projection shapes, such as mixed object
 and array roots, fail with `LONEJSON_STATUS_UNSUPPORTED` before partial output.
+`LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_SOURCE_EVENTS` is the default
+streaming-preferred projection/composition mode.
+`LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM` is available
+for gated-spooled transforms that must first build the projected logical
+candidate into a bounded spool, then replay that projected candidate through
+normal transform callbacks.
 
 `LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS` flattens nested root arrays
 into logical candidates. Transform mode, projection, mutation, gated spooling,

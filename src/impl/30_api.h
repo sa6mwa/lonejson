@@ -3951,16 +3951,15 @@ lonejson__candidate_capture_open(lonejson__candidate_scan *scan,
     sink_user = &capture->memory;
   } else if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_SPOOLED ||
              capture->mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
-    capture->spool_options =
-        *lonejson__runtime_spool_options_for_class(scan->runtime,
-                                                   scan->options->spool_class);
+    capture->spool_options = *lonejson__runtime_spool_options_for_class(
+        scan->runtime, scan->options->spool_class);
     if (scan->options->max_spooled_payload_bytes != 0u) {
       capture->spool_options.max_bytes =
           scan->options->max_spooled_payload_bytes;
     }
-    lonejson_spooled_init_with_allocator(
-        &capture->spool, &capture->spool_options,
-        scan->runtime->config.allocator);
+    lonejson_spooled_init_with_allocator(&capture->spool,
+                                         &capture->spool_options,
+                                         scan->runtime->config.allocator);
     capture->spool_init = 1;
     sink = lonejson__candidate_spooled_sink;
     sink_user = &capture->spool;
@@ -4398,9 +4397,10 @@ lonejson__candidate_scan_single(lonejson__candidate_scan *scan, int first) {
       scan, "candidate stream contains data after single JSON value");
 }
 
-static lonejson_status lonejson__candidate_scan_array_items_ex(
-    lonejson__candidate_scan *scan, int array_first, int recursive,
-    int require_eof) {
+static lonejson_status
+lonejson__candidate_scan_array_items_ex(lonejson__candidate_scan *scan,
+                                        int array_first, int recursive,
+                                        int require_eof) {
   lonejson_status status;
   int ch;
 

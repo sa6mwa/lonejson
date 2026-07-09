@@ -53,8 +53,6 @@
 #error "LONEJSON_WITH_OIDC requires LONEJSON_WITH_JWT"
 #endif
 #if defined(LONEJSON_WITH_OPENSSL)
-#include <stdlib.h>
-#include <string.h>
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/ec.h>
@@ -66,6 +64,8 @@
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
+#include <stdlib.h>
+#include <string.h>
 #endif
 #if defined(LJ_MALLOC) && !defined(LONEJSON_MALLOC)
 #define LONEJSON_MALLOC LJ_MALLOC
@@ -523,7 +523,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 22
+#define LONEJSON_ABI_VERSION 23
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -2656,7 +2656,8 @@ typedef enum lonejson_candidate_transform_output_framing {
   /** Emit each transformed candidate as one JSON value followed by `\n`.
    *
    * Dropped candidates emit no bytes. When no candidates are emitted, no
-   * newline is emitted. This is the liblql-compatible candidate stream framing.
+   * newline is emitted. This is the standard transformed candidate stream
+   * framing.
    */
   LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON = 1
 } lonejson_candidate_transform_output_framing;
@@ -2670,6 +2671,52 @@ typedef enum lonejson_candidate_transform_mode {
   /** Deliberately report unsupported for the selected transform shape. */
   LONEJSON_CANDIDATE_TRANSFORM_MODE_UNSUPPORTED = 2
 } lonejson_candidate_transform_mode;
+
+/** Composition policy for structural projection and transform callbacks. */
+typedef enum lonejson_candidate_transform_composition {
+  /** Keep current behavior: callbacks see source traversal events while
+   * projection constrains the emitted output.
+   */
+  LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_SOURCE_EVENTS = 0,
+  /** First build the projected candidate, then replay that projected shape
+   * through transform and insertion callbacks.
+   *
+   * This mode is currently supported by gated-spooled transforms only.
+   */
+  LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM = 1
+} lonejson_candidate_transform_composition;
+
+/** Relationship of a transform event value to its parent container. */
+typedef enum lonejson_candidate_transform_event_relationship {
+  /** Event targets the candidate root value. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_ROOT = 0,
+  /** Event targets an object member value. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_OBJECT_MEMBER = 1,
+  /** Event targets an array element value. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_ARRAY_ELEMENT = 2
+} lonejson_candidate_transform_event_relationship;
+
+/** Origin of events delivered to transform callbacks. */
+typedef enum lonejson_candidate_transform_event_origin {
+  /** Event came from direct source traversal. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_SOURCE = 0,
+  /** Event came from replaying LoneJSON-owned candidate storage. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_REPLAY = 1,
+  /** Event came from a projected replay value copied from source. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PROJECTED_SOURCE = 2,
+  /** Event came from a projected replay value synthesized by projection. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PROJECTED_SYNTHETIC = 3
+} lonejson_candidate_transform_event_origin;
+
+/** Transform callback phase for the current event. */
+typedef enum lonejson_candidate_transform_event_phase {
+  /** Direct source traversal phase. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_SOURCE = 0,
+  /** Gated replay of the original retained candidate. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_REPLAY = 1,
+  /** Replay of a LoneJSON-built projected candidate. */
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_PROJECTED_REPLAY = 2
+} lonejson_candidate_transform_event_phase;
 
 /** Per-logical-candidate execution metadata reported by transforms. */
 typedef struct lonejson_candidate_transform_candidate_info {
@@ -2688,7 +2735,8 @@ typedef struct lonejson_candidate_transform_candidate_info {
   int gated_spooled;
   /** Total semantic candidate bytes written to the gated spool. */
   lonejson_uint64 bytes_spooled;
-  /** Non-zero when gated spooling spilled from memory to file-backed storage. */
+  /** Non-zero when gated spooling spilled from memory to file-backed storage.
+   */
   int spilled;
   /** Candidate bytes retained in memory-backed spool storage. */
   lonejson_uint64 memory_bytes;
@@ -2696,6 +2744,10 @@ typedef struct lonejson_candidate_transform_candidate_info {
   lonejson_uint64 spill_bytes;
   /** Number of same-executor transform replays performed for this candidate. */
   lonejson_uint64 replay_count;
+  /** Bytes in the LoneJSON-built projected candidate for projected
+   * composition, or zero when no projected composition spool was built.
+   */
+  lonejson_uint64 bytes_projected;
 } lonejson_candidate_transform_candidate_info;
 
 /** Aggregate execution metadata for one candidate transform call. */
@@ -2714,13 +2766,48 @@ typedef struct lonejson_candidate_transform_result {
   lonejson_uint64 candidates_replayed;
   /** Metadata for the most recently completed logical candidate. */
   lonejson_candidate_transform_candidate_info last_candidate;
+  /** Gated-spooled logical candidates dropped before replay/output. */
+  lonejson_uint64 candidates_dropped;
+  /** Logical candidates whose transform stopped successfully. */
+  lonejson_uint64 candidates_stopped;
+  /** Logical candidates that built a projected candidate before mutation. */
+  lonejson_uint64 candidates_projected;
+  /** Total bytes written to projected-candidate spools. */
+  lonejson_uint64 total_bytes_projected;
 } lonejson_candidate_transform_result;
+
+/** Decision returned after a gated-spooled candidate has been fully observed.
+ */
+typedef enum lonejson_candidate_transform_candidate_decision {
+  /** Replay and transform this candidate. */
+  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_EMIT = 0,
+  /** Drop this candidate without replaying transform callbacks or output. */
+  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_DROP = 1,
+  /** Stop transforming successfully before later candidates are parsed. */
+  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_STOP = 2,
+  /** Fail the transform. The callback should populate `error` when possible. */
+  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_ERROR = 3
+} lonejson_candidate_transform_candidate_decision;
+
+/** Finalized gated-spooled candidate decision returned by a caller callback. */
+typedef struct lonejson_candidate_transform_candidate_policy {
+  /** Candidate-level action to apply before replay can emit output. */
+  lonejson_candidate_transform_candidate_decision decision;
+  /** Caller-owned policy pointer passed to replay transform events.
+   *
+   * LoneJSON never owns, copies, cleans up, or retains this pointer after the
+   * current logical candidate completes. Candidate transform callbacks are not
+   * interleaved across logical candidates in one transform call.
+   */
+  void *candidate_policy;
+} lonejson_candidate_transform_candidate_policy;
 
 /** Old scalar materialization policy for transform callbacks. */
 typedef enum lonejson_candidate_transform_old_scalar_mode {
   /** Do not retain complete string or number values for `old_value`. */
   LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE = 0,
-  /** Retain the current complete string or number until its callback returns. */
+  /** Retain the current complete string or number until its callback returns.
+   */
   LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE = 1
 } lonejson_candidate_transform_old_scalar_mode;
 
@@ -2728,7 +2815,8 @@ typedef enum lonejson_candidate_transform_old_scalar_mode {
 typedef enum lonejson_candidate_transform_insert_phase {
   /** No insertion callback is active. */
   LONEJSON_CANDIDATE_TRANSFORM_INSERT_NONE = 0,
-  /** Called immediately after an emitted object begins, before source members. */
+  /** Called immediately after an emitted object begins, before source members.
+   */
   LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_BEGIN = 1,
   /** Called after an object key is known, before that source member is emitted.
    */
@@ -2828,7 +2916,30 @@ typedef struct lonejson_candidate_transform_event {
   const char *object_key;
   /** Byte length of `object_key`. */
   size_t object_key_len;
+  /** Caller-owned policy returned by the gated-spooled decision callback.
+   *
+   * Non-NULL only when the caller returned one for the current logical
+   * candidate. The pointer is callback-scoped to that logical candidate.
+   */
+  void *candidate_policy;
+  /** Relationship between this value and its parent container. */
+  lonejson_candidate_transform_event_relationship relationship;
+  /** Storage/traversal origin of this callback event. */
+  lonejson_candidate_transform_event_origin origin;
+  /** Transform traversal phase for this callback event. */
+  lonejson_candidate_transform_event_phase phase;
 } lonejson_candidate_transform_event;
+
+typedef lonejson_candidate_transform_candidate_policy (
+    *lonejson_candidate_transform_candidate_decision_fn)(
+    void *user, const lonejson_candidate_info *candidate,
+    const lonejson_candidate_transform_candidate_info *transform_candidate,
+    lonejson_error *error);
+
+typedef lonejson_candidate_transform_old_scalar_mode (
+    *lonejson_candidate_transform_old_scalar_fn)(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_error *error);
 
 typedef lonejson_candidate_transform_action (*lonejson_candidate_transform_fn)(
     void *user, const lonejson_candidate_transform_event *event,
@@ -2852,14 +2963,17 @@ typedef lonejson_status (*lonejson_candidate_transform_insert_fn)(
  * retaining their complete decoded payload.
  * `transform` decides whether each value is kept, dropped, stopped, or
  * replaced; replacement JSON must be emitted through the supplied lonejson
- * writer before the callback returns. `insert`, when set, is called only while
- * lonejson's writer is positioned inside an emitted object; inserted members
- * must be emitted with writer key/value calls.
+ * writer before the callback returns. In gated-spooled mode, `observer` is
+ * called only during the first pass over the original source candidate; replay
+ * transform callbacks receive `candidate_policy` from `candidate_decision`
+ * instead of receiving duplicate observer callbacks. `insert`, when set, is
+ * called only while lonejson's writer is positioned inside an emitted object;
+ * inserted members must be emitted with writer key/value calls.
  *
  * Dropping an object member suppresses both its key and value. Dropping an
  * array element preserves valid array separators. Dropping a candidate root
- * emits no candidate bytes. Emitted candidates are terminated by `\n`, including
- * the final emitted candidate.
+ * emits no candidate bytes. Emitted candidates are terminated by `\n`,
+ * including the final emitted candidate.
  */
 typedef struct lonejson_candidate_transform_options {
   /** Input framing policy; zero defaults to auto-detection. */
@@ -2870,7 +2984,8 @@ typedef struct lonejson_candidate_transform_options {
   lonejson_candidate_transform_mode mode;
   /** Runtime spool class used by gated-spooled mode; zero selects default. */
   lonejson_spool_class spool_class;
-  /** Optional per-call gated-spooled candidate byte limit; zero uses runtime. */
+  /** Optional per-call gated-spooled candidate byte limit; zero uses runtime.
+   */
   size_t max_spooled_candidate_bytes;
   /** Complete old string/number policy; zero keeps large scalars streaming. */
   lonejson_candidate_transform_old_scalar_mode old_scalar_mode;
@@ -2902,6 +3017,21 @@ typedef struct lonejson_candidate_transform_options {
   void *candidate_user;
   /** Optional aggregate result record, zeroed before each transform call. */
   lonejson_candidate_transform_result *result;
+  /** Projection/transform composition policy; zero preserves source events. */
+  lonejson_candidate_transform_composition composition;
+  /** Optional per-event old string/number materialization policy.
+   *
+   * When set, this callback overrides `old_scalar_mode` for string and number
+   * values. Return `OLD_SCALAR_COMPLETE` only for values whose transform or
+   * replacement callback needs complete old scalar bytes.
+   */
+  lonejson_candidate_transform_old_scalar_fn old_scalar;
+  /** Caller state passed to `old_scalar`. */
+  void *old_scalar_user;
+  /** Optional gated-spooled candidate decision before replay/output. */
+  lonejson_candidate_transform_candidate_decision_fn candidate_decision;
+  /** Caller state passed to `candidate_decision`. */
+  void *candidate_decision_user;
 } lonejson_candidate_transform_options;
 
 struct lonejson_json_value;
@@ -7046,14 +7176,16 @@ lonejson_set_auth_provider(lonejson *runtime,
 #define LONEJSON_OPENSSL_JWT_MAX_RSA_COMPONENT_BYTES (8u * 1024u)
 #endif
 
-LONEJSON_OPENSSL_INLINE void lonejson__openssl_clear_error(lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE void
+lonejson__openssl_clear_error(lonejson_error *error) {
   if (error != NULL) {
     memset(error, 0, sizeof(*error));
   }
 }
 
-LONEJSON_OPENSSL_INLINE void lonejson__openssl_copy_error_message(
-    char *dst, size_t dst_size, const char *message) {
+LONEJSON_OPENSSL_INLINE void
+lonejson__openssl_copy_error_message(char *dst, size_t dst_size,
+                                     const char *message) {
   size_t i;
 
   if (dst == NULL || dst_size == 0u) {
@@ -7078,14 +7210,14 @@ LONEJSON_OPENSSL_INLINE lonejson_status lonejson__openssl_set_error(
     error->line = line;
     error->column = column;
     error->offset = offset;
-    lonejson__openssl_copy_error_message(error->message,
-                                         sizeof(error->message), message);
+    lonejson__openssl_copy_error_message(error->message, sizeof(error->message),
+                                         message);
   }
   return status;
 }
 
 LONEJSON_OPENSSL_INLINE int lonejson__openssl_streq(const char *a,
-                                                     const char *b) {
+                                                    const char *b) {
   return a != NULL && b != NULL && strcmp(a, b) == 0;
 }
 
@@ -7106,8 +7238,9 @@ lonejson__jwt_decode_base64url_alloc(const char *data, size_t len,
   }
   out = (unsigned char *)malloc(decoded_len == 0u ? 1u : decoded_len);
   if (out == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate decoded JWT segment");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                      0u, 0u, 0u,
+                                      "failed to allocate decoded JWT segment");
     return NULL;
   }
   status = lonejson_base64_decode(data, len, LONEJSON_BASE64_URL_RAW, out,
@@ -7136,8 +7269,9 @@ lonejson__jwt_decode_base64_alloc(const char *data, size_t len, size_t *out_len,
   }
   out = (unsigned char *)malloc(decoded_len == 0u ? 1u : decoded_len);
   if (out == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate decoded JWT segment");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                      0u, 0u, 0u,
+                                      "failed to allocate decoded JWT segment");
     return NULL;
   }
   status = lonejson_base64_decode(data, len, LONEJSON_BASE64_STANDARD, out,
@@ -7150,9 +7284,8 @@ lonejson__jwt_decode_base64_alloc(const char *data, size_t len, size_t *out_len,
   return out;
 }
 
-LONEJSON_OPENSSL_INLINE int lonejson__jwt_digest_matches_b64url(const char *encoded,
-                                               const unsigned char *digest,
-                                               size_t digest_len) {
+LONEJSON_OPENSSL_INLINE int lonejson__jwt_digest_matches_b64url(
+    const char *encoded, const unsigned char *digest, size_t digest_len) {
   unsigned char *decoded;
   size_t decoded_len = 0u;
   lonejson_error error;
@@ -7172,16 +7305,17 @@ LONEJSON_OPENSSL_INLINE int lonejson__jwt_digest_matches_b64url(const char *enco
   return ok;
 }
 
-LONEJSON_OPENSSL_INLINE X509 *lonejson__jwt_x509_from_x5c_item(const char *item,
-                                              lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE X509 *
+lonejson__jwt_x509_from_x5c_item(const char *item, lonejson_error *error) {
   unsigned char *der;
   const unsigned char *cursor;
   size_t der_len = 0u;
   X509 *cert;
 
   if (item == NULL || item[0] == '\0') {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
-                              "JWK x5c certificate must not be empty");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                      0u, 0u,
+                                      "JWK x5c certificate must not be empty");
     return NULL;
   }
   der = lonejson__jwt_decode_base64_alloc(item, strlen(item), &der_len,
@@ -7191,8 +7325,8 @@ LONEJSON_OPENSSL_INLINE X509 *lonejson__jwt_x509_from_x5c_item(const char *item,
   }
   if (der_len > (size_t)LONG_MAX) {
     free(der);
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                              "JWK x5c certificate is too large");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                                      0u, "JWK x5c certificate is too large");
     return NULL;
   }
   cursor = der;
@@ -7200,15 +7334,16 @@ LONEJSON_OPENSSL_INLINE X509 *lonejson__jwt_x509_from_x5c_item(const char *item,
   free(der);
   if (cert == NULL || cursor == NULL) {
     X509_free(cert);
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
-                              "JWK x5c certificate is invalid");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                      0u, 0u, "JWK x5c certificate is invalid");
     return NULL;
   }
   return cert;
 }
 
-LONEJSON_OPENSSL_INLINE EVP_PKEY *lonejson__jwt_rsa_public_key_from_jwk(const lonejson_jwk *jwk,
-                                                       lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE EVP_PKEY *
+lonejson__jwt_rsa_public_key_from_jwk(const lonejson_jwk *jwk,
+                                      lonejson_error *error) {
   EVP_PKEY_CTX *ctx = NULL;
   EVP_PKEY *pkey = NULL;
   OSSL_PARAM_BLD *builder = NULL;
@@ -7223,8 +7358,9 @@ LONEJSON_OPENSSL_INLINE EVP_PKEY *lonejson__jwt_rsa_public_key_from_jwk(const lo
 
   if (jwk->n == NULL || jwk->e == NULL || jwk->n[0] == '\0' ||
       jwk->e[0] == '\0') {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
-                              "RSA JWK n and e members are required");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                      0u, 0u,
+                                      "RSA JWK n and e members are required");
     return NULL;
   }
   n = lonejson__jwt_decode_base64url_alloc(jwk->n, strlen(jwk->n), &n_len,
@@ -7233,56 +7369,64 @@ LONEJSON_OPENSSL_INLINE EVP_PKEY *lonejson__jwt_rsa_public_key_from_jwk(const lo
                                            "JWK exponent", error);
   if (n == NULL || e == NULL || n_len == 0u || e_len == 0u) {
     if (n != NULL && n_len == 0u) {
-      (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
-                                "RSA JWK modulus must not be empty");
+      (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                        0u, 0u,
+                                        "RSA JWK modulus must not be empty");
     } else if (e != NULL && e_len == 0u) {
-      (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
-                                "RSA JWK exponent must not be empty");
+      (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                        0u, 0u,
+                                        "RSA JWK exponent must not be empty");
     }
     goto done;
   }
   if (n_len > LONEJSON_OPENSSL_JWT_MAX_RSA_COMPONENT_BYTES ||
       e_len > LONEJSON_OPENSSL_JWT_MAX_RSA_COMPONENT_BYTES) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                              "RSA JWK key material exceeds configured limit");
+    (void)lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+        "RSA JWK key material exceeds configured limit");
     goto done;
   }
   if (n_len > (size_t)INT_MAX || e_len > (size_t)INT_MAX) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                              "RSA JWK key material exceeds supported size");
+    (void)lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+        "RSA JWK key material exceeds supported size");
     goto done;
   }
   n_bn = BN_bin2bn(n, (int)n_len, NULL);
   e_bn = BN_bin2bn(e, (int)e_len, NULL);
   if (n_bn == NULL || e_bn == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate RSA JWK key material");
+    (void)lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+        "failed to allocate RSA JWK key material");
     goto done;
   }
   builder = OSSL_PARAM_BLD_new();
   ctx = EVP_PKEY_CTX_new_from_name(NULL, "RSA", NULL);
   if (builder == NULL || ctx == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate RSA public key context");
+    (void)lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+        "failed to allocate RSA public key context");
     goto done;
   }
   if (!OSSL_PARAM_BLD_push_BN(builder, OSSL_PKEY_PARAM_RSA_N, n_bn) ||
       !OSSL_PARAM_BLD_push_BN(builder, OSSL_PKEY_PARAM_RSA_E, e_bn)) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate RSA public key params");
+    (void)lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+        "failed to allocate RSA public key params");
     goto done;
   }
   params = OSSL_PARAM_BLD_to_param(builder);
   if (params == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate RSA public key params");
+    (void)lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+        "failed to allocate RSA public key params");
     goto done;
   }
   if (EVP_PKEY_fromdata_init(ctx) <= 0 ||
       EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) <= 0 ||
       pkey == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "RSA JWK public key is invalid");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u, "RSA JWK public key is invalid");
     goto done;
   }
   ok = 1;
@@ -7302,10 +7446,9 @@ done:
   return pkey;
 }
 
-LONEJSON_OPENSSL_INLINE lonejson_status
-lonejson__jwt_validate_rs256_signature(const lonejson_jwt_compact *jwt,
-                                       const lonejson_jwk *jwk, int pss,
-                                       lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE lonejson_status lonejson__jwt_validate_rs256_signature(
+    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk, int pss,
+    lonejson_error *error) {
   EVP_PKEY *pkey = NULL;
   EVP_MD_CTX *md = NULL;
   EVP_PKEY_CTX *pkey_ctx = NULL;
@@ -7321,8 +7464,9 @@ lonejson__jwt_validate_rs256_signature(const lonejson_jwt_compact *jwt,
   }
   if (signature_len == 0u) {
     free(signature);
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "JWT signature must not be empty");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                       0u, 0u,
+                                       "JWT signature must not be empty");
   }
   pkey = lonejson__jwt_rsa_public_key_from_jwk(jwk, error);
   if (pkey == NULL) {
@@ -7333,8 +7477,9 @@ lonejson__jwt_validate_rs256_signature(const lonejson_jwt_compact *jwt,
   if (md == NULL) {
     free(signature);
     EVP_PKEY_free(pkey);
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                               0u, "failed to allocate JWT verifier");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                       0u, 0u, 0u,
+                                       "failed to allocate JWT verifier");
   }
   if (EVP_DigestVerifyInit(md, &pkey_ctx, EVP_sha256(), NULL, pkey) <= 0 ||
       EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, pss ? RSA_PKCS1_PSS_PADDING
@@ -7343,8 +7488,9 @@ lonejson__jwt_validate_rs256_signature(const lonejson_jwt_compact *jwt,
     free(signature);
     EVP_MD_CTX_free(md);
     EVP_PKEY_free(pkey);
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "failed to initialize JWT verifier");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                       0u, 0u,
+                                       "failed to initialize JWT verifier");
   }
   verify_result = EVP_DigestVerify(
       md, signature, signature_len,
@@ -7355,12 +7501,13 @@ lonejson__jwt_validate_rs256_signature(const lonejson_jwt_compact *jwt,
   if (verify_result == 1) {
     return LONEJSON_STATUS_OK;
   }
-  return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                             "JWT signature validation failed");
+  return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                     0u, 0u, "JWT signature validation failed");
 }
 
-LONEJSON_OPENSSL_INLINE EVP_PKEY *lonejson__jwt_ec_public_key_from_jwk(const lonejson_jwk *jwk,
-                                                      lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE EVP_PKEY *
+lonejson__jwt_ec_public_key_from_jwk(const lonejson_jwk *jwk,
+                                     lonejson_error *error) {
   EVP_PKEY_CTX *ctx = NULL;
   EVP_PKEY *pkey = NULL;
   OSSL_PARAM_BLD *builder = NULL;
@@ -7373,14 +7520,15 @@ LONEJSON_OPENSSL_INLINE EVP_PKEY *lonejson__jwt_ec_public_key_from_jwk(const lon
   int ok = 0;
 
   if (!lonejson__openssl_streq(jwk->crv, "P-256")) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "ES256 requires a P-256 JWK");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u, "ES256 requires a P-256 JWK");
     return NULL;
   }
   if (jwk->x == NULL || jwk->x[0] == '\0' || jwk->y == NULL ||
       jwk->y[0] == '\0') {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "ES256 JWK coordinates are required");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u,
+                                      "ES256 JWK coordinates are required");
     return NULL;
   }
   x = lonejson__jwt_decode_base64url_alloc(jwk->x, strlen(jwk->x), &x_len,
@@ -7391,8 +7539,9 @@ LONEJSON_OPENSSL_INLINE EVP_PKEY *lonejson__jwt_ec_public_key_from_jwk(const lon
     goto done;
   }
   if (x_len != 32u || y_len != 32u) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "ES256 JWK coordinates must be 32 bytes");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u,
+                                      "ES256 JWK coordinates must be 32 bytes");
     goto done;
   }
   pub[0] = 0x04u;
@@ -7401,29 +7550,32 @@ LONEJSON_OPENSSL_INLINE EVP_PKEY *lonejson__jwt_ec_public_key_from_jwk(const lon
   builder = OSSL_PARAM_BLD_new();
   ctx = EVP_PKEY_CTX_new_from_name(NULL, "EC", NULL);
   if (builder == NULL || ctx == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate EC public key context");
+    (void)lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+        "failed to allocate EC public key context");
     goto done;
   }
   if (!OSSL_PARAM_BLD_push_utf8_string(builder, OSSL_PKEY_PARAM_GROUP_NAME,
                                        "prime256v1", 0u) ||
       !OSSL_PARAM_BLD_push_octet_string(builder, OSSL_PKEY_PARAM_PUB_KEY, pub,
                                         sizeof(pub))) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate EC public key params");
+    (void)lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+        "failed to allocate EC public key params");
     goto done;
   }
   params = OSSL_PARAM_BLD_to_param(builder);
   if (params == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate EC public key params");
+    (void)lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+        "failed to allocate EC public key params");
     goto done;
   }
   if (EVP_PKEY_fromdata_init(ctx) <= 0 ||
       EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) <= 0 ||
       pkey == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "EC JWK public key is invalid");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u, "EC JWK public key is invalid");
     goto done;
   }
   ok = 1;
@@ -7453,8 +7605,9 @@ lonejson__jwt_es256_der_signature_alloc(const unsigned char *signature,
   int der_len;
 
   if (signature_len != 64u) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "ES256 signature must be 64 bytes");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u,
+                                      "ES256 signature must be 64 bytes");
     return NULL;
   }
   sig = ECDSA_SIG_new();
@@ -7464,16 +7617,18 @@ lonejson__jwt_es256_der_signature_alloc(const unsigned char *signature,
     ECDSA_SIG_free(sig);
     BN_free(r);
     BN_free(s);
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate ES256 signature");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                      0u, 0u, 0u,
+                                      "failed to allocate ES256 signature");
     return NULL;
   }
   if (ECDSA_SIG_set0(sig, r, s) != 1) {
     ECDSA_SIG_free(sig);
     BN_free(r);
     BN_free(s);
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to prepare ES256 signature");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                      0u, 0u, 0u,
+                                      "failed to prepare ES256 signature");
     return NULL;
   }
   r = NULL;
@@ -7481,15 +7636,16 @@ lonejson__jwt_es256_der_signature_alloc(const unsigned char *signature,
   der_len = i2d_ECDSA_SIG(sig, NULL);
   if (der_len <= 0) {
     ECDSA_SIG_free(sig);
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "ES256 signature is invalid");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u, "ES256 signature is invalid");
     return NULL;
   }
   der = (unsigned char *)malloc((size_t)der_len);
   if (der == NULL) {
     ECDSA_SIG_free(sig);
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to allocate ES256 signature");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                      0u, 0u, 0u,
+                                      "failed to allocate ES256 signature");
     return NULL;
   }
   cursor = der;
@@ -7497,18 +7653,17 @@ lonejson__jwt_es256_der_signature_alloc(const unsigned char *signature,
   ECDSA_SIG_free(sig);
   if (der_len <= 0) {
     free(der);
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "ES256 signature is invalid");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u, "ES256 signature is invalid");
     return NULL;
   }
   *out_len = (size_t)der_len;
   return der;
 }
 
-LONEJSON_OPENSSL_INLINE lonejson_status
-lonejson__jwt_validate_es256_signature(const lonejson_jwt_compact *jwt,
-                                       const lonejson_jwk *jwk,
-                                       lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE lonejson_status lonejson__jwt_validate_es256_signature(
+    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk,
+    lonejson_error *error) {
   EVP_PKEY *pkey = NULL;
   EVP_MD_CTX *md = NULL;
   unsigned char *signature = NULL;
@@ -7538,15 +7693,17 @@ lonejson__jwt_validate_es256_signature(const lonejson_jwt_compact *jwt,
   if (md == NULL) {
     free(der_signature);
     EVP_PKEY_free(pkey);
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                               0u, "failed to allocate JWT verifier");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                       0u, 0u, 0u,
+                                       "failed to allocate JWT verifier");
   }
   if (EVP_DigestVerifyInit(md, NULL, EVP_sha256(), NULL, pkey) <= 0) {
     free(der_signature);
     EVP_MD_CTX_free(md);
     EVP_PKEY_free(pkey);
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "failed to initialize JWT verifier");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                       0u, 0u,
+                                       "failed to initialize JWT verifier");
   }
   verify_result = EVP_DigestVerify(
       md, der_signature, der_signature_len,
@@ -7557,14 +7714,13 @@ lonejson__jwt_validate_es256_signature(const lonejson_jwt_compact *jwt,
   if (verify_result == 1) {
     return LONEJSON_STATUS_OK;
   }
-  return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                             "JWT signature validation failed");
+  return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                     0u, 0u, "JWT signature validation failed");
 }
 
-LONEJSON_OPENSSL_INLINE lonejson_status
-lonejson__jwt_validate_eddsa_signature(const lonejson_jwt_compact *jwt,
-                                       const lonejson_jwk *jwk,
-                                       lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE lonejson_status lonejson__jwt_validate_eddsa_signature(
+    const lonejson_jwt_compact *jwt, const lonejson_jwk *jwk,
+    lonejson_error *error) {
   EVP_PKEY *pkey = NULL;
   EVP_MD_CTX *md = NULL;
   unsigned char *x = NULL;
@@ -7574,12 +7730,13 @@ lonejson__jwt_validate_eddsa_signature(const lonejson_jwt_compact *jwt,
   int verify_result;
 
   if (!lonejson__openssl_streq(jwk->crv, "Ed25519")) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "EdDSA requires an Ed25519 JWK");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                       0u, 0u, "EdDSA requires an Ed25519 JWK");
   }
   if (jwk->x == NULL || jwk->x[0] == '\0') {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "Ed25519 JWK x coordinate is required");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                       0u, 0u,
+                                       "Ed25519 JWK x coordinate is required");
   }
   x = lonejson__jwt_decode_base64url_alloc(jwk->x, strlen(jwk->x), &x_len,
                                            "JWK x coordinate", error);
@@ -7594,29 +7751,33 @@ lonejson__jwt_validate_eddsa_signature(const lonejson_jwt_compact *jwt,
   if (x_len != 32u || signature_len != 64u) {
     free(x);
     free(signature);
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "Ed25519 JWK or signature length is invalid");
+    return lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "Ed25519 JWK or signature length is invalid");
   }
   pkey = EVP_PKEY_new_raw_public_key_ex(NULL, "ED25519", NULL, x, x_len);
   free(x);
   if (pkey == NULL) {
     free(signature);
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "Ed25519 JWK public key is invalid");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                       0u, 0u,
+                                       "Ed25519 JWK public key is invalid");
   }
   md = EVP_MD_CTX_new();
   if (md == NULL) {
     EVP_PKEY_free(pkey);
     free(signature);
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                               0u, "failed to allocate JWT verifier");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                       0u, 0u, 0u,
+                                       "failed to allocate JWT verifier");
   }
   if (EVP_DigestVerifyInit(md, NULL, NULL, NULL, pkey) <= 0) {
     EVP_MD_CTX_free(md);
     EVP_PKEY_free(pkey);
     free(signature);
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "failed to initialize JWT verifier");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                       0u, 0u,
+                                       "failed to initialize JWT verifier");
   }
   verify_result = EVP_DigestVerify(
       md, signature, signature_len,
@@ -7627,8 +7788,8 @@ lonejson__jwt_validate_eddsa_signature(const lonejson_jwt_compact *jwt,
   if (verify_result == 1) {
     return LONEJSON_STATUS_OK;
   }
-  return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                             "JWT signature validation failed");
+  return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                     0u, 0u, "JWT signature validation failed");
 }
 
 LONEJSON_OPENSSL_INLINE EVP_PKEY *
@@ -7639,13 +7800,14 @@ lonejson__jwt_eddsa_public_key_from_jwk(const lonejson_jwk *jwk,
   size_t x_len = 0u;
 
   if (!lonejson__openssl_streq(jwk->crv, "Ed25519")) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "EdDSA requires an Ed25519 JWK");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u, "EdDSA requires an Ed25519 JWK");
     return NULL;
   }
   if (jwk->x == NULL || jwk->x[0] == '\0') {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "Ed25519 JWK x coordinate is required");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u,
+                                      "Ed25519 JWK x coordinate is required");
     return NULL;
   }
   x = lonejson__jwt_decode_base64url_alloc(jwk->x, strlen(jwk->x), &x_len,
@@ -7655,15 +7817,16 @@ lonejson__jwt_eddsa_public_key_from_jwk(const lonejson_jwk *jwk,
   }
   if (x_len != 32u) {
     free(x);
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "Ed25519 JWK length is invalid");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u, "Ed25519 JWK length is invalid");
     return NULL;
   }
   pkey = EVP_PKEY_new_raw_public_key_ex(NULL, "ED25519", NULL, x, x_len);
   free(x);
   if (pkey == NULL) {
-    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                              "Ed25519 JWK public key is invalid");
+    (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                      0u, 0u,
+                                      "Ed25519 JWK public key is invalid");
   }
   return pkey;
 }
@@ -7681,15 +7844,15 @@ lonejson__jwt_public_key_from_jwk_for_alg(const lonejson_jwt_header *header,
   if (strcmp(header->alg, "EdDSA") == 0) {
     return lonejson__jwt_eddsa_public_key_from_jwk(jwk, error);
   }
-  (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                            "JWT signature algorithm is not supported");
+  (void)lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u,
+                                    0u, 0u,
+                                    "JWT signature algorithm is not supported");
   return NULL;
 }
 
-LONEJSON_OPENSSL_INLINE lonejson_status
-lonejson__jwt_validate_jwk_x5c(void *x509_store,
-                               const lonejson_jwt_header *header,
-                               const lonejson_jwk *jwk, lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE lonejson_status lonejson__jwt_validate_jwk_x5c(
+    void *x509_store, const lonejson_jwt_header *header,
+    const lonejson_jwk *jwk, lonejson_error *error) {
   STACK_OF(X509) *chain = NULL;
   X509 *leaf = NULL;
   X509 *cert = NULL;
@@ -7709,8 +7872,9 @@ lonejson__jwt_validate_jwk_x5c(void *x509_store,
   }
   chain = sk_X509_new_null();
   if (chain == NULL) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                               0u, "failed to allocate JWK x5c chain");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                       0u, 0u, 0u,
+                                       "failed to allocate JWK x5c chain");
   }
   for (i = 0u; i < jwk->x5c.count; ++i) {
     cert = lonejson__jwt_x509_from_x5c_item(jwk->x5c.items[i], error);
@@ -7722,58 +7886,61 @@ lonejson__jwt_validate_jwk_x5c(void *x509_store,
       leaf = cert;
     } else if (!sk_X509_push(chain, cert)) {
       X509_free(cert);
-      status =
-          lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to append JWK x5c certificate");
+      status = lonejson__openssl_set_error(
+          error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+          "failed to append JWK x5c certificate");
       goto done;
     }
     cert = NULL;
   }
   if (leaf == NULL) {
-    status = lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
-                                 0u, "JWK x5c chain is empty");
+    status = lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_JSON,
+                                         0u, 0u, 0u, "JWK x5c chain is empty");
     goto done;
   }
   if (X509_digest(leaf, EVP_sha1(), digest, &digest_len) != 1 ||
       digest_len != 20u) {
-    status = lonejson__openssl_set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
-                                 0u, "failed to compute JWK x5c SHA-1");
+    status =
+        lonejson__openssl_set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u,
+                                    0u, 0u, "failed to compute JWK x5c SHA-1");
     goto done;
   }
   if (!lonejson__jwt_digest_matches_b64url(jwk->x5t, digest, digest_len) ||
       !lonejson__jwt_digest_matches_b64url(header->x5t, digest, digest_len)) {
-    status =
-        lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                            "JWT x5t thumbprint does not match x5c leaf");
+    status = lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "JWT x5t thumbprint does not match x5c leaf");
     goto done;
   }
   if (X509_digest(leaf, EVP_sha256(), digest, &digest_len) != 1 ||
       digest_len != 32u) {
-    status = lonejson__openssl_set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
-                                 0u, "failed to compute JWK x5c SHA-256");
+    status = lonejson__openssl_set_error(error, LONEJSON_STATUS_INTERNAL_ERROR,
+                                         0u, 0u, 0u,
+                                         "failed to compute JWK x5c SHA-256");
     goto done;
   }
   if (!lonejson__jwt_digest_matches_b64url(jwk->x5t_s256, digest, digest_len) ||
       !lonejson__jwt_digest_matches_b64url(header->x5t_s256, digest,
                                            digest_len)) {
-    status =
-        lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                            "JWT x5t#S256 thumbprint does not match x5c leaf");
+    status = lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "JWT x5t#S256 thumbprint does not match x5c leaf");
     goto done;
   }
   cert_key = X509_get_pubkey(leaf);
   jwk_key = lonejson__jwt_public_key_from_jwk_for_alg(header, jwk, error);
   if (cert_key == NULL || jwk_key == NULL) {
-    status =
-        error != NULL && error->code != LONEJSON_STATUS_OK
-            ? error->code
-            : lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                  0u, "JWK x5c leaf public key is invalid");
+    status = error != NULL && error->code != LONEJSON_STATUS_OK
+                 ? error->code
+                 : lonejson__openssl_set_error(
+                       error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+                       "JWK x5c leaf public key is invalid");
     goto done;
   }
   if (EVP_PKEY_eq(cert_key, jwk_key) != 1) {
-    status = lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                 0u, "JWK public key does not match x5c leaf");
+    status = lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "JWK public key does not match x5c leaf");
     goto done;
   }
   if (x509_store != NULL) {
@@ -7782,25 +7949,25 @@ lonejson__jwt_validate_jwk_x5c(void *x509_store,
     store = X509_STORE_new();
     owns_store = 1;
     if (store == NULL || X509_STORE_set_default_paths(store) != 1) {
-      status =
-          lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                              0u, "failed to initialize OpenSSL trust store");
+      status = lonejson__openssl_set_error(
+          error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+          "failed to initialize OpenSSL trust store");
       goto done;
     }
   }
   store_ctx = X509_STORE_CTX_new();
   if (store_ctx == NULL ||
       X509_STORE_CTX_init(store_ctx, store, leaf, chain) != 1) {
-    status =
-        lonejson__openssl_set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
-                            0u, "failed to initialize JWK x5c verifier");
+    status = lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
+        "failed to initialize JWK x5c verifier");
     goto done;
   }
   ok = X509_verify_cert(store_ctx);
   if (ok != 1) {
-    status =
-        lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                            "JWK x5c certificate chain is not trusted");
+    status = lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "JWK x5c certificate chain is not trusted");
     goto done;
   }
 
@@ -7816,10 +7983,9 @@ done:
   return status;
 }
 
-LONEJSON_OPENSSL_INLINE lonejson_status
-lonejson__openssl_auth_verify_jws(void *user_data,
-                                  const lonejson_jws_verify_request *request,
-                                  lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE lonejson_status lonejson__openssl_auth_verify_jws(
+    void *user_data, const lonejson_jws_verify_request *request,
+    lonejson_error *error) {
   const lonejson_jwt_compact *jwt;
   const lonejson_jwt_header *header;
   const lonejson_jwk *jwk;
@@ -7827,8 +7993,9 @@ lonejson__openssl_auth_verify_jws(void *user_data,
 
   if (request == NULL || request->jwt == NULL || request->header == NULL ||
       request->jwk == NULL) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "JWS verification request is required");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                       0u, 0u, 0u,
+                                       "JWS verification request is required");
   }
   jwt = request->jwt;
   header = request->header;
@@ -7839,50 +8006,53 @@ lonejson__openssl_auth_verify_jws(void *user_data,
   }
   if (strcmp(header->alg, "RS256") == 0 || strcmp(header->alg, "PS256") == 0) {
     if (!lonejson__openssl_streq(jwk->kty, "RSA")) {
-      return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                 0u,
-                                 "JWT JWK key type does not match algorithm");
+      return lonejson__openssl_set_error(
+          error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+          "JWT JWK key type does not match algorithm");
     }
     return lonejson__jwt_validate_rs256_signature(
         jwt, jwk, strcmp(header->alg, "PS256") == 0, error);
   }
   if (strcmp(header->alg, "ES256") == 0) {
     if (!lonejson__openssl_streq(jwk->kty, "EC")) {
-      return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                 0u,
-                                 "JWT JWK key type does not match algorithm");
+      return lonejson__openssl_set_error(
+          error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+          "JWT JWK key type does not match algorithm");
     }
     return lonejson__jwt_validate_es256_signature(jwt, jwk, error);
   }
   if (strcmp(header->alg, "EdDSA") == 0) {
     if (!lonejson__openssl_streq(jwk->kty, "OKP")) {
-      return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
-                                 0u,
-                                 "JWT JWK key type does not match algorithm");
+      return lonejson__openssl_set_error(
+          error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+          "JWT JWK key type does not match algorithm");
     }
     return lonejson__jwt_validate_eddsa_signature(jwt, jwk, error);
   }
   {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
-                               "JWT signature algorithm is not supported");
+    return lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u, 0u,
+        "JWT signature algorithm is not supported");
   }
 }
 
-LONEJSON_OPENSSL_INLINE lonejson_status
-lonejson__openssl_auth_random_bytes(void *user_data, unsigned char *dst,
-                                    size_t len, lonejson_error *error) {
+LONEJSON_OPENSSL_INLINE lonejson_status lonejson__openssl_auth_random_bytes(
+    void *user_data, unsigned char *dst, size_t len, lonejson_error *error) {
   (void)user_data;
   if (dst == NULL && len != 0u) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "random byte output is required");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                       0u, 0u, 0u,
+                                       "random byte output is required");
   }
   if (len > (size_t)INT_MAX) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                               "random byte request exceeds OpenSSL limit");
+    return lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+        "random byte request exceeds OpenSSL limit");
   }
   if (len != 0u && RAND_bytes(dst, (int)len) != 1) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
-                               0u, "failed to generate random bytes");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INTERNAL_ERROR,
+                                       0u, 0u, 0u,
+                                       "failed to generate random bytes");
   }
   return LONEJSON_STATUS_OK;
 }
@@ -7894,13 +8064,15 @@ lonejson__openssl_auth_sha256(void *user_data, const void *data, size_t len,
 
   (void)user_data;
   if ((data == NULL && len != 0u) || out == NULL) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "SHA-256 input and output are required");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                       0u, 0u, 0u,
+                                       "SHA-256 input and output are required");
   }
   if (EVP_Digest(data, len, out, &digest_len, EVP_sha256(), NULL) != 1 ||
       digest_len != 32u) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
-                               0u, "failed to compute SHA-256 digest");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INTERNAL_ERROR,
+                                       0u, 0u, 0u,
+                                       "failed to compute SHA-256 digest");
   }
   return LONEJSON_STATUS_OK;
 }
@@ -7911,13 +8083,14 @@ LONEJSON_OPENSSL_INLINE lonejson_status lonejson_auth_provider_init_openssl(
     lonejson_error *error) {
   lonejson__openssl_clear_error(error);
   if (provider == NULL) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u, "auth provider output is required");
+    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT,
+                                       0u, 0u, 0u,
+                                       "auth provider output is required");
   }
   if (config != NULL && (config->libctx != NULL || config->propq != NULL)) {
-    return lonejson__openssl_set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u,
-                               "OpenSSL provider config fields are reserved");
+    return lonejson__openssl_set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "OpenSSL provider config fields are reserved");
   }
   memset(provider, 0, sizeof(*provider));
   provider->user_data = config != NULL ? config->x509_store : NULL;
@@ -8750,6 +8923,56 @@ void lonejson_oidc_jwks_cache_parse_cleanup(
 /** Report the selected transform shape as unsupported. */
 #define LJ_CANDIDATE_TRANSFORM_MODE_UNSUPPORTED                                \
   LONEJSON_CANDIDATE_TRANSFORM_MODE_UNSUPPORTED
+/** Preserve current source traversal callbacks while projection limits output.
+ */
+#define LJ_CANDIDATE_TRANSFORM_COMPOSITION_SOURCE_EVENTS                       \
+  LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_SOURCE_EVENTS
+/** Build a projected candidate before transform callbacks see it. */
+#define LJ_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM              \
+  LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM
+/** Transform event targets the candidate root. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_ROOT                                      \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_ROOT
+/** Transform event targets an object member value. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_OBJECT_MEMBER                             \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_OBJECT_MEMBER
+/** Transform event targets an array element value. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_ARRAY_ELEMENT                             \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_ARRAY_ELEMENT
+/** Transform event came from direct source traversal. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_SOURCE                                    \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_SOURCE
+/** Transform event came from replayed LoneJSON-owned storage. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_REPLAY                                    \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_REPLAY
+/** Transform event came from a projected source-backed replay value. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_PROJECTED_SOURCE                          \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PROJECTED_SOURCE
+/** Transform event came from a projected synthetic replay value. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_PROJECTED_SYNTHETIC                       \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PROJECTED_SYNTHETIC
+/** Transform event phase is direct source traversal. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_PHASE_SOURCE                              \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_SOURCE
+/** Transform event phase is source-candidate replay. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_PHASE_REPLAY                              \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_REPLAY
+/** Transform event phase is projected-candidate replay. */
+#define LJ_CANDIDATE_TRANSFORM_EVENT_PHASE_PROJECTED_REPLAY                    \
+  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_PROJECTED_REPLAY
+/** Candidate decision should replay and transform this candidate. */
+#define LJ_CANDIDATE_TRANSFORM_CANDIDATE_EMIT                                  \
+  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_EMIT
+/** Candidate decision should drop this candidate before replay/output. */
+#define LJ_CANDIDATE_TRANSFORM_CANDIDATE_DROP                                  \
+  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_DROP
+/** Candidate decision should stop successfully before this candidate replays.
+ */
+#define LJ_CANDIDATE_TRANSFORM_CANDIDATE_STOP                                  \
+  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_STOP
+/** Candidate decision should fail the transform. */
+#define LJ_CANDIDATE_TRANSFORM_CANDIDATE_ERROR                                 \
+  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_ERROR
 /** Do not retain complete string or number old values. */
 #define LJ_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE                                 \
   LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE
@@ -9196,11 +9419,29 @@ typedef lonejson_candidate_transform_output_framing
     lj_candidate_transform_output_framing;
 /** Execution mode selected before transformed candidate output is committed. */
 typedef lonejson_candidate_transform_mode lj_candidate_transform_mode;
+/** Composition policy for structural projection and transform callbacks. */
+typedef lonejson_candidate_transform_composition
+    lj_candidate_transform_composition;
+/** Relationship of a transform event value to its parent container. */
+typedef lonejson_candidate_transform_event_relationship
+    lj_candidate_transform_event_relationship;
+/** Origin of events delivered to transform callbacks. */
+typedef lonejson_candidate_transform_event_origin
+    lj_candidate_transform_event_origin;
+/** Transform callback phase for the current event. */
+typedef lonejson_candidate_transform_event_phase
+    lj_candidate_transform_event_phase;
 /** Per-logical-candidate execution metadata reported by transforms. */
 typedef lonejson_candidate_transform_candidate_info
     lj_candidate_transform_candidate_info;
 /** Aggregate execution metadata for one candidate transform call. */
 typedef lonejson_candidate_transform_result lj_candidate_transform_result;
+/** Decision returned after gated-spooled candidate observation. */
+typedef lonejson_candidate_transform_candidate_decision
+    lj_candidate_transform_candidate_decision;
+/** Finalized gated-spooled candidate decision and caller policy. */
+typedef lonejson_candidate_transform_candidate_policy
+    lj_candidate_transform_candidate_policy;
 /** Old scalar materialization policy for transform callbacks. */
 typedef lonejson_candidate_transform_old_scalar_mode
     lj_candidate_transform_old_scalar_mode;
@@ -9219,18 +9460,22 @@ typedef lonejson_candidate_transform_projection_path
 /** Action returned by candidate transform callbacks. */
 typedef lonejson_candidate_transform_action lj_candidate_transform_action;
 /** Callback-scoped view of the current original scalar value. */
-typedef lonejson_candidate_transform_old_value
-    lj_candidate_transform_old_value;
+typedef lonejson_candidate_transform_old_value lj_candidate_transform_old_value;
 /** Context for a transform decision about one parsed JSON value. */
 typedef lonejson_candidate_transform_event lj_candidate_transform_event;
+/** Candidate transform old-scalar materialization callback signature. */
+typedef lonejson_candidate_transform_old_scalar_fn
+    lj_candidate_transform_old_scalar_fn;
 /** Candidate transform decision callback signature. */
 typedef lonejson_candidate_transform_fn lj_candidate_transform_fn;
 /** Candidate transform replacement callback signature. */
 typedef lonejson_candidate_transform_replace_fn
     lj_candidate_transform_replace_fn;
 /** Candidate transform insertion callback signature. */
-typedef lonejson_candidate_transform_insert_fn
-    lj_candidate_transform_insert_fn;
+typedef lonejson_candidate_transform_insert_fn lj_candidate_transform_insert_fn;
+/** Gated-spooled candidate decision callback signature. */
+typedef lonejson_candidate_transform_candidate_decision_fn
+    lj_candidate_transform_candidate_decision_fn;
 /** Options for single-pass candidate stream transforms. */
 typedef lonejson_candidate_transform_options lj_candidate_transform_options;
 /** Options for arbitrary JSON candidate streams. */

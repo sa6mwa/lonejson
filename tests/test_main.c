@@ -440,10 +440,18 @@ int main(void) {
   test_candidate_stream_transform_pass_drop_replace();
   test_candidate_stream_transform_fragmented_reader();
   test_candidate_stream_transform_gated_spooled_replay();
+  test_candidate_stream_transform_gated_decision_policy();
+  test_candidate_stream_transform_gated_decision_stop_and_error();
+  test_candidate_stream_transform_projected_composition_policy();
+  test_candidate_stream_transform_projected_mutation_shapes();
+  test_candidate_stream_transform_projected_synthetic_shapes();
+  test_candidate_stream_transform_projected_recursive_and_fragmented();
+  test_candidate_stream_transform_projected_stop_and_read_failure();
   test_candidate_stream_transform_streams_large_string_keep();
   test_candidate_stream_transform_inserts_object_members();
   test_candidate_stream_transform_inserts_after_dropped_container_member();
   test_candidate_stream_transform_inserts_after_replaced_container_member();
+  test_candidate_stream_transform_insert_array_object_relationship();
   test_candidate_stream_transform_recursive_array_items();
   test_candidate_stream_transform_projects_structural_paths();
   test_candidate_stream_transform_projection_inserts_only_emitted_members();
