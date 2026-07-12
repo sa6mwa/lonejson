@@ -287,6 +287,11 @@ function M.new(config)
     local fd, callbacks = runtime_method_args(obj, first, ...)
     return runtime:visit_path_value_fd(fd, callbacks)
   end
+
+  for _, name in ipairs(runtime_exports) do
+    bind_runtime(obj, runtime, name)
+  end
+
   return obj
 end
 
