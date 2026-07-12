@@ -15,6 +15,7 @@ if(NOT LONEJSON_VERSION_RESULT EQUAL 0 OR NOT LONEJSON_RESOLVED_VERSION)
   message(FATAL_ERROR "${LONEJSON_VERSION_ERROR}")
 endif()
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonCompiler.cmake")
 project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
 
 include(CTest)
@@ -23,7 +24,6 @@ find_program(LONEJSON_LUA_EXECUTABLE
   REQUIRED)
 find_program(LONEJSON_LUAROCKS_EXECUTABLE NAMES luarocks)
 find_program(CLANG_FORMAT_BIN NAMES clang-format)
-find_program(LONEJSON_CLANG_EXECUTABLE NAMES clang)
 
 option(LONEJSON_BUILD_TESTS "Build lonejson tests." ON)
 option(LONEJSON_BUILD_EXAMPLES "Build lonejson examples." OFF)
@@ -692,6 +692,11 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_discover_target_tools.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_compiler_selection_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compiler_selection.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_darwin_macho_metadata_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_darwin_macho_metadata.sh"
@@ -727,9 +732,14 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_test_all_clang_optional.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
-      NAME lonejson_check_clang_sanitizer_support_tests
+      NAME lonejson_pinned_llvm_sanitizer_support_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_check_clang_sanitizer_support.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_pinned_llvm_sanitizer_support.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_bootlin_tsan_support_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bootlin_tsan_support.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_cross_sanitizer_matrix_tests
@@ -860,33 +870,32 @@ if(LONEJSON_BUILD_TESTS)
   set_tests_properties(lonejson_single_header_strict_warning_build_tests
     PROPERTIES RUN_SERIAL TRUE)
 
-  if(LONEJSON_CLANG_EXECUTABLE)
-    set(LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT
-      "${CMAKE_CURRENT_BINARY_DIR}/generated/lonejson_single_header_strict_clang.o")
-    add_custom_command(
-      OUTPUT "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}"
-      COMMAND "${CMAKE_COMMAND}" -E make_directory
-        "${CMAKE_CURRENT_BINARY_DIR}/generated"
-      COMMAND "${LONEJSON_CLANG_EXECUTABLE}"
-        ${LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS}
-        -D_POSIX_C_SOURCE=200809L
-        -D_FILE_OFFSET_BITS=64
-        -I "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}"
-        -c "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
-        -o "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}"
-      DEPENDS
-        package-single-header
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
-      VERBATIM)
-    add_custom_target(lonejson_single_header_strict_clang ALL
-      DEPENDS "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}")
-    add_test(
-      NAME lonejson_single_header_strict_clang_build_tests
-      COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_CURRENT_BINARY_DIR}"
-        --target lonejson_single_header_strict_clang)
-    set_tests_properties(lonejson_single_header_strict_clang_build_tests
-      PROPERTIES RUN_SERIAL TRUE)
-  endif()
+  set(LONEJSON_SINGLE_HEADER_STRICT_TOOLCHAIN_OBJECT
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/lonejson_single_header_strict_toolchain.o")
+  add_custom_command(
+    OUTPUT "${LONEJSON_SINGLE_HEADER_STRICT_TOOLCHAIN_OBJECT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+      "${CMAKE_CURRENT_BINARY_DIR}/generated"
+    # This must follow the configured toolchain rather than a host compiler.
+    COMMAND "${CMAKE_C_COMPILER}"
+      ${LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS}
+      -D_POSIX_C_SOURCE=200809L
+      -D_FILE_OFFSET_BITS=64
+      -I "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}"
+      -c "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
+      -o "${LONEJSON_SINGLE_HEADER_STRICT_TOOLCHAIN_OBJECT}"
+    DEPENDS
+      package-single-header
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
+    VERBATIM)
+  add_custom_target(lonejson_single_header_strict_toolchain ALL
+    DEPENDS "${LONEJSON_SINGLE_HEADER_STRICT_TOOLCHAIN_OBJECT}")
+  add_test(
+    NAME lonejson_single_header_strict_toolchain_build_tests
+    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_CURRENT_BINARY_DIR}"
+      --target lonejson_single_header_strict_toolchain)
+  set_tests_properties(lonejson_single_header_strict_toolchain_build_tests
+    PROPERTIES RUN_SERIAL TRUE)
 
   function(lonejson_add_single_header_config_test target)
     add_executable(${target} tests/test_single_header_config_matrix.c)

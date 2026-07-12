@@ -1,5 +1,30 @@
 # Local Verification
 
+## Compiler and Cross Toolchains
+
+CMake selects the pinned Bootlin x86_64 GNU collection by default. Linux
+target toolchain files select their matching pinned Bootlin collection. Before
+a Linux cross or release build, install the collections into the lifecycle
+cache:
+
+```sh
+make toolchains-all
+```
+
+The default cache is
+`${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains`; set
+`CPKT_TOOLCHAIN_CACHE` to use another shared cache location.
+
+Every native debug, host, and Linux release build uses a single pinned Bootlin collection:
+its GCC driver, GNU linker, binutils/debug tools, libc sysroot, and target
+runtime. Configuration verifies the compiler triple; package inspection reads
+the configured target tools from the same collection. The only Clang-specific
+diagnostic presets are MemorySanitizer and libFuzzer, which GCC does not
+provide; they are not release artifact routes. ThreadSanitizer uses the default
+Bootlin GCC toolchain. MSan and libFuzzer resolve pinned upstream LLVM 22.1.6
+from the same cache and never use host Clang; install it explicitly with
+`make toolchains-llvm`.
+
 ## Debug Gate
 
 Use `make test` as the debug lifecycle gate.

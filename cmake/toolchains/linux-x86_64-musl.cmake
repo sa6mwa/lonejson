@@ -1,9 +1,3 @@
-set(CMAKE_SYSTEM_NAME Linux)
-set(CMAKE_SYSTEM_PROCESSOR x86_64)
-set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-
-set(CMAKE_C_COMPILER /usr/bin/musl-gcc CACHE FILEPATH "")
-
-set(LONEJSON_TARGET_ARCH x86_64 CACHE STRING "" FORCE)
-set(LONEJSON_TARGET_OS linux CACHE STRING "" FORCE)
-set(LONEJSON_TARGET_LIBC musl CACHE STRING "" FORCE)
+include("${CMAKE_CURRENT_LIST_DIR}/lonejson_bootlin.cmake")
+lonejson_configure_bootlin_toolchain(
+  x86_64-linux-musl x86_64 x86_64 musl qemu-x86_64)

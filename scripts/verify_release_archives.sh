@@ -54,11 +54,19 @@ target_preset() {
   esac
 }
 
-target_cmake_system_name() {
+target_toolchain_file() {
   local target_id=$1
   case "$target_id" in
-    *apple-darwin) printf '%s\n' Darwin ;;
-    *) printf '%s\n' Linux ;;
+    x86_64-linux-gnu) printf '%s\n' "$repo_root/cmake/toolchains/linux-x86_64-gnu.cmake" ;;
+    x86_64-linux-musl) printf '%s\n' "$repo_root/cmake/toolchains/linux-x86_64-musl.cmake" ;;
+    aarch64-linux-gnu) printf '%s\n' "$repo_root/cmake/toolchains/linux-aarch64-gnu.cmake" ;;
+    aarch64-linux-musl) printf '%s\n' "$repo_root/cmake/toolchains/linux-aarch64-musl.cmake" ;;
+    armhf-linux-gnu) printf '%s\n' "$repo_root/cmake/toolchains/linux-armhf-gnu.cmake" ;;
+    armhf-linux-musl) printf '%s\n' "$repo_root/cmake/toolchains/linux-armhf-musl.cmake" ;;
+    *)
+      printf 'unknown Linux target id: %s\n' "$target_id" >&2
+      exit 1
+      ;;
   esac
 }
 
@@ -416,9 +424,9 @@ EOF
   raw_compile_flags="$(target_raw_compile_flags "$target_id")"
   raw_link_flags="$(target_raw_link_flags "$target_id")"
   # shellcheck disable=SC2086
-  run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
+  run_with_target_path "$target_id" "$CC" "$consumer_source" $TARGET_CFLAGS $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
   # shellcheck disable=SC2086
-  run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_static_flags $raw_link_flags -o "$tmp_dir/pkg-config-static-consumer"
+  run_with_target_path "$target_id" "$CC" "$consumer_source" $TARGET_CFLAGS $raw_compile_flags $pkg_config_static_flags $raw_link_flags -o "$tmp_dir/pkg-config-static-consumer"
 
   cmake_source_dir="$tmp_dir/cmake-consumer"
   cmake_build_dir="$tmp_dir/cmake-build"
@@ -448,16 +456,13 @@ EOF
       -D "LONEJSON_C_PKT_SYSTEMS_ROOT=$adapter_dependency_root"
     )
   else
-    cmake_system_name="$(target_cmake_system_name "$target_id")"
     cmake_args=(
       -S "$cmake_source_dir"
       -B "$cmake_build_dir"
       -G Ninja
       -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
-      -D "CMAKE_C_COMPILER=$CC"
-      -D "CMAKE_SYSTEM_NAME=$cmake_system_name"
-      -D CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+      -D "CMAKE_TOOLCHAIN_FILE=$(target_toolchain_file "$target_id")"
     )
   fi
   run_with_target_path "$target_id" cmake "${cmake_args[@]}"
@@ -507,7 +512,7 @@ EOF
   adapter_pkg_config_flags="$(PKG_CONFIG_PATH="$pkg_config_path" pkg-config --cflags --libs lonejson-curl lonejson-oidc lonejson-openssl)"
   adapter_c89_flags="-std=c89 -Wall -Wextra -Werror -Werror=implicit-function-declaration"
   # shellcheck disable=SC2086
-  run_with_target_path "$target_id" "$CC" "$adapter_source" $raw_compile_flags $adapter_c89_flags $adapter_pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-adapter-consumer"
+  run_with_target_path "$target_id" "$CC" "$adapter_source" $TARGET_CFLAGS $raw_compile_flags $adapter_c89_flags $adapter_pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-adapter-consumer"
 
   adapter_cmake_source_dir="$tmp_dir/cmake-adapter-consumer"
   adapter_cmake_build_dir="$tmp_dir/cmake-adapter-build"
@@ -550,9 +555,7 @@ EOF
       -G Ninja
       -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
-      -D "CMAKE_C_COMPILER=$CC"
-      -D "CMAKE_SYSTEM_NAME=$cmake_system_name"
-      -D CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+      -D "CMAKE_TOOLCHAIN_FILE=$(target_toolchain_file "$target_id")"
     )
   fi
   run_with_target_path "$target_id" cmake "${cmake_args[@]}"

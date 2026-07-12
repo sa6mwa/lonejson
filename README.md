@@ -1322,6 +1322,34 @@ environment and falls back automatically to a curl-free build otherwise. The
 same release version source of truth is used for the source-only archive and
 the generated standalone header artifact.
 
+## Compiler and cross-toolchain policy
+
+Native debug, host, and Linux release builds use pinned Bootlin stable toolchain
+collections end to end: GCC, GNU ld, binutils, debugger, libc sysroot, and
+target runtime all come from one cached collection rather than a host compiler
+or any `~/.local/cross` installation. CMake rejects a target compiler whose
+`-dumpmachine` triple does not match the collection, and package verification
+uses the configured Bootlin target tools. Clang remains available only to the
+Clang-specific MemorySanitizer and libFuzzer diagnostic presets; ThreadSanitizer
+uses the default Bootlin GCC toolchain. Those Clang-only routes use pinned
+upstream LLVM 22.1.6 from the same shared lifecycle cache, never host Clang:
+
+```sh
+make toolchains-llvm
+```
+
+Install the Linux release toolchains with:
+
+```sh
+make toolchains-all
+```
+
+They are shared across pkt.systems projects at
+`${CPKT_TOOLCHAIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains}`.
+Set `CPKT_TOOLCHAIN_CACHE` to relocate that cache. The Darwin target remains
+an explicit osxcross/SDK setup because Apple SDKs are not publicly
+downloadable.
+
 ## Verification
 
 The standard verification commands are:

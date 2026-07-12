@@ -27,6 +27,7 @@
     {
       "name": "debug",
       "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-gnu.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -38,6 +39,7 @@
     {
       "name": "host",
       "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-gnu.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
@@ -55,6 +57,7 @@
     {
       "name": "linux-gnu-release",
       "inherits": "host",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-gnu.cmake",
       "cacheVariables": {
         "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root",
         "LONEJSON_BUILD_WITH_CURL": "ON",
@@ -152,15 +155,15 @@
       "name": "tsan",
       "inherits": "debug",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
         "LONEJSON_ENABLE_TSAN": "ON"
       }
     },
     {
       "name": "msan",
-      "inherits": "debug",
+      "inherits": "base",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LONEJSON_USE_PINNED_LLVM": "ON",
         "LONEJSON_ENABLE_MSAN": "ON"
       }
     },
@@ -169,7 +172,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_C_COMPILER": "clang",
+        "LONEJSON_USE_PINNED_LLVM": "ON",
         "LONEJSON_BUILD_FUZZERS": "ON",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",

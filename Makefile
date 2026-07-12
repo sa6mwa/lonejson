@@ -9,9 +9,8 @@ TSAN_PRESET := tsan
 MSAN_PRESET := msan
 FUZZ_PRESET := fuzz
 TIME_STEP := ./scripts/time_step.sh
-LONEJSON_HAVE_CLANG ?= $(shell if command -v clang >/dev/null 2>&1; then printf '1'; else printf '0'; fi)
-LONEJSON_HAVE_TSAN ?= $(shell bash "$(CURDIR)/scripts/check_clang_sanitizer_support.sh" thread)
-LONEJSON_HAVE_MSAN ?= $(shell bash "$(CURDIR)/scripts/check_clang_sanitizer_support.sh" memory)
+LONEJSON_HAVE_TSAN ?= $(shell bash "$(CURDIR)/scripts/check_bootlin_tsan_support.sh")
+LONEJSON_HAVE_MSAN ?= $(shell bash "$(CURDIR)/scripts/check_pinned_llvm_sanitizer_support.sh" memory)
 LONEJSON_TEST_ALL_HOST_CURL ?= 1
 RELEASE_BUILD_PRESETS := \
 	linux-gnu-release \
@@ -139,7 +138,7 @@ LUA_ROCK_LIBLONEJSON_SOURCES := \
 	$(wildcard src/impl/*.h)
 
 SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_confirm_tests|lua_legacy_uservalue_tests|lua_schema_cache_tests|lua_encode_stats_tests|lua_external_liblonejson_tests|lua_target_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|run_release_matrix_darwin_target_tests)
-HOST_POLICY_CTEST_EXCLUDE := lonejson_(discover_target_tools_tests|darwin_macho_metadata_tests|darwin_linker_route_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|cmake_c_pkt_systems_root_tests|test_all_clang_optional_tests|check_clang_sanitizer_support_tests|cmake_fuzz_sanitizer_conflict_tests|cmake_fuzz_auth_optional_tests|release_werror_tests|source_release_tarball_tests|lua_src_rock_privacy_tests|lua_public_boundary_tests|lua_surface_coverage_tests|lua_source_stage_manifest_tests|release_artifact_verify_tests|release_archive_verify_tests|lua_native_test_target_filter_tests|run_release_matrix_darwin_target_tests|release_checksum_manifest_tests|ctest_metadata_tests|short_names_tests|short_names_disabled_tests|single_header_strict_warning_tests|single_header_strict_warning_build_tests|single_header_strict_clang_build_tests|single_header_config_default|single_header_config_omit_protocol|single_header_config_lj_implementation|single_header_config_lj_config_aliases|single_header_config_short_names_disabled|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|bench_gate_tests)
+HOST_POLICY_CTEST_EXCLUDE := lonejson_(discover_target_tools_tests|compiler_selection_tests|darwin_macho_metadata_tests|darwin_linker_route_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|cmake_c_pkt_systems_root_tests|test_all_clang_optional_tests|pinned_llvm_sanitizer_support_tests|bootlin_tsan_support_tests|cross_sanitizer_matrix_tests|cmake_fuzz_sanitizer_conflict_tests|cmake_fuzz_auth_optional_tests|release_werror_tests|source_release_tarball_tests|lua_legacy_uservalue_tests|lua_schema_cache_tests|lua_encode_stats_tests|lua_external_liblonejson_tests|lua_src_rock_privacy_tests|lua_public_boundary_tests|lua_surface_coverage_tests|lua_source_stage_manifest_tests|release_artifact_verify_tests|release_archive_verify_tests|lua_native_test_target_filter_tests|run_release_matrix_darwin_target_tests|release_checksum_manifest_tests|ctest_metadata_tests|short_names_tests|short_names_disabled_tests|single_header_strict_warning_tests|single_header_strict_warning_build_tests|single_header_strict_toolchain_build_tests|single_header_config_default|single_header_config_omit_protocol|single_header_config_lj_implementation|single_header_config_lj_config_aliases|single_header_config_short_names_disabled|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|bench_gate_tests)
 SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUDE)
 
 .PHONY: \
@@ -208,6 +207,14 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 	deps-armhf-linux-gnu \
 	deps-armhf-linux-musl \
 	deps-arm64-apple-darwin \
+	toolchains-x86_64-linux-gnu \
+	toolchains-x86_64-linux-musl \
+	toolchains-aarch64-linux-gnu \
+	toolchains-aarch64-linux-musl \
+	toolchains-armhf-linux-gnu \
+	toolchains-armhf-linux-musl \
+	toolchains-llvm \
+	toolchains-all \
 	deps-cross \
 	deps-all \
 	certs \
@@ -267,6 +274,7 @@ help:
 		'make test-host-curl         Build and run the host-native curl-enabled test preset.' \
 		'make test-cross             Configure, build, and run all cross release test presets serially.' \
 		'make cross-sanitizers       Extra hardening: build and run the supported armhf-linux-gnu ASan/UBSan target under QEMU.' \
+		'make toolchains-llvm        Download and verify the pinned upstream LLVM diagnostics toolchain.' \
 		'make test-all               Run debug, host, host-curl, cross, host sanitizers, benchmark gates, and fuzz-smoke serially.' \
 		'make test-all-bindings      Compatibility alias for make lua-test; binding coverage is no longer a full world gate.' \
 		'make test-install-tree      Verify checksum-listed SDK archives through installed CMake and pkg-config consumers.' \
@@ -282,6 +290,7 @@ help:
 		'make deps-debug             Alias for make deps-host.' \
 		'make deps-release           Alias for make deps-all.' \
 		'make deps-host              Download and extract the host-native c.pkt.systems dependency bundle.' \
+		'make toolchains-all         Install pinned Bootlin Linux toolchains in the shared lifecycle cache.' \
 		'make deps-x86_64-linux-gnu  Download and extract the x86_64 glibc c.pkt.systems bundle.' \
 		'make deps-x86_64-linux-musl Download and extract the x86_64 musl c.pkt.systems bundle.' \
 		'make deps-aarch64-linux-gnu Download and extract the aarch64 glibc c.pkt.systems bundle.' \
@@ -595,12 +604,12 @@ tsan:
 	cmake --build --preset $(TSAN_PRESET)
 	ctest --preset $(TSAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
 
-msan:
+msan: toolchains-llvm
 	cmake --preset $(MSAN_PRESET)
 	cmake --build --preset $(MSAN_PRESET)
 	MSAN_OPTIONS=halt_on_error=1:abort_on_error=1:exit_code=86 ctest --preset $(MSAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
 
-fuzz:
+fuzz: toolchains-llvm
 	@missing=0; for seed in $(FUZZ_LARGE_SEEDS); do \
 		if [ ! -s "$$seed" ]; then \
 			missing=1; \
@@ -719,27 +728,51 @@ format:
 
 deps-debug: deps-host
 
+toolchains-llvm:
+	./scripts/cpkt-llvm.sh ensure
+
 deps-release: deps-all
 
 deps-host:
 	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -P cmake/fetch_c_pkt_systems.cmake
 
-deps-x86_64-linux-gnu:
+toolchains-x86_64-linux-gnu:
+	./scripts/cpkt-toolchains.sh ensure x86_64-linux-gnu
+
+toolchains-x86_64-linux-musl:
+	./scripts/cpkt-toolchains.sh ensure x86_64-linux-musl
+
+toolchains-aarch64-linux-gnu:
+	./scripts/cpkt-toolchains.sh ensure aarch64-linux-gnu
+
+toolchains-aarch64-linux-musl:
+	./scripts/cpkt-toolchains.sh ensure aarch64-linux-musl
+
+toolchains-armhf-linux-gnu:
+	./scripts/cpkt-toolchains.sh ensure armhf-linux-gnu
+
+toolchains-armhf-linux-musl:
+	./scripts/cpkt-toolchains.sh ensure armhf-linux-musl
+
+toolchains-all:
+	./scripts/cpkt-toolchains.sh ensure all
+
+deps-x86_64-linux-gnu: toolchains-x86_64-linux-gnu
 	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
 
-deps-x86_64-linux-musl:
+deps-x86_64-linux-musl: toolchains-x86_64-linux-musl
 	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-musl -P cmake/fetch_c_pkt_systems.cmake
 
-deps-aarch64-linux-gnu:
+deps-aarch64-linux-gnu: toolchains-aarch64-linux-gnu
 	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aarch64-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
 
-deps-aarch64-linux-musl:
+deps-aarch64-linux-musl: toolchains-aarch64-linux-musl
 	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aarch64-linux-musl -P cmake/fetch_c_pkt_systems.cmake
 
-deps-armhf-linux-gnu:
+deps-armhf-linux-gnu: toolchains-armhf-linux-gnu
 	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
 
-deps-armhf-linux-musl:
+deps-armhf-linux-musl: toolchains-armhf-linux-musl
 	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-musl -P cmake/fetch_c_pkt_systems.cmake
 
 deps-arm64-apple-darwin:
