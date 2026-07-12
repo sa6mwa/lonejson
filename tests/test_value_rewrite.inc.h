@@ -629,7 +629,6 @@ test_value_rewrite_expect_old_value(lonejson_writer *writer,
       (test_value_rewrite_old_value_expect *)user;
 
   expect->calls++;
-  EXPECT(test_msan_bytes_initialized(old, sizeof(*old)));
   EXPECT(old->present == expect->present);
   EXPECT(old->type == expect->type);
   if (old->type == LONEJSON_VALUE_NUMBER) {
@@ -1092,24 +1091,19 @@ static void test_value_rewrite_adapter_and_sink_failures(void) {
 
   lonejson_buffer_reader_init(&reader, "abc", 3u);
   rr = lonejson_buffer_reader_read(&reader, buffer, 2u);
-  EXPECT(test_msan_bytes_initialized(&rr, sizeof(rr)));
   EXPECT(rr.bytes_read == 2u);
   EXPECT(rr.eof == 0);
   rr = lonejson_buffer_reader_read(&reader, buffer, 0u);
-  EXPECT(test_msan_bytes_initialized(&rr, sizeof(rr)));
   EXPECT(rr.bytes_read == 0u);
   EXPECT(rr.eof == 0);
   rr = lonejson_buffer_reader_read(&reader, buffer, sizeof(buffer));
-  EXPECT(test_msan_bytes_initialized(&rr, sizeof(rr)));
   EXPECT(rr.bytes_read == 1u);
   EXPECT(rr.eof != 0);
   lonejson_buffer_reader_init(&reader, NULL, 3u);
   rr = lonejson_buffer_reader_read(&reader, buffer, sizeof(buffer));
-  EXPECT(test_msan_bytes_initialized(&rr, sizeof(rr)));
   EXPECT(rr.error_code != 0);
   lonejson_buffer_reader_init(&reader, NULL, 0u);
   rr = lonejson_buffer_reader_read(&reader, buffer, sizeof(buffer));
-  EXPECT(test_msan_bytes_initialized(&rr, sizeof(rr)));
   EXPECT(rr.eof != 0);
 
   memset(&options, 0, sizeof(options));

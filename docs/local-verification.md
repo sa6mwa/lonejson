@@ -21,8 +21,8 @@ runtime. Configuration verifies the compiler triple; package inspection reads
 the configured target tools from the same collection. Native memory checking
 uses host-installed Valgrind; fuzzing uses a cached, pinned AFL++ GCC-plugin
 build tied to the Bootlin x86_64 collection. Valgrind is not a
-MemorySanitizer-equivalent analysis, but it provides the native leak and
-invalid-memory gate without a non-portable LLVM distribution.
+compiler-based uninitialized-memory analysis, but it provides the native leak
+and invalid-memory gate without a non-portable LLVM distribution.
 
 ## Debug Gate
 

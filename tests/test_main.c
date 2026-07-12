@@ -215,7 +215,6 @@ int main(void) {
   test_public_api_argument_and_serialization_guards();
   test_public_initializers_and_defaults();
   test_public_dynamic_record_helpers();
-  test_msan_public_boundary_results_are_initialized();
   test_runtime_defaults_and_method_dispatch();
   test_runtime_method_json_value_init_null_does_not_leak_pin();
   test_receiver_methods_dispatch_on_public_handles();

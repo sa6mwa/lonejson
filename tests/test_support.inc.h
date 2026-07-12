@@ -2063,29 +2063,6 @@ static void poison_bytes(void *ptr, size_t len, unsigned char value) {
   }
 }
 
-static int test_msan_bytes_initialized(const void *ptr, size_t len) {
-#if LONEJSON__HAS_MSAN
-  return ptr == NULL || __msan_test_shadow(ptr, len) < 0;
-#else
-  (void)ptr;
-  (void)len;
-  return 1;
-#endif
-}
-
-static int test_msan_cstr_initialized(const char *text) {
-  return text == NULL || test_msan_bytes_initialized(text, strlen(text) + 1u);
-}
-
-static void test_msan_poison_bytes(void *ptr, size_t len) {
-#if LONEJSON__HAS_MSAN
-  __msan_poison(ptr, len);
-#else
-  (void)ptr;
-  (void)len;
-#endif
-}
-
 static lonejson_read_result test_state_reader(void *user, unsigned char *buffer,
                                               size_t capacity) {
   test_reader_state *st = (test_reader_state *)user;
@@ -2407,7 +2384,6 @@ static lonejson_status test_sse_begin_cb(void *user,
   test_sse_state *state;
 
   (void)error;
-  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   state = (test_sse_state *)user;
   ++state->begin_count;
   test_copy_cstr(state->event, sizeof(state->event), event->event);
@@ -2421,7 +2397,6 @@ static lonejson_status test_sse_data_cb(void *user, const void *bytes,
   size_t copy_len;
 
   state = (test_sse_state *)user;
-  EXPECT(test_msan_bytes_initialized(bytes, len));
   if (state->fail) {
     (void)error;
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -2445,7 +2420,6 @@ static lonejson_status test_sse_end_cb(void *user,
   test_sse_state *state;
 
   (void)error;
-  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   state = (test_sse_state *)user;
   ++state->count;
   test_copy_cstr(state->event, sizeof(state->event), event->event);
@@ -2473,7 +2447,6 @@ static lonejson_status test_sse_json_event_cb(void *user,
   test_event *record;
 
   (void)error;
-  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   state = (test_sse_json_state *)user;
   record = (test_event *)dst;
   if (strcmp(record->id, "evtjsn") != 0 || record->ok != true) {
@@ -2495,7 +2468,6 @@ test_sse_json_collect_event_cb(void *user, const lonejson_sse_event *event,
 
   (void)dst;
   (void)error;
-  EXPECT(test_msan_bytes_initialized(event, sizeof(*event)));
   state = (test_sse_json_state *)user;
   ++state->count;
   test_copy_cstr(state->event, sizeof(state->event), event->event);
@@ -2513,7 +2485,6 @@ test_multipart_begin_cb(void *user, const lonejson_multipart_part *part,
   size_t index;
 
   (void)error;
-  EXPECT(test_msan_bytes_initialized(part, sizeof(*part)));
   state = (test_multipart_state *)user;
   if (state->fail_begin) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -2522,13 +2493,7 @@ test_multipart_begin_cb(void *user, const lonejson_multipart_part *part,
   if (index < 4u) {
     size_t i;
 
-    EXPECT(test_msan_cstr_initialized(part->name));
-    EXPECT(test_msan_cstr_initialized(part->content_type));
     for (i = 0u; i < part->header_count; ++i) {
-      EXPECT(test_msan_bytes_initialized(&part->headers[i],
-                                         sizeof(part->headers[i])));
-      EXPECT(test_msan_cstr_initialized(part->headers[i].name));
-      EXPECT(test_msan_cstr_initialized(part->headers[i].value));
     }
     test_copy_cstr(state->names[index], sizeof(state->names[index]),
                    part->name);
@@ -2546,7 +2511,6 @@ static lonejson_status test_multipart_data_cb(void *user, const void *bytes,
   test_multipart_state *state;
 
   state = (test_multipart_state *)user;
-  EXPECT(test_msan_bytes_initialized(bytes, len));
   if (state->check_no_body_alloc && state->stats != NULL) {
     if (state->stats->alloc_calls != state->alloc_calls_after_headers ||
         state->stats->realloc_calls != state->realloc_calls_after_headers) {
@@ -2577,17 +2541,10 @@ test_multipart_end_cb(void *user, const lonejson_multipart_part *part,
 
   (void)part;
   (void)error;
-  EXPECT(test_msan_bytes_initialized(part, sizeof(*part)));
   if (part != NULL) {
     size_t i;
 
-    EXPECT(test_msan_cstr_initialized(part->name));
-    EXPECT(test_msan_cstr_initialized(part->content_type));
     for (i = 0u; i < part->header_count; ++i) {
-      EXPECT(test_msan_bytes_initialized(&part->headers[i],
-                                         sizeof(part->headers[i])));
-      EXPECT(test_msan_cstr_initialized(part->headers[i].name));
-      EXPECT(test_msan_cstr_initialized(part->headers[i].value));
     }
   }
   state = (test_multipart_state *)user;
