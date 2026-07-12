@@ -222,9 +222,10 @@ extern "C" {
  * handled by `lonejson_parse_cstr`, `lonejson_parse_buffer`,
  * `lonejson_parse_reader`, `lonejson_parse_filep`, and `lonejson_parse_path`,
  * with `lonejson_validate_*` variants available when you only need syntax
- * validation. Object-framed streams use `lonejson_stream_open_*`,
- * `lonejson_stream_next`, `lonejson_stream_error`, and
- * `lonejson_stream_close`. Selected-array streams use
+ * validation. Object-framed streams emit mapped top-level JSON objects only;
+ * they do not enumerate arbitrary JSON values. They use
+ * `lonejson_stream_open_*`, `lonejson_stream_next`, `lonejson_stream_error`,
+ * and `lonejson_stream_close`. Selected-array streams use
  * `lonejson_array_stream_open_*`, `lonejson_array_stream_next`,
  * `lonejson_array_stream_next_value`, `lonejson_array_stream_error`, and
  * `lonejson_array_stream_close`. Serialization is exposed through
@@ -280,7 +281,9 @@ extern "C" {
  *
  * Object-framed streaming is the right fit when the input consists of
  * consecutive JSON objects with optional whitespace between them. lonejson does
- * not treat newlines as framing; it treats completed objects as framing.
+ * not treat newlines as framing; it treats completed objects as framing. It
+ * does not iterate scalar or array roots; use `lonejson_visit_value_*` when
+ * processing exactly one arbitrary JSON value without a schema.
  *
  * ```c
  * lonejson_stream *stream;
@@ -5232,8 +5235,9 @@ typedef enum lonejson_array_stream_result {
 
 /** Public state for an object-framed JSON stream cursor.
  *
- * Stream handles are created by `lonejson_stream_open_*()` and must be closed
- * with `lonejson_stream_close()` or `stream->close(stream)`.
+ * Stream handles emit mapped top-level objects only; they are not arbitrary
+ * JSON-value iterators. Handles are created by `lonejson_stream_open_*()` and
+ * must be closed with `lonejson_stream_close()` or `stream->close(stream)`.
  */
 struct lonejson_stream {
   /** Last stream error. Cleared when a complete object is emitted. */

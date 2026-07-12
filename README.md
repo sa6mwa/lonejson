@@ -614,7 +614,10 @@ The Lua binding exposes the same reuse control through
 `lonejson` stream parsing is object-framed rather than delimiter-framed. It
 ignores whitespace between objects, so `{"a":1}{"a":2}`, pretty-printed
 objects separated by blank lines, and JSONL-style one-object-per-line input all
-fit the same model.
+fit the same model. This cursor emits mapped top-level objects only; it is not
+an iterator for arbitrary scalar, array, or object values. Use
+`lonejson_visit_value_*` to process exactly one arbitrary JSON value without a
+schema.
 
 ```c
 lonejson_stream *stream;
