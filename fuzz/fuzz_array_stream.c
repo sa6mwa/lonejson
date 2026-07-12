@@ -366,7 +366,7 @@ static void fuzz_drive_duplicate_oracles(const uint8_t *data, size_t size) {
   fuzz_expect_root_duplicate(root_after, (size_t)after_len, (size_t)chunk);
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   char path[65];
   size_t path_len;
   const uint8_t *json;

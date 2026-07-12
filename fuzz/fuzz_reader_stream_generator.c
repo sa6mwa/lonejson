@@ -162,7 +162,7 @@ static void fuzz_generator_path(lonejson *runtime, const fuzz_person *person,
   lonejson_generator_cleanup(&generator);
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson *runtime;
   fuzz_person person;
   lonejson_error error;

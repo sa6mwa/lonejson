@@ -118,7 +118,7 @@ static lonejson_read_result fuzz_reader(void *user, unsigned char *buffer,
   return rr;
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson_config config;
   lonejson *runtime;
   lonejson_value_visitor visitor;

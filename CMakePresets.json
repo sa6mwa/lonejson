@@ -17,7 +17,6 @@
         "LONEJSON_BUILD_EXAMPLES": "ON",
         "LONEJSON_ENABLE_ASAN": "OFF",
         "LONEJSON_ENABLE_TSAN": "OFF",
-        "LONEJSON_ENABLE_MSAN": "OFF",
         "LONEJSON_BUILD_WITH_CURL": "OFF",
         "LONEJSON_BUILD_WITH_OPENSSL": "OFF",
         "LONEJSON_BUILD_WITH_JWT": "OFF",
@@ -34,6 +33,10 @@
     },
     {
       "name": "debug-lua",
+      "inherits": "debug"
+    },
+    {
+      "name": "valgrind",
       "inherits": "debug"
     },
     {
@@ -159,20 +162,11 @@
       }
     },
     {
-      "name": "msan",
-      "inherits": "base",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "LONEJSON_USE_PINNED_LLVM": "ON",
-        "LONEJSON_ENABLE_MSAN": "ON"
-      }
-    },
-    {
       "name": "fuzz",
       "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-aflpp.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "LONEJSON_USE_PINNED_LLVM": "ON",
         "LONEJSON_BUILD_FUZZERS": "ON",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",
@@ -216,8 +210,8 @@
       "configurePreset": "tsan"
     },
     {
-      "name": "msan",
-      "configurePreset": "msan"
+      "name": "valgrind",
+      "configurePreset": "valgrind"
     },
     {
       "name": "fuzz",
@@ -394,8 +388,8 @@
       }
     },
     {
-      "name": "msan",
-      "configurePreset": "msan",
+      "name": "valgrind",
+      "configurePreset": "valgrind",
       "output": {
         "outputOnFailure": true
       }

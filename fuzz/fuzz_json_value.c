@@ -119,7 +119,7 @@ static const lonejson_field fuzz_json_value_doc_fields[] = {
 LONEJSON_MAP_DEFINE(fuzz_json_value_doc_map, fuzz_json_value_doc,
                     fuzz_json_value_doc_fields);
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson *runtime;
   lonejson *runtime_pretty;
   lonejson *runtime_streamed;

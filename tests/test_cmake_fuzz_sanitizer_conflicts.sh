@@ -18,21 +18,12 @@ run_expect_fail() {
   fi
   grep -F 'LONEJSON_BUILD_FUZZERS is incompatible with' "$log" >/dev/null
   grep -F 'LONEJSON_ENABLE_TSAN' "$log" >/dev/null
-  grep -F 'LONEJSON_ENABLE_MSAN.' "$log" >/dev/null
 }
 
 run_expect_fail fuzz_tsan \
+  -DCMAKE_TOOLCHAIN_FILE="$repo_root/cmake/toolchains/linux-x86_64-aflpp.cmake" \
   -DCMAKE_BUILD_TYPE=Debug \
   -DLONEJSON_BUILD_TESTS=OFF \
   -DLONEJSON_BUILD_EXAMPLES=OFF \
   -DLONEJSON_BUILD_FUZZERS=ON \
-  -DLONEJSON_USE_PINNED_LLVM=ON \
   -DLONEJSON_ENABLE_TSAN=ON
-
-run_expect_fail fuzz_msan \
-  -DLONEJSON_USE_PINNED_LLVM=ON \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DLONEJSON_BUILD_TESTS=OFF \
-  -DLONEJSON_BUILD_EXAMPLES=OFF \
-  -DLONEJSON_BUILD_FUZZERS=ON \
-  -DLONEJSON_ENABLE_MSAN=ON

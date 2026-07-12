@@ -37,11 +37,6 @@ if printf '%s\n' "$output" | grep -F -- '-DLONEJSON_ENABLE_TSAN=ON' >/dev/null; 
   exit 1
 fi
 
-if printf '%s\n' "$output" | grep -F -- '-DLONEJSON_ENABLE_MSAN=ON' >/dev/null; then
-  printf 'cross sanitizer matrix must not advertise unsupported cross MSan coverage\n' >&2
-  exit 1
-fi
-
 if printf '%s\n' "$script_text" | grep -E '^(aarch64|armhf-linux-musl|aarch64-linux-musl)' >/dev/null; then
   printf 'cross sanitizer matrix must list only currently executable QEMU sanitizer targets\n' >&2
   exit 1

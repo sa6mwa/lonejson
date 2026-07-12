@@ -1329,13 +1329,13 @@ collections end to end: GCC, GNU ld, binutils, debugger, libc sysroot, and
 target runtime all come from one cached collection rather than a host compiler
 or any `~/.local/cross` installation. CMake rejects a target compiler whose
 `-dumpmachine` triple does not match the collection, and package verification
-uses the configured Bootlin target tools. Clang remains available only to the
-Clang-specific MemorySanitizer and libFuzzer diagnostic presets; ThreadSanitizer
-uses the default Bootlin GCC toolchain. Those Clang-only routes use pinned
-upstream LLVM 22.1.6 from the same shared lifecycle cache, never host Clang:
+uses the configured Bootlin target tools. Native memory checking uses the
+host-installed Valgrind Memcheck. Fuzzing uses a pinned AFL++ GCC-plugin build
+tied to the cached Bootlin x86_64 GCC collection; neither route uses a host
+compiler. ThreadSanitizer uses the default Bootlin GCC toolchain:
 
 ```sh
-make toolchains-llvm
+make toolchains-aflpp
 ```
 
 Install the Linux release toolchains with:

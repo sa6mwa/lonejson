@@ -127,7 +127,7 @@ scan_shipped_payload_for_instrumentation() {
       *liblonejson*.a | *liblonejson*.so* | *liblonejson*.dylib | \
       *.rockspec | *.h | *.pc | *.cmake | *.so | *.dylib)
         if strings "$file_path" | grep -E \
-          '(__asan|__msan|__tsan|libasan|libmsan|libtsan|AddressSanitizer|MemorySanitizer|ThreadSanitizer|LLVMFuzzerTestOneInput|libFuzzer|-fsanitize)' \
+          '(__asan|__tsan|libasan|libtsan|AddressSanitizer|ThreadSanitizer|-fsanitize)' \
           >/dev/null; then
           fail_artifact "$artifact" "$rel_path" \
             "sanitizer or fuzzer instrumentation marker leaked"

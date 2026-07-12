@@ -94,7 +94,7 @@ static void fuzz_variant(const uint8_t *data, size_t size,
                                     &error);
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   if (size > 65536u) {
     return 0;
   }

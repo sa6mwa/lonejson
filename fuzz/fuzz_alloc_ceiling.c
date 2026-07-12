@@ -160,7 +160,7 @@ static char *fuzz_build_budget_json(size_t name_len, size_t title_len,
   return json;
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson *seed_runtime = NULL;
   lonejson *runtime = NULL;
   lonejson_config config;

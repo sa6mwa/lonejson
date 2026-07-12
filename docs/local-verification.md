@@ -18,12 +18,11 @@ The default cache is
 Every native debug, host, and Linux release build uses a single pinned Bootlin collection:
 its GCC driver, GNU linker, binutils/debug tools, libc sysroot, and target
 runtime. Configuration verifies the compiler triple; package inspection reads
-the configured target tools from the same collection. The only Clang-specific
-diagnostic presets are MemorySanitizer and libFuzzer, which GCC does not
-provide; they are not release artifact routes. ThreadSanitizer uses the default
-Bootlin GCC toolchain. MSan and libFuzzer resolve pinned upstream LLVM 22.1.6
-from the same cache and never use host Clang; install it explicitly with
-`make toolchains-llvm`.
+the configured target tools from the same collection. Native memory checking
+uses host-installed Valgrind; fuzzing uses a cached, pinned AFL++ GCC-plugin
+build tied to the Bootlin x86_64 collection. Valgrind is not a
+MemorySanitizer-equivalent analysis, but it provides the native leak and
+invalid-memory gate without a non-portable LLVM distribution.
 
 ## Debug Gate
 

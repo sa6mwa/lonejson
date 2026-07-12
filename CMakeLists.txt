@@ -28,10 +28,9 @@ find_program(CLANG_FORMAT_BIN NAMES clang-format)
 option(LONEJSON_BUILD_TESTS "Build lonejson tests." ON)
 option(LONEJSON_BUILD_EXAMPLES "Build lonejson examples." OFF)
 option(LONEJSON_BUILD_BENCHMARKS "Build lonejson benchmarks." OFF)
-option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
+option(LONEJSON_BUILD_FUZZERS "Build lonejson AFL++ fuzz targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_TSAN "Enable ThreadSanitizer." OFF)
-option(LONEJSON_ENABLE_MSAN "Enable MemorySanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
 option(LONEJSON_BUILD_WITH_OPENSSL "Build lonejson with OpenSSL-backed auth/crypto support enabled." OFF)
@@ -284,14 +283,9 @@ if(LONEJSON_ENABLE_TSAN)
   math(EXPR LONEJSON_ENABLED_SANITIZER_COUNT
     "${LONEJSON_ENABLED_SANITIZER_COUNT} + 1")
 endif()
-if(LONEJSON_ENABLE_MSAN)
-  math(EXPR LONEJSON_ENABLED_SANITIZER_COUNT
-    "${LONEJSON_ENABLED_SANITIZER_COUNT} + 1")
-endif()
 if(LONEJSON_ENABLED_SANITIZER_COUNT GREATER 1)
   message(FATAL_ERROR
-    "Enable at most one of LONEJSON_ENABLE_ASAN, LONEJSON_ENABLE_TSAN, or "
-    "LONEJSON_ENABLE_MSAN at a time.")
+    "Enable at most one of LONEJSON_ENABLE_ASAN or LONEJSON_ENABLE_TSAN at a time.")
 endif()
 
 if(LONEJSON_ENABLE_ASAN AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
@@ -305,20 +299,6 @@ if(LONEJSON_ENABLE_TSAN)
   endif()
   add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
   add_link_options(-fsanitize=thread)
-endif()
-
-if(LONEJSON_ENABLE_MSAN)
-  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "LONEJSON_ENABLE_MSAN requires Clang.")
-  endif()
-  add_compile_options(
-    -fsanitize=memory
-    -fsanitize-memory-track-origins=2
-    -fno-omit-frame-pointer
-    -O1)
-  add_link_options(
-    -fsanitize=memory
-    -fsanitize-memory-track-origins=2)
 endif()
 
 if(LONEJSON_ENABLE_STACK_USAGE AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
@@ -377,17 +357,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 endif()
 
 if(LONEJSON_BUILD_FUZZERS)
-  if(LONEJSON_ENABLE_TSAN OR LONEJSON_ENABLE_MSAN)
+  if(LONEJSON_ENABLE_TSAN)
     message(FATAL_ERROR
-      "LONEJSON_BUILD_FUZZERS is incompatible with "
-      "LONEJSON_ENABLE_TSAN and LONEJSON_ENABLE_MSAN.")
+      "LONEJSON_BUILD_FUZZERS is incompatible with LONEJSON_ENABLE_TSAN.")
   endif()
-  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "LONEJSON_BUILD_FUZZERS requires Clang/libFuzzer.")
+  if(NOT LONEJSON_AFLPP_ROOT)
+    message(FATAL_ERROR
+      "LONEJSON_BUILD_FUZZERS requires the pinned AFL++ GCC-plugin toolchain.")
   endif()
-  target_compile_options(lonejson_static PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
 endif()
 
 set_target_properties(lonejson_shared PROPERTIES
@@ -727,14 +704,9 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_c_pkt_systems_root.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
-      NAME lonejson_test_all_clang_optional_tests
+      NAME lonejson_test_all_hardening_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_test_all_clang_optional.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}")
-    add_test(
-      NAME lonejson_pinned_llvm_sanitizer_support_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_pinned_llvm_sanitizer_support.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_bootlin_tsan_support_tests
@@ -1062,180 +1034,60 @@ if(LONEJSON_BUILD_BENCHMARKS)
 endif()
 
 if(LONEJSON_BUILD_FUZZERS)
-  add_executable(lonejson_fuzz_base64 fuzz/fuzz_base64.c)
-  target_include_directories(lonejson_fuzz_base64 PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_base64 PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_base64 PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_base64 PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_base64)
+  add_library(lonejson_afl_driver STATIC fuzz/afl_driver.c)
+  lonejson_configure_c_target(lonejson_afl_driver)
+  # AFL++ instruments through its pinned GCC wrapper. Existing callbacks use
+  # a small native file-input driver rather than an LLVM runtime.
+  function(lonejson_add_afl_fuzz_target target source)
+    add_executable("${target}" "${source}")
+    target_include_directories("${target}" PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+    target_link_libraries("${target}" PRIVATE lonejson lonejson_afl_driver)
+    target_compile_options("${target}" PRIVATE -fno-omit-frame-pointer)
+    lonejson_configure_c_target("${target}")
+  endfunction()
 
-  add_executable(lonejson_fuzz_validate fuzz/fuzz_validate.c)
-  target_include_directories(lonejson_fuzz_validate PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_validate PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_validate PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_validate PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_validate)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_base64 fuzz/fuzz_base64.c)
 
-  add_executable(lonejson_fuzz_mapped_parse fuzz/fuzz_mapped_parse.c)
-  target_include_directories(lonejson_fuzz_mapped_parse PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_mapped_parse PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_mapped_parse PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_mapped_parse PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_mapped_parse)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_validate fuzz/fuzz_validate.c)
 
-  add_executable(lonejson_fuzz_array_stream fuzz/fuzz_array_stream.c)
-  target_include_directories(lonejson_fuzz_array_stream PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_array_stream PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_array_stream PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_array_stream PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_array_stream)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_mapped_parse fuzz/fuzz_mapped_parse.c)
 
-  add_executable(lonejson_fuzz_json_value fuzz/fuzz_json_value.c)
-  target_include_directories(lonejson_fuzz_json_value PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_json_value PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_json_value PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_json_value PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_json_value)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_array_stream fuzz/fuzz_array_stream.c)
 
-  add_executable(lonejson_fuzz_value_visitor fuzz/fuzz_value_visitor.c)
-  target_include_directories(lonejson_fuzz_value_visitor PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_value_visitor PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_value_visitor PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_value_visitor PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_value_visitor)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_json_value fuzz/fuzz_json_value.c)
 
-  add_executable(lonejson_fuzz_path_value_visitor
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_value_visitor fuzz/fuzz_value_visitor.c)
+
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_path_value_visitor
     fuzz/fuzz_path_value_visitor.c)
-  target_include_directories(lonejson_fuzz_path_value_visitor
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_path_value_visitor PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_path_value_visitor PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_path_value_visitor PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_path_value_visitor)
 
-  add_executable(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
-  target_include_directories(lonejson_fuzz_value_rewrite PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_value_rewrite PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_value_rewrite PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_value_rewrite PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_value_rewrite)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
 
-  add_executable(lonejson_fuzz_reader_stream_generator
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_reader_stream_generator
     fuzz/fuzz_reader_stream_generator.c)
-  target_include_directories(lonejson_fuzz_reader_stream_generator
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_reader_stream_generator
-    PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_reader_stream_generator PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_reader_stream_generator PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_reader_stream_generator)
 
-  add_executable(lonejson_fuzz_writer_generator_backpressure
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_writer_generator_backpressure
     fuzz/fuzz_writer_generator_backpressure.c)
-  target_include_directories(lonejson_fuzz_writer_generator_backpressure
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_writer_generator_backpressure
-    PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_writer_generator_backpressure PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_writer_generator_backpressure PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_writer_generator_backpressure)
 
-  add_executable(lonejson_fuzz_writer_value_stream
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_writer_value_stream
     fuzz/fuzz_writer_value_stream.c)
-  target_include_directories(lonejson_fuzz_writer_value_stream
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_writer_value_stream PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_writer_value_stream PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined)
-  target_link_options(lonejson_fuzz_writer_value_stream PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_writer_value_stream)
 
-  add_executable(lonejson_fuzz_protocol_framing
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_protocol_framing
     fuzz/fuzz_protocol_framing.c)
-  target_include_directories(lonejson_fuzz_protocol_framing
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_protocol_framing
-    PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_protocol_framing PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_protocol_framing PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_protocol_framing)
 
-  add_executable(lonejson_fuzz_fixed_string_paths
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_fixed_string_paths
     fuzz/fuzz_fixed_string_paths.c)
-  target_include_directories(lonejson_fuzz_fixed_string_paths
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_fixed_string_paths PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_fixed_string_paths PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_fixed_string_paths PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_fixed_string_paths)
 
-  add_executable(lonejson_fuzz_alloc_ceiling
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_alloc_ceiling
     fuzz/fuzz_alloc_ceiling.c)
-  target_include_directories(lonejson_fuzz_alloc_ceiling
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_alloc_ceiling PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_alloc_ceiling PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_alloc_ceiling PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_alloc_ceiling)
 
-  add_executable(lonejson_fuzz_parser_boundaries
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_parser_boundaries
     fuzz/fuzz_parser_boundaries.c)
-  target_include_directories(lonejson_fuzz_parser_boundaries
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_parser_boundaries PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_parser_boundaries PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_parser_boundaries PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_parser_boundaries)
 
   if(LONEJSON_BUILD_WITH_CURL AND LONEJSON_BUILD_WITH_OPENSSL AND
       LONEJSON_BUILD_WITH_JWT AND LONEJSON_BUILD_WITH_OIDC)
-    add_executable(lonejson_fuzz_jwt fuzz/fuzz_jwt.c)
-    target_include_directories(lonejson_fuzz_jwt PRIVATE
-      "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-    target_link_libraries(lonejson_fuzz_jwt PRIVATE lonejson)
+    lonejson_add_afl_fuzz_target(lonejson_fuzz_jwt fuzz/fuzz_jwt.c)
     lonejson_target_include_curl(lonejson_fuzz_jwt)
     lonejson_target_include_openssl(lonejson_fuzz_jwt)
     target_link_libraries(lonejson_fuzz_jwt PRIVATE OpenSSL::Crypto)
@@ -1244,12 +1096,6 @@ if(LONEJSON_BUILD_FUZZERS)
       LONEJSON_WITH_OPENSSL
       LONEJSON_WITH_JWT
       LONEJSON_WITH_OIDC)
-    target_compile_options(lonejson_fuzz_jwt PRIVATE
-      -fsanitize=fuzzer-no-link,address,undefined
-      -fno-omit-frame-pointer)
-    target_link_options(lonejson_fuzz_jwt PRIVATE
-      -fsanitize=fuzzer,address,undefined)
-    lonejson_configure_c_target(lonejson_fuzz_jwt)
   endif()
 endif()
 

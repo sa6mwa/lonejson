@@ -154,7 +154,7 @@ static char *fuzz_build_followup_json(const uint8_t *data, size_t size,
   return json;
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson *seed_runtime = NULL;
   lonejson *runtime = NULL;
   lonejson_config config;
