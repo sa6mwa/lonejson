@@ -37,7 +37,7 @@ option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled."
 option(LONEJSON_BUILD_WITH_OPENSSL "Build lonejson with OpenSSL-backed auth/crypto support enabled." OFF)
 option(LONEJSON_BUILD_WITH_JWT "Build lonejson with JWT/JWK auth APIs enabled." OFF)
 option(LONEJSON_BUILD_WITH_OIDC "Build lonejson with OIDC/OAuth2 helper APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "24" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "25" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -584,7 +584,6 @@ if(LONEJSON_BUILD_TESTS)
       LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
       LONEJSON_TEST_MAP_ANALYSIS_COUNTER=1
       LONEJSON_TEST_LUA_ENCODE_STATS=1
-      LONEJSON_TEST_LUA_CANDIDATE_INFO=1
       LONEJSON_TEST_LUA_SIMULATE_NO_MAXINTEGER=1)
     target_link_libraries(lonejson_lua_target_core PRIVATE
       lonejson_shared
@@ -649,7 +648,6 @@ if(LONEJSON_BUILD_TESTS)
       LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
       LONEJSON_TEST_MAP_ANALYSIS_COUNTER=1
       LONEJSON_TEST_LUA_ENCODE_STATS=1
-      LONEJSON_TEST_LUA_CANDIDATE_INFO=1
       LONEJSON_TEST_LUA_SIMULATE_NO_MAXINTEGER=1)
     target_link_libraries(lonejson_lua_interop_tests PRIVATE
       lonejson_shared
@@ -919,9 +917,6 @@ if(LONEJSON_BUILD_TESTS)
     TEST_LJ_CONFIG_ALIASES
     TEST_USE_SHORT_NAMES)
   lonejson_add_single_header_config_test(
-    lonejson_single_header_config_small_parser_default_candidate_rejects
-    TEST_SMALL_PARSER_DEFAULT_CANDIDATE_REJECTS)
-  lonejson_add_single_header_config_test(
     lonejson_single_header_config_short_names_disabled
     TEST_DISABLE_SHORT_NAMES)
 
@@ -1130,18 +1125,6 @@ if(LONEJSON_BUILD_FUZZERS)
     -fsanitize=fuzzer,address,undefined)
   lonejson_configure_c_target(lonejson_fuzz_path_value_visitor)
 
-  add_executable(lonejson_fuzz_candidate_stream
-    fuzz/fuzz_candidate_stream.c)
-  target_include_directories(lonejson_fuzz_candidate_stream
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_candidate_stream PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_candidate_stream PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_candidate_stream PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_candidate_stream)
-
   add_executable(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
   target_include_directories(lonejson_fuzz_value_rewrite PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
   target_link_libraries(lonejson_fuzz_value_rewrite PRIVATE lonejson)
@@ -1291,7 +1274,6 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/38_writer_api.h"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_candidate_transform_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_value_rewrite_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/40_auth_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/bench/lonejson_bench.c"
@@ -1315,7 +1297,6 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_path_value_visitor.c"
-      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_candidate_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_rewrite.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_generator_backpressure.c"
@@ -1501,7 +1482,6 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/38_writer_api.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_candidate_transform_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_value_rewrite_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/40_auth_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_single_header.cmake

@@ -28,7 +28,10 @@ if [[ -f "$manifest_path" ]]; then
   tar -C "$repo_root" -cf - -T "$manifest_path" | tar -xf - -C "$stage_dir"
 elif git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   tmp_manifest="$(mktemp)"
-  git -C "$repo_root" ls-files >"$tmp_manifest"
+  while IFS= read -r -d '' path; do
+    [[ -e "$repo_root/$path" ]] || continue
+    printf '%s\n' "$path" >>"$tmp_manifest"
+  done < <(git -C "$repo_root" ls-files -z)
   cp "$tmp_manifest" "$stage_dir/RELEASE_MANIFEST"
   tar -C "$repo_root" -cf - -T "$tmp_manifest" | tar -xf - -C "$stage_dir"
 else

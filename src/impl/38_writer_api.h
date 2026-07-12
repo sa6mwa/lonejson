@@ -690,32 +690,6 @@ void lonejson_writer_cleanup(lonejson_writer *writer) {
   lonejson__writer_assign_methods(writer);
 }
 
-static void lonejson__writer_reset_for_reuse(lonejson_writer *writer) {
-  lonejson__writer_state *state;
-
-  if (writer == NULL || writer->state == NULL) {
-    return;
-  }
-  state = (lonejson__writer_state *)writer->state;
-  lonejson__writer_clear_event(state);
-  state->frame_count = 0u;
-  state->root_written = 0;
-  state->finished = 0;
-  state->string_open = 0;
-  state->number_open = 0;
-  state->failed = 0;
-  state->value_stream_active = 0;
-  state->string_reader_active = 0;
-  state->string_reader = NULL;
-  state->string_reader_user = NULL;
-  state->string_reader_buffer_len = 0u;
-  state->string_reader_buffer_off = 0u;
-  state->string_reader_eof = 0;
-  state->number.len = 0u;
-  lonejson__clear_error(&writer->error);
-  lonejson__writer_assign_methods(writer);
-}
-
 lonejson_status lonejson_writer_begin_object(lonejson_writer *writer,
                                              lonejson_error *error) {
   lonejson_status status;

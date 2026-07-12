@@ -154,29 +154,6 @@ static size_t lonejson__format_size_decimal(char *out, size_t out_size,
   return len;
 }
 
-static size_t lonejson__format_u64_decimal(char *out, size_t out_size,
-                                           lonejson_uint64 value) {
-  char reversed[sizeof(lonejson_uint64) * 3u + 1u];
-  size_t len = 0u;
-  size_t i;
-
-  do {
-    lonejson_uint64 digit = value % 10u;
-    reversed[len] = (char)('0' + (int)digit);
-    value /= 10u;
-    ++len;
-  } while (value != 0u && len < sizeof(reversed));
-
-  if (out_size <= len) {
-    return len;
-  }
-  for (i = 0u; i < len; ++i) {
-    out[i] = reversed[len - 1u - i];
-  }
-  out[len] = '\0';
-  return len;
-}
-
 typedef union lonejson__parser_workspace_align_union {
   lonejson_frame frame;
   void *ptr;
@@ -1289,15 +1266,6 @@ lonejson_path_value_visitor lonejson_default_path_value_visitor(void) {
 
   memset(&visitor, 0, sizeof(visitor));
   return visitor;
-}
-
-lonejson_candidate_stream_options
-lonejson_default_candidate_stream_options(void) {
-  lonejson_candidate_stream_options options;
-
-  memset(&options, 0, sizeof(options));
-  options.framing = LONEJSON_CANDIDATE_FRAMING_AUTO;
-  return options;
 }
 
 static void

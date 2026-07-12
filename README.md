@@ -475,13 +475,7 @@ covers the lower-level case where one arbitrary JSON value should be visited
 without a schema. Parse, write, and arbitrary-value limits are configured on
 the instantiated `lonejson` runtime through `lonejson_config`.
 
-Candidate stream and candidate transform reader/file/path/fd APIs use the
-runtime's `candidate_read_buffer_size` as their transport buffer size. The
-default is `LONEJSON_CANDIDATE_READ_BUFFER_SIZE`, currently the parser buffer
-size. Reader-heavy candidate workloads can raise it, for example to `64 KiB`,
-to reduce callback or file-read churn without materializing the whole input.
-Buffer-backed candidate APIs ignore this setting because their input is already
-memory-resident.
+
 
 Every public operation hangs off one instantiated runtime. You can call the
 free functions such as `lonejson_parse_cstr(lj, ...)` or the equivalent method
@@ -859,59 +853,6 @@ Structured old values are observable through `old_value_visitor`; visitor
 events are streamed and balanced, and the complete old value is not materialized.
 See `examples/value_rewrite_replace_with.c` for a complete integer increment
 program.
-
-### Transform candidate streams
-
-Use `lonejson_transform_candidates_*` when a stream of JSON candidates should be
-validated once and rewritten as candidates are parsed. The input can be a
-buffer, reader callback, `FILE *`, path, or file descriptor, with the same
-candidate framing modes used by `lonejson_visit_candidates_*`: repeated values,
-JSON Lines, a single value, or top-level array items.
-
-The transform mode is explicit and selected before output can leak.
-`LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING` streams source values directly
-when a plan can commit output as it parses. Kept strings and numbers stream by
-default; complete old string/number views are opt-in with
-`LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE`, either call-wide or through
-the per-event `old_scalar` policy callback for values whose replacement logic
-needs the complete old scalar.
-`LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED` retains each logical
-candidate in a bounded `lonejson_spooled` handle, spills according to the
-selected runtime spool policy, asks `candidate_decision` whether to emit, drop,
-stop, or error, and replays emitted candidates through the same transform
-executor. Result counters report streamed, spooled, spilled, replayed, dropped,
-stopped, and projected candidates plus per-candidate spool bytes.
-
-`observer` receives the original token stream first. In gated-spooled mode,
-replay callbacks receive the caller-owned candidate policy returned by
-`candidate_decision`; replay does not call `observer` again. Replacement JSON is
-emitted only through `lonejson_writer`, so callers never write raw commas,
-colons, string escapes, object keys, separators, or container punctuation.
-`insert` callbacks can add object members at object begin, before or after
-source members, and at object end.
-
-`LONEJSON_CANDIDATE_TRANSFORM_DROP` suppresses an object member, array element,
-or complete candidate root while preserving valid output. Emitted candidates are
-JSON Lines values terminated with `\n`, including the final emitted candidate.
-Dropped candidates emit no bytes, and an all-dropped transform emits no newline.
-
-Structural projection is configured with
-`lonejson_candidate_transform_projection_path` entries. Projection segment kinds
-distinguish object members from array indexes, so object key `"0"` and array
-index `0` are unambiguous. LoneJSON emits projection parent objects/arrays,
-groups missing object-member descendants, and writes `null` placeholders for
-projected sparse array indexes. Invalid projection shapes, such as mixed object
-and array roots, fail with `LONEJSON_STATUS_UNSUPPORTED` before partial output.
-`LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_SOURCE_EVENTS` is the default
-streaming-preferred projection/composition mode.
-`LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM` is available
-for gated-spooled transforms that must first build the projected logical
-candidate into a bounded spool, then replay that projected candidate through
-normal transform callbacks.
-
-`LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS` flattens nested root arrays
-into logical candidates. Transform mode, projection, mutation, gated spooling,
-replay, and candidate metadata apply to each logical candidate independently.
 
 ### Parse Server-Sent Events and multipart streams
 
