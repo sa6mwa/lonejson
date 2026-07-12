@@ -28,8 +28,9 @@ require_text 'release-pipeline'
 require_text 'prerelease: release-pipeline'
 require_text 'prerelease-hardening: prerelease'
 require_text 'release-pipeline:'
-require_text '+$(TIME_STEP) prerelease/test-all $(MAKE) test-all'
+require_text '+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0'
 require_text '+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix'
+require_text 'Skipping test-host-curl: release-matrix runs the full curl-enabled host release tests before packaging'
 require_text 'release:'
 require_text '$(TIME_STEP) release/clean ./scripts/clean.sh'
 require_text '+$(TIME_STEP) release/pipeline $(MAKE) release-pipeline'
@@ -43,7 +44,7 @@ line_number() {
   grep -nF -- "$text" "$makefile" | head -n 1 | cut -d: -f1
 }
 
-test_all_line=$(line_number '+$(TIME_STEP) prerelease/test-all $(MAKE) test-all')
+test_all_line=$(line_number '+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0')
 matrix_line=$(line_number '+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix')
 clean_line=$(line_number '$(TIME_STEP) release/clean ./scripts/clean.sh')
 pipeline_line=$(line_number '+$(TIME_STEP) release/pipeline $(MAKE) release-pipeline')

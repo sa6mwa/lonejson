@@ -12,6 +12,7 @@ TIME_STEP := ./scripts/time_step.sh
 LONEJSON_HAVE_CLANG ?= $(shell if command -v clang >/dev/null 2>&1; then printf '1'; else printf '0'; fi)
 LONEJSON_HAVE_TSAN ?= $(shell bash "$(CURDIR)/scripts/check_clang_sanitizer_support.sh" thread)
 LONEJSON_HAVE_MSAN ?= $(shell bash "$(CURDIR)/scripts/check_clang_sanitizer_support.sh" memory)
+LONEJSON_TEST_ALL_HOST_CURL ?= 1
 RELEASE_BUILD_PRESETS := \
 	linux-gnu-release \
 	linux-musl-release \
@@ -399,7 +400,7 @@ prerelease-live:
 prerelease-hardening: prerelease
 
 release-pipeline:
-	+$(TIME_STEP) prerelease/test-all $(MAKE) test-all
+	+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0
 	+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix
 
 release-matrix:
@@ -510,7 +511,11 @@ cross-sanitizers: deps-cross
 test-all:
 	+$(TIME_STEP) test $(MAKE) test
 	+$(TIME_STEP) test-host $(MAKE) test-host
+ifeq ($(LONEJSON_TEST_ALL_HOST_CURL),1)
 	+$(TIME_STEP) test-host-curl $(MAKE) test-host-curl
+else
+	@printf '%s\n' 'Skipping test-host-curl: release-matrix runs the full curl-enabled host release tests before packaging'
+endif
 	+$(TIME_STEP) test-cross $(MAKE) test-cross
 	+$(TIME_STEP) asan $(MAKE) asan
 ifeq ($(LONEJSON_HAVE_TSAN),1)
