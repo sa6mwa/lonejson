@@ -26,6 +26,7 @@ require_text 'test-e2e:'
 require_text '+$(TIME_STEP) e2e/curl $(MAKE) test-curl-e2e'
 require_text '+$(TIME_STEP) e2e/oidc $(MAKE) test-oidc-e2e'
 require_text '+$(TIME_STEP) e2e/m2m $(MAKE) test-m2m-e2e'
+require_text 'fuzz: deps-host toolchains-aflpp'
 
 grep -F 'NAMES lua lua5.5 lua5.4 lua5.3 luajit' "$repo_root/CMakeLists.txt" >/dev/null && {
   printf 'obsolete Lua runtime discovery remains in CMakeLists.txt\n' >&2

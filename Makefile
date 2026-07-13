@@ -574,7 +574,7 @@ valgrind:
 	valgrind --leak-check=full --track-origins=yes --error-exitcode=86 --quiet \
 		./build/$(VALGRIND_PRESET)/lonejson_tests
 
-fuzz: toolchains-aflpp
+fuzz: deps-host toolchains-aflpp
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_base64 lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_path_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries lonejson_fuzz_jwt
 	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -D LONEJSON_AFL_COMPILER="$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^cc=//p')" -P cmake/check_fuzz_instrumentation.cmake

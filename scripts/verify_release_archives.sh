@@ -92,7 +92,7 @@ target_raw_link_flags() {
         printf 'missing target linker for %s\n' "$target_id" >&2
         exit 1
       fi
-      printf '%s\n' "-fuse-ld=$LINKER"
+      printf '%s\n' "--ld-path=$LINKER"
       ;;
     *) printf '%s\n' "" ;;
   esac
