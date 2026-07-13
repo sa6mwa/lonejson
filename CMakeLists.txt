@@ -19,7 +19,10 @@ if(NOT LONEJSON_VERSION_RESULT EQUAL 0 OR NOT LONEJSON_RESOLVED_VERSION)
 endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonCompiler.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CpktDependencyCache.cmake")
 project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
+
+cpkt_resolve_dependency_cache(LONEJSON_RESOLVED_DEPENDENCY_CACHE)
 
 include(CTest)
 find_program(LONEJSON_LUA_EXECUTABLE

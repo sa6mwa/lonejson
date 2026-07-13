@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cert_dir="${repo_root}/docker/nginx/certs"
+cert_dir="${repo_root}/devenv/volumes/nginx/certs"
 crt="${cert_dir}/server.crt"
 key="${cert_dir}/server.key"
 cfg="${cert_dir}/openssl.cnf"

@@ -116,10 +116,16 @@ for spec in \
   "$armhf_musl_root|arm-linux|arm-buildroot-linux-musleabihf"; do
   IFS='|' read -r root prefix triple <<<"$spec"
   mkdir -p "$root/bin" "$root/$triple/sysroot/usr/include" "$root/$triple/sysroot/usr/lib"
-  touch "$root/$triple/sysroot/usr/include/stdio.h"
+  mkdir -p "$root/lib"
+  touch "$root/$triple/sysroot/usr/include/stdio.h" \
+    "$root/lib/libstdc++.a" "$root/lib/libgcc.a"
   touch "$root/$triple/sysroot/usr/lib/libc.so"
   for tool in gcc g++ ld ar ranlib strip nm objcopy objdump addr2line gdb readelf; do
-    printf '#!/usr/bin/env bash\nexit 0\n' >"$root/bin/$prefix-$tool"
+    if [[ "$tool" == g++ ]]; then
+      printf '#!/usr/bin/env bash\ncase "${1:-}" in\n  -print-file-name=libstdc++.a) printf "%%s\\n" "$(dirname "$0")/../lib/libstdc++.a" ;;\n  -print-file-name=libgcc.a) printf "%%s\\n" "$(dirname "$0")/../lib/libgcc.a" ;;\n  *) exit 0 ;;\nesac\n' >"$root/bin/$prefix-$tool"
+    else
+      printf '#!/usr/bin/env bash\nexit 0\n' >"$root/bin/$prefix-$tool"
+    fi
     chmod +x "$root/bin/$prefix-$tool"
   done
 done

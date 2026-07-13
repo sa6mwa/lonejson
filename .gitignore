@@ -9,10 +9,7 @@
 /src/lua/*.o
 /examples/bin/
 /examples/lua_binding.out
-/docker/nginx/certs/server.crt
-/docker/nginx/certs/server.key
-/docker/nginx/certs/openssl.cnf
-/docker/nginx/generated/
+/devenv/volumes/
 /perflogs/hosts/*/history.jsonl
 /perflogs/hosts/*/latest.json
 /perflogs/hosts/*/runs/

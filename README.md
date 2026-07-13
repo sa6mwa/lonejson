@@ -1351,6 +1351,27 @@ Set `CPKT_TOOLCHAIN_CACHE` to relocate that cache. The Darwin target remains
 an explicit osxcross/SDK setup because Apple SDKs are not publicly
 downloadable.
 
+Pinned c.pkt.systems SDK archives use the adjacent shared cache
+`${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.
+Each archive is verified by SHA-256 before reuse and is keyed by that digest;
+only the extracted SDK root belongs to this checkout under `.cache/`. `make
+clean` preserves both shared caches.
+
+## Local compose e2e
+
+`make test-e2e` starts a deterministic local compose project named
+`lonejson-e2e`, waits for HTTPS, OIDC, and API-fixture readiness, then runs the
+curl, OIDC, and M2M workflows. Mutable service state, including the generated
+TLS certificate and nginx fixture data, is under `devenv/volumes/` and is
+removed by `make dev-reset` or `make clean`.
+
+Every published service port is overrideable for parallel checkouts:
+`LONEJSON_OAUTH2_E2E_PORT`, `LONEJSON_OIDC_E2E_PORT`,
+`LONEJSON_API_FIXTURE_E2E_PORT`, `LONEJSON_NGINX_HTTP_E2E_PORT`, and
+`LONEJSON_NGINX_HTTPS_E2E_PORT`. Set
+`LONEJSON_E2E_KEEP_DEVSERVICES=1` to retain the compose stack after an e2e
+run for debugging.
+
 ## Verification
 
 The standard verification commands are:

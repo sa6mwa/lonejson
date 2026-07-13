@@ -245,7 +245,7 @@ help:
 		'make format                 Run clang-format over the C sources.' \
 		'make deps-debug             Alias for make deps-host.' \
 		'make deps-release           Alias for make deps-all.' \
-		'make deps-host              Download and extract the host-native c.pkt.systems dependency bundle.' \
+		'make deps-host              Cache the verified host c.pkt.systems archive globally, then extract it under .cache/.' \
 		'make toolchains-all         Install pinned Bootlin Linux toolchains in the shared lifecycle cache.' \
 		'make deps-x86_64-linux-gnu  Download and extract the x86_64 glibc c.pkt.systems bundle.' \
 		'make deps-x86_64-linux-musl Download and extract the x86_64 musl c.pkt.systems bundle.' \
@@ -267,12 +267,12 @@ help:
 		'make compose-ps             Compatibility alias for make dev-ps.' \
 		'make compose-logs           Compatibility alias for make dev-logs.' \
 		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
-		'make test-e2e               Run all deterministic local e2e gates serially.' \
+		'make test-e2e               Run all deterministic local e2e gates serially; set LONEJSON_*_E2E_PORT to avoid host-port conflicts.' \
 		'make test-curl-e2e          Build and run the curl examples against the local HTTPS rig.' \
 		'make test-oidc-e2e          Build and run OIDC/OAuth2/JWKS e2e against the local compose rig.' \
 		'make test-m2m-e2e           Build and run M2M Basic/Bearer auth e2e with curl as the client.' \
 		'make release-source-artifact Build the source-only release tarball in dist/.' \
-		'make clean                  Remove build/, dist/, .cache/, examples/bin/, and generated Lua module artifacts.' \
+		'make clean                  Remove build/, dist/, .cache/, devenv/volumes/, examples/bin/, and generated Lua module artifacts; preserve shared caches.' \
 		'make clean-dist             Remove dist/ release artifacts only.'
 
 finalize-slice:

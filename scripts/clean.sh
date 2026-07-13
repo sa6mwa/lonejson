@@ -52,7 +52,7 @@ fi
 remove_path() {
     target_path="$1"
     case "$target_path" in
-        "$root_dir"/build|"$root_dir"/dist|"$root_dir"/.cache|"$root_dir"/.luarocks-build|"$root_dir"/examples/bin|"$root_dir"/lonejson)
+        "$root_dir"/build|"$root_dir"/dist|"$root_dir"/.cache|"$root_dir"/.luarocks-build|"$root_dir"/examples/bin|"$root_dir"/lonejson|"$root_dir"/devenv/volumes)
             ;;
         *)
             printf 'clean.sh: refusing to remove unexpected path: %s\n' "$target_path" >&2
@@ -68,6 +68,7 @@ if [ "$mode" = "all" ]; then
     remove_path "$root_dir/build"
     remove_path "$root_dir/.cache"
     remove_path "$root_dir/.luarocks-build"
+    remove_path "$root_dir/devenv/volumes"
     remove_path "$root_dir/examples/bin"
     remove_path "$root_dir/lonejson"
 fi

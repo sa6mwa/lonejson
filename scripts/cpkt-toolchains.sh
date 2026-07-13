@@ -74,6 +74,18 @@ toolchain_values() {
   printf '%s|%s|%s|%s|%s|%s\n' "$arch" "$name" "$sha256" "$prefix" "$sysroot_rel" "$(cache_root)/roots/$name"
 }
 
+compiler_file() {
+  "$1" -print-file-name="$2"
+}
+
+existing_compiler_file() {
+  local path dir
+  path="$(compiler_file "$1" "$2")"
+  [[ "$path" != "$2" && -f "$path" ]] || return 1
+  dir="$(CDPATH= cd -- "$(dirname -- "$path")" && pwd -P)"
+  printf '%s/%s\n' "$dir" "$(basename -- "$path")"
+}
+
 toolchain_ready() {
   local root=$1 prefix=$2 sysroot=$3
   [[ -x "$root/bin/$prefix-gcc" ]] &&
@@ -90,7 +102,9 @@ toolchain_ready() {
     [[ -x "$root/bin/$prefix-readelf" ]] &&
     [[ -f "$sysroot/usr/include/stdio.h" || -f "$sysroot/include/stdio.h" ]] &&
     [[ -e "$sysroot/usr/lib/libc.so" || -e "$sysroot/lib/libc.so" ||
-       -e "$sysroot/lib/libc.so.6" ]]
+       -e "$sysroot/lib/libc.so.6" ]] &&
+    existing_compiler_file "$root/bin/$prefix-g++" libstdc++.a >/dev/null &&
+    existing_compiler_file "$root/bin/$prefix-g++" libgcc.a >/dev/null
 }
 
 ensure_target() {
@@ -127,7 +141,7 @@ ensure_target() {
 }
 
 report_target() {
-  local target=$1 values arch name sha256 prefix sysroot_rel root
+  local target=$1 values arch name sha256 prefix sysroot_rel root cc cxx
   values="$(toolchain_values "$target")"
   IFS='|' read -r arch name sha256 prefix sysroot_rel root <<<"$values"
   toolchain_ready "$root" "$prefix" "$root/$sysroot_rel" || die "missing $target; run: $0 ensure $target"
@@ -138,8 +152,10 @@ report_target() {
   printf 'root=%s\n' "$root"
   printf 'prefix=%s\n' "$prefix"
   printf 'sysroot=%s\n' "$root/$sysroot_rel"
-  printf 'cc=%s\n' "$root/bin/$prefix-gcc"
-  printf 'cxx=%s\n' "$root/bin/$prefix-g++"
+  cc="$root/bin/$prefix-gcc"
+  cxx="$root/bin/$prefix-g++"
+  printf 'cc=%s\n' "$cc"
+  printf 'cxx=%s\n' "$cxx"
   printf 'ld=%s\n' "$root/bin/$prefix-ld"
   printf 'ar=%s\n' "$root/bin/$prefix-ar"
   printf 'ranlib=%s\n' "$root/bin/$prefix-ranlib"
@@ -152,11 +168,30 @@ report_target() {
   printf 'readelf=%s\n' "$root/bin/$prefix-readelf"
   printf 'target_triple=%s\n' "${sysroot_rel%/sysroot}"
   printf 'bin=%s\n' "$root/${sysroot_rel%/sysroot}/bin"
+  printf 'libstdcxx_a=%s\n' "$(existing_compiler_file "$cxx" libstdc++.a)"
+  printf 'libgcc_a=%s\n' "$(existing_compiler_file "$cxx" libgcc.a)"
+}
+
+print_env() {
+  local target=$1 description key value
+  description="$(report_target "$target")"
+  for key in root prefix sysroot cc cxx ld ar ranlib strip nm objcopy objdump addr2line gdb readelf libstdcxx_a libgcc_a; do
+    value="$(printf '%s\n' "$description" | sed -n "s/^${key}=//p")"
+    [[ -z "$value" ]] || printf 'export %s=%q\n' "CPKT_TOOLCHAIN_${key^^}" "$value"
+  done
+  printf 'export CPKT_TARGET=%q\n' "$target"
+  printf 'export CC=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^cc=//p')"
+  printf 'export CXX=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^cxx=//p')"
+  printf 'export LD=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^ld=//p')"
+  printf 'export AR=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^ar=//p')"
+  printf 'export RANLIB=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^ranlib=//p')"
+  printf 'export STRIP=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^strip=//p')"
+  printf 'export NM=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^nm=//p')"
 }
 
 usage() {
   cat <<'EOF'
-usage: cpkt-toolchains.sh <ensure|discover> <target|all>
+usage: cpkt-toolchains.sh <ensure|discover|env> <target|all>
 
 Pinned Bootlin collections are stored in:
   ${CPKT_TOOLCHAIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains}
@@ -177,6 +212,10 @@ case "${1:-}" in
   discover)
     [[ $# -eq 2 ]] || die 'usage: cpkt-toolchains.sh discover <target>'
     report_target "$2"
+    ;;
+  env)
+    [[ $# -eq 2 ]] || die 'usage: cpkt-toolchains.sh env <target>'
+    print_env "$2"
     ;;
   -h|--help|'') usage ;;
   *) die "unknown command: $1" ;;

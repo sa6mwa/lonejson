@@ -32,6 +32,8 @@ bootlin_gdb=$(printf '%s\n' "$bootlin_description" | sed -n 's/^gdb=//p')
 bootlin_readelf=$(printf '%s\n' "$bootlin_description" | sed -n 's/^readelf=//p')
 bootlin_sysroot=$(printf '%s\n' "$bootlin_description" | sed -n 's/^sysroot=//p')
 bootlin_target=$(printf '%s\n' "$bootlin_description" | sed -n 's/^target_triple=//p')
+bootlin_libstdcxx_a=$(printf '%s\n' "$bootlin_description" | sed -n 's/^libstdcxx_a=//p')
+bootlin_libgcc_a=$(printf '%s\n' "$bootlin_description" | sed -n 's/^libgcc_a=//p')
 
 [[ "$($bootlin_cc -dumpmachine)" == "$bootlin_target" ]]
 [[ -x "$bootlin_cxx" ]]
@@ -45,6 +47,8 @@ bootlin_target=$(printf '%s\n' "$bootlin_description" | sed -n 's/^target_triple
 [[ -x "$bootlin_addr2line" ]]
 [[ -x "$bootlin_gdb" ]]
 [[ -x "$bootlin_readelf" ]]
+[[ -f "$bootlin_libstdcxx_a" ]]
+[[ -f "$bootlin_libgcc_a" ]]
 [[ -f "$bootlin_sysroot/usr/include/stdio.h" ]]
 [[ -e "$bootlin_sysroot/usr/lib/libc.so" || -e "$bootlin_sysroot/lib/libc.so" ||
    -e "$bootlin_sysroot/lib/libc.so.6" ]]
@@ -69,6 +73,11 @@ bootlin_target=$(printf '%s\n' "$bootlin_description" | sed -n 's/^target_triple
 [[ "$(cache_value "$tmp_dir/default/CMakeCache.txt" LONEJSON_BOOTLIN_GDB)" == "$bootlin_gdb" ]]
 grep -F 'LONEJSON_DEFAULT_C_COMPILER:INTERNAL=bootlin-gcc' \
   "$tmp_dir/default/CMakeCache.txt" >/dev/null
+
+toolchain_env=$("$repo_root/scripts/cpkt-toolchains.sh" env x86_64-linux-gnu)
+printf '%s\n' "$toolchain_env" | grep -F "export CC=$bootlin_cc" >/dev/null
+printf '%s\n' "$toolchain_env" | grep -F "export LD=$bootlin_ld" >/dev/null
+printf '%s\n' "$toolchain_env" | grep -F "CPKT_TOOLCHAIN_LIBSTDCXX_A=$bootlin_libstdcxx_a" >/dev/null
 
 "$cmake_cmd" -S "$repo_root" -B "$tmp_dir/bootlin-x86_64" -G Ninja \
   -D CMAKE_MAKE_PROGRAM="$ninja_cmd" \

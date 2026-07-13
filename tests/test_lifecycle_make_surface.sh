@@ -13,7 +13,7 @@ require_text() {
 }
 
 require_text 'make lua-env                Print shell exports for using the repo-local Lua rock and debug C library.'
-require_text 'make test-e2e               Run all deterministic local e2e gates serially.'
+require_text 'make test-e2e               Run all deterministic local e2e gates serially; set LONEJSON_*_E2E_PORT to avoid host-port conflicts.'
 require_text 'make dev-ps                 Show the local compose-backed e2e service status.'
 require_text 'make compose-ps             Compatibility alias for make dev-ps.'
 
@@ -47,3 +47,9 @@ grep -F 'NAMES lua lua5.5 lua5.4 lua5.3 luajit' "$repo_root/CMakeLists.txt" >/de
   exit 1
 }
 grep -F 'Lua 5\\.5\\.' "$repo_root/CMakeLists.txt" >/dev/null
+
+grep -F 'name: lonejson-e2e' "$repo_root/docker-compose.yaml" >/dev/null
+grep -F 'LONEJSON_NGINX_HTTPS_E2E_PORT' "$repo_root/docker-compose.yaml" >/dev/null
+grep -F './devenv/volumes/nginx/generated' "$repo_root/docker-compose.yaml" >/dev/null
+grep -F 'service-readiness' "$repo_root/scripts/dev-up.sh" >/dev/null
+grep -F 'compose state and recent logs follow' "$repo_root/scripts/test-e2e.sh" >/dev/null

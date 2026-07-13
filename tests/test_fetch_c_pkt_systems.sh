@@ -13,8 +13,12 @@ assets_dir="$tmp_dir/assets"
 bundle_root="$assets_dir/$bundle_dir_name"
 success_root="$tmp_dir/success-root"
 failure_root="$tmp_dir/failure-root"
+offline_root="$tmp_dir/offline-root"
+corrupt_root="$tmp_dir/corrupt-root"
 pinned_version_root="$tmp_dir/pinned-version-root"
 archive_path="$assets_dir/$bundle_dir_name.tar.gz"
+dependency_cache="$tmp_dir/dependency-cache"
+failure_dependency_cache="$tmp_dir/failure-dependency-cache"
 
 mkdir -p \
   "$bundle_root/include/curl" \
@@ -56,6 +60,7 @@ cmake \
   -D LONEJSON_SOURCE_DIR="$success_root" \
   -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu \
   -D LONEJSON_C_PKT_SYSTEMS_BASE_URL="file://$assets_dir" \
+  -D CPKT_DEPENDENCY_CACHE="$dependency_cache" \
   -D LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE="$archive_sha256" \
   -D LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES=3 \
   -D LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS=0 \
@@ -63,18 +68,34 @@ cmake \
   -P "$repo_root/cmake/fetch_c_pkt_systems.cmake" \
   >"$success_log" 2>&1
 
-grep -q 'Download attempt 1/3 failed' "$success_log"
-grep -q 'Download attempt 2/3 failed' "$success_log"
+grep -q 'download attempt 1/3 failed' "$success_log"
+grep -q 'download attempt 2/3 failed' "$success_log"
 test -f "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/include/curl/curlver.h"
 test -f "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/lib/cmake/CURL/CURLConfig.cmake"
 test -f "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/lib/pkgconfig/libcurl.pc"
-test -f "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-version"
+test -f "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-identity"
+test -f "$dependency_cache/archives/sha256/$archive_sha256/$bundle_dir_name.tar.gz"
+test ! -e "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/$bundle_dir_name.tar.gz"
+
+# A local extraction is disposable: the verified shared archive supports a
+# fresh offline extraction without consulting the network.
+offline_log="$tmp_dir/offline.log"
+cmake \
+  -D LONEJSON_SOURCE_DIR="$offline_root" \
+  -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu \
+  -D LONEJSON_C_PKT_SYSTEMS_BASE_URL="file://$tmp_dir/missing-assets" \
+  -D CPKT_DEPENDENCY_CACHE="$dependency_cache" \
+  -D LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE="$archive_sha256" \
+  -P "$repo_root/cmake/fetch_c_pkt_systems.cmake" \
+  >"$offline_log" 2>&1
+test -f "$offline_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/include/curl/curlver.h"
 
 failure_log="$tmp_dir/failure.log"
 if cmake \
   -D LONEJSON_SOURCE_DIR="$failure_root" \
   -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu \
   -D LONEJSON_C_PKT_SYSTEMS_BASE_URL="file://$assets_dir" \
+  -D CPKT_DEPENDENCY_CACHE="$failure_dependency_cache" \
   -D LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE="$archive_sha256" \
   -D LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES=3 \
   -D LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS=0 \
@@ -85,12 +106,32 @@ if cmake \
   exit 1
 fi
 
-grep -q 'after 3 attempts' "$failure_log"
+grep -q 'failed to acquire verified archive' "$failure_log"
 test ! -e "$failure_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-version"
+
+# A corrupted global entry is rejected before extraction and is never treated
+# as a cache hit.
+printf '%s\n' corrupt >"$dependency_cache/archives/sha256/$archive_sha256/$bundle_dir_name.tar.gz"
+corrupt_log="$tmp_dir/corrupt.log"
+if cmake \
+  -D LONEJSON_SOURCE_DIR="$corrupt_root" \
+  -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu \
+  -D LONEJSON_C_PKT_SYSTEMS_BASE_URL="file://$tmp_dir/missing-assets" \
+  -D CPKT_DEPENDENCY_CACHE="$dependency_cache" \
+  -D LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE="$archive_sha256" \
+  -P "$repo_root/cmake/fetch_c_pkt_systems.cmake" \
+  >"$corrupt_log" 2>&1; then
+  printf 'expected corrupt shared archive to be rejected\n' >&2
+  exit 1
+fi
+grep -q 'discarding corrupt shared cache archive' "$corrupt_log"
+test ! -e "$corrupt_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-identity"
+test ! -e "$dependency_cache/archives/sha256/$archive_sha256/$bundle_dir_name.tar.gz"
 
 pinned_version_log="$tmp_dir/pinned-version.log"
 if cmake \
   -D LONEJSON_SOURCE_DIR="$pinned_version_root" \
+  -D CPKT_DEPENDENCY_CACHE="$tmp_dir/pinned-version-cache" \
   -D LONEJSON_C_PKT_SYSTEMS_VERSION=0.2.0 \
   -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu \
   -D LONEJSON_C_PKT_SYSTEMS_BASE_URL="file://$assets_dir" \

@@ -5,6 +5,7 @@ if(NOT DEFINED LONEJSON_SOURCE_DIR)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/c_pkt_systems_metadata.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/CpktDependencyCache.cmake")
 
 if(DEFINED LONEJSON_C_PKT_SYSTEMS_VERSION AND
    NOT LONEJSON_C_PKT_SYSTEMS_VERSION STREQUAL LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION)
@@ -122,7 +123,7 @@ if(NOT LONEJSON_C_PKT_SYSTEMS_TARGET_ID IN_LIST _supported_targets)
     "Supported values: ${_supported_targets}.")
 endif()
 
-function(lonejson_download_c_pkt_systems_bundle url archive_path expected_sha256)
+function(lonejson_download_c_pkt_systems_bundle url archive_name expected_sha256 out_var)
   if(NOT LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES MATCHES "^[0-9]+$")
     message(FATAL_ERROR
       "LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES must be a non-negative integer.")
@@ -136,52 +137,19 @@ function(lonejson_download_c_pkt_systems_bundle url archive_path expected_sha256
       "LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES must be at least 1.")
   endif()
 
-  set(_last_message "download not attempted")
-  foreach(_attempt RANGE 1 ${LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES})
-    file(REMOVE "${archive_path}")
-
-    if(DEFINED LONEJSON_C_PKT_SYSTEMS_TEST_FAIL_DOWNLOAD_ATTEMPTS AND
-       _attempt LESS_EQUAL LONEJSON_C_PKT_SYSTEMS_TEST_FAIL_DOWNLOAD_ATTEMPTS)
-      set(_download_code 22)
-      set(_download_message "HTTP response code said error")
-    else()
-      file(DOWNLOAD
-        "${url}"
-        "${archive_path}"
-        SHOW_PROGRESS
-        STATUS _download_status
-        TLS_VERIFY ON)
-      list(GET _download_status 0 _download_code)
-      list(GET _download_status 1 _download_message)
-    endif()
-
-    if(_download_code EQUAL 0)
-      file(SHA256 "${archive_path}" _downloaded_sha256)
-      if(_downloaded_sha256 STREQUAL expected_sha256)
-        return()
-      endif()
-      set(_download_code 1)
-      set(_download_message
-        "SHA256 mismatch (expected ${expected_sha256}, got ${_downloaded_sha256})")
-    endif()
-
-    file(REMOVE "${archive_path}")
-    set(_last_message "${_download_message}")
-    if(_attempt LESS LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES)
-      message(WARNING
-        "Download attempt ${_attempt}/${LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES} "
-        "failed for ${url}: ${_download_message}; retrying in "
-        "${LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS}s")
-      if(NOT LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS STREQUAL "0")
-        execute_process(COMMAND "${CMAKE_COMMAND}" -E
-          sleep "${LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS}")
-      endif()
-    endif()
-  endforeach()
-
-  message(FATAL_ERROR
-    "Failed to download ${url} after "
-    "${LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES} attempts: ${_last_message}")
+  if(DEFINED LONEJSON_C_PKT_SYSTEMS_TEST_FAIL_DOWNLOAD_ATTEMPTS)
+    set(CPKT_DEPENDENCY_CACHE_TEST_FAIL_DOWNLOAD_ATTEMPTS
+      "${LONEJSON_C_PKT_SYSTEMS_TEST_FAIL_DOWNLOAD_ATTEMPTS}")
+  endif()
+  cpkt_acquire_verified_archive(
+    COMPONENT "c.pkt.systems"
+    URL "${url}"
+    SHA256 "${expected_sha256}"
+    ARCHIVE_NAME "${archive_name}"
+    OUTPUT_VARIABLE _archive_path
+    RETRIES "${LONEJSON_C_PKT_SYSTEMS_DOWNLOAD_RETRIES}"
+    RETRY_DELAY_SECONDS "${LONEJSON_C_PKT_SYSTEMS_RETRY_DELAY_SECONDS}")
+  set(${out_var} "${_archive_path}" PARENT_SCOPE)
 endfunction()
 
 set(_target_id "${LONEJSON_C_PKT_SYSTEMS_TARGET_ID}")
@@ -189,14 +157,15 @@ set(_bundle_dir_name "c.pkt.systems-${LONEJSON_C_PKT_SYSTEMS_VERSION}-${_target_
 set(_filename "${_bundle_dir_name}.tar.gz")
 set(_url "${LONEJSON_C_PKT_SYSTEMS_BASE_URL}/${_filename}")
 set(_deps_root "${LONEJSON_SOURCE_DIR}/.cache/c.pkt.systems/${_target_id}")
-set(_archive_path "${_deps_root}/${_filename}")
 set(_extract_root "${_deps_root}/root")
 set(_staging_root "${_deps_root}/extract")
-set(_stamp_path "${_extract_root}/.lonejson-c-pkt-systems-version")
+set(_stamp_path "${_extract_root}/.lonejson-c-pkt-systems-identity")
 lonejson_c_pkt_systems_sha256("${_target_id}" _expected_sha256)
 if(DEFINED LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE)
   set(_expected_sha256 "${LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE}")
 endif()
+set(_dependency_identity
+  "cache-layout=2\ncomponent=c.pkt.systems\nversion=${LONEJSON_C_PKT_SYSTEMS_VERSION}\ntarget=${_target_id}\nurl=${_url}\nsha256=${_expected_sha256}\n")
 
 function(lonejson_validate_c_pkt_systems_bundle extract_root filename target_id curl_version_out openssl_version_out)
   set(_curl_version_header "${extract_root}/include/curl/curlver.h")
@@ -245,9 +214,8 @@ endfunction()
 file(MAKE_DIRECTORY "${_deps_root}")
 
 if(EXISTS "${_stamp_path}")
-  file(READ "${_stamp_path}" _existing_version)
-  string(STRIP "${_existing_version}" _existing_version)
-  if(_existing_version STREQUAL "${LONEJSON_C_PKT_SYSTEMS_VERSION}")
+  file(READ "${_stamp_path}" _existing_identity)
+  if(_existing_identity STREQUAL _dependency_identity)
     lonejson_validate_c_pkt_systems_bundle("${_extract_root}" "${_filename}"
       "${_target_id}" _curl_version _openssl_version)
     message(STATUS
@@ -257,8 +225,8 @@ if(EXISTS "${_stamp_path}")
   endif()
 endif()
 
-message(STATUS "Downloading ${_url}")
-lonejson_download_c_pkt_systems_bundle("${_url}" "${_archive_path}" "${_expected_sha256}")
+message(STATUS "Acquiring verified c.pkt.systems archive ${_url}")
+lonejson_download_c_pkt_systems_bundle("${_url}" "${_filename}" "${_expected_sha256}" _archive_path)
 
 file(REMOVE_RECURSE "${_extract_root}")
 file(REMOVE_RECURSE "${_staging_root}")
@@ -283,7 +251,7 @@ endif()
 lonejson_validate_c_pkt_systems_bundle("${_extract_root}" "${_filename}"
   "${_target_id}" _curl_version _openssl_version)
 
-file(WRITE "${_stamp_path}" "${LONEJSON_C_PKT_SYSTEMS_VERSION}\n")
+file(WRITE "${_stamp_path}" "${_dependency_identity}")
 file(REMOVE_RECURSE "${_staging_root}")
 
 message(STATUS

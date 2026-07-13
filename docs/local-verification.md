@@ -15,6 +15,13 @@ The default cache is
 `${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains`; set
 `CPKT_TOOLCHAIN_CACHE` to use another shared cache location.
 
+Pinned c.pkt.systems SDK archives are separate immutable cache entries under
+`${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.
+`make deps-host` and the target-specific dependency targets verify each archive
+by SHA-256 before reuse, then extract it into the checkout-local `.cache/`
+tree. `make clean` removes only that extracted local state and preserves the
+shared archive and toolchain caches.
+
 Every native debug, host, and Linux release build uses a single pinned Bootlin collection:
 its GCC driver, GNU linker, binutils/debug tools, libc sysroot, and target
 runtime. Configuration verifies the compiler triple; package inspection reads
