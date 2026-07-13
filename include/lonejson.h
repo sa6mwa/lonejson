@@ -2350,8 +2350,9 @@ typedef struct lonejson_array_stream_string_handler {
  *
  * This is a configured parse-field helper, not a standalone receiver handle.
  * Configure it with `lonejson_string_array_stream_set_handler()` before
- * parsing; lonejson preserves the configured callbacks across destination
- * clearing and only resets per-parse internal state. The free-function setup
+ * parsing; lonejson preserves the configured callbacks across reset and
+ * per-parse destination clearing, and only resets per-parse internal state.
+ * The free-function setup
  * helper accepts either explicit `lonejson_string_array_stream_init()` output
  * or plain zeroed storage and auto-initializes the field when needed.
  */
@@ -5026,8 +5027,8 @@ void lonejson_mapped_array_stream_init(lonejson_mapped_array_stream *stream);
  *
  * `stream` may point at either explicit `lonejson_mapped_array_stream_init()`
  * output or plain zeroed storage. This helper auto-initializes the field when
- * needed and preserves the configured handler across later destination
- * clearing.
+ * needed and preserves the configured handler across reset and later per-parse
+ * destination clearing.
  */
 lonejson_status lonejson_mapped_array_stream_set_handler(
     lonejson_mapped_array_stream *stream,
@@ -6429,12 +6430,13 @@ lonejson_status lonejson_serialize_jsonl_path(lonejson *runtime,
  */
 void lonejson_cleanup(const lonejson_map *map, void *value);
 /** Initializes previously uninitialized mapped storage according to its field
- * descriptors.
+ * descriptors without inspecting its prior contents.
  *
  * Call this before the first parse into storage that contains stateful handle
  * fields such as `lonejson_spooled`, `lonejson_json_value`, mapped array-stream
- * helpers, or other runtime-managed subobjects. Use `lonejson_reset()` to
- * reuse an already initialized value.
+ * helpers, or other runtime-managed subobjects. It overwrites every mapped
+ * field and does not release earlier storage; use `lonejson_reset()` to clear
+ * and reuse an already initialized value.
  *
  * This is also the right entrypoint when you plan to parse with
  * `clear_destination = 0`, or when you are configuring caller-owned

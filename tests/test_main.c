@@ -136,7 +136,7 @@ int main(void) {
   test_array_stream_mapped_string_field_envelope();
   test_array_stream_mapped_string_field_zeroed_set_handler();
   test_array_stream_mapped_string_field_lifecycle_preserves_set_handler_method();
-  test_array_stream_mapped_string_field_reinit_preserves_handler();
+  test_array_stream_mapped_string_field_reset_preserves_handler();
   test_array_stream_mapped_string_field_init_overwrites_nonzero_storage();
   test_array_stream_mapped_string_field_metadata_and_long_item();
   test_array_stream_mapped_string_field_failure_modes();
@@ -144,7 +144,7 @@ int main(void) {
   test_array_stream_mapped_field_nested_items();
   test_array_stream_mapped_field_zeroed_set_handler();
   test_array_stream_mapped_field_lifecycle_preserves_set_handler_method();
-  test_array_stream_mapped_field_reinit_preserves_handler();
+  test_array_stream_mapped_field_reset_preserves_handler();
   test_array_stream_mapped_field_init_overwrites_nonzero_storage();
   test_array_stream_mapped_field_nested_json_value_sink_reuse();
   test_array_stream_mapped_field_nested_json_value_capture_budget_reuse();
@@ -318,8 +318,8 @@ int main(void) {
   test_json_value_large_string_object_regressions();
   test_json_value_large_string_nested_regressions();
   test_json_value_reuse_and_cleanup_ownership();
-  test_init_releases_existing_json_value_storage();
-  test_init_releases_existing_spooled_storage();
+  test_reset_releases_existing_json_value_storage();
+  test_reset_releases_existing_spooled_storage();
   test_init_preserves_shallow_copied_source_owner();
   test_json_value_source_validation_failures();
   test_json_value_reader_source_rejects_would_block();
