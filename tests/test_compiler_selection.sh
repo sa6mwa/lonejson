@@ -18,6 +18,8 @@ cache_value() {
 }
 
 bootlin_description=$("$repo_root/scripts/cpkt-toolchains.sh" discover x86_64-linux-gnu)
+grep -Fx 'source=bootlin' <<<"$bootlin_description" >/dev/null
+grep -Fx 'status=ready' <<<"$bootlin_description" >/dev/null
 bootlin_cc=$(printf '%s\n' "$bootlin_description" | sed -n 's/^cc=//p')
 bootlin_cxx=$(printf '%s\n' "$bootlin_description" | sed -n 's/^cxx=//p')
 bootlin_ld=$(printf '%s\n' "$bootlin_description" | sed -n 's/^ld=//p')

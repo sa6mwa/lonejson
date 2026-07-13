@@ -3,9 +3,9 @@
 ## Compiler and Cross Toolchains
 
 CMake selects the pinned Bootlin x86_64 GNU collection by default. Linux
-target toolchain files select their matching pinned Bootlin collection. Before
-a Linux cross or release build, install the collections into the lifecycle
-cache:
+target toolchain files provision their matching pinned Bootlin collection into
+the lifecycle cache during configuration. To inspect status or warm every
+Linux collection before a matrix build:
 
 ```sh
 make toolchains-all
@@ -14,6 +14,10 @@ make toolchains-all
 The default cache is
 `${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains`; set
 `CPKT_TOOLCHAIN_CACHE` to use another shared cache location.
+
+`scripts/cpkt-toolchains.sh discover` reports every lifecycle target without
+downloading it. The optional Darwin entry reports local osxcross status; it
+never downloads an Apple SDK.
 
 Pinned c.pkt.systems SDK archives are separate immutable cache entries under
 `${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.

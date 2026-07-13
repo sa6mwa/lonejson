@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Lifecycle-managed, reproducible Linux toolchain resolver.  The downloaded
-# collections intentionally live outside a checkout so they can be shared by
-# c.pkt.systems projects and refreshed without workstation-specific paths.
+# Resolve only lifecycle-pinned compiler collections. Linux must never fall
+# back to a host-installed compiler or binutils collection.
 
 die() {
   printf 'cpkt-toolchains: %s\n' "$*" >&2
@@ -41,6 +40,29 @@ download_file() {
   else
     die 'curl or wget is required to download Bootlin toolchains'
   fi
+}
+
+target_ids() {
+  cat <<'TARGETS'
+x86_64-linux-gnu
+x86_64-linux-musl
+aarch64-linux-gnu
+aarch64-linux-musl
+armhf-linux-gnu
+armhf-linux-musl
+arm64-apple-darwin
+TARGETS
+}
+
+is_linux_target() {
+  case "$1" in
+    x86_64-linux-gnu|x86_64-linux-musl|aarch64-linux-gnu|aarch64-linux-musl|armhf-linux-gnu|armhf-linux-musl) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+require_target() {
+  is_linux_target "$1" || [[ "$1" == arm64-apple-darwin ]] || die "unsupported target: $1"
 }
 
 toolchain_meta() {
@@ -107,6 +129,20 @@ toolchain_ready() {
     existing_compiler_file "$root/bin/$prefix-g++" libgcc.a >/dev/null
 }
 
+osxcross_candidate() {
+  local root=${OSXCROSS_ROOT:-${HOME:-}/.local/cross/osxcross}
+  local prefix=${CPKT_OSXCROSS_HOST:-arm64-apple-darwin25}
+  [[ -x "$root/bin/$prefix-clang" ]] &&
+    [[ -x "$root/bin/$prefix-clang++" ]] &&
+    [[ -x "$root/bin/$prefix-ld" ]] &&
+    [[ -x "$root/bin/$prefix-ar" ]] &&
+    [[ -x "$root/bin/$prefix-ranlib" ]] &&
+    [[ -x "$root/bin/$prefix-strip" ]] &&
+    [[ -x "$root/bin/$prefix-nm" ]] &&
+    [[ -x "$root/bin/$prefix-otool" ]] || return 1
+  printf 'osxcross|%s|%s\n' "$root" "$prefix"
+}
+
 ensure_target() {
   local target=$1 values arch name sha256 prefix sysroot_rel root archive_dir archive tmp extract
   values="$(toolchain_values "$target")"
@@ -140,42 +176,59 @@ ensure_target() {
   toolchain_ready "$root" "$prefix" "$root/$sysroot_rel" || die "incomplete extracted toolchain: $root"
 }
 
-report_target() {
+report_bootlin_target() {
   local target=$1 values arch name sha256 prefix sysroot_rel root cc cxx
   values="$(toolchain_values "$target")"
   IFS='|' read -r arch name sha256 prefix sysroot_rel root <<<"$values"
-  toolchain_ready "$root" "$prefix" "$root/$sysroot_rel" || die "missing $target; run: $0 ensure $target"
-  printf 'target=%s\n' "$target"
-  printf 'libc=%s\n' "${target##*-}"
-  printf 'cache=%s\n' "$(cache_root)"
-  printf 'source=bootlin\n'
-  printf 'root=%s\n' "$root"
-  printf 'prefix=%s\n' "$prefix"
-  printf 'sysroot=%s\n' "$root/$sysroot_rel"
+  printf 'target=%s\ncache=%s\nsource=bootlin\narchive=%s.tar.xz\n' "$target" "$(cache_root)" "$name"
+  if ! toolchain_ready "$root" "$prefix" "$root/$sysroot_rel"; then
+    printf 'status=missing\ndownloadable=yes\nurl=https://toolchains.bootlin.com/downloads/releases/toolchains/%s/tarballs/%s.tar.xz\n' "$arch" "$name"
+    return
+  fi
   cc="$root/bin/$prefix-gcc"
   cxx="$root/bin/$prefix-g++"
-  printf 'cc=%s\n' "$cc"
-  printf 'cxx=%s\n' "$cxx"
-  printf 'ld=%s\n' "$root/bin/$prefix-ld"
-  printf 'ar=%s\n' "$root/bin/$prefix-ar"
-  printf 'ranlib=%s\n' "$root/bin/$prefix-ranlib"
-  printf 'strip=%s\n' "$root/bin/$prefix-strip"
-  printf 'nm=%s\n' "$root/bin/$prefix-nm"
-  printf 'objcopy=%s\n' "$root/bin/$prefix-objcopy"
-  printf 'objdump=%s\n' "$root/bin/$prefix-objdump"
-  printf 'addr2line=%s\n' "$root/bin/$prefix-addr2line"
-  printf 'gdb=%s\n' "$root/bin/$prefix-gdb"
-  printf 'readelf=%s\n' "$root/bin/$prefix-readelf"
-  printf 'target_triple=%s\n' "${sysroot_rel%/sysroot}"
-  printf 'bin=%s\n' "$root/${sysroot_rel%/sysroot}/bin"
-  printf 'libstdcxx_a=%s\n' "$(existing_compiler_file "$cxx" libstdc++.a)"
-  printf 'libgcc_a=%s\n' "$(existing_compiler_file "$cxx" libgcc.a)"
+  printf 'status=ready\nroot=%s\nprefix=%s\nsysroot=%s\nlibc=%s\n' "$root" "$prefix" "$root/$sysroot_rel" "${target##*-}"
+  printf 'cc=%s\ncxx=%s\nld=%s\nar=%s\nranlib=%s\nstrip=%s\nnm=%s\nobjcopy=%s\nobjdump=%s\naddr2line=%s\ngdb=%s\nreadelf=%s\n' \
+    "$cc" "$cxx" "$root/bin/$prefix-ld" "$root/bin/$prefix-ar" "$root/bin/$prefix-ranlib" "$root/bin/$prefix-strip" "$root/bin/$prefix-nm" "$root/bin/$prefix-objcopy" "$root/bin/$prefix-objdump" "$root/bin/$prefix-addr2line" "$root/bin/$prefix-gdb" "$root/bin/$prefix-readelf"
+  printf 'target_triple=%s\nbin=%s\nlibstdcxx_a=%s\nlibgcc_a=%s\n' "${sysroot_rel%/sysroot}" "$root/${sysroot_rel%/sysroot}/bin" "$(existing_compiler_file "$cxx" libstdc++.a)" "$(existing_compiler_file "$cxx" libgcc.a)"
+}
+
+report_darwin_target() {
+  local candidate source root prefix
+  printf 'target=arm64-apple-darwin\ncache=%s\nsource=osxcross\ndownloadable=no\n' "$(cache_root)"
+  if ! candidate=$(osxcross_candidate); then
+    printf 'status=missing\nnote=Configure OSXCROSS_ROOT with a complete local osxcross SDK toolchain.\n'
+    return
+  fi
+  IFS='|' read -r source root prefix <<<"$candidate"
+  printf 'status=ready\nroot=%s\nprefix=%s\ncc=%s\ncxx=%s\nld=%s\nar=%s\nranlib=%s\nstrip=%s\nnm=%s\notool=%s\n' \
+    "$root" "$prefix" "$root/bin/$prefix-clang" "$root/bin/$prefix-clang++" "$root/bin/$prefix-ld" "$root/bin/$prefix-ar" "$root/bin/$prefix-ranlib" "$root/bin/$prefix-strip" "$root/bin/$prefix-nm" "$root/bin/$prefix-otool"
+}
+
+report_target() {
+  require_target "$1"
+  if is_linux_target "$1"; then
+    report_bootlin_target "$1"
+  else
+    report_darwin_target
+  fi
+}
+
+ensure_selected_target() {
+  require_target "$1"
+  if is_linux_target "$1"; then
+    ensure_target "$1"
+  else
+    osxcross_candidate >/dev/null || die 'arm64-apple-darwin requires a complete local osxcross SDK toolchain'
+  fi
+  report_target "$1"
 }
 
 print_env() {
   local target=$1 description key value
   description="$(report_target "$target")"
-  for key in root prefix sysroot cc cxx ld ar ranlib strip nm objcopy objdump addr2line gdb readelf libstdcxx_a libgcc_a; do
+  [[ "$description" == *$'status=ready'* ]] || die "target is missing; run: $0 ensure $target"
+  for key in source root prefix sysroot cc cxx ld ar ranlib strip nm objcopy objdump addr2line gdb readelf libstdcxx_a libgcc_a otool; do
     value="$(printf '%s\n' "$description" | sed -n "s/^${key}=//p")"
     [[ -z "$value" ]] || printf 'export %s=%q\n' "CPKT_TOOLCHAIN_${key^^}" "$value"
   done
@@ -187,36 +240,60 @@ print_env() {
   printf 'export RANLIB=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^ranlib=//p')"
   printf 'export STRIP=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^strip=//p')"
   printf 'export NM=%q\n' "$(printf '%s\n' "$description" | sed -n 's/^nm=//p')"
+  value="$(printf '%s\n' "$description" | sed -n 's/^sysroot=//p')"
+  [[ -z "$value" ]] || printf 'export CPKT_SYSROOT=%q\n' "$value"
 }
 
 usage() {
   cat <<'EOF'
-usage: cpkt-toolchains.sh <ensure|discover|env> <target|all>
+usage: cpkt-toolchains.sh <command> [target-id]
 
-Pinned Bootlin collections are stored in:
-  ${CPKT_TOOLCHAIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains}
+Commands:
+  targets              List lifecycle target ids.
+  discover [target]    Report pinned collection status; without a target, report all.
+  ensure <target|all>  Download, checksum-verify, and install pinned Linux collections.
+  env <target>         Print shell exports for a ready collection.
+
+Linux policy: every compiler, linker, binutil, and libc comes from the pinned
+Bootlin collection. Host GCC, Clang, and binutils are never candidates.
+Darwin policy: discover a local osxcross collection; do not download Apple SDKs.
 EOF
 }
 
 case "${1:-}" in
+  -h|--help|'') usage ;;
+  targets) target_ids ;;
+  discover)
+    if [[ $# -eq 2 ]]; then
+      report_target "$2"
+    elif [[ $# -eq 1 ]]; then
+      first=1
+      while IFS= read -r target; do
+        [[ $first -eq 1 ]] || printf '\n'
+        first=0
+        report_target "$target"
+      done < <(target_ids)
+    else
+      die 'usage: cpkt-toolchains.sh discover [target]'
+    fi
+    ;;
   ensure)
     [[ $# -eq 2 ]] || die 'usage: cpkt-toolchains.sh ensure <target|all>'
     if [[ "$2" == all ]]; then
-      for target in x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl; do
-        ensure_target "$target"
-      done
+      while IFS= read -r target; do
+        if is_linux_target "$target"; then
+          ensure_selected_target "$target"
+        else
+          report_target "$target"
+        fi
+      done < <(target_ids)
     else
-      ensure_target "$2"
+      ensure_selected_target "$2"
     fi
-    ;;
-  discover)
-    [[ $# -eq 2 ]] || die 'usage: cpkt-toolchains.sh discover <target>'
-    report_target "$2"
     ;;
   env)
     [[ $# -eq 2 ]] || die 'usage: cpkt-toolchains.sh env <target>'
     print_env "$2"
     ;;
-  -h|--help|'') usage ;;
   *) die "unknown command: $1" ;;
 esac

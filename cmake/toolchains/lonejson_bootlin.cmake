@@ -6,7 +6,7 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
   endif()
 
   execute_process(
-    COMMAND "${_lonejson_resolver}" discover "${target_id}"
+    COMMAND "${_lonejson_resolver}" ensure "${target_id}"
     RESULT_VARIABLE _lonejson_result
     OUTPUT_VARIABLE _lonejson_description
     ERROR_VARIABLE _lonejson_error
@@ -14,7 +14,13 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
     ERROR_STRIP_TRAILING_WHITESPACE)
   if(NOT _lonejson_result EQUAL 0)
     message(FATAL_ERROR
-      "Bootlin ${target_id} toolchain is unavailable. Run `make toolchains-${target_id}`.\n${_lonejson_error}")
+      "Bootlin ${target_id} toolchain provisioning failed.\n${_lonejson_error}")
+  endif()
+
+  string(REGEX MATCH "status=([^\r\n]+)" _lonejson_status_match "${_lonejson_description}")
+  if(NOT _lonejson_status_match OR NOT "${CMAKE_MATCH_1}" STREQUAL "ready")
+    message(FATAL_ERROR
+      "Bootlin resolver did not provision a ready ${target_id} collection.\n${_lonejson_description}")
   endif()
 
   foreach(_lonejson_key root prefix target_triple sysroot libc cc cxx ld ar ranlib strip nm objcopy objdump addr2line gdb readelf bin)

@@ -25,6 +25,30 @@ require_text './scripts/dev-ps.sh'
 require_text 'test-e2e:'
 require_text './scripts/test-e2e.sh'
 require_text 'fuzz: deps-host toolchains-aflpp'
+require_text 'make toolchains-all         Install pinned Bootlin Linux toolchains in the shared lifecycle cache.'
+require_text 'make toolchains-x86_64-linux-gnu Install the pinned x86_64 glibc Bootlin collection.'
+require_text 'make release-lua-artifacts  Build the standalone Lua source package, release rockspec, and source rock in dist/.'
+require_text 'make clean                  Remove build/, dist/, .cache/, devenv/volumes/, examples/bin/, and generated Lua module artifacts; preserve shared caches.'
+
+help_text=$(make -C "$repo_root" help)
+while IFS= read -r target; do
+  [[ "$target" == help ]] && continue
+  grep -F "make $target" <<<"$help_text" >/dev/null || {
+    printf 'phony lifecycle target is missing from make help: %s\n' "$target" >&2
+    exit 1
+  }
+done < <(awk '
+  /^\.PHONY:/ { collecting = 1; next }
+  collecting {
+    line = $0
+    sub(/^[[:space:]]*/, "", line)
+    sub(/[[:space:]]*\\$/, "", line)
+    if (line == "") next
+    count = split(line, targets, /[[:space:]]+/)
+    for (target_index = 1; target_index <= count; ++target_index) if (targets[target_index] != "") print targets[target_index]
+    if ($0 !~ /\\$/) exit
+  }
+' "$makefile")
 
 for script in compose dev-up dev-down dev-reset dev-ps dev-logs test-e2e; do
   if [[ ! -x "$repo_root/scripts/$script.sh" ]]; then

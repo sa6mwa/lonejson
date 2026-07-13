@@ -198,6 +198,7 @@ help:
 		'make package-source         Build the source-only release tarball in dist/.' \
 		'make package-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make package-checksums      Generate release checksums for existing dist artifacts.' \
+		'make release-lua-artifacts  Build the standalone Lua source package, release rockspec, and source rock in dist/.' \
 		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
 		'make verify-release-archives Alias for make package-verify.' \
 		'make verify-release-privacy Alias for make package-verify.' \
@@ -246,6 +247,12 @@ help:
 		'make deps-debug             Alias for make deps-host.' \
 		'make deps-release           Alias for make deps-all.' \
 		'make deps-host              Cache the verified host c.pkt.systems archive globally, then extract it under .cache/.' \
+		'make toolchains-x86_64-linux-gnu Install the pinned x86_64 glibc Bootlin collection.' \
+		'make toolchains-x86_64-linux-musl Install the pinned x86_64 musl Bootlin collection.' \
+		'make toolchains-aarch64-linux-gnu Install the pinned aarch64 glibc Bootlin collection.' \
+		'make toolchains-aarch64-linux-musl Install the pinned aarch64 musl Bootlin collection.' \
+		'make toolchains-armhf-linux-gnu Install the pinned armhf glibc Bootlin collection.' \
+		'make toolchains-armhf-linux-musl Install the pinned armhf musl Bootlin collection.' \
 		'make toolchains-all         Install pinned Bootlin Linux toolchains in the shared lifecycle cache.' \
 		'make deps-x86_64-linux-gnu  Download and extract the x86_64 glibc c.pkt.systems bundle.' \
 		'make deps-x86_64-linux-musl Download and extract the x86_64 musl c.pkt.systems bundle.' \

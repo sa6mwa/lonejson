@@ -1339,7 +1339,9 @@ compiler. ThreadSanitizer uses the default Bootlin GCC toolchain:
 make toolchains-aflpp
 ```
 
-Install the Linux release toolchains with:
+Each Linux CMake configuration provisions its selected, checksum-pinned
+Bootlin collection automatically. To inspect toolchain status or warm all
+Linux release collections before a matrix build:
 
 ```sh
 make toolchains-all
@@ -1349,7 +1351,8 @@ They are shared across pkt.systems projects at
 `${CPKT_TOOLCHAIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains}`.
 Set `CPKT_TOOLCHAIN_CACHE` to relocate that cache. The Darwin target remains
 an explicit osxcross/SDK setup because Apple SDKs are not publicly
-downloadable.
+downloadable. `scripts/cpkt-toolchains.sh discover` reports every supported
+target, including whether the optional local osxcross collection is ready.
 
 Pinned c.pkt.systems SDK archives use the adjacent shared cache
 `${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.
