@@ -27,6 +27,7 @@ reject_text() {
 require_text 'release-pipeline'
 require_text 'prerelease: release-pipeline'
 require_text 'prerelease-hardening: prerelease'
+require_text '+$(TIME_STEP) hardening/bench-check $(MAKE) bench-check'
 require_text 'release-pipeline:'
 require_text '+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0'
 require_text '+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix'
@@ -38,6 +39,7 @@ require_text '+$(TIME_STEP) release/pipeline $(MAKE) release-pipeline'
 reject_text 'prerelease: test-all'
 reject_text '+$(TIME_STEP) release/prerelease'
 reject_text '+$(TIME_STEP) release/release-matrix'
+reject_text '+$(TIME_STEP) bench-check $(MAKE) bench-check'
 
 line_number() {
   local text=$1

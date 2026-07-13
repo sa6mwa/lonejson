@@ -11,6 +11,7 @@ FUZZ_PRESET := fuzz
 TIME_STEP := ./scripts/time_step.sh
 LONEJSON_HAVE_TSAN ?= $(shell bash "$(CURDIR)/scripts/check_bootlin_tsan_support.sh")
 LONEJSON_TEST_ALL_HOST_CURL ?= 1
+LONEJSON_E2E_SERVICES_READY ?= 0
 RELEASE_BUILD_PRESETS := \
 	x86_64-linux-gnu-release \
 	x86_64-linux-musl-release \
@@ -27,7 +28,6 @@ CROSS_RELEASE_PRESETS := \
 LUA ?= lua
 LUAROCKS ?= luarocks
 GENERATED_FIXTURE_DIR := $(CURDIR)/build/generated/fixtures
-COMPOSE := $(shell if command -v nerdctl >/dev/null 2>&1; then printf '%s' 'nerdctl compose'; elif command -v docker >/dev/null 2>&1; then printf '%s' 'docker compose'; fi)
 ifneq ($(LONEJSON_VERSION_OVERRIDE),)
 export LONEJSON_VERSION_OVERRIDE
 endif
@@ -201,9 +201,9 @@ help:
 		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
 		'make verify-release-archives Alias for make package-verify.' \
 		'make verify-release-privacy Alias for make package-verify.' \
-		'make prerelease             Run the full release pipeline without cleaning generated state first.' \
+		'make prerelease             Run the deterministic release pipeline without cleaning generated state first.' \
 		'make prerelease-live        Refuse live external-provider release checks unless explicitly enabled.' \
-		'make prerelease-hardening   Compatibility alias for make prerelease.' \
+		'make prerelease-hardening   Run prerelease plus explicit benchmark checks.' \
 		'make release-pipeline       Internal shared release proof used by prerelease and release.' \
 		'make release-matrix         Build host release tests, then package, checksum, and verify every release target without cleaning first.' \
 		'make release                Clean generated state, then run the same pipeline as prerelease.' \
@@ -231,7 +231,7 @@ help:
 		'make test-cross             Configure, build, and run all cross release test presets serially.' \
 		'make cross-sanitizers       Extra hardening: build and run the supported armhf-linux-gnu ASan/UBSan target under QEMU.' \
 		'make toolchains-aflpp       Build the pinned native AFL++ GCC-plugin toolchain in the shared lifecycle cache.' \
-		'make test-all               Run debug, host, host-curl, cross, host sanitizers, benchmark gates, and fuzz-smoke serially.' \
+		'make test-all               Run debug, host, host-curl, cross, host sanitizers, Valgrind, e2e, and fuzz-smoke serially.' \
 		'make test-all-bindings      Compatibility alias for make lua-test; binding coverage is no longer a full world gate.' \
 		'make test-install-tree      Verify checksum-listed SDK archives through installed CMake and pkg-config consumers.' \
 		'make example-smoke-local    Build and stage standalone local examples.' \
@@ -257,15 +257,15 @@ help:
 		'make deps-cross             Download and extract bundles required by make test-cross.' \
 		'make deps-all               Download and extract every supported c.pkt.systems bundle.' \
 		'make certs                  Generate the local self-signed localhost TLS cert for nginx.' \
-		'make dev-up                 Alias for make compose-up.' \
-		'make dev-down               Alias for make compose-down.' \
+		'make dev-up                 Start the local compose-backed e2e services through scripts/dev-up.sh.' \
+		'make dev-down               Stop the local compose-backed e2e services through scripts/dev-down.sh.' \
 		'make dev-reset              Stop the local compose stack and remove generated local service state.' \
-		'make dev-ps                 Alias for make compose-ps.' \
-		'make dev-logs               Alias for make compose-logs.' \
-		'make compose-up             Start the local nginx, sink, API fixture, and OIDC/OAuth2 test rig.' \
-		'make compose-down           Stop and remove the local compose stack.' \
-		'make compose-ps             Show the local compose stack status.' \
-		'make compose-logs           Tail logs from the local compose stack.' \
+		'make dev-ps                 Show the local compose-backed e2e service status.' \
+		'make dev-logs               Tail logs from the local compose-backed e2e services.' \
+		'make compose-up             Compatibility alias for make dev-up.' \
+		'make compose-down           Compatibility alias for make dev-down.' \
+		'make compose-ps             Compatibility alias for make dev-ps.' \
+		'make compose-logs           Compatibility alias for make dev-logs.' \
 		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
 		'make test-e2e               Run all deterministic local e2e gates serially.' \
 		'make test-curl-e2e          Build and run the curl examples against the local HTTPS rig.' \
@@ -366,6 +366,7 @@ prerelease-live:
 	@test "$${LONEJSON_ENABLE_LIVE_TESTS:-}" = "1" || (printf '%s\n' 'Set LONEJSON_ENABLE_LIVE_TESTS=1 to run live prerelease checks; no live prerelease checks are currently defined.' >&2; exit 1)
 
 prerelease-hardening: prerelease
+	+$(TIME_STEP) hardening/bench-check $(MAKE) bench-check
 
 release-pipeline:
 	+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0
@@ -495,7 +496,7 @@ else
 	@printf '%s\n' 'Skipping tsan: unsupported toolchain'
 endif
 	+$(TIME_STEP) valgrind $(MAKE) valgrind
-	+$(TIME_STEP) bench-check $(MAKE) bench-check
+	+$(TIME_STEP) test-e2e $(MAKE) test-e2e
 	+$(TIME_STEP) fuzz-smoke $(MAKE) fuzz-smoke
 
 test-all-bindings:
@@ -680,48 +681,51 @@ deps-all: \
 certs:
 	./scripts/ensure_test_certs.sh
 
-dev-up: compose-up
+dev-up:
+	./scripts/dev-up.sh
 
-dev-down: compose-down
+dev-down:
+	./scripts/dev-down.sh
 
-dev-reset: compose-down
-	cmake -E rm -rf docker/nginx/generated
+dev-reset:
+	./scripts/dev-reset.sh
 
-dev-ps: compose-ps
+dev-ps:
+	./scripts/dev-ps.sh
 
-dev-logs: compose-logs
+dev-logs:
+	./scripts/dev-logs.sh
 
 compose-up:
-	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
-	$(MAKE) certs
-	./scripts/ensure_large_fixtures.sh "$(LUA)" "./scripts/generate_large_fixtures.lua" "$(GENERATED_FIXTURE_DIR)"
-	$(LUA) ./scripts/generate_large_fixtures.lua ./docker/nginx/generated/variants
-	$(COMPOSE) -f docker-compose.yml up -d --build --force-recreate
+	LUA="$(LUA)" ./scripts/dev-up.sh
 
 compose-down:
-	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
-	$(COMPOSE) -f docker-compose.yml down --remove-orphans
+	./scripts/dev-down.sh
 
 compose-ps:
-	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
-	$(COMPOSE) -f docker-compose.yml ps
+	./scripts/dev-ps.sh
 
 compose-logs:
-	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
-	$(COMPOSE) -f docker-compose.yml logs -f
+	./scripts/dev-logs.sh
 
 curl-examples: deps-host
 	./scripts/build_curl_examples.sh
 
+ifeq ($(LONEJSON_E2E_SERVICES_READY),1)
 test-curl-e2e: curl-examples
+else
+test-curl-e2e: compose-up curl-examples
+endif
 	./scripts/test_curl_e2e.sh
 
 test-e2e:
-	+$(TIME_STEP) e2e/curl $(MAKE) test-curl-e2e
-	+$(TIME_STEP) e2e/oidc $(MAKE) test-oidc-e2e
-	+$(TIME_STEP) e2e/m2m $(MAKE) test-m2m-e2e
+	./scripts/test-e2e.sh
 
+ifeq ($(LONEJSON_E2E_SERVICES_READY),1)
+test-oidc-e2e: deps-host
+else
 test-oidc-e2e: compose-up deps-host
+endif
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset host-curl --target lonejson_oidc_fixture_server
 	./scripts/test_oidc_e2e.sh

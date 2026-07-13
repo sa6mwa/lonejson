@@ -25,6 +25,14 @@ if printf '%s\n' "$release_pipeline_test_all" | grep -E '(^|[[:space:]])make[[:s
   exit 1
 fi
 printf '%s\n' "$release_pipeline_test_all" | grep -F 'Skipping test-host-curl: release-matrix runs the full curl-enabled host release tests before packaging' >/dev/null
+printf '%s\n' "$release_pipeline_test_all" | grep -E '(^|[[:space:]])make[[:space:]]+test-e2e($|[[:space:]])' >/dev/null
+if printf '%s\n' "$release_pipeline_test_all" | grep -E '(^|[[:space:]])make[[:space:]]+bench-check($|[[:space:]])' >/dev/null; then
+  echo "test-all should not invoke bench-check; benchmark gates belong to prerelease-hardening or explicit bench targets" >&2
+  exit 1
+fi
+
+hardening_dry_run=$(make -C "$repo_root" -n prerelease-hardening LONEJSON_HAVE_TSAN=0)
+printf '%s\n' "$hardening_dry_run" | grep -E '(^|[[:space:]])make[[:space:]]+bench-check($|[[:space:]])' >/dev/null
 
 asan_dry_run=$(make -C "$repo_root" -n asan)
 printf '%s\n' "$asan_dry_run" | grep -F 'lua_external_liblonejson_tests' >/dev/null

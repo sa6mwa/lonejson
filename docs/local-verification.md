@@ -54,6 +54,19 @@ For normal local confidence and completion reports, use:
 make test
 ```
 
+## Broader Confidence
+
+`make test-all` is the deterministic broad local confidence gate. It runs the
+debug gate, host release tests, curl/auth host tests unless explicitly skipped
+by the release pipeline, cross target tests, host sanitizers where supported,
+Valgrind, deterministic local e2e, and fuzz smoke.
+
+Benchmark gates are intentionally not part of `test-all` or the normal
+`prerelease` graph. Run `make bench-check`, `make bench-gate`,
+`make lua-bench-gate`, or `make prerelease-hardening` when performance is the
+surface under review or when preparing a release decision that explicitly
+requires benchmark evidence.
+
 For a focused test while iterating on a narrow change, build the required
 targets first and state that the result is focused diagnostic coverage, not the
 debug lifecycle gate:

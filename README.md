@@ -423,8 +423,9 @@ introspection, UserInfo, revocation, bearer rejection, and bearer acceptance
 against the live endpoints. The same e2e checks fail-closed bearer behavior for
 missing credentials, wrong audience, missing scope, wrong/missing `azp`, and
 acceptance for strict multi-audience tokens and `scp` array scopes. Compose
-commands prefer `nerdctl compose` and fall back to `docker compose`. The e2e
-also exercises refresh-token grant exchange against the mock provider and
+commands run through `scripts/compose.sh`, which prefers `nerdctl compose` and
+falls back to `docker compose`. The e2e also exercises refresh-token grant
+exchange against the mock provider and
 requires a returned access token.
 
 `make test-m2m-e2e` starts a tiny lonejson-backed API fixture and uses `curl`
@@ -1357,6 +1358,7 @@ The standard verification commands are:
 ```sh
 make test
 make test-all
+make test-e2e
 make cross-sanitizers
 make asan
 make bench-gate
@@ -1370,8 +1372,9 @@ raw `ctest --preset debug` as completion or release evidence; raw CTest is only
 diagnostic after a matching configure/build step. See
 [Local Verification](docs/local-verification.md) for the exact boundary.
 
-`make test-all` is the broader local confidence gate: debug, host, curl/auth
-host, cross presets, host sanitizers, benchmark checks, and fuzz smoke.
+`make test-all` is the broader deterministic local confidence gate: debug,
+host, curl/auth host, cross presets, host sanitizers, Valgrind, deterministic
+local e2e, and fuzz smoke. It deliberately does not run benchmark gates.
 `make cross-sanitizers` is an extra hardening check for the currently supported
 QEMU sanitizer route, `armhf-linux-gnu` ASan/UBSan; it is intentionally outside
 the normal release gate because the other pkt.systems C projects run sanitizer
@@ -1381,7 +1384,10 @@ matrix that builds, checksums, and verifies every release artifact. `make
 release` is the final clean release gate; it cleans generated state, then runs
 the same release pipeline. No release-relevant check should exist only in one
 of those targets. `make test-all-bindings` is a compatibility alias for the Lua
-binding suite; it no longer expands to the full world gate.
+binding suite; it no longer expands to the full world gate. Benchmark
+enforcement is explicit through `bench-check`, `bench-gate`, Lua benchmark
+targets, and `prerelease-hardening` so noisy host performance runs can be
+investigated separately from lifecycle alignment.
 
 ## License
 

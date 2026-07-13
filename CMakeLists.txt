@@ -739,7 +739,7 @@ if(LONEJSON_BUILD_TESTS)
     add_test(
       NAME lonejson_test_all_hardening_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_test_all_clang_optional.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_test_all_hardening.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_bootlin_tsan_support_tests
