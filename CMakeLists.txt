@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
 
+set(LONEJSON_VERSION_OVERRIDE "" CACHE STRING "Explicit release-candidate version override in X.Y.Z form.")
 execute_process(
-  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release_version.sh"
+  COMMAND "${CMAKE_COMMAND}" -E env
+          "LONEJSON_VERSION_OVERRIDE=${LONEJSON_VERSION_OVERRIDE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release_version.sh"
   OUTPUT_VARIABLE LONEJSON_RESOLVED_VERSION
   ERROR_VARIABLE LONEJSON_VERSION_ERROR
   RESULT_VARIABLE LONEJSON_VERSION_RESULT
@@ -822,6 +825,11 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_release_pipeline_makefile_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_pipeline_makefile.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_release_version_override_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_version_override.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_release_checksum_manifest_tests

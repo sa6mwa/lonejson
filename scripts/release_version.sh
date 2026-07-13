@@ -5,6 +5,19 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 root_dir="$(CDPATH= cd -- "$script_dir/.." && pwd)"
 version_file="$root_dir/VERSION"
 
+if [ -n "${LONEJSON_VERSION_OVERRIDE:-}" ]; then
+    case "$LONEJSON_VERSION_OVERRIDE" in
+      [0-9]*.[0-9]*.[0-9]*)
+        if [[ "$LONEJSON_VERSION_OVERRIDE" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            printf '%s\n' "$LONEJSON_VERSION_OVERRIDE"
+            exit 0
+        fi
+        ;;
+    esac
+    printf 'release_version.sh: invalid LONEJSON_VERSION_OVERRIDE value: %s\n' "$LONEJSON_VERSION_OVERRIDE" >&2
+    exit 1
+fi
+
 git_top="$(git -C "$root_dir" rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -n "$git_top" ]; then
     git_top="$(CDPATH= cd -- "$git_top" && pwd)"

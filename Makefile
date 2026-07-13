@@ -28,6 +28,9 @@ LUA ?= lua
 LUAROCKS ?= luarocks
 GENERATED_FIXTURE_DIR := $(CURDIR)/build/generated/fixtures
 COMPOSE := $(shell if command -v nerdctl >/dev/null 2>&1; then printf '%s' 'nerdctl compose'; elif command -v docker >/dev/null 2>&1; then printf '%s' 'docker compose'; fi)
+ifneq ($(LONEJSON_VERSION_OVERRIDE),)
+export LONEJSON_VERSION_OVERRIDE
+endif
 RELEASE_VERSION := $(shell ./scripts/release_version.sh)
 DIST_DIR := $(CURDIR)/dist
 RELEASE_SOURCE_TARBALL := $(DIST_DIR)/lonejson-$(RELEASE_VERSION).tar.gz
@@ -112,6 +115,7 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 	release-pipeline \
 	release-matrix \
 	release \
+	print-release-version \
 	lua-rock \
 	lua-env \
 	lua-test \
@@ -203,6 +207,7 @@ help:
 		'make release-pipeline       Internal shared release proof used by prerelease and release.' \
 		'make release-matrix         Build host release tests, then package, checksum, and verify every release target without cleaning first.' \
 		'make release                Clean generated state, then run the same pipeline as prerelease.' \
+		'make print-release-version  Print the exact version used by package and release targets.' \
 		'make release-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make release-darwin-smoke-bundle Build the Darwin smoke ZIP with example and link-smoke binaries.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
@@ -372,6 +377,9 @@ release-matrix:
 release:
 	$(TIME_STEP) release/clean ./scripts/clean.sh
 	+$(TIME_STEP) release/pipeline $(MAKE) release-pipeline
+
+print-release-version:
+	@printf '%s\n' "$(RELEASE_VERSION)"
 
 bench:
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
