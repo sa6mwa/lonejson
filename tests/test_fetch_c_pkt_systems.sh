@@ -65,10 +65,10 @@ cmake \
 
 grep -q 'Download attempt 1/3 failed' "$success_log"
 grep -q 'Download attempt 2/3 failed' "$success_log"
-test -f "$success_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/include/curl/curlver.h"
-test -f "$success_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/lib/cmake/CURL/CURLConfig.cmake"
-test -f "$success_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/lib/pkgconfig/libcurl.pc"
-test -f "$success_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-version"
+test -f "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/include/curl/curlver.h"
+test -f "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/lib/cmake/CURL/CURLConfig.cmake"
+test -f "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/lib/pkgconfig/libcurl.pc"
+test -f "$success_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-version"
 
 failure_log="$tmp_dir/failure.log"
 if cmake \
@@ -86,7 +86,7 @@ if cmake \
 fi
 
 grep -q 'after 3 attempts' "$failure_log"
-test ! -e "$failure_root/.deps/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-version"
+test ! -e "$failure_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-version"
 
 pinned_version_log="$tmp_dir/pinned-version.log"
 if cmake \
@@ -101,4 +101,4 @@ if cmake \
 fi
 
 grep -q 'LONEJSON_C_PKT_SYSTEMS_VERSION is not configurable' "$pinned_version_log"
-test ! -e "$pinned_version_root/.deps/c.pkt.systems"
+test ! -e "$pinned_version_root/.cache/c.pkt.systems"

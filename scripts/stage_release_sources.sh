@@ -40,6 +40,7 @@ else
     --exclude='./stash' \
     --exclude='./build' \
     --exclude='./dist' \
+    --exclude='./.cache' \
     --exclude='./.deps' \
     --exclude='./.luarocks-build' \
     --exclude='./lonejson' \

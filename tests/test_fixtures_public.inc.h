@@ -868,7 +868,6 @@ static void test_public_dynamic_record_helpers(void) {
   lonejson_free(limited_runtime);
 }
 
-
 static lonejson_status test_runtime_array_rewrite_keep_item(
     void *user, const lonejson_array_rewrite_context *context, void *item,
     lonejson_array_rewrite_result *result, lonejson_error *error) {

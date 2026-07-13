@@ -40,13 +40,25 @@ else
     root_dir="$(CDPATH= cd -- "$root_dir" && pwd)"
 fi
 
-if [ "$root_dir" = "/" ]; then
-    printf 'clean.sh: refusing to clean /\n' >&2
+script_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+home_dir="${HOME:-}"
+
+if [ "$root_dir" = "/" ] || [ "$root_dir" = "$home_dir" ] ||
+   [ "$root_dir" != "$script_root" ]; then
+    printf 'clean.sh: refusing to clean unsafe root: %s\n' "$root_dir" >&2
     exit 1
 fi
 
 remove_path() {
     target_path="$1"
+    case "$target_path" in
+        "$root_dir"/build|"$root_dir"/dist|"$root_dir"/.cache|"$root_dir"/.luarocks-build|"$root_dir"/examples/bin|"$root_dir"/lonejson)
+            ;;
+        *)
+            printf 'clean.sh: refusing to remove unexpected path: %s\n' "$target_path" >&2
+            exit 1
+            ;;
+    esac
     if [ -e "$target_path" ]; then
         rm -rf -- "$target_path"
     fi
@@ -54,7 +66,7 @@ remove_path() {
 
 if [ "$mode" = "all" ]; then
     remove_path "$root_dir/build"
-    remove_path "$root_dir/.deps"
+    remove_path "$root_dir/.cache"
     remove_path "$root_dir/.luarocks-build"
     remove_path "$root_dir/examples/bin"
     remove_path "$root_dir/lonejson"

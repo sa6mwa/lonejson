@@ -77,7 +77,7 @@ fi
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OPENSSL=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_JWT=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OIDC=ON' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'run_target linux-gnu-release x86_64-linux-gnu package-archive-linux-gnu full' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'run_target x86_64-linux-gnu-release x86_64-linux-gnu package-archive-x86_64-linux-gnu full' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset"' >/dev/null
 if printf '%s\n' "$matrix_script" | grep -F -- 'host_policy_ctest_exclude=' >/dev/null; then
   printf 'release matrix must not keep a filtered cross-target CTest replay surface\n' >&2
@@ -88,7 +88,7 @@ if printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset" -E' >/d
   exit 1
 fi
 for non_host_target in \
-    'run_target linux-musl-release x86_64-linux-musl package-archive-linux-musl' \
+    'run_target x86_64-linux-musl-release x86_64-linux-musl package-archive-x86_64-linux-musl' \
     'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu' \
     'run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl' \
     'run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu' \

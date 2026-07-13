@@ -12,8 +12,8 @@ TIME_STEP := ./scripts/time_step.sh
 LONEJSON_HAVE_TSAN ?= $(shell bash "$(CURDIR)/scripts/check_bootlin_tsan_support.sh")
 LONEJSON_TEST_ALL_HOST_CURL ?= 1
 RELEASE_BUILD_PRESETS := \
-	linux-gnu-release \
-	linux-musl-release \
+	x86_64-linux-gnu-release \
+	x86_64-linux-musl-release \
 	aarch64-linux-gnu-release \
 	aarch64-linux-musl-release \
 	armhf-linux-gnu-release \
@@ -259,7 +259,7 @@ help:
 		'make test-oidc-e2e          Build and run OIDC/OAuth2/JWKS e2e against the local compose rig.' \
 		'make test-m2m-e2e           Build and run M2M Basic/Bearer auth e2e with curl as the client.' \
 		'make release-source-artifact Build the source-only release tarball in dist/.' \
-		'make clean                  Remove build/, dist/, .deps/, examples/bin/, and generated Lua module artifacts.' \
+		'make clean                  Remove build/, dist/, .cache/, examples/bin/, and generated Lua module artifacts.' \
 		'make clean-dist             Remove dist/ release artifacts only.'
 
 finalize-slice:

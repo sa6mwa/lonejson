@@ -38,7 +38,7 @@ target_id="${LONEJSON_C_PKT_SYSTEMS_TARGET_ID:-}"
 if [[ -z "${target_id}" ]]; then
   target_id="$(detect_target_id)"
 fi
-bundle_root="${repo_root}/.deps/c.pkt.systems/${target_id}/root"
+bundle_root="${repo_root}/.cache/c.pkt.systems/${target_id}/root"
 
 if [[ ! -d "${bundle_root}" ]]; then
   printf '%s\n' "missing c.pkt.systems bundle at ${bundle_root}" >&2

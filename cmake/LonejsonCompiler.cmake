@@ -35,8 +35,7 @@ if(LONEJSON_BUILD_FUZZERS)
   set(ENV{AFL_CC} "")
   set(ENV{AFL_CXX} "")
   message(STATUS "Using pinned AFL++ ${_lonejson_afl_version} with Bootlin GCC")
-elseif(NOT DEFINED CMAKE_C_COMPILER AND "$ENV{CC}" STREQUAL "" AND
-    NOT CMAKE_TOOLCHAIN_FILE)
+elseif(NOT CMAKE_TOOLCHAIN_FILE)
   include("${CMAKE_CURRENT_LIST_DIR}/toolchains/lonejson_bootlin.cmake")
   lonejson_configure_bootlin_toolchain(
     x86_64-linux-gnu x86_64 x86_64 "" qemu-x86_64)

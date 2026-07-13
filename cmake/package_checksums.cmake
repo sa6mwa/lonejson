@@ -1,4 +1,7 @@
-set(dist_dir "${LONEJSON_ROOT}/dist")
+if(NOT DEFINED LONEJSON_DIST_DIR OR LONEJSON_DIST_DIR STREQUAL "")
+  set(LONEJSON_DIST_DIR "${LONEJSON_ROOT}/dist")
+endif()
+set(dist_dir "${LONEJSON_DIST_DIR}")
 set(checksums_name "lonejson-${LONEJSON_VERSION}-CHECKSUMS")
 set(checksums_path "${dist_dir}/${checksums_name}")
 

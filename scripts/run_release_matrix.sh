@@ -15,7 +15,7 @@ configure_release_target() {
     preset="$1"
     target_id="$2"
 
-    bundle_root="$repo_root/.deps/c.pkt.systems/$target_id/root"
+    bundle_root="$repo_root/.cache/c.pkt.systems/$target_id/root"
     if [ ! -f "$bundle_root/lib/cmake/CURL/CURLConfig.cmake" ]; then
         printf 'missing c.pkt.systems CURL CMake package for %s under %s\n' "$target_id" "$bundle_root/lib/cmake/CURL" >&2
         exit 1
@@ -81,8 +81,8 @@ cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aa
 cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aarch64-linux-musl -P cmake/fetch_c_pkt_systems.cmake
 cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
 cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-musl -P cmake/fetch_c_pkt_systems.cmake
-run_target linux-gnu-release x86_64-linux-gnu package-archive-linux-gnu full
-run_target linux-musl-release x86_64-linux-musl package-archive-linux-musl
+run_target x86_64-linux-gnu-release x86_64-linux-gnu package-archive-x86_64-linux-gnu full
+run_target x86_64-linux-musl-release x86_64-linux-musl package-archive-x86_64-linux-musl
 run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu
 run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl
 run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu

@@ -1303,8 +1303,7 @@ lonejson__json_value_apply_allocator(lonejson_json_value *value,
 
 static LONEJSON__INLINE int
 lonejson__json_value_is_initialized(const lonejson_json_value *value) {
-  return value != NULL &&
-         value->methods == &g_lonejson_json_value_methods &&
+  return value != NULL && value->methods == &g_lonejson_json_value_methods &&
          value->_lonejson_magic ==
              lonejson__init_cookie(value, LONEJSON__JSON_VALUE_MAGIC);
 }
@@ -1361,8 +1360,7 @@ static void lonejson__source_assign_methods(lonejson_source *value) {
 
 static LONEJSON__INLINE int
 lonejson__source_is_initialized(const lonejson_source *value) {
-  return value != NULL &&
-         value->cleanup == lonejson_source_cleanup &&
+  return value != NULL && value->cleanup == lonejson_source_cleanup &&
          value->reset == lonejson_source_reset &&
          value->set_file == lonejson_source_set_file &&
          value->set_fd == lonejson_source_set_fd &&

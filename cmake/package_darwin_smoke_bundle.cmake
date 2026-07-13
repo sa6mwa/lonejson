@@ -13,6 +13,10 @@ endif()
 
 get_filename_component(LONEJSON_BINARY_DIR "${LONEJSON_BINARY_DIR}" ABSOLUTE)
 get_filename_component(LONEJSON_ROOT "${LONEJSON_ROOT}" ABSOLUTE)
+if(NOT DEFINED LONEJSON_DIST_DIR OR LONEJSON_DIST_DIR STREQUAL "")
+  set(LONEJSON_DIST_DIR "${LONEJSON_ROOT}/dist")
+endif()
+get_filename_component(LONEJSON_DIST_DIR "${LONEJSON_DIST_DIR}" ABSOLUTE)
 
 function(lonejson_import_cache_path var_name)
   if(DEFINED ${var_name} AND NOT "${${var_name}}" STREQUAL "")
@@ -80,17 +84,17 @@ set(consumer_bin_dir "${bundle_root}/consumer-bin")
 set(stage_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}-smoke-test")
 set(stage_root "${bundle_root}/${stage_name}")
 set(release_archive
-    "${LONEJSON_ROOT}/dist/liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}.tar.gz")
+    "${LONEJSON_DIST_DIR}/liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}.tar.gz")
 set(release_prefix
     "${extract_root}/liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}")
-set(smoke_archive "${LONEJSON_ROOT}/dist/${stage_name}.zip")
+set(smoke_archive "${LONEJSON_DIST_DIR}/${stage_name}.zip")
 
 if(NOT EXISTS "${release_archive}")
   message(FATAL_ERROR "missing Darwin release archive: ${release_archive}")
 endif()
 
 file(REMOVE_RECURSE "${bundle_root}")
-file(MAKE_DIRECTORY "${LONEJSON_ROOT}/dist")
+file(MAKE_DIRECTORY "${LONEJSON_DIST_DIR}")
 file(MAKE_DIRECTORY
   "${extract_root}"
   "${consumer_bin_dir}"

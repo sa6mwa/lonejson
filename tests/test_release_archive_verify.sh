@@ -33,7 +33,7 @@ package_root="$tmp_dir/package/liblonejson-9.9.9-x86_64-linux-gnu"
 dependency_root="$tmp_dir/deps"
 mkdir -p \
   "$dist_dir" \
-  "$build_root/linux-gnu-release" \
+  "$build_root/x86_64-linux-gnu-release" \
   "$dependency_root/lib/cmake/CURL" \
   "$dependency_root/lib/cmake/OpenSSL" \
   "$dependency_root/lib/pkgconfig" \
@@ -577,7 +577,7 @@ EOF
 printf 'license\n' >"$package_root/share/doc/liblonejson/LICENSE"
 printf 'readme\n' >"$package_root/share/doc/liblonejson/README.md"
 
-cat >"$build_root/linux-gnu-release/CMakeCache.txt" <<EOF
+cat >"$build_root/x86_64-linux-gnu-release/CMakeCache.txt" <<EOF
 CMAKE_C_COMPILER:FILEPATH=$(command -v cc)
 CMAKE_NM:FILEPATH=$(command -v nm)
 CMAKE_READELF:FILEPATH=$(command -v readelf)

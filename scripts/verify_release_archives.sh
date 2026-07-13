@@ -40,8 +40,8 @@ require_file() {
 target_preset() {
   local target_id=$1
   case "$target_id" in
-    x86_64-linux-gnu) printf '%s\n' linux-gnu-release ;;
-    x86_64-linux-musl) printf '%s\n' linux-musl-release ;;
+    x86_64-linux-gnu) printf '%s\n' x86_64-linux-gnu-release ;;
+    x86_64-linux-musl) printf '%s\n' x86_64-linux-musl-release ;;
     aarch64-linux-gnu) printf '%s\n' aarch64-linux-gnu-release ;;
     aarch64-linux-musl) printf '%s\n' aarch64-linux-musl-release ;;
     armhf-linux-gnu) printf '%s\n' armhf-linux-gnu-release ;;
@@ -281,7 +281,7 @@ require_archive_contract() {
   require_file "$package_root/lib/pkgconfig/lonejson-jwt.pc"
   require_file "$package_root/lib/pkgconfig/lonejson-oidc.pc"
   require_file "$package_root/lib/pkgconfig/lonejson-openssl.pc"
-  if grep -RE 'c\.pkt\.systems|\.deps/|/home/|/build/' \
+  if grep -RE 'c\.pkt\.systems|\.cache/|\.deps/|/home/|/build/' \
       "$package_root/lib/pkgconfig/lonejson.pc" \
       "$package_root/lib/cmake/lonejson" >/dev/null; then
     printf 'forbidden dependency or path leak in release metadata for %s\n' "$archive" >&2
@@ -301,7 +301,7 @@ require_archive_contract() {
     printf 'unexpected third-party CMake dependency in core lonejson SDK: %s\n' "$archive" >&2
     exit 1
   fi
-  if grep -E '\.deps/|/home/|/build/|file://' "$dependency_manifest" >/dev/null; then
+  if grep -E '\.cache/|\.deps/|/home/|/build/|file://' "$dependency_manifest" >/dev/null; then
     printf 'forbidden path leak in dependency manifest for %s\n' "$archive" >&2
     exit 1
   fi
@@ -344,7 +344,7 @@ require_archive_contract() {
       "$archive"
     dynamic_metadata="$("$OTOOL" -L "$shared_lib"; "$OTOOL" -l "$shared_lib")"
     case "$dynamic_metadata" in
-      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
+      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".cache/"* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
         printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
         exit 1
         ;;
@@ -366,7 +366,7 @@ require_archive_contract() {
     fi
     dynamic_metadata="$("$READELF" -d "$shared_lib")"
     case "$dynamic_metadata" in
-      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
+      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".cache/"* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
         printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
         exit 1
         ;;

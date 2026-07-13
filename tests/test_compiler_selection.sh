@@ -11,7 +11,6 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 cmake_cmd=$(command -v "${CMAKE_COMMAND:-cmake}")
 ninja_cmd=$(command -v ninja)
-gcc_cmd=$(command -v gcc)
 
 cache_value() {
   local cache_file=$1 name=$2
@@ -89,10 +88,20 @@ grep -F 'LONEJSON_DEFAULT_C_COMPILER:INTERNAL=bootlin-gcc' \
 [[ "$(cache_value "$tmp_dir/host/CMakeCache.txt" CMAKE_LINKER)" == "$bootlin_ld" ]]
 [[ "$(cache_value "$tmp_dir/host/CMakeCache.txt" CMAKE_SYSROOT)" == "$bootlin_sysroot" ]]
 
+set +e
 "$cmake_cmd" -S "$repo_root" -B "$tmp_dir/explicit-gcc" -G Ninja \
   -D CMAKE_MAKE_PROGRAM="$ninja_cmd" \
-  -D CMAKE_C_COMPILER="$gcc_cmd" \
+  -D CMAKE_C_COMPILER=/usr/bin/gcc \
   -D LONEJSON_BUILD_TESTS=OFF \
   -D LONEJSON_BUILD_EXAMPLES=OFF \
   >"$tmp_dir/explicit-gcc.log" 2>&1
-[[ "$(cache_value "$tmp_dir/explicit-gcc/CMakeCache.txt" CMAKE_C_COMPILER)" == "$gcc_cmd" ]]
+explicit_gcc_status=$?
+set -e
+if [[ "$explicit_gcc_status" -eq 0 ]]; then
+  [[ "$(cache_value "$tmp_dir/explicit-gcc/CMakeCache.txt" CMAKE_C_COMPILER)" == "$bootlin_cc" ]]
+  [[ "$(cache_value "$tmp_dir/explicit-gcc/CMakeCache.txt" CMAKE_LINKER)" == "$bootlin_ld" ]]
+  [[ "$(cache_value "$tmp_dir/explicit-gcc/CMakeCache.txt" CMAKE_SYSROOT)" == "$bootlin_sysroot" ]]
+else
+  grep -E 'must use its pinned Bootlin compiler|Bootlin compiler triple mismatch' \
+    "$tmp_dir/explicit-gcc.log" >/dev/null
+fi

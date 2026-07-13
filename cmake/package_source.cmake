@@ -1,4 +1,7 @@
-set(dist_dir "${LONEJSON_ROOT}/dist")
+if(NOT DEFINED LONEJSON_DIST_DIR OR LONEJSON_DIST_DIR STREQUAL "")
+  set(LONEJSON_DIST_DIR "${LONEJSON_ROOT}/dist")
+endif()
+set(dist_dir "${LONEJSON_DIST_DIR}")
 set(source_root_name "lonejson-${LONEJSON_VERSION}")
 set(archive_base "${dist_dir}/${source_root_name}.tar")
 set(archive_path "${archive_base}.gz")

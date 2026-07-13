@@ -165,7 +165,7 @@ run_target_sanitizer() {
     sanitizer="$3"
     build_dir="$repo_root/build/$preset-$sanitizer"
     toolchain_file="$(target_toolchain_file "$target_id")"
-    bundle_root="$repo_root/.deps/c.pkt.systems/$target_id/root"
+    bundle_root="$repo_root/.cache/c.pkt.systems/$target_id/root"
     sanitizer_flag="$(sanitizer_cmake_flag "$sanitizer")"
     env_name="$(sanitizer_env_name "$sanitizer")"
     env_value="$(sanitizer_env_value "$sanitizer")"

@@ -2,6 +2,8 @@
 /build/
 /build-review/
 /.deps/
+/.cache/
+/VERSION
 /lonejson/
 /.luarocks-build/
 /src/lua/*.o

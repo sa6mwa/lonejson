@@ -273,8 +273,11 @@ if(PACKAGE_FIND_VERSION)
 endif()
 ")
 
-file(MAKE_DIRECTORY "${LONEJSON_ROOT}/dist")
-set(archive_base "${LONEJSON_ROOT}/dist/${archive_name}.tar")
+if(NOT DEFINED LONEJSON_DIST_DIR OR LONEJSON_DIST_DIR STREQUAL "")
+  set(LONEJSON_DIST_DIR "${LONEJSON_ROOT}/dist")
+endif()
+file(MAKE_DIRECTORY "${LONEJSON_DIST_DIR}")
+set(archive_base "${LONEJSON_DIST_DIR}/${archive_name}.tar")
 set(archive "${archive_base}.gz")
 
 find_program(LONEJSON_TAR_BIN NAMES tar)

@@ -46,7 +46,7 @@ dependency_metadata="$(printf '%s\n' "$load_metadata" | sed '1d')"
 combined_metadata="$dependency_metadata"
 
 case "$combined_metadata" in
-  *libcurl* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"* | *"/tmp/"* | *"/var/tmp/"*)
+  *libcurl* | *c.pkt.systems* | *".cache/"* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"* | *"/tmp/"* | *"/var/tmp/"*)
     printf 'forbidden Darwin loader metadata in %s\n' "$context" >&2
     exit 1
     ;;
