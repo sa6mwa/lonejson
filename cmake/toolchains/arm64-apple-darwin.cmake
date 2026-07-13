@@ -58,8 +58,8 @@ foreach(_lonejson_required_tool
   endif()
 endforeach()
 
-set(_lonejson_darwin_linker_flag "--ld-path=${CMAKE_LINKER}")
-string(CONCAT _lonejson_legacy_darwin_linker_regex "(^| )-fuse-ld=[^ ]+")
+set(_lonejson_darwin_linker_flag "-fuse-ld=${CMAKE_LINKER}")
+string(CONCAT _lonejson_legacy_darwin_linker_regex "(^| )--ld-path=[^ ]+")
 foreach(_lonejson_linker_flags
         CMAKE_EXE_LINKER_FLAGS
         CMAKE_SHARED_LINKER_FLAGS
@@ -69,7 +69,7 @@ foreach(_lonejson_linker_flags
          _lonejson_current_linker_flags "${_lonejson_current_linker_flags}")
   string(STRIP "${_lonejson_current_linker_flags}"
          _lonejson_current_linker_flags)
-  if(NOT "${_lonejson_current_linker_flags}" MATCHES "(^| )--ld-path=")
+  if(NOT "${_lonejson_current_linker_flags}" MATCHES "(^| )-fuse-ld=")
     set(_lonejson_current_linker_flags
         "${_lonejson_darwin_linker_flag} ${_lonejson_current_linker_flags}")
   endif()

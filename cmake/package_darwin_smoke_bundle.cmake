@@ -122,7 +122,7 @@ set(common_compile_args
   -Wextra
   -Werror
   "-mmacosx-version-min=${LONEJSON_MACOS_DEPLOYMENT_TARGET}"
-  "--ld-path=${CMAKE_LINKER}"
+  "-fuse-ld=${CMAKE_LINKER}"
   -I "${release_prefix}/include"
   "${LONEJSON_ROOT}/tests/test_link_consumer.c")
 

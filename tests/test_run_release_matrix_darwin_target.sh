@@ -28,7 +28,7 @@ grep -F 'list(APPEND _lonejson_find_root_path "${LONEJSON_C_PKT_SYSTEMS_ROOT}")'
 printf '%s\n' "$verify_script" | grep -F -- 'target_raw_compile_flags()' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-mmacosx-version-min=$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'raw_compile_flags="$(target_raw_compile_flags "$target_id")"' >/dev/null
-printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "--ld-path=$LINKER"' >/dev/null
+printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-fuse-ld=$LINKER"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'target_toolchain_file()' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- '$TARGET_CFLAGS $raw_compile_flags $pkg_config_flags' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- '-D "CMAKE_TOOLCHAIN_FILE=$(target_toolchain_file "$target_id")"' >/dev/null

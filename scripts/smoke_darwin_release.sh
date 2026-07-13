@@ -92,12 +92,12 @@ if [ -z "$packaged_dylib" ]; then
 fi
 
 "$cc" -std=c89 -Wall -Wextra -Werror -I "${package_root}/include" \
-    "-mmacosx-version-min=${deployment_target}" "--ld-path=${ld}" \
+    "-mmacosx-version-min=${deployment_target}" "-fuse-ld=${ld}" \
     "${repo_root}/tests/test_link_consumer.c" \
     "${package_root}/lib/liblonejson.a" \
     -o "${smoke_dir}/bin/static-link-smoke"
 "$cc" -std=c89 -Wall -Wextra -Werror -I "${package_root}/include" \
-    "-mmacosx-version-min=${deployment_target}" "--ld-path=${ld}" \
+    "-mmacosx-version-min=${deployment_target}" "-fuse-ld=${ld}" \
     "${repo_root}/tests/test_link_consumer.c" "$packaged_dylib" \
     -o "${smoke_dir}/bin/shared-link-smoke"
 
