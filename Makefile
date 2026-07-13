@@ -113,6 +113,7 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 	release-matrix \
 	release \
 	lua-rock \
+	lua-env \
 	lua-test \
 	lua-fuzz \
 	lua-bench \
@@ -167,11 +168,14 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 	dev-up \
 	dev-down \
 	dev-reset \
+	dev-ps \
 	dev-logs \
 	compose-up \
 	compose-down \
+	compose-ps \
 	compose-logs \
 	curl-examples \
+	test-e2e \
 	test-curl-e2e \
 	test-oidc-e2e \
 	test-m2m-e2e \
@@ -202,6 +206,7 @@ help:
 		'make release-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make release-darwin-smoke-bundle Build the Darwin smoke ZIP with example and link-smoke binaries.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
+		'make lua-env                Print shell exports for using the repo-local Lua rock and debug C library.' \
 		'make lua-test               Build the Lua module and run the Lua integration test.' \
 		'make lua-fuzz               Build the Lua module and run the Lua randomized binding fuzz smoke.' \
 		'make lua-bench              Run the standalone Lua benchmark harness, compare it, and enforce the Lua benchmark gate.' \
@@ -250,11 +255,14 @@ help:
 		'make dev-up                 Alias for make compose-up.' \
 		'make dev-down               Alias for make compose-down.' \
 		'make dev-reset              Stop the local compose stack and remove generated local service state.' \
+		'make dev-ps                 Alias for make compose-ps.' \
 		'make dev-logs               Alias for make compose-logs.' \
 		'make compose-up             Start the local nginx, sink, API fixture, and OIDC/OAuth2 test rig.' \
 		'make compose-down           Stop and remove the local compose stack.' \
+		'make compose-ps             Show the local compose stack status.' \
 		'make compose-logs           Tail logs from the local compose stack.' \
 		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
+		'make test-e2e               Run all deterministic local e2e gates serially.' \
 		'make test-curl-e2e          Build and run the curl examples against the local HTTPS rig.' \
 		'make test-oidc-e2e          Build and run OIDC/OAuth2/JWKS e2e against the local compose rig.' \
 		'make test-m2m-e2e           Build and run M2M Basic/Bearer auth e2e with curl as the client.' \
@@ -491,6 +499,11 @@ example-smoke-local: build
 
 lua-rock: $(LUA_ROCK_STAMP)
 
+lua-env: lua-rock
+	@$(LUAROCKS) path --tree "$(LUA_ROCK_TREE)"
+	@printf 'export LD_LIBRARY_PATH=%q:$${LD_LIBRARY_PATH:-}\n' "$(LONEJSON_LUA_LIBDIR)"
+	@printf 'export DYLD_LIBRARY_PATH=%q:$${DYLD_LIBRARY_PATH:-}\n' "$(LONEJSON_LUA_LIBDIR)"
+
 $(LUA_ROCKSPEC): $(LUA_ROCK_SOURCES)
 	mkdir -p "$(LUA_ROCK_TREE)"
 	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(LUA_ROCKSPEC)" "git+file://$(CURDIR)" "" "$$lib_ext"
@@ -666,6 +679,8 @@ dev-down: compose-down
 dev-reset: compose-down
 	cmake -E rm -rf docker/nginx/generated
 
+dev-ps: compose-ps
+
 dev-logs: compose-logs
 
 compose-up:
@@ -679,6 +694,10 @@ compose-down:
 	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
 	$(COMPOSE) -f docker-compose.yml down --remove-orphans
 
+compose-ps:
+	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
+	$(COMPOSE) -f docker-compose.yml ps
+
 compose-logs:
 	@test -n "$(COMPOSE)" || (printf '%s\n' 'Neither nerdctl nor docker was found in PATH.' >&2; exit 1)
 	$(COMPOSE) -f docker-compose.yml logs -f
@@ -688,6 +707,11 @@ curl-examples: deps-host
 
 test-curl-e2e: curl-examples
 	./scripts/test_curl_e2e.sh
+
+test-e2e:
+	+$(TIME_STEP) e2e/curl $(MAKE) test-curl-e2e
+	+$(TIME_STEP) e2e/oidc $(MAKE) test-oidc-e2e
+	+$(TIME_STEP) e2e/m2m $(MAKE) test-m2m-e2e
 
 test-oidc-e2e: compose-up deps-host
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
