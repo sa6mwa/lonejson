@@ -144,7 +144,7 @@ osxcross_candidate() {
 }
 
 ensure_target() {
-  local target=$1 values arch name sha256 prefix sysroot_rel root archive_dir archive tmp extract
+  local target=$1 values arch name sha256 prefix sysroot_rel root archive_dir archive tmp extract lock_dir lock_file lock_fd
   values="$(toolchain_values "$target")"
   IFS='|' read -r arch name sha256 prefix sysroot_rel root <<<"$values"
   if toolchain_ready "$root" "$prefix" "$root/$sysroot_rel"; then
@@ -153,7 +153,21 @@ ensure_target() {
 
   archive_dir="$(cache_root)/archives"
   archive="$archive_dir/$name.tar.xz"
-  mkdir -p "$archive_dir" "$(cache_root)/roots"
+  lock_dir="$(cache_root)/locks"
+  lock_file="$lock_dir/$name.lock"
+  command -v flock >/dev/null 2>&1 || die 'flock is required for shared Bootlin toolchain cache provisioning'
+  mkdir -p "$archive_dir" "$(cache_root)/roots" "$lock_dir"
+  exec {lock_fd}>"$lock_file"
+  flock "$lock_fd"
+
+  # Another checkout may have finished publishing this immutable collection
+  # while this process waited for the per-target shared-cache lock.
+  if toolchain_ready "$root" "$prefix" "$root/$sysroot_rel"; then
+    flock -u "$lock_fd"
+    exec {lock_fd}>&-
+    return
+  fi
+
   if [[ ! -f "$archive" ]]; then
     tmp="$archive.tmp.$$"
     trap 'rm -f "$tmp"' EXIT HUP INT TERM
@@ -174,6 +188,8 @@ ensure_target() {
   mv "$extract/$name" "$root"
   trap - EXIT HUP INT TERM
   toolchain_ready "$root" "$prefix" "$root/$sysroot_rel" || die "incomplete extracted toolchain: $root"
+  flock -u "$lock_fd"
+  exec {lock_fd}>&-
 }
 
 report_bootlin_target() {
@@ -259,6 +275,10 @@ Bootlin collection. Host GCC, Clang, and binutils are never candidates.
 Darwin policy: discover a local osxcross collection; do not download Apple SDKs.
 EOF
 }
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
 
 case "${1:-}" in
   -h|--help|'') usage ;;
