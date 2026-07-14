@@ -739,6 +739,11 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bootlin_host_arch.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_native_bootlin_target_tests
+      COMMAND "${CMAKE_COMMAND}"
+        -D LONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_bootlin_target.cmake")
+    add_test(
       NAME lonejson_cpkt_toolchain_resolver_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpkt_toolchain_resolver.sh"
