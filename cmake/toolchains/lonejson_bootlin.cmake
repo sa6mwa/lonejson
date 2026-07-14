@@ -184,9 +184,18 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
       set(LONEJSON_TARGET_LIBC "${target_libc}" CACHE STRING "")
     endif()
   else()
-    set(LONEJSON_TARGET_ARCH "${target_arch}" CACHE STRING "" FORCE)
-    set(LONEJSON_TARGET_OS linux CACHE STRING "" FORCE)
-    set(LONEJSON_TARGET_LIBC "${target_libc}" CACHE STRING "" FORCE)
+    # Toolchain files run before project(), when CMake's host processor may
+    # still be unavailable.  Preserve an explicitly requested target identity
+    # instead of replacing it with the compiler collection's Linux defaults.
+    if(NOT DEFINED LONEJSON_TARGET_ARCH)
+      set(LONEJSON_TARGET_ARCH "${target_arch}" CACHE STRING "" FORCE)
+    endif()
+    if(NOT DEFINED LONEJSON_TARGET_OS)
+      set(LONEJSON_TARGET_OS linux CACHE STRING "" FORCE)
+    endif()
+    if(NOT DEFINED LONEJSON_TARGET_LIBC)
+      set(LONEJSON_TARGET_LIBC "${target_libc}" CACHE STRING "" FORCE)
+    endif()
   endif()
   set(LONEJSON_BOOTLIN_TOOLCHAIN_ROOT "${_lonejson_root}" CACHE PATH "" FORCE)
   set(LONEJSON_BOOTLIN_TARGET_TRIPLE "${_lonejson_target_triple}" CACHE STRING "" FORCE)
