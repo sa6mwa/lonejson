@@ -2,4 +2,4 @@
 set -euo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-exec "$repo_root/scripts/fuzz.sh" "$@"
+exec "$repo_root/scripts/time_step.sh" "$@"

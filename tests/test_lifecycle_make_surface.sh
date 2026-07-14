@@ -29,6 +29,22 @@ require_text 'make toolchains-all         Install pinned Bootlin Linux toolchain
 require_text 'make toolchains-x86_64-linux-gnu Install the pinned x86_64 glibc Bootlin collection.'
 require_text 'make release-lua-artifacts  Build the standalone Lua source package, release rockspec, and source rock in dist/.'
 require_text 'make clean                  Remove build/, dist/, .cache/, devenv/volumes/, examples/bin/, and generated Lua module artifacts; preserve shared caches.'
+require_text 'make cross-build            Configure and build every supported Linux cross-release preset.'
+require_text 'make cross-test             Standard alias for make test-cross.'
+require_text 'make package-single-header  Build the version-stamped standalone-header artifact in dist/.'
+require_text 'cross-build: deps-cross'
+require_text 'cross-test: deps-cross'
+require_text 'test-cross: cross-test'
+require_text './scripts/build.sh $(DEBUG_PRESET) --stage-examples'
+require_text './scripts/test.sh $(DEBUG_PRESET)'
+require_text './scripts/host_test.sh'
+require_text './scripts/cross_build.sh $(CROSS_RELEASE_PRESETS)'
+require_text './scripts/cross_test.sh "$(HOST_POLICY_CTEST_EXCLUDE)" $(CROSS_RELEASE_PRESETS)'
+require_text './scripts/deps.sh x86_64-linux-gnu'
+require_text './scripts/package.sh'
+require_text './scripts/package-verify.sh'
+require_text './scripts/verify_release_privacy.sh'
+require_text './scripts/validate_luarocks.sh'
 
 help_text=$(make -C "$repo_root" help)
 while IFS= read -r target; do
@@ -50,12 +66,22 @@ done < <(awk '
   }
 ' "$makefile")
 
-for script in compose dev-up dev-down dev-reset dev-ps dev-logs test-e2e; do
+for script in \
+  deps build test host_test cross_build cross_test fuzz package package-verify \
+  run_timed osxcross_available verify_release_privacy validate_luarocks \
+  compose dev-up dev-down dev-reset dev-ps dev-logs test-e2e; do
   if [[ ! -x "$repo_root/scripts/$script.sh" ]]; then
     printf 'missing executable lifecycle script: scripts/%s.sh\n' "$script" >&2
     exit 1
   fi
 done
+
+grep -F 'exec "$repo_root/scripts/time_step.sh"' "$repo_root/scripts/run_timed.sh" >/dev/null
+grep -F 'exec "$repo_root/scripts/fuzz.sh"' "$repo_root/scripts/run_afl_fuzz.sh" >/dev/null
+grep -F 'verify_release_artifacts.sh' "$repo_root/scripts/package-verify.sh" >/dev/null
+grep -F 'verify_release_archives.sh' "$repo_root/scripts/package-verify.sh" >/dev/null
+grep -F 'verify_release_artifacts.sh' "$repo_root/scripts/verify_release_privacy.sh" >/dev/null
+grep -F 'cpkt-toolchains.sh" discover arm64-apple-darwin' "$repo_root/scripts/osxcross_available.sh" >/dev/null
 
 [[ -f "$repo_root/docker-compose.yaml" ]] || {
   printf 'missing lifecycle compose file: docker-compose.yaml\n' >&2

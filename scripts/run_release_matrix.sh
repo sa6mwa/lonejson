@@ -63,7 +63,10 @@ require_command qemu-aarch64
 require_command qemu-arm
 "$repo_root/scripts/cpkt-toolchains.sh" ensure all
 
-darwin_toolchain="${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/arm64-apple-darwin25-clang"
+darwin_toolchain=
+if darwin_description="$("$repo_root/scripts/osxcross_available.sh" 2>/dev/null)"; then
+    darwin_toolchain="$(printf '%s\n' "$darwin_description" | sed -n 's/^cc=//p')"
+fi
 
 if [ "${LONEJSON_RELEASE_MATRIX_PREFLIGHT_ONLY:-0}" = "1" ]; then
     printf 'Release matrix preflight completed successfully.\n'
@@ -87,7 +90,7 @@ run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-l
 run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl
 run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu
 run_target armhf-linux-musl-release armhf-linux-musl package-archive-armhf-linux-musl
-if [ -x "$darwin_toolchain" ]; then
+if [ -n "$darwin_toolchain" ] && [ -x "$darwin_toolchain" ]; then
     darwin_tool_bin="$(dirname -- "$darwin_toolchain")"
     export PATH="$darwin_tool_bin:$PATH"
     cmake -D LONEJSON_SOURCE_DIR="$repo_root" -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=arm64-apple-darwin -P cmake/fetch_c_pkt_systems.cmake
@@ -96,7 +99,7 @@ if [ -x "$darwin_toolchain" ]; then
     cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
 else
     printf '\n== arm64-apple-darwin-release ==\n'
-    printf 'Skipping Darwin release target: osxcross toolchain not available at %s\n' "$darwin_toolchain"
+    printf 'Skipping Darwin release target: local osxcross toolchain is unavailable\n'
 fi
 
 cmake --build --preset package-single-header

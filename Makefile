@@ -8,7 +8,7 @@ ASAN_PRESET := asan
 TSAN_PRESET := tsan
 VALGRIND_PRESET := valgrind
 FUZZ_PRESET := fuzz
-TIME_STEP := ./scripts/time_step.sh
+TIME_STEP := ./scripts/run_timed.sh
 LONEJSON_HAVE_TSAN ?= $(shell bash "$(CURDIR)/scripts/check_bootlin_tsan_support.sh")
 LONEJSON_TEST_ALL_HOST_CURL ?= 1
 LONEJSON_E2E_SERVICES_READY ?= 0
@@ -19,7 +19,7 @@ RELEASE_BUILD_PRESETS := \
 	aarch64-linux-musl-release \
 	armhf-linux-gnu-release \
 	armhf-linux-musl-release \
-	$(shell if [ -x "$${OSXCROSS_ROOT:-$$HOME/.local/cross/osxcross}/bin/arm64-apple-darwin25-clang" ]; then printf '%s' arm64-apple-darwin-release; fi)
+	$(shell if ./scripts/osxcross_available.sh >/dev/null 2>&1; then printf '%s' arm64-apple-darwin-release; fi)
 CROSS_RELEASE_PRESETS := \
 	aarch64-linux-gnu-release \
 	aarch64-linux-musl-release \
@@ -97,12 +97,14 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 	build-debug \
 	build-host \
 	build-release \
+	cross-build \
 	release-lua-artifacts \
 	package \
 	prerelease-artifacts \
 	package-source \
 	package-source-smoke \
 	package-checksums \
+	package-single-header \
 	release-source-artifact \
 	release-source-smoke \
 	release-darwin-smoke-bundle \
@@ -135,6 +137,7 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 	test-host \
 	test-host-curl \
 	test-cross \
+	cross-test \
 	cross-sanitizers \
 	test-all \
 	test-all-bindings \
@@ -193,11 +196,13 @@ help:
 		'make build-debug            Alias for make build.' \
 		'make build-host             Configure and build the host-native release preset.' \
 		'make build-release          Configure and build the full shipped release test matrix.' \
+		'make cross-build            Configure and build every supported Linux cross-release preset.' \
 		'make package                Build all release packages through make release.' \
 		'make prerelease-artifacts   Compatibility alias for make release-matrix.' \
 		'make package-source         Build the source-only release tarball in dist/.' \
 		'make package-source-smoke   Unpack the source release tarball into a temp tree, then run host C/Lua tests and Lua artifact packaging there.' \
 		'make package-checksums      Generate release checksums for existing dist artifacts.' \
+		'make package-single-header  Build the version-stamped standalone-header artifact in dist/.' \
 		'make release-lua-artifacts  Build the standalone Lua source package, release rockspec, and source rock in dist/.' \
 		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
 		'make verify-release-archives Alias for make package-verify.' \
@@ -230,6 +235,7 @@ help:
 		'make test-host              Build and run the host-native test preset.' \
 		'make test-host-curl         Build and run the host-native curl-enabled test preset.' \
 		'make test-cross             Configure, build, and run all cross release test presets serially.' \
+		'make cross-test             Standard alias for make test-cross.' \
 		'make cross-sanitizers       Extra hardening: build and run the supported armhf-linux-gnu ASan/UBSan target under QEMU.' \
 		'make toolchains-aflpp       Build the pinned native AFL++ GCC-plugin toolchain in the shared lifecycle cache.' \
 		'make test-all               Run debug, host, host-curl, cross, host sanitizers, Valgrind, e2e, and fuzz-smoke serially.' \
@@ -287,21 +293,20 @@ finalize-slice:
 	$(MAKE) test-debug
 
 build:
-	cmake --preset $(DEBUG_PRESET)
-	cmake --build --preset $(DEBUG_PRESET)
-	./scripts/stage_standalone_examples.sh
+	./scripts/build.sh $(DEBUG_PRESET) --stage-examples
 
 build-debug: build
 
 build-host:
-	cmake --preset $(HOST_PRESET)
-	cmake --build --preset $(HOST_PRESET)
+	./scripts/build.sh $(HOST_PRESET)
 
 build-release: deps-all
 	@set -e; for preset in $(RELEASE_BUILD_PRESETS); do \
-		cmake --preset "$$preset"; \
-		cmake --build --preset "$$preset"; \
+		./scripts/build.sh "$$preset"; \
 	done
+
+cross-build: deps-cross
+	./scripts/cross_build.sh $(CROSS_RELEASE_PRESETS)
 
 $(DIST_DIR):
 	mkdir -p "$(DIST_DIR)"
@@ -323,16 +328,17 @@ $(RELEASE_ROCKSPEC): lonejson.rockspec.in scripts/render_release_rockspec.sh | $
 $(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_LUA_SOURCE_TARBALL)
 	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(notdir $(RELEASE_LUA_SOURCE_TARBALL))" "" "$$lib_ext" "lonejson-$(RELEASE_VERSION)"
 
-$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lua_src_rock.sh scripts/smoke_lua_src_rock.sh
+$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lua_src_rock.sh scripts/validate_luarocks.sh
 	./scripts/package_lua_src_rock.sh "$(RELEASE_ROCK)" "$(RELEASE_PACK_ROCKSPEC)" "$(RELEASE_LUA_SOURCE_TARBALL)"
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared
-	./scripts/smoke_lua_src_rock.sh "$(RELEASE_ROCK)" "$(LONEJSON_LUA_LIBDIR)"
+	./scripts/validate_luarocks.sh "$(RELEASE_ROCK)" "$(LONEJSON_LUA_LIBDIR)"
 	rm -rf "$(RELEASE_PACK_DIR)"
 
 release-lua-artifacts: $(RELEASE_ROCKSPEC) $(RELEASE_LUA_SOURCE_TARBALL) $(RELEASE_ROCK)
 
-package: release
+package:
+	./scripts/package.sh
 
 package-source: release-source-artifact
 
@@ -353,6 +359,10 @@ package-checksums:
 	cmake --preset $(HOST_PRESET)
 	cmake --build --preset package-checksums
 
+package-single-header:
+	cmake --preset $(HOST_PRESET)
+	cmake --build --preset package-single-header
+
 release-darwin-smoke-bundle: deps-arm64-apple-darwin
 	cmake --preset arm64-apple-darwin-release
 	cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
@@ -360,12 +370,12 @@ release-darwin-smoke-bundle: deps-arm64-apple-darwin
 prerelease-artifacts: release-matrix
 
 package-verify:
-	./scripts/verify_release_artifacts.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
-	./scripts/verify_release_archives.sh "$(CURDIR)" "$(RELEASE_CHECKSUMS)"
+	./scripts/package-verify.sh "$(RELEASE_CHECKSUMS)"
 
 verify-release-archives: package-verify
 
-verify-release-privacy: package-verify
+verify-release-privacy:
+	./scripts/verify_release_privacy.sh "$(RELEASE_CHECKSUMS)"
 
 prerelease: release-pipeline
 
@@ -376,6 +386,7 @@ prerelease-hardening: prerelease
 	+$(TIME_STEP) hardening/bench-check $(MAKE) bench-check
 
 release-pipeline:
+	+$(TIME_STEP) prerelease/format $(MAKE) format
 	+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0
 	+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix
 
@@ -464,25 +475,23 @@ bench-gate:
 	./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$(PERF_LATEST)"
 
 test: build
-	ctest --preset $(DEBUG_PRESET)
+	./scripts/test.sh $(DEBUG_PRESET)
 	$(MAKE) lua-test
 
 test-debug: test
 
 test-host: build-host
-	ctest --preset $(HOST_PRESET)
+	./scripts/host_test.sh
 
 test-host-curl: deps-host
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset host-curl
 	ctest --preset host-curl
 
-test-cross: deps-cross
-	@set -e; for preset in $(CROSS_RELEASE_PRESETS); do \
-		cmake --preset "$$preset"; \
-		cmake --build --preset "$$preset"; \
-		ctest --preset "$$preset" --output-on-failure -E "$(HOST_POLICY_CTEST_EXCLUDE)"; \
-	done
+cross-test: deps-cross
+	./scripts/cross_test.sh "$(HOST_POLICY_CTEST_EXCLUDE)" $(CROSS_RELEASE_PRESETS)
+
+test-cross: cross-test
 
 cross-sanitizers: deps-cross
 	./scripts/run_cross_sanitizer_matrix.sh
@@ -626,7 +635,7 @@ toolchains-aflpp:
 deps-release: deps-all
 
 deps-host:
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -P cmake/fetch_c_pkt_systems.cmake
+	./scripts/deps.sh x86_64-linux-gnu
 
 toolchains-x86_64-linux-gnu:
 	./scripts/cpkt-toolchains.sh ensure x86_64-linux-gnu
@@ -650,25 +659,25 @@ toolchains-all:
 	./scripts/cpkt-toolchains.sh ensure all
 
 deps-x86_64-linux-gnu: toolchains-x86_64-linux-gnu
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
+	./scripts/deps.sh x86_64-linux-gnu
 
 deps-x86_64-linux-musl: toolchains-x86_64-linux-musl
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-musl -P cmake/fetch_c_pkt_systems.cmake
+	./scripts/deps.sh x86_64-linux-musl
 
 deps-aarch64-linux-gnu: toolchains-aarch64-linux-gnu
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aarch64-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
+	./scripts/deps.sh aarch64-linux-gnu
 
 deps-aarch64-linux-musl: toolchains-aarch64-linux-musl
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=aarch64-linux-musl -P cmake/fetch_c_pkt_systems.cmake
+	./scripts/deps.sh aarch64-linux-musl
 
 deps-armhf-linux-gnu: toolchains-armhf-linux-gnu
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-gnu -P cmake/fetch_c_pkt_systems.cmake
+	./scripts/deps.sh armhf-linux-gnu
 
 deps-armhf-linux-musl: toolchains-armhf-linux-musl
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=armhf-linux-musl -P cmake/fetch_c_pkt_systems.cmake
+	./scripts/deps.sh armhf-linux-musl
 
 deps-arm64-apple-darwin:
-	cmake -D LONEJSON_SOURCE_DIR=$(CURDIR) -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=arm64-apple-darwin -P cmake/fetch_c_pkt_systems.cmake
+	./scripts/deps.sh arm64-apple-darwin
 
 deps-cross: \
 	deps-aarch64-linux-gnu \

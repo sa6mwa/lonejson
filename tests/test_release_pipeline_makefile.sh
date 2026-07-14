@@ -29,6 +29,7 @@ require_text 'prerelease: release-pipeline'
 require_text 'prerelease-hardening: prerelease'
 require_text '+$(TIME_STEP) hardening/bench-check $(MAKE) bench-check'
 require_text 'release-pipeline:'
+require_text '+$(TIME_STEP) prerelease/format $(MAKE) format'
 require_text '+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0'
 require_text '+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix'
 require_text 'Skipping test-host-curl: release-matrix runs the full curl-enabled host release tests before packaging'
@@ -46,13 +47,14 @@ line_number() {
   grep -nF -- "$text" "$makefile" | head -n 1 | cut -d: -f1
 }
 
+format_line=$(line_number '+$(TIME_STEP) prerelease/format $(MAKE) format')
 test_all_line=$(line_number '+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0')
 matrix_line=$(line_number '+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix')
 clean_line=$(line_number '$(TIME_STEP) release/clean ./scripts/clean.sh')
 pipeline_line=$(line_number '+$(TIME_STEP) release/pipeline $(MAKE) release-pipeline')
 
-if (( test_all_line >= matrix_line )); then
-  printf 'release-pipeline must run test-all before release-matrix\n' >&2
+if (( format_line >= test_all_line || test_all_line >= matrix_line )); then
+  printf 'release-pipeline must run format, test-all, then release-matrix\n' >&2
   exit 1
 fi
 

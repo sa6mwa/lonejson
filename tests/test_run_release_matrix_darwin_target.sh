@@ -35,6 +35,7 @@ printf '%s\n' "$verify_script" | grep -F -- '-D "CMAKE_TOOLCHAIN_FILE=$(target_t
 printf '%s\n' "$verify_script" | grep -F -- 'scripts/discover_target_tools.sh' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'package-darwin-smoke-bundle' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'make package-verify' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'scripts/osxcross_available.sh' >/dev/null
 grep -F 'liblonejson.${LONEJSON_ABI_VERSION}.dylib' \
   "$darwin_smoke_script_path" >/dev/null
 grep -F 'LONEJSON_ABI_VERSION is required for Darwin smoke bundle' \
@@ -143,10 +144,16 @@ done
 while IFS='|' read -r name prefix triple; do
   root="$toolchain_cache/roots/$name"
   mkdir -p "$root/bin" "$root/$triple/sysroot/usr/include" "$root/$triple/sysroot/usr/lib"
+  mkdir -p "$root/lib"
   touch "$root/$triple/sysroot/usr/include/stdio.h"
   touch "$root/$triple/sysroot/usr/lib/libc.so"
+  touch "$root/lib/libstdc++.a" "$root/lib/libgcc.a"
   for tool in gcc g++ ld ar ranlib strip nm objcopy objdump addr2line gdb readelf; do
-    printf '#!/usr/bin/env bash\nexit 0\n' >"$root/bin/$prefix-$tool"
+    if [[ "$tool" == g++ ]]; then
+      printf '#!/usr/bin/env bash\ncase "${1:-}" in\n  -print-file-name=libstdc++.a) printf "%%s\\n" "$(dirname "$0")/../lib/libstdc++.a" ;;\n  -print-file-name=libgcc.a) printf "%%s\\n" "$(dirname "$0")/../lib/libgcc.a" ;;\n  *) exit 0 ;;\nesac\n' >"$root/bin/$prefix-$tool"
+    else
+      printf '#!/usr/bin/env bash\nexit 0\n' >"$root/bin/$prefix-$tool"
+    fi
     chmod +x "$root/bin/$prefix-$tool"
   done
 done <<'EOF'
@@ -162,4 +169,4 @@ preflight_output="$(PATH="$fake_bin:/usr/bin:/bin" \
   CPKT_TOOLCHAIN_CACHE="$toolchain_cache" \
   LONEJSON_RELEASE_MATRIX_PREFLIGHT_ONLY=1 \
   "$matrix_script_path")"
-[[ "$preflight_output" == "Release matrix preflight completed successfully." ]]
+printf '%s\n' "$preflight_output" | grep -Fx 'Release matrix preflight completed successfully.' >/dev/null

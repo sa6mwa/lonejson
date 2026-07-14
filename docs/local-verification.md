@@ -19,6 +19,11 @@ The default cache is
 downloading it. The optional Darwin entry reports local osxcross status; it
 never downloads an Apple SDK.
 
+Use `make cross-build` to configure/build the Linux cross presets and `make
+cross-test` (or the compatibility name `make test-cross`) to execute their
+QEMU-backed test coverage. `make package-single-header` creates the separate
+version-stamped single-header artifact without running a full release.
+
 Pinned c.pkt.systems SDK archives are separate immutable cache entries under
 `${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.
 `make deps-host` and the target-specific dependency targets verify each archive
