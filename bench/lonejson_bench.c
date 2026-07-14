@@ -988,7 +988,12 @@ static void bench_fill_timestamp(bench_run *run) {
 }
 
 static void bench_fill_host_and_compiler(bench_run *run) {
-  if (gethostname(run->host, sizeof(run->host) - 1u) != 0) {
+  const char *host_id;
+
+  host_id = getenv("LONEJSON_BENCH_HOST_ID");
+  if (host_id != NULL && host_id[0] != '\0') {
+    snprintf(run->host, sizeof(run->host), "%s", host_id);
+  } else if (gethostname(run->host, sizeof(run->host) - 1u) != 0) {
     snprintf(run->host, sizeof(run->host), "unknown");
   }
   run->host[sizeof(run->host) - 1u] = '\0';

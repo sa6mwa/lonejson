@@ -11,3 +11,9 @@ execute_process(
 if(NOT clean_result EQUAL 0)
   message(FATAL_ERROR "failed to clean dist at ${LONEJSON_DIST_DIR}")
 endif()
+
+if(NOT LONEJSON_DIST_DIR STREQUAL "${LONEJSON_ROOT}/dist")
+  file(MAKE_DIRECTORY "${LONEJSON_DIST_DIR}")
+  file(WRITE "${LONEJSON_DIST_DIR}/.lonejson-dist"
+    "lonejson lifecycle artifact directory\n")
+endif()

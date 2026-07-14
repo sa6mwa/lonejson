@@ -73,8 +73,21 @@ fi
 
 if [ "$dist_dir" = "/" ] || [ "$dist_dir" = "$home_dir" ] ||
    [ "$dist_dir" = "$root_dir" ]; then
-    printf 'clean.sh: refusing to clean unsafe dist directory: %s\n' "$dist_dir" >&2
-    exit 1
+  printf 'clean.sh: refusing to clean unsafe dist directory: %s\n' "$dist_dir" >&2
+  exit 1
+fi
+
+if [ "$dist_dir" != "$root_dir/dist" ]; then
+    case "$dist_dir" in
+        "$root_dir"/*)
+            printf 'clean.sh: refusing to clean project directory as custom dist: %s\n' "$dist_dir" >&2
+            exit 1
+            ;;
+    esac
+    if [ -e "$dist_dir" ] && [ ! -f "$dist_dir/.lonejson-dist" ]; then
+        printf 'clean.sh: refusing to clean unmarked custom dist directory: %s\n' "$dist_dir" >&2
+        exit 1
+    fi
 fi
 
 remove_path() {

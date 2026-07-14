@@ -16,6 +16,11 @@ if [ "$("$repo_root/scripts/bench_host_id.sh" wopr)" != \
   exit 1
 fi
 
+grep -F 'getenv("LONEJSON_BENCH_HOST_ID")' \
+  "$repo_root/bench/lonejson_bench.c" >/dev/null
+grep -F 'snprintf(run->host, sizeof(run->host), "%s", host_id);' \
+  "$repo_root/bench/lonejson_bench.c" >/dev/null
+
 mkdir -p "$tmp_dir/bin"
 cat >"$tmp_dir/bin/md5sum" <<'EOF'
 #!/usr/bin/env bash

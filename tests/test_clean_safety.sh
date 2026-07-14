@@ -51,14 +51,36 @@ grep -F 'refusing to clean unsafe dist directory' "$tmp_dir/dist-root-stderr" >/
 
 custom_dist_dir="$tmp_dir/custom-dist"
 custom_build_dir="$tmp_dir/custom-build"
-mkdir -p "$custom_dist_dir"
-printf '%s\n' generated >"$custom_dist_dir/artifact"
 cmake -S "$repo_root" -B "$custom_build_dir" -G Ninja \
   -D LONEJSON_DIST_DIR="$custom_dist_dir" \
   -D LONEJSON_BUILD_TESTS=OFF \
   -D LONEJSON_BUILD_EXAMPLES=OFF >/dev/null
 cmake --build "$custom_build_dir" --target package-clean-dist >/dev/null
-if [[ -e "$custom_dist_dir" ]]; then
-  printf 'package-clean-dist did not remove the configured artifact directory\n' >&2
+[[ -f "$custom_dist_dir/.lonejson-dist" ]]
+printf '%s\n' generated >"$custom_dist_dir/artifact"
+cmake --build "$custom_build_dir" --target package-clean-dist >/dev/null
+if [[ -e "$custom_dist_dir/artifact" ]]; then
+  printf 'package-clean-dist did not remove the generated custom artifact\n' >&2
   exit 1
 fi
+
+unsafe_dist_dir="$tmp_dir/unmarked-dist"
+mkdir -p "$unsafe_dist_dir"
+printf '%s\n' unrelated >"$unsafe_dist_dir/artifact"
+if "$repo_root/scripts/clean.sh" --dist-only --root "$repo_root" \
+    --dist-dir "$unsafe_dist_dir" >"$tmp_dir/unmarked-stdout" 2>"$tmp_dir/unmarked-stderr"; then
+  printf 'clean.sh accepted an unmarked external custom dist directory\n' >&2
+  exit 1
+fi
+grep -F 'refusing to clean unmarked custom dist directory' \
+  "$tmp_dir/unmarked-stderr" >/dev/null
+[[ -f "$unsafe_dist_dir/artifact" ]]
+
+if "$repo_root/scripts/clean.sh" --dist-only --root "$repo_root" \
+    --dist-dir "$repo_root/src" >"$tmp_dir/source-stdout" 2>"$tmp_dir/source-stderr"; then
+  printf 'clean.sh accepted a project source directory as custom dist\n' >&2
+  exit 1
+fi
+grep -F 'refusing to clean project directory as custom dist' \
+  "$tmp_dir/source-stderr" >/dev/null
+[[ -f "$repo_root/src/lonejson.c" ]]
