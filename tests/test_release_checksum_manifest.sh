@@ -40,3 +40,18 @@ for artifact in \
     exit 1
   fi
 done
+
+# The configured artifact directory must flow through the CMake target rather
+# than silently falling back to the checkout's default dist/ directory.
+custom_dist_dir="$tmp_dir/custom-dist"
+custom_build_dir="$tmp_dir/custom-build"
+mkdir -p "$custom_dist_dir"
+printf '%s\n' custom >"$custom_dist_dir/lonejson-0.0.0.tar.gz"
+cmake -S "$repo_root" -B "$custom_build_dir" -G Ninja \
+  -D LONEJSON_DIST_DIR="$custom_dist_dir" \
+  -D LONEJSON_BUILD_TESTS=OFF \
+  -D LONEJSON_BUILD_EXAMPLES=OFF >/dev/null
+cmake --build "$custom_build_dir" --target package-checksums >/dev/null
+custom_manifest="$custom_dist_dir/lonejson-0.0.0-CHECKSUMS"
+[[ -f "$custom_manifest" ]]
+grep -F '  lonejson-0.0.0.tar.gz' "$custom_manifest" >/dev/null

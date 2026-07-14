@@ -704,6 +704,11 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpkt_toolchain_resolver.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_cpkt_aflpp_resolver_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpkt_aflpp_resolver.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_lifecycle_preset_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lifecycle_presets.sh"
@@ -1412,6 +1417,7 @@ add_custom_target(package-single-header
 add_custom_target(package-checksums
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
     -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_checksums.cmake
   VERBATIM

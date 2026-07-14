@@ -28,15 +28,29 @@ ready() {
 ensure() {
   [[ "$(uname -s)" = Linux ]] || die 'AFL++ GCC-plugin fuzzing is native Linux-only'
   case "$(uname -m)" in x86_64|amd64) ;; *) die 'native x86_64 Linux is required; no cross, emulator, or QEMU runner is supported' ;; esac
-  local r c archive desc cc cxx bootlin_root tmp src dl helper
+  local r c archive desc cc cxx bootlin_root tmp src dl helper lock_dir lock_file lock_fd
   r=$(root); c=$(cache); archive="$c/archives/$archive_name"
   ready "$r" && return
+  lock_dir="$c/locks"
+  lock_file="$lock_dir/aflplusplus-${version}-x86_64-linux-gnu.lock"
+  command -v flock >/dev/null 2>&1 || die 'flock is required for shared AFL++ cache provisioning'
+  mkdir -p "$c/archives" "$lock_dir"
+  exec {lock_fd}>"$lock_file"
+  flock "$lock_fd"
+
+  # Another checkout may have finished publishing this immutable AFL++ root
+  # while this process waited for the shared-cache lock.
+  if ready "$r"; then
+    flock -u "$lock_fd"
+    exec {lock_fd}>&-
+    return
+  fi
+
   [[ -x "$bootlin" ]] || die "Bootlin resolver missing: $bootlin"
   "$bootlin" ensure x86_64-linux-gnu >/dev/null
   desc=$("$bootlin" discover x86_64-linux-gnu)
   cc=$(value cc "$desc"); cxx=$(value cxx "$desc"); bootlin_root=$(value root "$desc")
   [[ -x "$cc" && -x "$cxx" && -f "$bootlin_root/include/gmp.h" ]] || die 'Bootlin GCC plugin headers are incomplete'
-  mkdir -p "$c/archives"
   if ! [[ -f "$archive" ]] || ! printf '%s  %s\n' "$archive_sha256" "$archive" | sha256sum -c - >/dev/null 2>&1; then
     rm -f "$archive"; dl="$archive.tmp.$$"
     if command -v curl >/dev/null; then
@@ -82,6 +96,8 @@ EOF
   chmod +x "$tmp/root/bin/cpkt-afl-gcc" "$tmp/root/bin/cpkt-afl-g++"; touch "$tmp/root/.cpkt-aflpp-revision-$revision"
   ready "$tmp/root" || die 'incomplete AFL++ build'
   rm -rf "$r"; mv "$tmp/root" "$r"; trap - EXIT HUP INT TERM; rm -rf "$tmp"
+  flock -u "$lock_fd"
+  exec {lock_fd}>&-
 }
 
 report() {
@@ -95,6 +111,10 @@ env_out() {
   ensure; d=$("$bootlin" discover x86_64-linux-gnu); cc=$(value cc "$d"); cxx=$(value cxx "$d"); r=$(root)
   printf 'export CPKT_AFLPP_ROOT=%q\nexport AFL_PATH=%q\nexport AFL_CC=%q\nexport AFL_CXX=%q\nexport CC=%q\nexport CXX=%q\n' "$r" "$r/lib/afl" "$cc" "$cxx" "$r/bin/cpkt-afl-gcc" "$r/bin/cpkt-afl-g++"
 }
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
 
 case "${1:-}" in
   ensure) [[ $# -eq 1 ]] || die 'usage: cpkt-aflpp.sh ensure'; ensure ;;
