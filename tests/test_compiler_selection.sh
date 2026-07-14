@@ -73,6 +73,10 @@ bootlin_libgcc_a=$(printf '%s\n' "$bootlin_description" | sed -n 's/^libgcc_a=//
 [[ "$(cache_value "$tmp_dir/default/CMakeCache.txt" CMAKE_SYSROOT)" == "$bootlin_sysroot" ]]
 [[ "$(cache_value "$tmp_dir/default/CMakeCache.txt" CMAKE_C_COMPILER_TARGET)" == "$bootlin_target" ]]
 [[ "$(cache_value "$tmp_dir/default/CMakeCache.txt" LONEJSON_BOOTLIN_GDB)" == "$bootlin_gdb" ]]
+if grep -F 'CMAKE_CROSSCOMPILING_EMULATOR:STRING=' "$tmp_dir/default/CMakeCache.txt" >/dev/null; then
+  printf 'plain native Bootlin configuration must not install a QEMU emulator\n' >&2
+  exit 1
+fi
 grep -F 'LONEJSON_DEFAULT_C_COMPILER:INTERNAL=bootlin-gcc' \
   "$tmp_dir/default/CMakeCache.txt" >/dev/null
 

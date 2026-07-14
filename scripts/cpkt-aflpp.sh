@@ -3,7 +3,7 @@
 set -euo pipefail
 
 version=5.02c
-revision=1
+revision=2
 archive_name="AFLplusplus-${version}.tar.gz"
 archive_sha256=118415843e5d289d63bd6d8f2252c18212978f15ac9e86acbbc75766cd45acde
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
@@ -20,9 +20,12 @@ root() { printf '%s/roots/aflplusplus-%s-x86_64-linux-gnu\n' "$(cache)" "$versio
 value() { sed -n "s/^$1=//p" <<<"$2" | tail -1; }
 ready() {
   local r=$1
+  local published_root=${2:-$r}
   [[ -x "$r/bin/afl-fuzz" && -x "$r/bin/cpkt-afl-gcc" && -x "$r/bin/cpkt-afl-g++" &&
      -f "$r/lib/afl/afl-gcc-pass.so" && -f "$r/lib/afl/afl-compiler-rt.o" &&
-     -f "$r/.cpkt-aflpp-revision-$revision" ]]
+     -f "$r/.cpkt-aflpp-revision-$revision" ]] &&
+    grep -F "export AFL_PATH=$published_root/lib/afl" "$r/bin/cpkt-afl-gcc" >/dev/null &&
+    grep -F "export AFL_PATH=$published_root/lib/afl" "$r/bin/cpkt-afl-g++" >/dev/null
 }
 
 ensure() {
@@ -65,15 +68,21 @@ ensure() {
   mkdir -p "$tmp/extract" "$tmp/root/bin" "$tmp/root/lib/afl"
   tar -xzf "$archive" -C "$tmp/extract"; src="$tmp/extract/AFLplusplus-$version"
   [[ -d "$src" ]] || die "unexpected archive layout: $archive_name"
-  helper="$tmp/root/lib/afl"
+  # The published root is immutable but has a stable cache path.  AFL++
+  # embeds HELPER_PATH in its compiler driver, so it must never refer to the
+  # temporary extraction root that is moved away after provisioning.
+  helper="$r/lib/afl"
   (
     cd "$src"
-    make -j1 NO_PYTHON=1 CC="$cc" CXX="$cxx" PREFIX="$tmp/root" HELPER_PATH="$helper" BIN_PATH="$tmp/root/bin" afl-fuzz afl-showmap afl-tmin afl-gotcpu afl-analyze afl-cmin
-    "$cc" -O3 -funroll-loops -fPIC -Wall -g -Iinclude -Iinstrumentation -DAFL_PATH="$helper" -DBIN_PATH="$r/bin" -DLLVM_BINDIR="" -DVERSION="++$version" -DLLVM_LIBDIR="" -DLLVM_VERSION="" -DAFL_CLANG_FLTO="" -DAFL_REAL_LD="" -DAFL_CLANG_LDPATH="" -DAFL_CLANG_FUSELD="" -DCLANG_BIN="$cc" -DCLANGPP_BIN="$cxx" -DUSE_BINDIR=1 -Wno-unused-function -Wno-deprecated -c src/afl-common.c -o instrumentation/afl-common.o
-    "$cc" -O3 -funroll-loops -fPIC -Wall -g -Iinclude -Iinstrumentation -DAFL_PATH="$helper" -DBIN_PATH="$r/bin" -DLLVM_BINDIR="" -DVERSION="++$version" -DLLVM_LIBDIR="" -DLLVM_VERSION="" -DAFL_CLANG_FLTO="" -DAFL_REAL_LD="" -DAFL_CLANG_LDPATH="" -DAFL_CLANG_FUSELD="" -DCLANG_BIN="$cc" -DCLANGPP_BIN="$cxx" -DUSE_BINDIR=1 -Wno-unused-function -Wno-deprecated -DAFL_INCLUDE_PATH="$r/include/afl" src/afl-cc.c instrumentation/afl-common.o -o afl-cc -DLLVM_MINOR=0 -DLLVM_MAJOR=0 -DCFLAGS_OPT="" -lm
+    # The lifecycle only consumes afl-fuzz, afl-showmap, and the GCC-plugin
+    # driver below.  Asking AFL++ 5.02c for its unused auxiliary utilities
+    # leaves afl-tmin without a generated Python object on fresh builds.
+    make -j1 NO_PYTHON=1 CC="$cc" CXX="$cxx" PREFIX="$tmp/root" HELPER_PATH="$helper" BIN_PATH="$tmp/root/bin" afl-fuzz afl-showmap
+    "$cc" -O3 -funroll-loops -fPIC -Wall -g -Iinclude -Iinstrumentation -DAFL_PATH=\"$helper\" -DBIN_PATH=\"$r/bin\" -DLLVM_BINDIR=\"\" -DVERSION=\"++$version\" -DLLVM_LIBDIR=\"\" -DLLVM_VERSION=\"\" -DAFL_CLANG_FLTO=\"\" -DAFL_REAL_LD=\"\" -DAFL_CLANG_LDPATH=\"\" -DAFL_CLANG_FUSELD=\"\" -DCLANG_BIN=\"$cc\" -DCLANGPP_BIN=\"$cxx\" -DUSE_BINDIR=1 -Wno-unused-function -Wno-deprecated -c src/afl-common.c -o instrumentation/afl-common.o
+    "$cc" -O3 -funroll-loops -fPIC -Wall -g -Iinclude -Iinstrumentation -DAFL_PATH=\"$helper\" -DBIN_PATH=\"$r/bin\" -DLLVM_BINDIR=\"\" -DVERSION=\"++$version\" -DLLVM_LIBDIR=\"\" -DLLVM_VERSION=\"\" -DAFL_CLANG_FLTO=\"\" -DAFL_REAL_LD=\"\" -DAFL_CLANG_LDPATH=\"\" -DAFL_CLANG_FUSELD=\"\" -DCLANG_BIN=\"$cc\" -DCLANGPP_BIN=\"$cxx\" -DUSE_BINDIR=1 -Wno-unused-function -Wno-deprecated -DAFL_INCLUDE_PATH=\"$r/include/afl\" src/afl-cc.c instrumentation/afl-common.o -o afl-cc -DLLVM_MINOR=0 -DLLVM_MAJOR=0 -DCFLAGS_OPT=\"\" -lm
     ln -sf afl-cc afl-gcc-fast; ln -sf afl-cc afl-g++-fast
     make -j1 -f GNUmakefile.gcc_plugin CC="$cc" CXX="$cxx" PREFIX="$tmp/root" HELPER_PATH="$helper" BIN_PATH="$tmp/root/bin" CXXFLAGS="-O3 -g -funroll-loops -I$bootlin_root/include" LDFLAGS="-L$bootlin_root/lib -Wl,-rpath,$bootlin_root/lib"
-    install -m755 afl-fuzz afl-showmap afl-tmin afl-gotcpu afl-analyze afl-cmin afl-cc "$tmp/root/bin/"
+    install -m755 afl-fuzz afl-showmap afl-cc "$tmp/root/bin/"
     ln -sf afl-cc "$tmp/root/bin/afl-gcc-fast"; ln -sf afl-cc "$tmp/root/bin/afl-g++-fast"
     install -m755 afl-gcc-pass.so afl-gcc-cmplog-pass.so afl-gcc-cmptrs-pass.so "$tmp/root/lib/afl/"
     install -m644 afl-compiler-rt.o dynamic_list.txt "$tmp/root/lib/afl/"
@@ -94,7 +103,7 @@ export AFL_CXX=$(printf '%q' "$cxx")
 exec $(printf '%q' "$r/bin/afl-g++-fast") "\$@"
 EOF
   chmod +x "$tmp/root/bin/cpkt-afl-gcc" "$tmp/root/bin/cpkt-afl-g++"; touch "$tmp/root/.cpkt-aflpp-revision-$revision"
-  ready "$tmp/root" || die 'incomplete AFL++ build'
+  ready "$tmp/root" "$r" || die 'incomplete AFL++ build'
   rm -rf "$r"; mv "$tmp/root" "$r"; trap - EXIT HUP INT TERM; rm -rf "$tmp"
   flock -u "$lock_fd"
   exec {lock_fd}>&-

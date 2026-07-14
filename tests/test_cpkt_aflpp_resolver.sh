@@ -14,6 +14,17 @@ grep -F 'lock_file="$lock_dir/aflplusplus-${version}-x86_64-linux-gnu.lock"' "$r
 grep -F 'flock "$lock_fd"' "$resolver" >/dev/null
 grep -F 'while this process waited for the shared-cache lock' "$resolver" >/dev/null
 grep -F 'flock -u "$lock_fd"' "$resolver" >/dev/null
+grep -F 'revision=2' "$resolver" >/dev/null
+grep -F 'helper="$r/lib/afl"' "$resolver" >/dev/null
+grep -F 'export AFL_PATH=$published_root/lib/afl' "$resolver" >/dev/null
+grep -F 'ready "$tmp/root" "$r"' "$resolver" >/dev/null
+grep -F 'afl-fuzz afl-showmap' "$resolver" >/dev/null
+grep -F -- '-DAFL_PATH=\"$helper\"' "$resolver" >/dev/null
+grep -F -- '-DBIN_PATH=\"$r/bin\"' "$resolver" >/dev/null
+if grep -F 'afl-tmin afl-gotcpu afl-analyze afl-cmin' "$resolver" >/dev/null; then
+  printf 'AFL++ resolver must not build unused auxiliary utilities\n' >&2
+  exit 1
+fi
 
 lock_test_cache="$tmp_dir/lock-test-cache"
 lock_test_root="$lock_test_cache/roots/fixture"

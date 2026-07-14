@@ -31,7 +31,26 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
     set(_lonejson_${_lonejson_key} "${CMAKE_MATCH_1}")
   endforeach()
 
-  string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" _lonejson_host_processor)
+  # This function is called before project() for the default native build.
+  # CMake has not populated its host metadata at that point, so query the
+  # host directly before deciding whether the selected runtime needs QEMU.
+  set(_lonejson_host_system "${CMAKE_HOST_SYSTEM_NAME}")
+  if(NOT _lonejson_host_system)
+    execute_process(
+      COMMAND uname -s
+      RESULT_VARIABLE _lonejson_host_system_result
+      OUTPUT_VARIABLE _lonejson_host_system
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+  endif()
+  set(_lonejson_host_processor "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  if(NOT _lonejson_host_processor)
+    execute_process(
+      COMMAND uname -m
+      RESULT_VARIABLE _lonejson_host_processor_result
+      OUTPUT_VARIABLE _lonejson_host_processor
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+  endif()
+  string(TOLOWER "${_lonejson_host_processor}" _lonejson_host_processor)
   if(_lonejson_host_processor STREQUAL "amd64")
     set(_lonejson_host_processor "x86_64")
   elseif(_lonejson_host_processor STREQUAL "arm64")
@@ -46,7 +65,7 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
 
   string(TOLOWER "${target_libc}" _lonejson_target_libc)
   set(_lonejson_host_libc "")
-  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+  if(_lonejson_host_system STREQUAL "Linux")
     execute_process(
       COMMAND ldd --version
       RESULT_VARIABLE _lonejson_host_ldd_result
