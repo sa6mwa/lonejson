@@ -21,10 +21,8 @@ trap cleanup EXIT
 
 cd "$repo_root"
 
-if [[ "$keep_services" != 1 ]]; then
-  started_services=1
-  "$repo_root/scripts/dev-up.sh"
-fi
+started_services=1
+"$repo_root/scripts/dev-up.sh"
 
 "$repo_root/scripts/time_step.sh" e2e/curl make --no-print-directory LONEJSON_E2E_SERVICES_READY=1 test-curl-e2e
 "$repo_root/scripts/time_step.sh" e2e/oidc make --no-print-directory LONEJSON_E2E_SERVICES_READY=1 test-oidc-e2e
