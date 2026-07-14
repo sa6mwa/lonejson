@@ -2,10 +2,11 @@
 
 ## Compiler and Cross Toolchains
 
-CMake selects the pinned Bootlin x86_64 GNU collection by default. Linux
-target toolchain files provision their matching pinned Bootlin collection into
-the lifecycle cache during configuration. To inspect status or warm every
-Linux collection before a matrix build:
+CMake selects the pinned Bootlin collection matching the native Linux host's
+processor and libc for debug, host, and Lua workflows. Explicit Linux target
+toolchain files provision their matching pinned Bootlin collection into the
+lifecycle cache during configuration. To inspect status or warm every Linux
+collection before a matrix build:
 
 ```sh
 make toolchains-all
