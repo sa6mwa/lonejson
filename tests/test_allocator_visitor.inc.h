@@ -865,6 +865,48 @@ static void test_custom_allocator_json_value_capture_and_serialize_alloc(void) {
   EXPECT(write_alloc.stats.bytes_live == 0u);
 }
 
+static void
+test_custom_allocator_json_value_default_clear_reparse_releases_capture(void) {
+  static const char json[] =
+      "{\"id\":\"q-clear\",\"selector\":{\"a\":[1,true,null]}}";
+  test_allocator_state parse_alloc;
+  lonejson__parse_options parse_options = lonejson__default_parse_options();
+  lonejson_error error;
+  lonejson_status status;
+  test_alloc_json_value_doc doc;
+  lonejson_field fields[2];
+  lonejson_map default_capture_map;
+  size_t bytes_after_first_parse;
+
+  memset(&doc, 0, sizeof(doc));
+  test_allocator_init(&parse_alloc);
+  memcpy(fields, test_alloc_json_value_doc_fields, sizeof(fields));
+  fields[1].flags |= LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE;
+  default_capture_map = test_alloc_json_value_doc_map;
+  default_capture_map.fields = fields;
+  default_capture_map._map_identity = NULL;
+  default_capture_map._map_cookie = 0u;
+  parse_options.allocator = &parse_alloc.allocator;
+
+  status =
+      test_parse_cstr(&default_capture_map, &doc, json, &parse_options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_BUFFER);
+  EXPECT(doc.selector.json != NULL);
+  bytes_after_first_parse = parse_alloc.stats.bytes_live;
+  EXPECT(bytes_after_first_parse > 0u);
+
+  status =
+      test_parse_cstr(&default_capture_map, &doc, json, &parse_options, &error);
+  EXPECT(status == LONEJSON_STATUS_OK);
+  EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_BUFFER);
+  EXPECT(doc.selector.json != NULL);
+  EXPECT(parse_alloc.stats.bytes_live == bytes_after_first_parse);
+
+  lonejson_cleanup(&default_capture_map, &doc);
+  EXPECT(parse_alloc.stats.bytes_live == 0u);
+}
+
 static void test_custom_allocator_raw_serialize_alloc_is_rejected(void) {
   test_allocator_state write_alloc;
   lonejson__write_options write_options = lonejson__default_write_options();

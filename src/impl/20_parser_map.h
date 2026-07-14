@@ -1898,9 +1898,8 @@ static void lonejson__init_value_parse(lonejson_parser *parser,
     lonejson_source_init((lonejson_source *)ptr);
     break;
   case LONEJSON_FIELD_KIND_JSON_VALUE:
-    lonejson__init_json_value_field((lonejson_json_value *)ptr,
-                                    &parser->allocator, parser->runtime,
-                                    field->flags);
+    lonejson__reseed_json_value_field_parse(parser, (lonejson_json_value *)ptr,
+                                            field->flags);
     break;
   case LONEJSON_FIELD_KIND_I64:
   case LONEJSON_FIELD_KIND_U64:

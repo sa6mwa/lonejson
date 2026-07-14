@@ -344,6 +344,7 @@ int main(void) {
   test_custom_allocator_misaligned_owned_alloc_is_rejected();
 #endif
   test_custom_allocator_json_value_capture_and_serialize_alloc();
+  test_custom_allocator_json_value_default_clear_reparse_releases_capture();
   test_custom_allocator_raw_serialize_alloc_is_rejected();
   test_explicit_default_allocator_raw_serialize_alloc_is_allowed();
   test_explicit_default_allocator_raw_serialize_jsonl_alloc_is_allowed();
