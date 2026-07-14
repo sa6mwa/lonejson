@@ -43,6 +43,7 @@ else
     --exclude='./.cache' \
     --exclude='./.deps' \
     --exclude='./.luarocks-build' \
+    --exclude='./devenv/volumes' \
     --exclude='./lonejson' \
     --exclude='./examples/bin' \
     --exclude='./examples/lua_binding.out' \

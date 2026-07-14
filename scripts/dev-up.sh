@@ -2,7 +2,10 @@
 set -euo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-lua_bin="${LUA:-lua}"
+lua_bin="${LUA:-$repo_root/scripts/resolve_lua55.sh}"
+if [[ "$lua_bin" == "$repo_root/scripts/resolve_lua55.sh" ]]; then
+  lua_bin="$($lua_bin)"
+fi
 generated_fixture_dir="$repo_root/build/generated/fixtures"
 state_root="$repo_root/devenv/volumes"
 nginx_https_port="${LONEJSON_NGINX_HTTPS_E2E_PORT:-8443}"

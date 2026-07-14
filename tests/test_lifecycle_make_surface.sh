@@ -111,7 +111,10 @@ grep -F 'NAMES lua lua5.5 lua5.4 lua5.3 luajit' "$repo_root/CMakeLists.txt" >/de
   printf 'obsolete Lua runtime discovery remains in CMakeLists.txt\n' >&2
   exit 1
 }
-grep -F 'Lua 5\\.5\\.' "$repo_root/CMakeLists.txt" >/dev/null
+grep -F 'scripts/resolve_lua55.sh' "$repo_root/CMakeLists.txt" >/dev/null
+grep -F 'LUA ?= $(shell ./scripts/resolve_lua55.sh 2>/dev/null)' "$repo_root/Makefile" >/dev/null
+grep -F 'LUA="$(LUA)" ./scripts/dev-up.sh' "$repo_root/Makefile" >/dev/null
+grep -F 'Lua 5.5 executable' "$repo_root/scripts/resolve_lua55.sh" >/dev/null
 
 grep -F 'name: lonejson-e2e' "$repo_root/docker-compose.yaml" >/dev/null
 grep -F 'LONEJSON_NGINX_HTTPS_E2E_PORT' "$repo_root/docker-compose.yaml" >/dev/null

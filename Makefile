@@ -25,7 +25,7 @@ CROSS_RELEASE_PRESETS := \
 	aarch64-linux-musl-release \
 	armhf-linux-gnu-release \
 	armhf-linux-musl-release
-LUA ?= lua
+LUA ?= $(shell ./scripts/resolve_lua55.sh 2>/dev/null)
 LUAROCKS ?= luarocks
 GENERATED_FIXTURE_DIR := $(CURDIR)/build/generated/fixtures
 ifneq ($(LONEJSON_VERSION_OVERRIDE),)
@@ -698,7 +698,7 @@ certs:
 	./scripts/ensure_test_certs.sh
 
 dev-up:
-	./scripts/dev-up.sh
+	LUA="$(LUA)" ./scripts/dev-up.sh
 
 dev-down:
 	./scripts/dev-down.sh

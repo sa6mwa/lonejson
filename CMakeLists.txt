@@ -25,11 +25,8 @@ project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
 cpkt_resolve_dependency_cache(LONEJSON_RESOLVED_DEPENDENCY_CACHE)
 
 include(CTest)
-find_program(LONEJSON_LUA_EXECUTABLE
-  NAMES lua5.5 lua
-  REQUIRED)
 execute_process(
-  COMMAND "${LONEJSON_LUA_EXECUTABLE}" -v
+  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/resolve_lua55.sh"
   RESULT_VARIABLE LONEJSON_LUA_VERSION_RESULT
   OUTPUT_VARIABLE LONEJSON_LUA_VERSION_OUTPUT
   ERROR_VARIABLE LONEJSON_LUA_VERSION_ERROR
@@ -38,10 +35,12 @@ execute_process(
 set(LONEJSON_LUA_VERSION_TEXT
   "${LONEJSON_LUA_VERSION_OUTPUT}${LONEJSON_LUA_VERSION_ERROR}")
 if(NOT LONEJSON_LUA_VERSION_RESULT EQUAL 0 OR
-    NOT LONEJSON_LUA_VERSION_TEXT MATCHES "Lua 5\\.5\\.")
+    NOT LONEJSON_LUA_VERSION_OUTPUT)
   message(FATAL_ERROR
-    "lonejson requires Lua 5.5 for Lua tooling; got: ${LONEJSON_LUA_VERSION_TEXT}")
+    "lonejson requires Lua 5.5 for Lua tooling; ${LONEJSON_LUA_VERSION_TEXT}")
 endif()
+set(LONEJSON_LUA_EXECUTABLE "${LONEJSON_LUA_VERSION_OUTPUT}" CACHE FILEPATH
+    "Resolved Lua 5.5 executable for lonejson tooling." FORCE)
 find_program(LONEJSON_LUAROCKS_EXECUTABLE NAMES luarocks)
 find_program(CLANG_FORMAT_BIN NAMES clang-format)
 
@@ -695,6 +694,11 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compiler_selection.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_bootlin_host_arch_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bootlin_host_arch.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_cpkt_toolchain_resolver_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpkt_toolchain_resolver.sh"
@@ -791,6 +795,11 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_lua_src_rock_privacy_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_src_rock_privacy.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_lua55_resolution_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua55_resolution.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_lua_public_boundary_tests

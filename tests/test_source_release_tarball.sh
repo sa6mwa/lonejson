@@ -91,6 +91,21 @@ reject_path .git
 reject_path build/source-release-ignore-sentinel
 reject_path dist/source-release-ignore-sentinel
 
+# A source archive made from a non-git source tree has no manifest to guide
+# staging, so its fallback must still omit all generated compose state.
+fallback_root="$test_root/non-git-source"
+fallback_stage="$test_root/non-git-stage"
+mkdir -p "$fallback_root/devenv/volumes/nginx/certs"
+printf '%s\n' public >"$fallback_root/README.md"
+printf '%s\n' private >"$fallback_root/devenv/volumes/nginx/certs/server.key"
+GIT_DIR="$test_root/not-a-git" "$repo_root/scripts/stage_release_sources.sh" \
+  "$fallback_root" "$fallback_stage" 9.8.7
+[[ -f "$fallback_stage/README.md" ]]
+if [[ -e "$fallback_stage/devenv/volumes" ]]; then
+  printf 'non-git source staging leaked generated compose state\n' >&2
+  exit 1
+fi
+
 "$stage_dir/scripts/release_version.sh" | grep -qx '9.8.7'
 "$cmake_bin" -S "$stage_dir" -B "$build_dir" -G Ninja \
   -D CMAKE_BUILD_TYPE=Release \
