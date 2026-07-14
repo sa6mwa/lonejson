@@ -64,6 +64,7 @@ require_command ctest
 require_command make
 require_command ninja
 require_command luarocks
+require_command qemu-x86_64
 require_command qemu-aarch64
 require_command qemu-arm
 "$repo_root/scripts/cpkt-toolchains.sh" ensure all

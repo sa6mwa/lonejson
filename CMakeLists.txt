@@ -1426,6 +1426,7 @@ add_custom_target(package-checksums
 add_custom_target(package-clean-dist
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_clean_dist.cmake
   VERBATIM
 )

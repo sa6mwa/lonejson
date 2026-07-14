@@ -44,9 +44,36 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
     set(_lonejson_target_arch "aarch64")
   endif()
 
-  set(_lonejson_is_native_arch FALSE)
-  if(_lonejson_host_processor STREQUAL _lonejson_target_arch)
-    set(_lonejson_is_native_arch TRUE)
+  string(TOLOWER "${target_libc}" _lonejson_target_libc)
+  set(_lonejson_host_libc "")
+  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    execute_process(
+      COMMAND ldd --version
+      RESULT_VARIABLE _lonejson_host_ldd_result
+      OUTPUT_VARIABLE _lonejson_host_ldd_output
+      ERROR_VARIABLE _lonejson_host_ldd_error
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_STRIP_TRAILING_WHITESPACE)
+    string(TOLOWER
+      "${_lonejson_host_ldd_output}${_lonejson_host_ldd_error}"
+      _lonejson_host_ldd_text)
+    if(_lonejson_host_ldd_result EQUAL 0 AND
+        _lonejson_host_ldd_text MATCHES "musl")
+      set(_lonejson_host_libc "musl")
+    elseif(_lonejson_host_ldd_result EQUAL 0 AND
+        _lonejson_host_ldd_text MATCHES "glibc|gnu c library|gnu libc")
+      set(_lonejson_host_libc "gnu")
+    endif()
+  endif()
+
+  # A Linux binary is executable without QEMU only when both its processor and
+  # dynamic-loader ABI match the host.  In particular, an x86_64 musl binary
+  # cannot run directly on an x86_64 glibc host without the musl loader.
+  set(_lonejson_is_native_runtime FALSE)
+  if(_lonejson_host_processor STREQUAL _lonejson_target_arch AND
+      ("${_lonejson_target_libc}" STREQUAL "" OR
+       "${_lonejson_host_libc}" STREQUAL "${_lonejson_target_libc}"))
+    set(_lonejson_is_native_runtime TRUE)
   else()
     set(CMAKE_SYSTEM_NAME Linux CACHE STRING "" FORCE)
     set(CMAKE_SYSTEM_PROCESSOR "${processor}" CACHE STRING "" FORCE)
@@ -142,11 +169,11 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
   set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
   set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
   set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-  if(NOT _lonejson_is_native_arch)
+  if(NOT _lonejson_is_native_runtime)
     set(CMAKE_CROSSCOMPILING_EMULATOR "/usr/bin/${emulator};-L;${_lonejson_sysroot}" CACHE STRING "" FORCE)
     set(CMAKE_CROSSCOMPILING_EMULATOR "/usr/bin/${emulator};-L;${_lonejson_sysroot}" PARENT_SCOPE)
   endif()
-  if(_lonejson_is_native_arch AND NOT CMAKE_TOOLCHAIN_FILE)
+  if(_lonejson_is_native_runtime AND NOT CMAKE_TOOLCHAIN_FILE)
     if(NOT DEFINED LONEJSON_TARGET_ARCH)
       set(LONEJSON_TARGET_ARCH "${target_arch}" CACHE STRING "")
     endif()

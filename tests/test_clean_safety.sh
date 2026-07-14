@@ -37,3 +37,28 @@ grep -F 'CPKT_TOOLCHAIN_CACHE' <<<"$script_text" >/dev/null && {
 }
 
 grep -F 'refusing to remove unexpected path' <<<"$script_text" >/dev/null
+
+set +e
+"$repo_root/scripts/clean.sh" --dist-only --root "$repo_root" \
+  --dist-dir "$repo_root" >"$tmp_dir/dist-root-stdout" 2>"$tmp_dir/dist-root-stderr"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  printf 'clean.sh accepted the repository root as a custom dist directory\n' >&2
+  exit 1
+fi
+grep -F 'refusing to clean unsafe dist directory' "$tmp_dir/dist-root-stderr" >/dev/null
+
+custom_dist_dir="$tmp_dir/custom-dist"
+custom_build_dir="$tmp_dir/custom-build"
+mkdir -p "$custom_dist_dir"
+printf '%s\n' generated >"$custom_dist_dir/artifact"
+cmake -S "$repo_root" -B "$custom_build_dir" -G Ninja \
+  -D LONEJSON_DIST_DIR="$custom_dist_dir" \
+  -D LONEJSON_BUILD_TESTS=OFF \
+  -D LONEJSON_BUILD_EXAMPLES=OFF >/dev/null
+cmake --build "$custom_build_dir" --target package-clean-dist >/dev/null
+if [[ -e "$custom_dist_dir" ]]; then
+  printf 'package-clean-dist did not remove the configured artifact directory\n' >&2
+  exit 1
+fi

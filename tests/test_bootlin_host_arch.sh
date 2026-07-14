@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# A target is native only when its normalized architecture matches CMake's
-# actual host architecture; an x86_64 target on ARM must use the QEMU route.
+# A target is native only when its normalized processor and Linux loader ABI
+# match CMake's actual host runtime; an x86_64 target on ARM and x86_64 musl
+# on a glibc host must both use the QEMU route.
 
 repo_root=$1
 tmp_dir=$(mktemp -d)
@@ -25,3 +26,24 @@ endif()
 EOF
 
 cmake -P "$tmp_dir/check.cmake"
+
+cat >"$tmp_dir/musl-check.cmake" <<EOF
+set(CMAKE_HOST_SYSTEM_PROCESSOR x86_64)
+include("$repo_root/cmake/toolchains/lonejson_bootlin.cmake")
+lonejson_configure_bootlin_toolchain(
+  x86_64-linux-musl x86_64 x86_64 musl qemu-x86_64)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR "x86_64 musl must use the cross runtime on a glibc host")
+endif()
+if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+  message(FATAL_ERROR "x86_64 musl cross target processor was not configured")
+endif()
+if(NOT "\${CMAKE_CROSSCOMPILING_EMULATOR}" MATCHES "^/usr/bin/qemu-x86_64;-L;.+/sysroot$")
+  message(FATAL_ERROR "x86_64 musl must configure qemu-x86_64 with its sysroot")
+endif()
+EOF
+
+host_ldd="$(ldd --version 2>&1 || true)"
+if ! grep -Eiq 'musl' <<<"$host_ldd"; then
+  cmake -P "$tmp_dir/musl-check.cmake"
+fi

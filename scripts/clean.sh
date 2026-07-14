@@ -4,9 +4,10 @@ set -eu
 
 mode="all"
 root_dir=""
+dist_dir=""
 
 usage() {
-    printf 'usage: %s [--dist-only] [--root DIR]\n' "$0" >&2
+    printf 'usage: %s [--dist-only] [--root DIR] [--dist-dir DIR]\n' "$0" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -21,6 +22,14 @@ while [ "$#" -gt 0 ]; do
                 exit 1
             fi
             root_dir="$2"
+            shift 2
+            ;;
+        --dist-dir)
+            if [ "$#" -lt 2 ]; then
+                usage
+                exit 1
+            fi
+            dist_dir="$2"
             shift 2
             ;;
         -h|--help)
@@ -49,10 +58,29 @@ if [ "$root_dir" = "/" ] || [ "$root_dir" = "$home_dir" ] ||
     exit 1
 fi
 
+if [ -z "$dist_dir" ]; then
+    dist_dir="$root_dir/dist"
+else
+    case "$dist_dir" in
+        /*)
+            ;;
+        *)
+            printf 'clean.sh: dist directory must be absolute: %s\n' "$dist_dir" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if [ "$dist_dir" = "/" ] || [ "$dist_dir" = "$home_dir" ] ||
+   [ "$dist_dir" = "$root_dir" ]; then
+    printf 'clean.sh: refusing to clean unsafe dist directory: %s\n' "$dist_dir" >&2
+    exit 1
+fi
+
 remove_path() {
     target_path="$1"
     case "$target_path" in
-        "$root_dir"/build|"$root_dir"/dist|"$root_dir"/.cache|"$root_dir"/.luarocks-build|"$root_dir"/examples/bin|"$root_dir"/lonejson|"$root_dir"/devenv/volumes)
+        "$root_dir"/build|"$root_dir"/dist|"$root_dir"/.cache|"$root_dir"/.luarocks-build|"$root_dir"/examples/bin|"$root_dir"/lonejson|"$root_dir"/devenv/volumes|"$dist_dir")
             ;;
         *)
             printf 'clean.sh: refusing to remove unexpected path: %s\n' "$target_path" >&2
@@ -73,4 +101,4 @@ if [ "$mode" = "all" ]; then
     remove_path "$root_dir/lonejson"
 fi
 
-remove_path "$root_dir/dist"
+remove_path "$dist_dir"

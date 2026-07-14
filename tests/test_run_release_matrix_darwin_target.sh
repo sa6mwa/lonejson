@@ -36,6 +36,7 @@ printf '%s\n' "$verify_script" | grep -F -- 'scripts/discover_target_tools.sh' >
 printf '%s\n' "$matrix_script" | grep -F -- 'package-darwin-smoke-bundle' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'make package-verify' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'scripts/osxcross_available.sh' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'require_command qemu-x86_64' >/dev/null
 printf '%s\n' "$matrix_script" | grep -Fx -- 'set -euo pipefail' >/dev/null
 grep -F 'liblonejson.${LONEJSON_ABI_VERSION}.dylib' \
   "$darwin_smoke_script_path" >/dev/null
@@ -140,6 +141,7 @@ for tool in \
   make \
   lua \
   luarocks \
+  qemu-x86_64 \
   qemu-aarch64 \
   qemu-arm; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_bin/$tool"
