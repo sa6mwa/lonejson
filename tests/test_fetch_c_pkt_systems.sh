@@ -6,7 +6,6 @@ set -euo pipefail
 
 repo_root=$1
 tmp_dir=$(mktemp -d)
-trap 'rm -rf "$tmp_dir"' EXIT
 
 bundle_dir_name="c.pkt.systems-0.7.0-x86_64-linux-gnu"
 assets_dir="$tmp_dir/assets"
@@ -16,9 +15,25 @@ failure_root="$tmp_dir/failure-root"
 offline_root="$tmp_dir/offline-root"
 corrupt_root="$tmp_dir/corrupt-root"
 pinned_version_root="$tmp_dir/pinned-version-root"
+concurrent_first_root="$tmp_dir/concurrent-first-root"
+concurrent_second_root="$tmp_dir/concurrent-second-root"
 archive_path="$assets_dir/$bundle_dir_name.tar.gz"
 dependency_cache="$tmp_dir/dependency-cache"
 failure_dependency_cache="$tmp_dir/failure-dependency-cache"
+concurrent_dependency_cache="$tmp_dir/concurrent-dependency-cache"
+first_pid=
+second_pid=
+
+cleanup() {
+  for pid in "$first_pid" "$second_pid"; do
+    if [[ -n "$pid" ]]; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
+  rm -rf "$tmp_dir"
+}
+trap cleanup EXIT
 
 mkdir -p \
   "$bundle_root/include/curl" \
@@ -143,3 +158,69 @@ fi
 
 grep -q 'LONEJSON_C_PKT_SYSTEMS_VERSION is not configurable' "$pinned_version_log"
 test ! -e "$pinned_version_root/.cache/c.pkt.systems"
+
+# Two independent consumers must never observe a partial archive in the shared
+# cache.  Hold the first process after it owns the per-digest lock, then start
+# the second consumer and prove it reuses the atomically published archive.
+fetch_concurrent() {
+  local source_root=$1
+  local log_path=$2
+  local hold_seconds=${3:-}
+  local -a command=(
+    cmake
+    -D "LONEJSON_SOURCE_DIR=$source_root"
+    -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu
+    -D "LONEJSON_C_PKT_SYSTEMS_BASE_URL=file://$assets_dir"
+    -D "CPKT_DEPENDENCY_CACHE=$concurrent_dependency_cache"
+    -D "LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE=$archive_sha256"
+  )
+  if [[ -n "$hold_seconds" ]]; then
+    command+=( -D "CPKT_DEPENDENCY_CACHE_TEST_HOLD_LOCK_SECONDS=$hold_seconds" )
+  fi
+  command+=( -P "$repo_root/cmake/fetch_c_pkt_systems.cmake" )
+  "${command[@]}" >"$log_path" 2>&1
+}
+
+first_log="$tmp_dir/concurrent-first.log"
+second_log="$tmp_dir/concurrent-second.log"
+fetch_concurrent "$concurrent_first_root" "$first_log" 2 &
+first_pid=$!
+for _ in $(seq 1 100); do
+  if grep -q 'test hook holding shared archive cache lock' "$first_log"; then
+    break
+  fi
+  if ! kill -0 "$first_pid" 2>/dev/null; then
+    cat "$first_log" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
+if ! grep -q 'test hook holding shared archive cache lock' "$first_log"; then
+  printf 'first concurrent fetch did not acquire the shared cache lock\n' >&2
+  cat "$first_log" >&2
+  exit 1
+fi
+
+fetch_concurrent "$concurrent_second_root" "$second_log" &
+second_pid=$!
+if ! wait "$first_pid"; then
+  cat "$first_log" >&2
+  exit 1
+fi
+first_pid=
+if ! wait "$second_pid"; then
+  cat "$second_log" >&2
+  exit 1
+fi
+second_pid=
+
+concurrent_archive="$concurrent_dependency_cache/archives/sha256/$archive_sha256/$bundle_dir_name.tar.gz"
+test -f "$concurrent_archive"
+[[ "$(sha256sum "$concurrent_archive" | awk '{print $1}')" == "$archive_sha256" ]]
+test -f "$concurrent_first_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-identity"
+test -f "$concurrent_second_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/.lonejson-c-pkt-systems-identity"
+grep -q 'reusing verified shared archive cache entry' "$second_log"
+if find "$(dirname -- "$concurrent_archive")" -maxdepth 1 -type f -name '.*.tmp' -print -quit | grep -q .; then
+  printf 'concurrent cache acquisition left a temporary archive behind\n' >&2
+  exit 1
+fi

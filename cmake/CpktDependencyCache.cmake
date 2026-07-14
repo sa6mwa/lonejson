@@ -68,10 +68,25 @@ function(cpkt_acquire_verified_archive)
       "${ARG_COMPONENT}: unable to lock shared archive cache entry ${_lock_path}: ${_lock_result}")
   endif()
 
+  if(DEFINED CPKT_DEPENDENCY_CACHE_TEST_HOLD_LOCK_SECONDS AND
+     NOT "${CPKT_DEPENDENCY_CACHE_TEST_HOLD_LOCK_SECONDS}" STREQUAL "")
+    if(NOT CPKT_DEPENDENCY_CACHE_TEST_HOLD_LOCK_SECONDS MATCHES "^[1-9][0-9]*$")
+      message(FATAL_ERROR
+        "CPKT_DEPENDENCY_CACHE_TEST_HOLD_LOCK_SECONDS must be a positive integer")
+    endif()
+    message(STATUS
+      "${ARG_COMPONENT}: test hook holding shared archive cache lock for "
+      "${CPKT_DEPENDENCY_CACHE_TEST_HOLD_LOCK_SECONDS}s")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep
+      "${CPKT_DEPENDENCY_CACHE_TEST_HOLD_LOCK_SECONDS}")
+  endif()
+
   if(EXISTS "${_archive_path}")
     file(SHA256 "${_archive_path}" _cached_sha256)
     string(TOLOWER "${_cached_sha256}" _cached_sha256)
     if(_cached_sha256 STREQUAL _expected_sha256)
+      message(STATUS
+        "${ARG_COMPONENT}: reusing verified shared archive cache entry ${_archive_path}")
       set(${ARG_OUTPUT_VARIABLE} "${_archive_path}" PARENT_SCOPE)
       return()
     endif()
