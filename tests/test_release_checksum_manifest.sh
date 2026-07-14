@@ -10,6 +10,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 dist_dir="$tmp_dir/dist"
 mkdir -p "$dist_dir"
+mkdir -p "$tmp_dir/cmake"
+cp "$repo_root/cmake/lonejson_dist_dir.cmake" "$tmp_dir/cmake/"
 
 for artifact in \
   lonejson-1.2.3.tar.gz \
@@ -46,6 +48,7 @@ done
 custom_dist_dir="$tmp_dir/custom-dist"
 custom_build_dir="$tmp_dir/custom-build"
 mkdir -p "$custom_dist_dir"
+printf '%s\n' 'lonejson lifecycle artifact directory' >"$custom_dist_dir/.lonejson-dist"
 printf '%s\n' custom >"$custom_dist_dir/lonejson-0.0.0.tar.gz"
 cmake -S "$repo_root" -B "$custom_build_dir" -G Ninja \
   -D LONEJSON_DIST_DIR="$custom_dist_dir" \
