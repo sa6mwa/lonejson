@@ -55,6 +55,9 @@ cmake -S "$repo_root" -B "$custom_build_dir" -G Ninja \
   -D LONEJSON_DIST_DIR="$custom_dist_dir" \
   -D LONEJSON_BUILD_TESTS=OFF \
   -D LONEJSON_BUILD_EXAMPLES=OFF >/dev/null
+cmake --build "$custom_build_dir" --target package-source >/dev/null
+[[ -f "$custom_dist_dir/.lonejson-dist" ]]
+find "$custom_dist_dir" -maxdepth 1 -name 'lonejson-*.tar.gz' -print -quit | grep -q .
 cmake --build "$custom_build_dir" --target package-clean-dist >/dev/null
 [[ -f "$custom_dist_dir/.lonejson-dist" ]]
 printf '%s\n' generated >"$custom_dist_dir/artifact"

@@ -13,10 +13,8 @@ endif()
 
 get_filename_component(LONEJSON_BINARY_DIR "${LONEJSON_BINARY_DIR}" ABSOLUTE)
 get_filename_component(LONEJSON_ROOT "${LONEJSON_ROOT}" ABSOLUTE)
-if(NOT DEFINED LONEJSON_DIST_DIR OR LONEJSON_DIST_DIR STREQUAL "")
-  set(LONEJSON_DIST_DIR "${LONEJSON_ROOT}/dist")
-endif()
-get_filename_component(LONEJSON_DIST_DIR "${LONEJSON_DIST_DIR}" ABSOLUTE)
+include("${LONEJSON_ROOT}/cmake/lonejson_dist_dir.cmake")
+lonejson_prepare_dist_dir()
 
 function(lonejson_import_cache_path var_name)
   if(DEFINED ${var_name} AND NOT "${${var_name}}" STREQUAL "")
@@ -94,7 +92,6 @@ if(NOT EXISTS "${release_archive}")
 endif()
 
 file(REMOVE_RECURSE "${bundle_root}")
-file(MAKE_DIRECTORY "${LONEJSON_DIST_DIR}")
 file(MAKE_DIRECTORY
   "${extract_root}"
   "${consumer_bin_dir}"

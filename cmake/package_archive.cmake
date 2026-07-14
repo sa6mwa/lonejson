@@ -273,10 +273,8 @@ if(PACKAGE_FIND_VERSION)
 endif()
 ")
 
-if(NOT DEFINED LONEJSON_DIST_DIR OR LONEJSON_DIST_DIR STREQUAL "")
-  set(LONEJSON_DIST_DIR "${LONEJSON_ROOT}/dist")
-endif()
-file(MAKE_DIRECTORY "${LONEJSON_DIST_DIR}")
+include("${LONEJSON_ROOT}/cmake/lonejson_dist_dir.cmake")
+lonejson_prepare_dist_dir()
 set(archive_base "${LONEJSON_DIST_DIR}/${archive_name}.tar")
 set(archive "${archive_base}.gz")
 

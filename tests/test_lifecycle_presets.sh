@@ -62,6 +62,20 @@ require_text '"name": "package-archive-x86_64-linux-gnu"'
 require_text '"configurePreset": "x86_64-linux-gnu-release"'
 require_text '"name": "package-archive-x86_64-linux-musl"'
 require_text '"configurePreset": "x86_64-linux-musl-release"'
+require_text '"toolchainFile": "${sourceDir}/cmake/toolchains/linux-native.cmake"'
+[[ -f "$repo_root/cmake/toolchains/linux-native.cmake" ]]
+grep -F 'ldd --version' "$repo_root/cmake/toolchains/linux-native.cmake" >/dev/null
+grep -F 'lonejson_configure_bootlin_toolchain' \
+  "$repo_root/cmake/toolchains/linux-native.cmake" >/dev/null
+for host_preset in debug host; do
+  host_preset_block=$(awk -v name="$host_preset" '
+    index($0, "\"name\": \"" name "\"") { active = 1 }
+    active { print }
+    active && /^    },$/ { exit }
+  ' "$presets")
+  grep -F '"toolchainFile": "${sourceDir}/cmake/toolchains/linux-native.cmake"' \
+    <<<"$host_preset_block" >/dev/null
+done
 
 reject_text '"name": "linux-gnu-release"'
 reject_text '"name": "linux-musl-release"'

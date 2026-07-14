@@ -1,11 +1,9 @@
-if(NOT DEFINED LONEJSON_DIST_DIR OR LONEJSON_DIST_DIR STREQUAL "")
-  set(LONEJSON_DIST_DIR "${LONEJSON_ROOT}/dist")
-endif()
+include("${LONEJSON_ROOT}/cmake/lonejson_dist_dir.cmake")
+lonejson_prepare_dist_dir()
 set(dist_dir "${LONEJSON_DIST_DIR}")
 set(checksums_name "lonejson-${LONEJSON_VERSION}-CHECKSUMS")
 set(checksums_path "${dist_dir}/${checksums_name}")
 
-file(MAKE_DIRECTORY "${dist_dir}")
 file(GLOB release_entries RELATIVE "${dist_dir}"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}.tar.gz"
   "${dist_dir}/lonejson-${LONEJSON_VERSION}.h.gz"
