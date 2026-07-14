@@ -168,6 +168,11 @@ ensure_target() {
     return
   fi
 
+  if [[ -f "$archive" ]] && [[ "$(sha256_file "$archive")" != "$sha256" ]]; then
+    printf 'cpkt-toolchains: discarding corrupt cached archive %s\n' "$archive" >&2
+    rm -f "$archive"
+  fi
+
   if [[ ! -f "$archive" ]]; then
     tmp="$archive.tmp.$$"
     trap 'rm -f "$tmp"' EXIT HUP INT TERM
@@ -175,8 +180,6 @@ ensure_target() {
     [[ "$(sha256_file "$tmp")" == "$sha256" ]] || die "checksum mismatch for $name.tar.xz"
     mv "$tmp" "$archive"
     trap - EXIT HUP INT TERM
-  elif [[ "$(sha256_file "$archive")" != "$sha256" ]]; then
-    die "cached archive checksum mismatch for $archive"
   fi
 
   extract="$(cache_root)/roots/.extract-$name.$$"

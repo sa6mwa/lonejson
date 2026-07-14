@@ -55,6 +55,45 @@ ensure_target fixture
 [[ -f "$CPKT_TOOLCHAIN_CACHE/roots/fixture/.ready" ]]
 EOF
 
+# A corrupt shared archive must be discarded and reacquired while the same
+# per-target lock is held, so a transient partial download never requires
+# manual cache cleanup.
+recovery_cache="$tmp_dir/recovery-cache"
+recovery_payload="$tmp_dir/recovery-payload"
+recovery_archive="$tmp_dir/fixture.tar.xz"
+mkdir -p "$recovery_payload/fixture/bin" "$recovery_cache/archives"
+: >"$recovery_payload/fixture/.ready"
+tar -C "$recovery_payload" -cJf "$recovery_archive" fixture
+recovery_sha256=$(sha256sum "$recovery_archive" | awk '{print $1}')
+printf '%s\n' corrupt >"$recovery_cache/archives/fixture.tar.xz"
+mkdir -p "$recovery_cache/roots/fixture"
+: >"$recovery_cache/roots/fixture/stale"
+
+recovery_log="$tmp_dir/recovery.log"
+CPKT_TOOLCHAIN_CACHE="$recovery_cache" \
+CPKT_TOOLCHAIN_TEST_GOOD_ARCHIVE="$recovery_archive" \
+CPKT_TOOLCHAIN_TEST_EXPECTED_SHA256="$recovery_sha256" \
+bash -s "$resolver" >"$recovery_log" 2>&1 <<'EOF'
+set -euo pipefail
+resolver=$1
+source "$resolver"
+toolchain_values() {
+  printf '%s\n' "fixture|fixture|$CPKT_TOOLCHAIN_TEST_EXPECTED_SHA256|fixture|sysroot|$CPKT_TOOLCHAIN_CACHE/roots/fixture"
+}
+toolchain_ready() {
+  [[ -f "$1/.ready" ]]
+}
+download_file() {
+  cp "$CPKT_TOOLCHAIN_TEST_GOOD_ARCHIVE" "$2"
+}
+ensure_target fixture
+EOF
+
+grep -F 'discarding corrupt cached archive' "$recovery_log" >/dev/null
+[[ "$(sha256sum "$recovery_cache/archives/fixture.tar.xz" | awk '{print $1}')" == "$recovery_sha256" ]]
+test -f "$recovery_cache/roots/fixture/.ready"
+test ! -e "$recovery_cache/roots/fixture/stale"
+
 targets=$("$resolver" targets)
 expected_targets=$'x86_64-linux-gnu\nx86_64-linux-musl\naarch64-linux-gnu\naarch64-linux-musl\narmhf-linux-gnu\narmhf-linux-musl\narm64-apple-darwin'
 [[ "$targets" == "$expected_targets" ]]
