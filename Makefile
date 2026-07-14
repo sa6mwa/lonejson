@@ -391,7 +391,7 @@ release-pipeline:
 	+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix
 
 release-matrix:
-	./scripts/run_release_matrix.sh
+	./scripts/run_linux_release_matrix.sh
 
 release:
 	$(TIME_STEP) release/clean ./scripts/clean.sh
@@ -595,22 +595,22 @@ fuzz: deps-host toolchains-aflpp
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_base64 lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_path_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries lonejson_fuzz_jwt
 	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -D LONEJSON_AFL_COMPILER="$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^cc=//p')" -P cmake/check_fuzz_instrumentation.cmake
-	$(TIME_STEP) fuzz/base64 ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" base64 ./build/$(FUZZ_PRESET)/lonejson_fuzz_base64 fuzz/corpus/base64
-	$(TIME_STEP) fuzz/validate ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" validate ./build/$(FUZZ_PRESET)/lonejson_fuzz_validate tests/fixtures/vendor/json_test_suite/test_parsing tests/fixtures/spec tests/fixtures/languages
-	$(TIME_STEP) fuzz/mapped ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" mapped ./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse fuzz/corpus/mapped tests/fixtures/spec
-	$(TIME_STEP) fuzz/array ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" array ./build/$(FUZZ_PRESET)/lonejson_fuzz_array_stream fuzz/corpus/array_stream fuzz/corpus/mapped
-	$(TIME_STEP) fuzz/json ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" json ./build/$(FUZZ_PRESET)/lonejson_fuzz_json_value fuzz/corpus/json_value fuzz/corpus/mapped
-	$(TIME_STEP) fuzz/visitor ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" visitor ./build/$(FUZZ_PRESET)/lonejson_fuzz_value_visitor fuzz/corpus/value_visitor fuzz/corpus/json_value
-	$(TIME_STEP) fuzz/path ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" path ./build/$(FUZZ_PRESET)/lonejson_fuzz_path_value_visitor fuzz/corpus/path_value_visitor fuzz/corpus/value_visitor
-	$(TIME_STEP) fuzz/rewrite ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" rewrite ./build/$(FUZZ_PRESET)/lonejson_fuzz_value_rewrite fuzz/corpus/value_rewrite fuzz/corpus/json_value
-	$(TIME_STEP) fuzz/reader ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" reader ./build/$(FUZZ_PRESET)/lonejson_fuzz_reader_stream_generator fuzz/corpus/mapped tests/fixtures/spec
-	$(TIME_STEP) fuzz/writer ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" writer ./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_generator_backpressure fuzz/corpus/mapped fuzz/corpus/json_value
-	$(TIME_STEP) fuzz/value-stream ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" value-stream ./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_value_stream fuzz/corpus/json_value fuzz/corpus/value_visitor
-	$(TIME_STEP) fuzz/protocol ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" protocol ./build/$(FUZZ_PRESET)/lonejson_fuzz_protocol_framing fuzz/corpus/protocol_framing
-	$(TIME_STEP) fuzz/fixed ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" fixed ./build/$(FUZZ_PRESET)/lonejson_fuzz_fixed_string_paths fuzz/corpus/fixed_string_paths
-	$(TIME_STEP) fuzz/alloc ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" alloc ./build/$(FUZZ_PRESET)/lonejson_fuzz_alloc_ceiling fuzz/corpus/alloc_ceiling
-	$(TIME_STEP) fuzz/parser ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" parser ./build/$(FUZZ_PRESET)/lonejson_fuzz_parser_boundaries fuzz/corpus/parser_boundaries
-	$(TIME_STEP) fuzz/jwt ./scripts/run_afl_fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" jwt ./build/$(FUZZ_PRESET)/lonejson_fuzz_jwt fuzz/corpus/jwt
+	$(TIME_STEP) fuzz/base64 ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" base64 ./build/$(FUZZ_PRESET)/lonejson_fuzz_base64 fuzz/corpus/base64
+	$(TIME_STEP) fuzz/validate ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" validate ./build/$(FUZZ_PRESET)/lonejson_fuzz_validate tests/fixtures/vendor/json_test_suite/test_parsing tests/fixtures/spec tests/fixtures/languages
+	$(TIME_STEP) fuzz/mapped ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" mapped ./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse fuzz/corpus/mapped tests/fixtures/spec
+	$(TIME_STEP) fuzz/array ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" array ./build/$(FUZZ_PRESET)/lonejson_fuzz_array_stream fuzz/corpus/array_stream fuzz/corpus/mapped
+	$(TIME_STEP) fuzz/json ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" json ./build/$(FUZZ_PRESET)/lonejson_fuzz_json_value fuzz/corpus/json_value fuzz/corpus/mapped
+	$(TIME_STEP) fuzz/visitor ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" visitor ./build/$(FUZZ_PRESET)/lonejson_fuzz_value_visitor fuzz/corpus/value_visitor fuzz/corpus/json_value
+	$(TIME_STEP) fuzz/path ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" path ./build/$(FUZZ_PRESET)/lonejson_fuzz_path_value_visitor fuzz/corpus/path_value_visitor fuzz/corpus/value_visitor
+	$(TIME_STEP) fuzz/rewrite ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" rewrite ./build/$(FUZZ_PRESET)/lonejson_fuzz_value_rewrite fuzz/corpus/value_rewrite fuzz/corpus/json_value
+	$(TIME_STEP) fuzz/reader ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" reader ./build/$(FUZZ_PRESET)/lonejson_fuzz_reader_stream_generator fuzz/corpus/mapped tests/fixtures/spec
+	$(TIME_STEP) fuzz/writer ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" writer ./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_generator_backpressure fuzz/corpus/mapped fuzz/corpus/json_value
+	$(TIME_STEP) fuzz/value-stream ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" value-stream ./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_value_stream fuzz/corpus/json_value fuzz/corpus/value_visitor
+	$(TIME_STEP) fuzz/protocol ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" protocol ./build/$(FUZZ_PRESET)/lonejson_fuzz_protocol_framing fuzz/corpus/protocol_framing
+	$(TIME_STEP) fuzz/fixed ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" fixed ./build/$(FUZZ_PRESET)/lonejson_fuzz_fixed_string_paths fuzz/corpus/fixed_string_paths
+	$(TIME_STEP) fuzz/alloc ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" alloc ./build/$(FUZZ_PRESET)/lonejson_fuzz_alloc_ceiling fuzz/corpus/alloc_ceiling
+	$(TIME_STEP) fuzz/parser ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" parser ./build/$(FUZZ_PRESET)/lonejson_fuzz_parser_boundaries fuzz/corpus/parser_boundaries
+	$(TIME_STEP) fuzz/jwt ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" jwt ./build/$(FUZZ_PRESET)/lonejson_fuzz_jwt fuzz/corpus/jwt
 	+$(TIME_STEP) fuzz/lua $(MAKE) lua-fuzz
 
 fuzz-long:

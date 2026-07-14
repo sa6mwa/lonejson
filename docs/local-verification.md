@@ -24,6 +24,10 @@ cross-test` (or the compatibility name `make test-cross`) to execute their
 QEMU-backed test coverage. `make package-single-header` creates the separate
 version-stamped single-header artifact without running a full release.
 
+`make release-matrix` repeats the runnable QEMU-backed cross coverage while
+building and verifying every release artifact; host-only LuaRocks/tooling
+checks remain native. A missing required runner is a failure, not a skip.
+
 Pinned c.pkt.systems SDK archives are separate immutable cache entries under
 `${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.
 `make deps-host` and the target-specific dependency targets verify each archive

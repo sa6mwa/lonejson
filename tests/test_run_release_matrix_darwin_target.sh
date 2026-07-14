@@ -36,6 +36,7 @@ printf '%s\n' "$verify_script" | grep -F -- 'scripts/discover_target_tools.sh' >
 printf '%s\n' "$matrix_script" | grep -F -- 'package-darwin-smoke-bundle' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'make package-verify' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'scripts/osxcross_available.sh' >/dev/null
+printf '%s\n' "$matrix_script" | grep -Fx -- 'set -euo pipefail' >/dev/null
 grep -F 'liblonejson.${LONEJSON_ABI_VERSION}.dylib' \
   "$darwin_smoke_script_path" >/dev/null
 grep -F 'LONEJSON_ABI_VERSION is required for Darwin smoke bundle' \
@@ -79,22 +80,25 @@ printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OPENSSL=ON' 
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_JWT=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OIDC=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'run_target x86_64-linux-gnu-release x86_64-linux-gnu package-archive-x86_64-linux-gnu full' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset"' >/dev/null
-if printf '%s\n' "$matrix_script" | grep -F -- 'host_policy_ctest_exclude=' >/dev/null; then
-  printf 'release matrix must not keep a filtered cross-target CTest replay surface\n' >&2
-  exit 1
-fi
-if printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset" -E' >/dev/null; then
-  printf 'release matrix must not rerun prerelease CTest subsets for package targets\n' >&2
-  exit 1
-fi
+printf '%s\n' "$matrix_script" | grep -F -- 'cross_ctest_exclude=' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset" --output-on-failure -E "$ctest_exclude"' >/dev/null
 for non_host_target in \
-    'run_target x86_64-linux-musl-release x86_64-linux-musl package-archive-x86_64-linux-musl' \
-    'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu' \
-    'run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl' \
-    'run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu' \
-    'run_target armhf-linux-musl-release armhf-linux-musl package-archive-armhf-linux-musl'; do
+    'run_target x86_64-linux-musl-release x86_64-linux-musl package-archive-x86_64-linux-musl full "$cross_ctest_exclude"' \
+    'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu full "$cross_ctest_exclude"' \
+    'run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl full "$cross_ctest_exclude"' \
+    'run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu full "$cross_ctest_exclude"' \
+    'run_target armhf-linux-musl-release armhf-linux-musl package-archive-armhf-linux-musl full "$cross_ctest_exclude"'; do
   printf '%s\n' "$matrix_script" | grep -F -- "$non_host_target" >/dev/null
+done
+for target_id in \
+    x86_64-linux-gnu \
+    x86_64-linux-musl \
+    aarch64-linux-gnu \
+    aarch64-linux-musl \
+    armhf-linux-gnu \
+    armhf-linux-musl \
+    arm64-apple-darwin; do
+  printf '%s\n' "$matrix_script" | grep -F -- "\"\$repo_root/scripts/deps.sh\" $target_id" >/dev/null
 done
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OPENSSL=${LONEJSON_BUILD_WITH_OPENSSL}' >/dev/null
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_JWT=${LONEJSON_BUILD_WITH_JWT}' >/dev/null

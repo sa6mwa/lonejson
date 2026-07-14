@@ -25,7 +25,7 @@ require_line 'lonejson_fuzz_path_value_visitor' \
   'make fuzz does not build/run lonejson_fuzz_path_value_visitor'
 require_line 'lonejson_fuzz_base64' \
   'make fuzz does not build/run lonejson_fuzz_base64'
-require_line 'scripts/run_afl_fuzz.sh' \
+require_line 'scripts/fuzz.sh' \
   'make fuzz does not run the pinned AFL++ driver'
 require_line 'fuzz/corpus/base64' \
   'make fuzz does not pass the base64 seed corpus to AFL++'

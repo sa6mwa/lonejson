@@ -45,6 +45,17 @@ require_text './scripts/package.sh'
 require_text './scripts/package-verify.sh'
 require_text './scripts/verify_release_privacy.sh'
 require_text './scripts/validate_luarocks.sh'
+require_text './scripts/run_linux_release_matrix.sh'
+require_text './scripts/fuzz.sh'
+
+if grep -F './scripts/run_release_matrix.sh' "$makefile" >/dev/null; then
+  printf 'release-matrix must route through scripts/run_linux_release_matrix.sh\n' >&2
+  exit 1
+fi
+if grep -F './scripts/run_afl_fuzz.sh' "$makefile" >/dev/null; then
+  printf 'fuzz must route through scripts/fuzz.sh\n' >&2
+  exit 1
+fi
 
 help_text=$(make -C "$repo_root" help)
 while IFS= read -r target; do
@@ -68,7 +79,7 @@ done < <(awk '
 
 for script in \
   deps build test host_test cross_build cross_test fuzz package package-verify \
-  run_timed osxcross_available verify_release_privacy validate_luarocks \
+  run_timed osxcross_available verify_release_privacy validate_luarocks run_linux_release_matrix \
   compose dev-up dev-down dev-reset dev-ps dev-logs test-e2e; do
   if [[ ! -x "$repo_root/scripts/$script.sh" ]]; then
     printf 'missing executable lifecycle script: scripts/%s.sh\n' "$script" >&2
@@ -82,6 +93,10 @@ grep -F 'verify_release_artifacts.sh' "$repo_root/scripts/package-verify.sh" >/d
 grep -F 'verify_release_archives.sh' "$repo_root/scripts/package-verify.sh" >/dev/null
 grep -F 'verify_release_artifacts.sh' "$repo_root/scripts/verify_release_privacy.sh" >/dev/null
 grep -F 'cpkt-toolchains.sh" discover arm64-apple-darwin' "$repo_root/scripts/osxcross_available.sh" >/dev/null
+grep -F 'exec "${repo_root}/scripts/run_release_matrix.sh"' "$repo_root/scripts/run_linux_release_matrix.sh" >/dev/null
+grep -Fx 'set -euo pipefail' "$repo_root/scripts/run_linux_release_matrix.sh" >/dev/null
+grep -Fx 'set -euo pipefail' "$repo_root/scripts/run_release_matrix.sh" >/dev/null
+grep -Fx 'set -euo pipefail' "$repo_root/scripts/smoke_darwin_release.sh" >/dev/null
 
 [[ -f "$repo_root/docker-compose.yaml" ]] || {
   printf 'missing lifecycle compose file: docker-compose.yaml\n' >&2
