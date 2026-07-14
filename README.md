@@ -1362,11 +1362,12 @@ clean` preserves both shared caches.
 
 ## Local compose e2e
 
-`make test-e2e` starts a deterministic local compose project named
-`lonejson-e2e`, waits for HTTPS, OIDC, and API-fixture readiness, then runs the
-curl, OIDC, and M2M workflows. Mutable service state, including the generated
-TLS certificate and nginx fixture data, is under `devenv/volumes/` and is
-removed by `make dev-reset` or `make clean`.
+`make test-e2e` starts a deterministic local compose project whose default name
+is derived from the checkout path, waits for HTTPS, OIDC, and API-fixture
+readiness, then runs the curl, OIDC, and M2M workflows. Set
+`LONEJSON_COMPOSE_PROJECT_NAME` to select an explicit project name. Mutable
+service state, including the generated TLS certificate and nginx fixture data,
+is under `devenv/volumes/` and is removed by `make dev-reset` or `make clean`.
 
 Every published service port is overrideable for parallel checkouts:
 `LONEJSON_OAUTH2_E2E_PORT`, `LONEJSON_OIDC_E2E_PORT`,

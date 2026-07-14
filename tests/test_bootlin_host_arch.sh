@@ -54,3 +54,26 @@ host_ldd="$(ldd --version 2>&1 || true)"
 if ! grep -Eiq 'musl' <<<"$host_ldd"; then
   PATH="$tmp_dir/bin:$PATH" cmake -P "$tmp_dir/musl-check.cmake"
 fi
+
+mkdir -p "$tmp_dir/musl-bin"
+cat >"$tmp_dir/musl-bin/ldd" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' 'musl libc (x86_64)' >&2
+exit 1
+EOF
+chmod +x "$tmp_dir/musl-bin/ldd"
+
+cat >"$tmp_dir/musl-native-check.cmake" <<EOF
+set(CMAKE_HOST_SYSTEM_PROCESSOR x86_64)
+include("$repo_root/cmake/toolchains/lonejson_bootlin.cmake")
+lonejson_configure_bootlin_toolchain(
+  x86_64-linux-musl x86_64 x86_64 musl qemu-x86_64)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR "musl host output with nonzero ldd status must stay native")
+endif()
+if(DEFINED CMAKE_CROSSCOMPILING_EMULATOR)
+  message(FATAL_ERROR "native musl runtime must not configure QEMU")
+endif()
+EOF
+
+PATH="$tmp_dir/musl-bin:$PATH" cmake -P "$tmp_dir/musl-native-check.cmake"

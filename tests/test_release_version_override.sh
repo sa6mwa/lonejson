@@ -38,5 +38,19 @@ cmake -S "$repo_root" -B "$tmp_dir/cmake-version" -G Ninja \
 grep -qx 'CMAKE_PROJECT_VERSION:STATIC=7.8.9' \
   "$tmp_dir/cmake-version/CMakeCache.txt"
 
+cmake -S "$repo_root" -B "$tmp_dir/cmake-environment-version" -G Ninja \
+  -D LONEJSON_BUILD_TESTS=OFF \
+  -D LONEJSON_BUILD_EXAMPLES=OFF \
+  >"$tmp_dir/cmake-environment-default.out" \
+  2>"$tmp_dir/cmake-environment-default.err"
+LONEJSON_VERSION_OVERRIDE=7.8.9 cmake \
+  -S "$repo_root" -B "$tmp_dir/cmake-environment-version" -G Ninja \
+  -D LONEJSON_BUILD_TESTS=OFF \
+  -D LONEJSON_BUILD_EXAMPLES=OFF \
+  >"$tmp_dir/cmake-environment-version.out" \
+  2>"$tmp_dir/cmake-environment-version.err"
+grep -qx 'CMAKE_PROJECT_VERSION:STATIC=7.8.9' \
+  "$tmp_dir/cmake-environment-version/CMakeCache.txt"
+
 make -s -C "$repo_root" print-release-version LONEJSON_VERSION_OVERRIDE=7.8.9 |
   grep -qx '7.8.9'

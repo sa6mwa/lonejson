@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.21)
 
-set(LONEJSON_VERSION_OVERRIDE "" CACHE STRING "Explicit release-candidate version override in X.Y.Z form.")
+if(DEFINED ENV{LONEJSON_VERSION_OVERRIDE} AND
+   NOT "$ENV{LONEJSON_VERSION_OVERRIDE}" STREQUAL "")
+  set(LONEJSON_VERSION_OVERRIDE "$ENV{LONEJSON_VERSION_OVERRIDE}" CACHE STRING
+    "Explicit release-candidate version override in X.Y.Z form." FORCE)
+else()
+  set(LONEJSON_VERSION_OVERRIDE "" CACHE STRING
+    "Explicit release-candidate version override in X.Y.Z form.")
+endif()
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -E env
           "LONEJSON_VERSION_OVERRIDE=${LONEJSON_VERSION_OVERRIDE}"
@@ -752,6 +759,11 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_e2e_keep_services_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_e2e_keep_services.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_compose_project_isolation_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compose_project_isolation.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_darwin_macho_metadata_tests

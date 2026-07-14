@@ -76,11 +76,9 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
     string(TOLOWER
       "${_lonejson_host_ldd_output}${_lonejson_host_ldd_error}"
       _lonejson_host_ldd_text)
-    if(_lonejson_host_ldd_result EQUAL 0 AND
-        _lonejson_host_ldd_text MATCHES "musl")
+    if(_lonejson_host_ldd_text MATCHES "musl")
       set(_lonejson_host_libc "musl")
-    elseif(_lonejson_host_ldd_result EQUAL 0 AND
-        _lonejson_host_ldd_text MATCHES "glibc|gnu c library|gnu libc")
+    elseif(_lonejson_host_ldd_text MATCHES "glibc|gnu c library|gnu libc")
       set(_lonejson_host_libc "gnu")
     endif()
   endif()

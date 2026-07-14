@@ -116,8 +116,10 @@ grep -F 'LUA ?= $(shell ./scripts/resolve_lua55.sh 2>/dev/null)' "$repo_root/Mak
 grep -F 'LUA="$(LUA)" ./scripts/dev-up.sh' "$repo_root/Makefile" >/dev/null
 grep -F 'Lua 5.5 executable' "$repo_root/scripts/resolve_lua55.sh" >/dev/null
 
-grep -F 'name: lonejson-e2e' "$repo_root/docker-compose.yaml" >/dev/null
+grep -F 'name: ${LONEJSON_COMPOSE_PROJECT_NAME:-lonejson-e2e}' \
+  "$repo_root/docker-compose.yaml" >/dev/null
 grep -F 'LONEJSON_NGINX_HTTPS_E2E_PORT' "$repo_root/docker-compose.yaml" >/dev/null
 grep -F './devenv/volumes/nginx/generated' "$repo_root/docker-compose.yaml" >/dev/null
+grep -F 'LONEJSON_COMPOSE_PROJECT_NAME' "$repo_root/scripts/compose.sh" >/dev/null
 grep -F 'service-readiness' "$repo_root/scripts/dev-up.sh" >/dev/null
 grep -F 'compose state and recent logs follow' "$repo_root/scripts/test-e2e.sh" >/dev/null

@@ -10,6 +10,11 @@ if [[ ! -f "$compose_file" ]]; then
   exit 1
 fi
 
+if [[ -z "${LONEJSON_COMPOSE_PROJECT_NAME:-}" ]]; then
+  checkout_id="$(printf '%s' "$repo_root" | cksum | awk '{print $1}')"
+  export LONEJSON_COMPOSE_PROJECT_NAME="lonejson-e2e-$checkout_id"
+fi
+
 if command -v nerdctl >/dev/null 2>&1; then
   exec nerdctl compose -f "$compose_file" "$@"
 fi

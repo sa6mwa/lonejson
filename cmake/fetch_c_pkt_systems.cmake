@@ -73,10 +73,6 @@ function(lonejson_detect_host_libc out_var)
     ERROR_STRIP_TRAILING_WHITESPACE
     RESULT_VARIABLE _ldd_rc)
 
-  if(NOT _ldd_rc EQUAL 0)
-    message(FATAL_ERROR "Failed to detect host libc using ldd --version.")
-  endif()
-
   set(_ldd_text "${_ldd_stdout}\n${_ldd_stderr}")
   string(TOLOWER "${_ldd_text}" _ldd_text_lower)
 
@@ -86,7 +82,7 @@ function(lonejson_detect_host_libc out_var)
     set(_libc "gnu")
   else()
     message(FATAL_ERROR
-      "Unable to detect whether host libc is glibc or musl. Override with "
+      "Unable to detect whether host libc is glibc or musl from ldd --version. Override with "
       "-D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=<target>.")
   endif()
 

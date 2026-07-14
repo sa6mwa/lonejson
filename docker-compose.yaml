@@ -1,4 +1,4 @@
-name: lonejson-e2e
+name: ${LONEJSON_COMPOSE_PROJECT_NAME:-lonejson-e2e}
 
 services:
   oauth2:
