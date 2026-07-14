@@ -87,6 +87,12 @@ set(LONEJSON_ABI_VERSION "25" CACHE STRING "Shared-library ABI / SONAME version"
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LONEJSON_SHARED_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build")
 set(LONEJSON_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dist" CACHE PATH "Directory for generated release artifacts.")
+set(LONEJSON_LOCK_TIMEOUT_SECONDS "120" CACHE STRING
+    "Seconds to wait for checkout-local artifact and fixture locks.")
+if(NOT LONEJSON_LOCK_TIMEOUT_SECONDS MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR
+    "LONEJSON_LOCK_TIMEOUT_SECONDS must be a positive integer number of seconds.")
+endif()
 set(LONEJSON_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(LONEJSON_GENERATED_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/include")
 set(LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/single-header/include")
@@ -358,7 +364,9 @@ if(LONEJSON_ENABLE_STACK_USAGE AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 
 add_custom_target(lonejson_generate_fixtures
-  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ensure_large_fixtures.sh"
+  COMMAND "${CMAKE_COMMAND}" -E env
+    "LONEJSON_LOCK_TIMEOUT_SECONDS=${LONEJSON_LOCK_TIMEOUT_SECONDS}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ensure_large_fixtures.sh"
     "${LONEJSON_LUA_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_large_fixtures.lua"
     "${LONEJSON_GENERATED_FIXTURE_DIR}"
@@ -901,6 +909,16 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_checksum_manifest.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_single_header_concurrency_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_concurrency.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_fixture_lock_timeout_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixture_lock_timeout.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_ctest_metadata_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ctest_metadata.sh"
@@ -1408,6 +1426,7 @@ add_custom_command(
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
     -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
+    -DLONEJSON_LOCK_TIMEOUT_SECONDS=${LONEJSON_LOCK_TIMEOUT_SECONDS}
     -DLONEJSON_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
     -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
     -DLONEJSON_PUBLIC_HEADER=${CMAKE_CURRENT_SOURCE_DIR}/include/lonejson.h

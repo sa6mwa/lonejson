@@ -14,7 +14,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 # process that waited for publication re-checks readiness before it could ever
 # replace a root another checkout has started using.
 grep -F 'lock_file="$lock_dir/$name.lock"' "$resolver" >/dev/null
-grep -F 'flock "$lock_fd"' "$resolver" >/dev/null
+grep -F 'CPKT_TOOLCHAIN_LOCK_TIMEOUT' "$resolver" >/dev/null
+grep -F 'flock -w "$lock_wait_seconds" "$lock_fd"' "$resolver" >/dev/null
 grep -F 'while this process waited for the per-target shared-cache lock' "$resolver" >/dev/null
 grep -F 'flock -u "$lock_fd"' "$resolver" >/dev/null
 
@@ -36,6 +37,7 @@ chmod +x "$lock_test_bin/flock"
 
 CPKT_TOOLCHAIN_CACHE="$lock_test_cache" \
 CPKT_TOOLCHAIN_TEST_READY_ROOT="$lock_test_root" \
+CPKT_TOOLCHAIN_LOCK_TIMEOUT=17 \
 PATH="$lock_test_bin:$PATH" \
 bash -s "$resolver" <<'EOF'
 set -euo pipefail
@@ -54,6 +56,26 @@ download_file() {
 ensure_target fixture
 [[ -f "$CPKT_TOOLCHAIN_CACHE/roots/fixture/.ready" ]]
 EOF
+
+set +e
+CPKT_TOOLCHAIN_CACHE="$tmp_dir/invalid-timeout-cache" \
+CPKT_TOOLCHAIN_LOCK_TIMEOUT=invalid bash -s "$resolver" \
+  >"$tmp_dir/invalid-timeout.out" 2>"$tmp_dir/invalid-timeout.err" <<'EOF'
+set -euo pipefail
+resolver=$1
+source "$resolver"
+toolchain_values() { printf '%s\n' 'fixture|fixture|unused|fixture|sysroot|/tmp/fixture'; }
+toolchain_ready() { return 1; }
+ensure_target fixture
+EOF
+invalid_timeout_status=$?
+set -e
+if [[ $invalid_timeout_status -eq 0 ]]; then
+  printf 'expected invalid toolchain lock timeout to fail\n' >&2
+  exit 1
+fi
+grep -F 'CPKT_TOOLCHAIN_LOCK_TIMEOUT must be a positive integer' \
+  "$tmp_dir/invalid-timeout.err" >/dev/null
 
 # A corrupt shared archive must be discarded and reacquired while the same
 # per-target lock is held, so a transient partial download never requires

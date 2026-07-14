@@ -1353,6 +1353,10 @@ Set `CPKT_TOOLCHAIN_CACHE` to relocate that cache. The Darwin target remains
 an explicit osxcross/SDK setup because Apple SDKs are not publicly
 downloadable. `scripts/cpkt-toolchains.sh discover` reports every supported
 target, including whether the optional local osxcross collection is ready.
+Shared Bootlin and AFL++ provisioning waits at most
+`${CPKT_TOOLCHAIN_LOCK_TIMEOUT:-600}` seconds for the matching cache lock.
+Checkout-local fixture, Lua-rock, and standalone-header locks use
+`${LONEJSON_LOCK_TIMEOUT_SECONDS:-120}` seconds.
 
 Pinned c.pkt.systems SDK archives use the adjacent shared cache
 `${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.

@@ -11,7 +11,8 @@ tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
 grep -F 'lock_file="$lock_dir/aflplusplus-${version}-x86_64-linux-gnu.lock"' "$resolver" >/dev/null
-grep -F 'flock "$lock_fd"' "$resolver" >/dev/null
+grep -F 'CPKT_TOOLCHAIN_LOCK_TIMEOUT' "$resolver" >/dev/null
+grep -F 'flock -w "$lock_wait_seconds" "$lock_fd"' "$resolver" >/dev/null
 grep -F 'while this process waited for the shared-cache lock' "$resolver" >/dev/null
 grep -F 'flock -u "$lock_fd"' "$resolver" >/dev/null
 grep -F 'revision=2' "$resolver" >/dev/null
@@ -40,6 +41,7 @@ EOF
 chmod +x "$lock_test_bin/flock"
 
 CPKT_AFLPP_TEST_READY_ROOT="$lock_test_root" \
+CPKT_TOOLCHAIN_LOCK_TIMEOUT=17 \
 PATH="$lock_test_bin:$PATH" \
 bash -s "$resolver" "$lock_test_cache" "$lock_test_root" <<'EOF'
 set -euo pipefail
@@ -59,3 +61,23 @@ ready() {
 ensure
 [[ -f "$fixture_root/.ready" ]]
 EOF
+
+set +e
+CPKT_TOOLCHAIN_CACHE="$tmp_dir/invalid-timeout-cache" \
+CPKT_TOOLCHAIN_LOCK_TIMEOUT=invalid bash -s "$resolver" \
+  >"$tmp_dir/invalid-timeout.out" 2>"$tmp_dir/invalid-timeout.err" <<'EOF'
+set -euo pipefail
+resolver=$1
+source "$resolver"
+root() { printf '%s\n' /tmp/aflpp-fixture; }
+ready() { return 1; }
+ensure
+EOF
+invalid_timeout_status=$?
+set -e
+if [[ $invalid_timeout_status -eq 0 ]]; then
+  printf 'expected invalid AFL++ lock timeout to fail\n' >&2
+  exit 1
+fi
+grep -F 'CPKT_TOOLCHAIN_LOCK_TIMEOUT must be a positive integer' \
+  "$tmp_dir/invalid-timeout.err" >/dev/null

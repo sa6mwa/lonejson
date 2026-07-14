@@ -21,6 +21,13 @@ cache_root() {
   fi
 }
 
+lock_timeout() {
+  local timeout=${CPKT_TOOLCHAIN_LOCK_TIMEOUT:-600}
+  [[ "$timeout" =~ ^[1-9][0-9]*$ ]] ||
+    die 'CPKT_TOOLCHAIN_LOCK_TIMEOUT must be a positive integer number of seconds'
+  printf '%s\n' "$timeout"
+}
+
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
@@ -144,7 +151,7 @@ osxcross_candidate() {
 }
 
 ensure_target() {
-  local target=$1 values arch name sha256 prefix sysroot_rel root archive_dir archive tmp extract lock_dir lock_file lock_fd
+  local target=$1 values arch name sha256 prefix sysroot_rel root archive_dir archive tmp extract lock_dir lock_file lock_fd lock_wait_seconds
   values="$(toolchain_values "$target")"
   IFS='|' read -r arch name sha256 prefix sysroot_rel root <<<"$values"
   if toolchain_ready "$root" "$prefix" "$root/$sysroot_rel"; then
@@ -155,10 +162,12 @@ ensure_target() {
   archive="$archive_dir/$name.tar.xz"
   lock_dir="$(cache_root)/locks"
   lock_file="$lock_dir/$name.lock"
+  lock_wait_seconds="$(lock_timeout)"
   command -v flock >/dev/null 2>&1 || die 'flock is required for shared Bootlin toolchain cache provisioning'
   mkdir -p "$archive_dir" "$(cache_root)/roots" "$lock_dir"
   exec {lock_fd}>"$lock_file"
-  flock "$lock_fd"
+  flock -w "$lock_wait_seconds" "$lock_fd" ||
+    die "timed out after ${lock_wait_seconds}s waiting for shared Bootlin toolchain lock: $lock_file"
 
   # Another checkout may have finished publishing this immutable collection
   # while this process waited for the per-target shared-cache lock.

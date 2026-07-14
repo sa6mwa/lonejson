@@ -16,6 +16,12 @@ cache() {
   elif [[ -n "${HOME:-}" ]]; then printf '%s/.cache/c.pkt.systems/toolchains\n' "$HOME"
   else die 'HOME, XDG_CACHE_HOME, or CPKT_TOOLCHAIN_CACHE is required'; fi
 }
+lock_timeout() {
+  local timeout=${CPKT_TOOLCHAIN_LOCK_TIMEOUT:-600}
+  [[ "$timeout" =~ ^[1-9][0-9]*$ ]] ||
+    die 'CPKT_TOOLCHAIN_LOCK_TIMEOUT must be a positive integer number of seconds'
+  printf '%s\n' "$timeout"
+}
 root() { printf '%s/roots/aflplusplus-%s-x86_64-linux-gnu\n' "$(cache)" "$version"; }
 value() { sed -n "s/^$1=//p" <<<"$2" | tail -1; }
 ready() {
@@ -31,15 +37,17 @@ ready() {
 ensure() {
   [[ "$(uname -s)" = Linux ]] || die 'AFL++ GCC-plugin fuzzing is native Linux-only'
   case "$(uname -m)" in x86_64|amd64) ;; *) die 'native x86_64 Linux is required; no cross, emulator, or QEMU runner is supported' ;; esac
-  local r c archive desc cc cxx bootlin_root tmp src dl helper lock_dir lock_file lock_fd
+  local r c archive desc cc cxx bootlin_root tmp src dl helper lock_dir lock_file lock_fd lock_wait_seconds
   r=$(root); c=$(cache); archive="$c/archives/$archive_name"
   ready "$r" && return
   lock_dir="$c/locks"
   lock_file="$lock_dir/aflplusplus-${version}-x86_64-linux-gnu.lock"
+  lock_wait_seconds="$(lock_timeout)"
   command -v flock >/dev/null 2>&1 || die 'flock is required for shared AFL++ cache provisioning'
   mkdir -p "$c/archives" "$lock_dir"
   exec {lock_fd}>"$lock_file"
-  flock "$lock_fd"
+  flock -w "$lock_wait_seconds" "$lock_fd" ||
+    die "timed out after ${lock_wait_seconds}s waiting for shared AFL++ cache lock: $lock_file"
 
   # Another checkout may have finished publishing this immutable AFL++ root
   # while this process waited for the shared-cache lock.

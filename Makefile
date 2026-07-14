@@ -12,6 +12,7 @@ TIME_STEP := ./scripts/run_timed.sh
 LONEJSON_HAVE_TSAN ?= $(shell bash "$(CURDIR)/scripts/check_bootlin_tsan_support.sh")
 LONEJSON_TEST_ALL_HOST_CURL ?= 1
 LONEJSON_E2E_SERVICES_READY ?= 0
+LONEJSON_LOCK_TIMEOUT_SECONDS ?= 120
 RELEASE_BUILD_PRESETS := \
 	x86_64-linux-gnu-release \
 	x86_64-linux-musl-release \
@@ -536,7 +537,7 @@ $(LUA_ROCKSPEC): $(LUA_ROCK_SOURCES)
 $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES) $(LUA_ROCK_LIBLONEJSON_SOURCES)
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared
-	flock "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"'
+	lock_timeout="$(LONEJSON_LOCK_TIMEOUT_SECONDS)"; case "$$lock_timeout" in (*[!0-9]*|0|'') printf '%s\n' 'LONEJSON_LOCK_TIMEOUT_SECONDS must be a positive integer number of seconds' >&2; exit 1;; esac; flock -w "$$lock_timeout" "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"'
 
 lua-test: lua-rock
 	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && LD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) tests/test_lua.lua
