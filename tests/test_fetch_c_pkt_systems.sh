@@ -17,6 +17,7 @@ corrupt_root="$tmp_dir/corrupt-root"
 pinned_version_root="$tmp_dir/pinned-version-root"
 concurrent_first_root="$tmp_dir/concurrent-first-root"
 concurrent_second_root="$tmp_dir/concurrent-second-root"
+local_concurrent_root="$tmp_dir/local-concurrent-root"
 archive_path="$assets_dir/$bundle_dir_name.tar.gz"
 dependency_cache="$tmp_dir/dependency-cache"
 failure_dependency_cache="$tmp_dir/failure-dependency-cache"
@@ -222,5 +223,73 @@ test -f "$concurrent_second_root/.cache/c.pkt.systems/x86_64-linux-gnu/root/.lon
 grep -q 'reusing verified shared archive cache entry' "$second_log"
 if find "$(dirname -- "$concurrent_archive")" -maxdepth 1 -type f -name '.*.tmp' -print -quit | grep -q .; then
   printf 'concurrent cache acquisition left a temporary archive behind\n' >&2
+  exit 1
+fi
+
+# Two lifecycle commands in one checkout must serialize local extraction.  The
+# second process must revalidate the stamp after acquiring the per-target lock
+# instead of deleting the first process's root or staging tree.
+fetch_local_concurrent() {
+  local log_path=$1
+  local hold_seconds=${2:-}
+  local -a command=(
+    cmake
+    -D "LONEJSON_SOURCE_DIR=$local_concurrent_root"
+    -D LONEJSON_C_PKT_SYSTEMS_TARGET_ID=x86_64-linux-gnu
+    -D "LONEJSON_C_PKT_SYSTEMS_BASE_URL=file://$tmp_dir/missing-assets"
+    -D "CPKT_DEPENDENCY_CACHE=$concurrent_dependency_cache"
+    -D "LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE=$archive_sha256"
+  )
+  if [[ -n "$hold_seconds" ]]; then
+    command+=(
+      -D "LONEJSON_C_PKT_SYSTEMS_TEST_HOLD_EXTRACTION_LOCK_SECONDS=$hold_seconds"
+    )
+  fi
+  command+=( -P "$repo_root/cmake/fetch_c_pkt_systems.cmake" )
+  "${command[@]}" >"$log_path" 2>&1
+}
+
+local_first_log="$tmp_dir/local-concurrent-first.log"
+local_second_log="$tmp_dir/local-concurrent-second.log"
+fetch_local_concurrent "$local_first_log" 2 &
+first_pid=$!
+for _ in $(seq 1 100); do
+  if grep -q 'test hook holding checkout-local extraction lock' "$local_first_log"; then
+    break
+  fi
+  if ! kill -0 "$first_pid" 2>/dev/null; then
+    cat "$local_first_log" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
+if ! grep -q 'test hook holding checkout-local extraction lock' "$local_first_log"; then
+  printf 'first local extraction did not acquire its checkout lock\n' >&2
+  cat "$local_first_log" >&2
+  exit 1
+fi
+
+fetch_local_concurrent "$local_second_log" &
+second_pid=$!
+if ! wait "$first_pid"; then
+  cat "$local_first_log" >&2
+  exit 1
+fi
+first_pid=
+if ! wait "$second_pid"; then
+  cat "$local_second_log" >&2
+  exit 1
+fi
+second_pid=
+
+local_extract_root="$local_concurrent_root/.cache/c.pkt.systems/x86_64-linux-gnu/root"
+test -f "$local_extract_root/.lonejson-c-pkt-systems-identity"
+test -f "$local_extract_root/include/curl/curlver.h"
+test ! -e "$local_concurrent_root/.cache/c.pkt.systems/x86_64-linux-gnu/extract"
+grep -q 'Extracting ' "$local_first_log"
+grep -q 'bundle already extracted' "$local_second_log"
+if grep -q 'Extracting ' "$local_second_log"; then
+  printf 'second local extraction did not reuse the first process result\n' >&2
+  cat "$local_second_log" >&2
   exit 1
 fi

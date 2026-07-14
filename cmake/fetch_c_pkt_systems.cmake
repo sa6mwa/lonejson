@@ -160,6 +160,7 @@ set(_deps_root "${LONEJSON_SOURCE_DIR}/.cache/c.pkt.systems/${_target_id}")
 set(_extract_root "${_deps_root}/root")
 set(_staging_root "${_deps_root}/extract")
 set(_stamp_path "${_extract_root}/.lonejson-c-pkt-systems-identity")
+set(_extract_lock_path "${_deps_root}/.lonejson-c-pkt-systems-extract.lock")
 lonejson_c_pkt_systems_sha256("${_target_id}" _expected_sha256)
 if(DEFINED LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE)
   set(_expected_sha256 "${LONEJSON_C_PKT_SYSTEMS_EXPECTED_SHA256_OVERRIDE}")
@@ -212,6 +213,28 @@ function(lonejson_validate_c_pkt_systems_bundle extract_root filename target_id 
 endfunction()
 
 file(MAKE_DIRECTORY "${_deps_root}")
+file(LOCK "${_extract_lock_path}" GUARD PROCESS TIMEOUT 120
+  RESULT_VARIABLE _extract_lock_result)
+if(NOT _extract_lock_result EQUAL 0)
+  message(FATAL_ERROR
+    "Unable to lock checkout-local c.pkt.systems extraction for ${_target_id}: "
+    "${_extract_lock_result}")
+endif()
+
+if(DEFINED LONEJSON_C_PKT_SYSTEMS_TEST_HOLD_EXTRACTION_LOCK_SECONDS AND
+   NOT "${LONEJSON_C_PKT_SYSTEMS_TEST_HOLD_EXTRACTION_LOCK_SECONDS}" STREQUAL "")
+  if(NOT LONEJSON_C_PKT_SYSTEMS_TEST_HOLD_EXTRACTION_LOCK_SECONDS
+     MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR
+      "LONEJSON_C_PKT_SYSTEMS_TEST_HOLD_EXTRACTION_LOCK_SECONDS must be a "
+      "positive integer")
+  endif()
+  message(STATUS
+    "c.pkt.systems: test hook holding checkout-local extraction lock for "
+    "${LONEJSON_C_PKT_SYSTEMS_TEST_HOLD_EXTRACTION_LOCK_SECONDS}s")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep
+    "${LONEJSON_C_PKT_SYSTEMS_TEST_HOLD_EXTRACTION_LOCK_SECONDS}")
+endif()
 
 if(EXISTS "${_stamp_path}")
   file(READ "${_stamp_path}" _existing_identity)
