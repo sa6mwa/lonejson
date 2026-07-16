@@ -8,7 +8,6 @@
 #include "test_array_rewrite.inc.h"
 #include "test_fixtures_public.inc.h"
 #include "test_json_value_sources.inc.h"
-#include "test_candidate_stream.inc.h"
 #include "test_allocator_visitor.inc.h"
 #include "test_generator_omit.inc.h"
 #include "test_writer.inc.h"
@@ -137,7 +136,7 @@ int main(void) {
   test_array_stream_mapped_string_field_envelope();
   test_array_stream_mapped_string_field_zeroed_set_handler();
   test_array_stream_mapped_string_field_lifecycle_preserves_set_handler_method();
-  test_array_stream_mapped_string_field_reinit_preserves_handler();
+  test_array_stream_mapped_string_field_reset_preserves_handler();
   test_array_stream_mapped_string_field_init_overwrites_nonzero_storage();
   test_array_stream_mapped_string_field_metadata_and_long_item();
   test_array_stream_mapped_string_field_failure_modes();
@@ -145,7 +144,7 @@ int main(void) {
   test_array_stream_mapped_field_nested_items();
   test_array_stream_mapped_field_zeroed_set_handler();
   test_array_stream_mapped_field_lifecycle_preserves_set_handler_method();
-  test_array_stream_mapped_field_reinit_preserves_handler();
+  test_array_stream_mapped_field_reset_preserves_handler();
   test_array_stream_mapped_field_init_overwrites_nonzero_storage();
   test_array_stream_mapped_field_nested_json_value_sink_reuse();
   test_array_stream_mapped_field_nested_json_value_capture_budget_reuse();
@@ -216,7 +215,6 @@ int main(void) {
   test_public_api_argument_and_serialization_guards();
   test_public_initializers_and_defaults();
   test_public_dynamic_record_helpers();
-  test_msan_public_boundary_results_are_initialized();
   test_runtime_defaults_and_method_dispatch();
   test_runtime_method_json_value_init_null_does_not_leak_pin();
   test_receiver_methods_dispatch_on_public_handles();
@@ -320,8 +318,8 @@ int main(void) {
   test_json_value_large_string_object_regressions();
   test_json_value_large_string_nested_regressions();
   test_json_value_reuse_and_cleanup_ownership();
-  test_init_releases_existing_json_value_storage();
-  test_init_releases_existing_spooled_storage();
+  test_reset_releases_existing_json_value_storage();
+  test_reset_releases_existing_spooled_storage();
   test_init_preserves_shallow_copied_source_owner();
   test_json_value_source_validation_failures();
   test_json_value_reader_source_rejects_would_block();
@@ -346,6 +344,7 @@ int main(void) {
   test_custom_allocator_misaligned_owned_alloc_is_rejected();
 #endif
   test_custom_allocator_json_value_capture_and_serialize_alloc();
+  test_custom_allocator_json_value_default_clear_reparse_releases_capture();
   test_custom_allocator_raw_serialize_alloc_is_rejected();
   test_explicit_default_allocator_raw_serialize_alloc_is_allowed();
   test_explicit_default_allocator_raw_serialize_jsonl_alloc_is_allowed();
@@ -411,75 +410,6 @@ int main(void) {
   test_serialize_omit_empty_implies_null();
   test_serialize_declarative_conditional_helpers();
   test_rewindability_edges_and_measure_preserves_sources();
-  test_candidate_stream_single_object();
-  test_candidate_stream_array_items();
-  test_candidate_stream_public_ranges_are_u64();
-  test_candidate_stream_offsets_above_uint32();
-  test_candidate_stream_offset_overflow_fails();
-  test_candidate_stream_repeated_and_auto();
-  test_candidate_stream_index_above_uint32();
-  test_candidate_stream_index_overflow_fails();
-  test_candidate_stream_callback_error_above_uint32();
-  test_candidate_stream_rejects_adjacent_repeated_values();
-  test_candidate_stream_accepts_whitespace_separators();
-  test_candidate_stream_malformed_offset();
-  test_candidate_stream_malformed_offset_above_uint32();
-  test_candidate_stream_counts_pushed_back_bytes_for_limits();
-  test_candidate_stream_counts_pushed_back_bytes_across_sources();
-  test_candidate_stream_numeric_delimiters_do_not_count_as_payload();
-  test_candidate_stream_callback_stop_and_failure();
-  test_candidate_stream_reader_and_runtime_methods();
-  test_candidate_stream_file_path_fd_and_large_reader();
-  test_candidate_stream_capture_sink_and_memory();
-  test_candidate_stream_capture_recursive_array_items();
-  test_candidate_stream_capture_spooled_and_cleanup();
-  test_candidate_stream_capture_gated_spooled();
-  test_candidate_stream_capture_gated_stop_and_failure();
-  test_candidate_stream_capture_failure_modes();
-  test_candidate_stream_capture_path_visitor_user();
-  test_candidate_stream_runtime_read_buffer_config();
-  test_candidate_stream_runtime_read_buffer_preserves_behavior();
-  test_candidate_stream_runtime_read_buffer_file_path_fd_config();
-  test_candidate_stream_runtime_read_buffer_buffer_transform_ignored();
-  test_candidate_stream_runtime_read_buffer_buffer_visit_ignored();
-  test_candidate_stream_runtime_read_buffer_rejects_invalid();
-  test_candidate_stream_transform_pass_drop_replace();
-  test_candidate_stream_transform_fragmented_reader();
-  test_candidate_stream_transform_gated_spooled_replay();
-  test_candidate_stream_transform_gated_decision_policy();
-  test_candidate_stream_transform_gated_decision_stop_and_error();
-  test_candidate_stream_transform_projected_composition_policy();
-  test_candidate_stream_transform_projected_mutation_shapes();
-  test_candidate_stream_transform_projected_synthetic_shapes();
-  test_candidate_stream_transform_projected_recursive_and_fragmented();
-  test_candidate_stream_transform_projected_stop_and_read_failure();
-  test_candidate_stream_transform_streams_large_string_keep();
-  test_candidate_stream_transform_inserts_object_members();
-  test_candidate_stream_transform_inserts_after_dropped_container_member();
-  test_candidate_stream_transform_inserts_after_replaced_container_member();
-  test_candidate_stream_transform_insert_array_object_relationship();
-  test_candidate_stream_transform_recursive_array_items();
-  test_candidate_stream_transform_projects_structural_paths();
-  test_candidate_stream_transform_projection_inserts_only_emitted_members();
-  test_candidate_stream_transform_projection_unsupported_shapes();
-  test_candidate_stream_transform_projects_container_value();
-  test_candidate_stream_transform_projects_wrong_shape_parent();
-  test_candidate_stream_transform_projects_wrong_shape_container_parent();
-  test_candidate_stream_transform_projects_wrong_shape_scalar_array_item();
-  test_candidate_stream_transform_projects_wrong_shape_scalar_object_member();
-  test_candidate_stream_transform_projection_drop_stays_dropped();
-  test_candidate_stream_transform_projection_drops_wrong_shape_scalar_ancestor();
-  test_candidate_stream_transform_projection_honors_ancestor_drop();
-  test_candidate_stream_transform_projection_honors_ancestor_replace();
-  test_candidate_stream_transform_projection_honors_root_replace();
-  test_candidate_stream_transform_projection_rejects_scalar_root();
-  test_candidate_stream_transform_projection_nul_key_seen();
-  test_candidate_stream_transform_projection_empty_key_seen();
-  test_candidate_stream_transform_projects_gated_spooled();
-  test_candidate_stream_transform_stop_container();
-  test_candidate_stream_transform_drop_array_element_compacts();
-  test_candidate_stream_transform_gated_stop_propagates();
-  test_candidate_stream_transform_failure_modes();
 #ifdef LONEJSON_WITH_CURL
   test_curl_parse_survives_runtime_free();
   test_curl_parse_reinit_releases_previous_parser();

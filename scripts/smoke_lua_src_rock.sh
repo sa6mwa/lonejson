@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 1 || $# -gt 2 ]]; then
-  printf 'usage: %s <src-rock> [lonejson-libdir]\n' "$0" >&2
+if [[ $# -lt 1 || $# -gt 4 ]]; then
+  printf 'usage: %s <src-rock> [lonejson-libdir] [lua] [luarocks]\n' "$0" >&2
   exit 1
 fi
 
 rock_path=$1
 lonejson_libdir=${2:-${LONEJSON_LIBDIR:-}}
+lua_exec=${3:-${LUA:-lua}}
+luarocks_exec=${4:-${LUAROCKS:-luarocks}}
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir=
 
@@ -84,8 +86,8 @@ if [[ ! -d "$lonejson_libdir" ]]; then
   exit 1
 fi
 
-LONEJSON_LIBDIR="$lonejson_libdir" luarocks install --tree "$tmp_dir/tree" "$rock_path"
-eval "$(luarocks path --tree "$tmp_dir/tree")"
+LONEJSON_LIBDIR="$lonejson_libdir" "$luarocks_exec" install --tree "$tmp_dir/tree" "$rock_path"
+eval "$("$luarocks_exec" path --tree "$tmp_dir/tree")"
 export LD_LIBRARY_PATH="$lonejson_libdir:${LD_LIBRARY_PATH:-}"
 export DYLD_LIBRARY_PATH="$lonejson_libdir:${DYLD_LIBRARY_PATH:-}"
-lua -e 'assert(require("lonejson.init"))'
+"$lua_exec" -e 'assert(require("lonejson.init"))'

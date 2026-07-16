@@ -40,8 +40,8 @@ require_file() {
 target_preset() {
   local target_id=$1
   case "$target_id" in
-    x86_64-linux-gnu) printf '%s\n' linux-gnu-release ;;
-    x86_64-linux-musl) printf '%s\n' linux-musl-release ;;
+    x86_64-linux-gnu) printf '%s\n' x86_64-linux-gnu-release ;;
+    x86_64-linux-musl) printf '%s\n' x86_64-linux-musl-release ;;
     aarch64-linux-gnu) printf '%s\n' aarch64-linux-gnu-release ;;
     aarch64-linux-musl) printf '%s\n' aarch64-linux-musl-release ;;
     armhf-linux-gnu) printf '%s\n' armhf-linux-gnu-release ;;
@@ -54,11 +54,19 @@ target_preset() {
   esac
 }
 
-target_cmake_system_name() {
+target_toolchain_file() {
   local target_id=$1
   case "$target_id" in
-    *apple-darwin) printf '%s\n' Darwin ;;
-    *) printf '%s\n' Linux ;;
+    x86_64-linux-gnu) printf '%s\n' "$repo_root/cmake/toolchains/linux-x86_64-gnu.cmake" ;;
+    x86_64-linux-musl) printf '%s\n' "$repo_root/cmake/toolchains/linux-x86_64-musl.cmake" ;;
+    aarch64-linux-gnu) printf '%s\n' "$repo_root/cmake/toolchains/linux-aarch64-gnu.cmake" ;;
+    aarch64-linux-musl) printf '%s\n' "$repo_root/cmake/toolchains/linux-aarch64-musl.cmake" ;;
+    armhf-linux-gnu) printf '%s\n' "$repo_root/cmake/toolchains/linux-armhf-gnu.cmake" ;;
+    armhf-linux-musl) printf '%s\n' "$repo_root/cmake/toolchains/linux-armhf-musl.cmake" ;;
+    *)
+      printf 'unknown Linux target id: %s\n' "$target_id" >&2
+      exit 1
+      ;;
   esac
 }
 
@@ -273,7 +281,7 @@ require_archive_contract() {
   require_file "$package_root/lib/pkgconfig/lonejson-jwt.pc"
   require_file "$package_root/lib/pkgconfig/lonejson-oidc.pc"
   require_file "$package_root/lib/pkgconfig/lonejson-openssl.pc"
-  if grep -RE 'c\.pkt\.systems|\.deps/|/home/|/build/' \
+  if grep -RE 'c\.pkt\.systems|\.cache/|\.deps/|/home/|/build/' \
       "$package_root/lib/pkgconfig/lonejson.pc" \
       "$package_root/lib/cmake/lonejson" >/dev/null; then
     printf 'forbidden dependency or path leak in release metadata for %s\n' "$archive" >&2
@@ -293,16 +301,16 @@ require_archive_contract() {
     printf 'unexpected third-party CMake dependency in core lonejson SDK: %s\n' "$archive" >&2
     exit 1
   fi
-  if grep -E '\.deps/|/home/|/build/|file://' "$dependency_manifest" >/dev/null; then
+  if grep -E '\.cache/|\.deps/|/home/|/build/|file://' "$dependency_manifest" >/dev/null; then
     printf 'forbidden path leak in dependency manifest for %s\n' "$archive" >&2
     exit 1
   fi
   for required_metadata in \
       '"schema": "pkt.systems.dependencies.v1"' \
       '"name": "c.pkt.systems"' \
-      '"version": "0.7.0"' \
+      '"version": "0.8.0"' \
       "\"target_id\": \"$target_id\"" \
-      '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.7.0/c.pkt.systems-0.7.0-' \
+      '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.8.0/c.pkt.systems-0.8.0-' \
       '"sha256": "' \
       '"bundled": false' \
       '"external": false' \
@@ -336,7 +344,7 @@ require_archive_contract() {
       "$archive"
     dynamic_metadata="$("$OTOOL" -L "$shared_lib"; "$OTOOL" -l "$shared_lib")"
     case "$dynamic_metadata" in
-      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
+      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".cache/"* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
         printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
         exit 1
         ;;
@@ -358,7 +366,7 @@ require_archive_contract() {
     fi
     dynamic_metadata="$("$READELF" -d "$shared_lib")"
     case "$dynamic_metadata" in
-      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
+      *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".cache/"* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
         printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
         exit 1
         ;;
@@ -416,9 +424,9 @@ EOF
   raw_compile_flags="$(target_raw_compile_flags "$target_id")"
   raw_link_flags="$(target_raw_link_flags "$target_id")"
   # shellcheck disable=SC2086
-  run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
+  run_with_target_path "$target_id" "$CC" "$consumer_source" $TARGET_CFLAGS $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
   # shellcheck disable=SC2086
-  run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_static_flags $raw_link_flags -o "$tmp_dir/pkg-config-static-consumer"
+  run_with_target_path "$target_id" "$CC" "$consumer_source" $TARGET_CFLAGS $raw_compile_flags $pkg_config_static_flags $raw_link_flags -o "$tmp_dir/pkg-config-static-consumer"
 
   cmake_source_dir="$tmp_dir/cmake-consumer"
   cmake_build_dir="$tmp_dir/cmake-build"
@@ -448,16 +456,13 @@ EOF
       -D "LONEJSON_C_PKT_SYSTEMS_ROOT=$adapter_dependency_root"
     )
   else
-    cmake_system_name="$(target_cmake_system_name "$target_id")"
     cmake_args=(
       -S "$cmake_source_dir"
       -B "$cmake_build_dir"
       -G Ninja
       -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
-      -D "CMAKE_C_COMPILER=$CC"
-      -D "CMAKE_SYSTEM_NAME=$cmake_system_name"
-      -D CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+      -D "CMAKE_TOOLCHAIN_FILE=$(target_toolchain_file "$target_id")"
     )
   fi
   run_with_target_path "$target_id" cmake "${cmake_args[@]}"
@@ -507,7 +512,7 @@ EOF
   adapter_pkg_config_flags="$(PKG_CONFIG_PATH="$pkg_config_path" pkg-config --cflags --libs lonejson-curl lonejson-oidc lonejson-openssl)"
   adapter_c89_flags="-std=c89 -Wall -Wextra -Werror -Werror=implicit-function-declaration"
   # shellcheck disable=SC2086
-  run_with_target_path "$target_id" "$CC" "$adapter_source" $raw_compile_flags $adapter_c89_flags $adapter_pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-adapter-consumer"
+  run_with_target_path "$target_id" "$CC" "$adapter_source" $TARGET_CFLAGS $raw_compile_flags $adapter_c89_flags $adapter_pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-adapter-consumer"
 
   adapter_cmake_source_dir="$tmp_dir/cmake-adapter-consumer"
   adapter_cmake_build_dir="$tmp_dir/cmake-adapter-build"
@@ -550,9 +555,7 @@ EOF
       -G Ninja
       -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
-      -D "CMAKE_C_COMPILER=$CC"
-      -D "CMAKE_SYSTEM_NAME=$cmake_system_name"
-      -D CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+      -D "CMAKE_TOOLCHAIN_FILE=$(target_toolchain_file "$target_id")"
     )
   fi
   run_with_target_path "$target_id" cmake "${cmake_args[@]}"

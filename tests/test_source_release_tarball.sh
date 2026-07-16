@@ -91,8 +91,25 @@ reject_path .git
 reject_path build/source-release-ignore-sentinel
 reject_path dist/source-release-ignore-sentinel
 
-"$stage_dir/scripts/release_version.sh" | grep -qx '9.8.7'
-"$cmake_bin" -S "$stage_dir" -B "$build_dir" -G Ninja \
+# A source archive made from a non-git source tree has no manifest to guide
+# staging, so its fallback must still omit all generated compose state.
+fallback_root="$test_root/non-git-source"
+fallback_stage="$test_root/non-git-stage"
+mkdir -p "$fallback_root/devenv/volumes/nginx/certs"
+printf '%s\n' public >"$fallback_root/README.md"
+printf '%s\n' private >"$fallback_root/devenv/volumes/nginx/certs/server.key"
+GIT_DIR="$test_root/not-a-git" "$repo_root/scripts/stage_release_sources.sh" \
+  "$fallback_root" "$fallback_stage" 9.8.7
+[[ -f "$fallback_stage/README.md" ]]
+if [[ -e "$fallback_stage/devenv/volumes" ]]; then
+  printf 'non-git source staging leaked generated compose state\n' >&2
+  exit 1
+fi
+
+LONEJSON_VERSION_OVERRIDE=7.8.9 \
+  "$stage_dir/scripts/release_version.sh" | grep -qx '9.8.7'
+LONEJSON_VERSION_OVERRIDE=7.8.9 "$cmake_bin" \
+  -S "$stage_dir" -B "$build_dir" -G Ninja \
   -D CMAKE_BUILD_TYPE=Release \
   -D LONEJSON_BUILD_TESTS=OFF \
   -D LONEJSON_BUILD_EXAMPLES=OFF \
@@ -102,7 +119,8 @@ grep -qx 'CMAKE_PROJECT_VERSION:STATIC=9.8.7' "$build_dir/CMakeCache.txt"
 
 cp -R "$stage_dir" "$missing_version_dir"
 rm -f "$missing_version_dir/VERSION"
-if "$cmake_bin" -S "$missing_version_dir" -B "$missing_version_build_dir" \
+if LONEJSON_VERSION_OVERRIDE=7.8.9 "$cmake_bin" \
+    -S "$missing_version_dir" -B "$missing_version_build_dir" \
     -G Ninja \
     -D LONEJSON_BUILD_TESTS=OFF \
     -D LONEJSON_BUILD_EXAMPLES=OFF \

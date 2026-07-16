@@ -1,5 +1,53 @@
 # Local Verification
 
+## Compiler and Cross Toolchains
+
+CMake selects the pinned Bootlin collection matching the native Linux host's
+processor and libc for debug, host, and Lua workflows. Explicit Linux target
+toolchain files provision their matching pinned Bootlin collection into the
+lifecycle cache during configuration. To inspect status or warm every Linux
+collection before a matrix build:
+
+```sh
+make toolchains-all
+```
+
+The default cache is
+`${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains`; set
+`CPKT_TOOLCHAIN_CACHE` to use another shared cache location.
+
+`scripts/cpkt-toolchains.sh discover` reports every lifecycle target without
+downloading it. The optional Darwin entry reports local osxcross status; it
+never downloads an Apple SDK.
+
+Use `make cross-build` to configure/build the Linux cross presets and `make
+cross-test` (or the compatibility name `make test-cross`) to execute their
+QEMU-backed test coverage. `make package-single-header` creates the separate
+version-stamped single-header artifact without running a full release.
+
+`make release-matrix` repeats the runnable QEMU-backed cross coverage while
+building and verifying every release artifact; host-only LuaRocks/tooling
+checks remain native. A missing required runner is a failure, not a skip.
+
+Pinned c.pkt.systems SDK archives are separate immutable cache entries under
+`${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.
+`make deps-host` and the target-specific dependency targets verify each archive
+by SHA-256 before reuse, then extract it into the checkout-local `.cache/`
+tree. `make clean` removes only that extracted local state and preserves the
+shared archive and toolchain caches.
+
+Every native debug, host, and Linux release build uses a single pinned Bootlin collection:
+its GCC driver, GNU linker, binutils/debug tools, libc sysroot, and target
+runtime. Configuration verifies the compiler triple; package inspection reads
+the configured target tools from the same collection. Native memory checking
+uses host-installed Valgrind; fuzzing uses a cached, pinned AFL++ GCC-plugin
+build tied to the Bootlin x86_64 collection. Valgrind is not a
+compiler-based uninitialized-memory analysis, but it provides the native leak
+and invalid-memory gate without a non-portable LLVM distribution.
+ThreadSanitizer support is probed by `make tsan` after resolving the selected
+native Bootlin target, so broad gates do not make a parse-time skip decision
+before the toolchain exists.
+
 ## Debug Gate
 
 Use `make test` as the debug lifecycle gate.
@@ -29,6 +77,25 @@ For normal local confidence and completion reports, use:
 ```sh
 make test
 ```
+
+## Broader Confidence
+
+`make test-all` is the deterministic broad local confidence gate. It runs the
+debug gate, host release tests, curl/auth host tests unless explicitly skipped
+by the release pipeline, cross target tests, host sanitizers where supported,
+Valgrind, deterministic local e2e, and fuzz smoke.
+
+For release-candidate rehearsals, `LONEJSON_VERSION_OVERRIDE=X.Y.Z` is accepted
+by `scripts/release_version.sh`, Make, and CMake. A CMake environment override
+is intentionally one-shot and is not written into `CMakeCache.txt`; use
+`-D LONEJSON_VERSION_OVERRIDE=X.Y.Z` only when the build directory itself should
+retain that override.
+
+Benchmark gates are intentionally not part of `test-all` or the normal
+`prerelease` graph. Run `make bench-check`, `make bench-gate`,
+`make lua-bench-gate`, or `make prerelease-hardening` when performance is the
+surface under review or when preparing a release decision that explicitly
+requires benchmark evidence.
 
 For a focused test while iterating on a narrow change, build the required
 targets first and state that the result is focused diagnostic coverage, not the

@@ -48,6 +48,21 @@ eval "$("$repo_root/scripts/discover_target_tools.sh" \
 [[ "$READELF" == "$fake_bin/aarch64-linux-gnu-readelf" ]]
 [[ -z "$OTOOL" ]]
 
+printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_bin/clang"
+chmod +x "$fake_bin/clang"
+cat >"$build_dir/CMakeCache.txt" <<EOF
+CMAKE_C_COMPILER:FILEPATH=$fake_bin/clang
+CMAKE_C_COMPILER_TARGET:STRING=aarch64-buildroot-linux-gnu
+CMAKE_C_COMPILER_EXTERNAL_TOOLCHAIN:PATH=$tmp_dir/bootlin
+CMAKE_SYSROOT:PATH=$tmp_dir/bootlin/aarch64-buildroot-linux-gnu/sysroot
+EOF
+
+eval "$("$repo_root/scripts/discover_target_tools.sh" \
+  --build-dir "$build_dir" \
+  --target-id aarch64-linux-gnu)"
+
+[[ "$TARGET_CFLAGS" == '--target=aarch64-buildroot-linux-gnu --gcc-toolchain='"$tmp_dir"'/bootlin --sysroot='"$tmp_dir"'/bootlin/aarch64-buildroot-linux-gnu/sysroot -B'"$tmp_dir"'/bootlin/aarch64-buildroot-linux-gnu/bin' ]]
+
 cat >"$build_dir/CMakeCache.txt" <<EOF
 CMAKE_C_COMPILER:FILEPATH=$fake_bin/arm64-apple-darwin25-clang
 EOF
@@ -93,49 +108,47 @@ eval "$(PATH="$host_bin:/usr/bin:/bin" "$repo_root/scripts/discover_target_tools
 [[ -z "$OTOOL" ]]
 [[ -z "$INSTALL_NAME_TOOL" ]]
 
-aarch64_musl_prefix="$tmp_dir/aarch64-linux-musl"
-armhf_musl_prefix="$tmp_dir/arm-linux-musleabihf"
-mkdir -p "$aarch64_musl_prefix/bin" "$armhf_musl_prefix/bin"
-for tool in \
-  aarch64-linux-musl-gcc \
-  aarch64-linux-musl-ld \
-  aarch64-linux-musl-ar \
-  aarch64-linux-musl-strip \
-  aarch64-linux-musl-nm \
-  aarch64-linux-musl-readelf; do
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$aarch64_musl_prefix/bin/$tool"
-  chmod +x "$aarch64_musl_prefix/bin/$tool"
-done
-for tool in \
-  arm-linux-musleabihf-gcc \
-  arm-linux-musleabihf-ld \
-  arm-linux-musleabihf-ar \
-  arm-linux-musleabihf-strip \
-  arm-linux-musleabihf-nm \
-  arm-linux-musleabihf-readelf; do
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$armhf_musl_prefix/bin/$tool"
-  chmod +x "$armhf_musl_prefix/bin/$tool"
+toolchain_cache="$tmp_dir/toolchain-cache"
+aarch64_musl_root="$toolchain_cache/roots/aarch64--musl--stable-2025.08-1"
+armhf_musl_root="$toolchain_cache/roots/armv7-eabihf--musl--stable-2025.08-1"
+for spec in \
+  "$aarch64_musl_root|aarch64-linux|aarch64-buildroot-linux-musl" \
+  "$armhf_musl_root|arm-linux|arm-buildroot-linux-musleabihf"; do
+  IFS='|' read -r root prefix triple <<<"$spec"
+  mkdir -p "$root/bin" "$root/$triple/sysroot/usr/include" "$root/$triple/sysroot/usr/lib"
+  mkdir -p "$root/lib"
+  touch "$root/$triple/sysroot/usr/include/stdio.h" \
+    "$root/lib/libstdc++.a" "$root/lib/libgcc.a"
+  touch "$root/$triple/sysroot/usr/lib/libc.so"
+  for tool in gcc g++ ld ar ranlib strip nm objcopy objdump addr2line gdb readelf; do
+    if [[ "$tool" == g++ ]]; then
+      printf '#!/usr/bin/env bash\ncase "${1:-}" in\n  -print-file-name=libstdc++.a) printf "%%s\\n" "$(dirname "$0")/../lib/libstdc++.a" ;;\n  -print-file-name=libgcc.a) printf "%%s\\n" "$(dirname "$0")/../lib/libgcc.a" ;;\n  *) exit 0 ;;\nesac\n' >"$root/bin/$prefix-$tool"
+    else
+      printf '#!/usr/bin/env bash\nexit 0\n' >"$root/bin/$prefix-$tool"
+    fi
+    chmod +x "$root/bin/$prefix-$tool"
+  done
 done
 rm -f "$build_dir/CMakeCache.txt"
 
 eval "$(PATH="/usr/bin:/bin" \
-  CPKT_AARCH64_MUSL_PREFIX="$aarch64_musl_prefix" \
+  CPKT_TOOLCHAIN_CACHE="$toolchain_cache" \
   "$repo_root/scripts/discover_target_tools.sh" \
     --build-dir "$build_dir" \
     --target-id aarch64-linux-musl)"
 
-[[ "$CC" == "$aarch64_musl_prefix/bin/aarch64-linux-musl-gcc" ]]
+[[ "$CC" == "$aarch64_musl_root/bin/aarch64-linux-gcc" ]]
 [[ "$TARGET_HOST_PREFIX" == "aarch64-linux-musl" ]]
-[[ "$AR" == "$aarch64_musl_prefix/bin/aarch64-linux-musl-ar" ]]
-[[ "$READELF" == "$aarch64_musl_prefix/bin/aarch64-linux-musl-readelf" ]]
+[[ "$AR" == "$aarch64_musl_root/bin/aarch64-linux-ar" ]]
+[[ "$READELF" == "$aarch64_musl_root/bin/aarch64-linux-readelf" ]]
 
 eval "$(PATH="/usr/bin:/bin" \
-  CPKT_ARMHF_MUSL_PREFIX="$armhf_musl_prefix" \
+  CPKT_TOOLCHAIN_CACHE="$toolchain_cache" \
   "$repo_root/scripts/discover_target_tools.sh" \
     --build-dir "$build_dir" \
     --target-id armhf-linux-musl)"
 
-[[ "$CC" == "$armhf_musl_prefix/bin/arm-linux-musleabihf-gcc" ]]
+[[ "$CC" == "$armhf_musl_root/bin/arm-linux-gcc" ]]
 [[ "$TARGET_HOST_PREFIX" == "arm-linux-musleabihf" ]]
-[[ "$AR" == "$armhf_musl_prefix/bin/arm-linux-musleabihf-ar" ]]
-[[ "$READELF" == "$armhf_musl_prefix/bin/arm-linux-musleabihf-readelf" ]]
+[[ "$AR" == "$armhf_musl_root/bin/arm-linux-ar" ]]
+[[ "$READELF" == "$armhf_musl_root/bin/arm-linux-readelf" ]]

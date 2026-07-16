@@ -1,7 +1,17 @@
 cmake_minimum_required(VERSION 3.21)
 
+set(LONEJSON_VERSION_OVERRIDE "" CACHE STRING
+  "Explicit release-candidate version override in X.Y.Z form.")
+set(LONEJSON_EFFECTIVE_VERSION_OVERRIDE "${LONEJSON_VERSION_OVERRIDE}")
+if(LONEJSON_EFFECTIVE_VERSION_OVERRIDE STREQUAL "" AND
+    DEFINED ENV{LONEJSON_VERSION_OVERRIDE} AND
+    NOT "$ENV{LONEJSON_VERSION_OVERRIDE}" STREQUAL "")
+  set(LONEJSON_EFFECTIVE_VERSION_OVERRIDE "$ENV{LONEJSON_VERSION_OVERRIDE}")
+endif()
 execute_process(
-  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release_version.sh"
+  COMMAND "${CMAKE_COMMAND}" -E env
+          "LONEJSON_VERSION_OVERRIDE=${LONEJSON_EFFECTIVE_VERSION_OVERRIDE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/scripts/release_version.sh"
   OUTPUT_VARIABLE LONEJSON_RESOLVED_VERSION
   ERROR_VARIABLE LONEJSON_VERSION_ERROR
   RESULT_VARIABLE LONEJSON_VERSION_RESULT
@@ -15,33 +25,74 @@ if(NOT LONEJSON_VERSION_RESULT EQUAL 0 OR NOT LONEJSON_RESOLVED_VERSION)
   message(FATAL_ERROR "${LONEJSON_VERSION_ERROR}")
 endif()
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonCompiler.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CpktDependencyCache.cmake")
 project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
 
+cpkt_resolve_dependency_cache(LONEJSON_RESOLVED_DEPENDENCY_CACHE)
+
 include(CTest)
-find_program(LONEJSON_LUA_EXECUTABLE
-  NAMES lua lua5.5 lua5.4 lua5.3 luajit
-  REQUIRED)
+if(LONEJSON_LUA_EXECUTABLE)
+  execute_process(
+    COMMAND "${LONEJSON_LUA_EXECUTABLE}" -v
+    RESULT_VARIABLE LONEJSON_LUA_VERSION_RESULT
+    OUTPUT_VARIABLE LONEJSON_LUA_VERSION_OUTPUT
+    ERROR_VARIABLE LONEJSON_LUA_VERSION_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE)
+  set(LONEJSON_LUA_VERSION_TEXT
+    "${LONEJSON_LUA_VERSION_OUTPUT}${LONEJSON_LUA_VERSION_ERROR}")
+  if(NOT LONEJSON_LUA_VERSION_RESULT EQUAL 0 OR
+      NOT LONEJSON_LUA_VERSION_TEXT MATCHES "Lua 5\\.5\\.")
+    message(FATAL_ERROR
+      "lonejson requires LONEJSON_LUA_EXECUTABLE to be a Lua 5.5 executable; ${LONEJSON_LUA_VERSION_TEXT}")
+  endif()
+  set(LONEJSON_LUA_EXECUTABLE "${LONEJSON_LUA_EXECUTABLE}" CACHE FILEPATH
+      "Resolved Lua 5.5 executable for lonejson tooling." FORCE)
+else()
+  execute_process(
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/resolve_lua55.sh"
+    RESULT_VARIABLE LONEJSON_LUA_VERSION_RESULT
+    OUTPUT_VARIABLE LONEJSON_LUA_VERSION_OUTPUT
+    ERROR_VARIABLE LONEJSON_LUA_VERSION_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE)
+  set(LONEJSON_LUA_VERSION_TEXT
+    "${LONEJSON_LUA_VERSION_OUTPUT}${LONEJSON_LUA_VERSION_ERROR}")
+  if(NOT LONEJSON_LUA_VERSION_RESULT EQUAL 0 OR
+      NOT LONEJSON_LUA_VERSION_OUTPUT)
+    message(FATAL_ERROR
+      "lonejson requires a Lua 5.5 executable for Lua tooling; ${LONEJSON_LUA_VERSION_TEXT}")
+  endif()
+  set(LONEJSON_LUA_EXECUTABLE "${LONEJSON_LUA_VERSION_OUTPUT}" CACHE FILEPATH
+      "Resolved Lua 5.5 executable for lonejson tooling." FORCE)
+endif()
 find_program(LONEJSON_LUAROCKS_EXECUTABLE NAMES luarocks)
 find_program(CLANG_FORMAT_BIN NAMES clang-format)
-find_program(LONEJSON_CLANG_EXECUTABLE NAMES clang)
 
 option(LONEJSON_BUILD_TESTS "Build lonejson tests." ON)
 option(LONEJSON_BUILD_EXAMPLES "Build lonejson examples." OFF)
 option(LONEJSON_BUILD_BENCHMARKS "Build lonejson benchmarks." OFF)
-option(LONEJSON_BUILD_FUZZERS "Build lonejson libFuzzer targets." OFF)
+option(LONEJSON_BUILD_FUZZERS "Build lonejson AFL++ fuzz targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ENABLE_TSAN "Enable ThreadSanitizer." OFF)
-option(LONEJSON_ENABLE_MSAN "Enable MemorySanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
 option(LONEJSON_BUILD_WITH_OPENSSL "Build lonejson with OpenSSL-backed auth/crypto support enabled." OFF)
 option(LONEJSON_BUILD_WITH_JWT "Build lonejson with JWT/JWK auth APIs enabled." OFF)
 option(LONEJSON_BUILD_WITH_OIDC "Build lonejson with OIDC/OAuth2 helper APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "24" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "25" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LONEJSON_SHARED_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build")
+set(LONEJSON_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dist" CACHE PATH "Directory for generated release artifacts.")
+set(LONEJSON_LOCK_TIMEOUT_SECONDS "120" CACHE STRING
+    "Seconds to wait for checkout-local artifact and fixture locks.")
+if(NOT LONEJSON_LOCK_TIMEOUT_SECONDS MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR
+    "LONEJSON_LOCK_TIMEOUT_SECONDS must be a positive integer number of seconds.")
+endif()
 set(LONEJSON_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(LONEJSON_GENERATED_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/include")
 set(LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/single-header/include")
@@ -55,7 +106,7 @@ set(LONEJSON_TARGET_LIBC "" CACHE STRING "Artifact libc suffix for Linux targets
 set(LONEJSON_STACK_USAGE_TARGETS "")
 set(LONEJSON_SINGLE_HEADER_BUILD "${LONEJSON_GENERATED_INCLUDE_DIR}/lonejson_single_header.h")
 set(LONEJSON_SINGLE_HEADER_BUILD_ALIAS "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}/lonejson.h")
-set(LONEJSON_SINGLE_HEADER_DIST_GZ "${CMAKE_CURRENT_SOURCE_DIR}/dist/lonejson-${LONEJSON_RESOLVED_VERSION}.h.gz")
+set(LONEJSON_SINGLE_HEADER_DIST_GZ "${LONEJSON_DIST_DIR}/lonejson-${LONEJSON_RESOLVED_VERSION}.h.gz")
 
 function(lonejson_configure_c_target target)
   if(UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
@@ -154,6 +205,12 @@ set(LONEJSON_RELEASE_TARGET_IDS
   armhf-linux-gnu
   armhf-linux-musl
   arm64-apple-darwin)
+set(LONEJSON_IS_SUPPORTED_RELEASE_TARGET OFF)
+if((LONEJSON_TARGET_OS_LOWER STREQUAL "linux" OR
+    LONEJSON_TARGET_OS_LOWER STREQUAL "darwin") AND
+   LONEJSON_TARGET_ID IN_LIST LONEJSON_RELEASE_TARGET_IDS)
+  set(LONEJSON_IS_SUPPORTED_RELEASE_TARGET ON)
+endif()
 
 set(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS OFF)
 if(NOT CMAKE_CROSSCOMPILING AND
@@ -284,14 +341,9 @@ if(LONEJSON_ENABLE_TSAN)
   math(EXPR LONEJSON_ENABLED_SANITIZER_COUNT
     "${LONEJSON_ENABLED_SANITIZER_COUNT} + 1")
 endif()
-if(LONEJSON_ENABLE_MSAN)
-  math(EXPR LONEJSON_ENABLED_SANITIZER_COUNT
-    "${LONEJSON_ENABLED_SANITIZER_COUNT} + 1")
-endif()
 if(LONEJSON_ENABLED_SANITIZER_COUNT GREATER 1)
   message(FATAL_ERROR
-    "Enable at most one of LONEJSON_ENABLE_ASAN, LONEJSON_ENABLE_TSAN, or "
-    "LONEJSON_ENABLE_MSAN at a time.")
+    "Enable at most one of LONEJSON_ENABLE_ASAN or LONEJSON_ENABLE_TSAN at a time.")
 endif()
 
 if(LONEJSON_ENABLE_ASAN AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
@@ -307,26 +359,14 @@ if(LONEJSON_ENABLE_TSAN)
   add_link_options(-fsanitize=thread)
 endif()
 
-if(LONEJSON_ENABLE_MSAN)
-  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "LONEJSON_ENABLE_MSAN requires Clang.")
-  endif()
-  add_compile_options(
-    -fsanitize=memory
-    -fsanitize-memory-track-origins=2
-    -fno-omit-frame-pointer
-    -O1)
-  add_link_options(
-    -fsanitize=memory
-    -fsanitize-memory-track-origins=2)
-endif()
-
 if(LONEJSON_ENABLE_STACK_USAGE AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-fstack-usage)
 endif()
 
 add_custom_target(lonejson_generate_fixtures
-  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ensure_large_fixtures.sh"
+  COMMAND "${CMAKE_COMMAND}" -E env
+    "LONEJSON_LOCK_TIMEOUT_SECONDS=${LONEJSON_LOCK_TIMEOUT_SECONDS}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/ensure_large_fixtures.sh"
     "${LONEJSON_LUA_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_large_fixtures.lua"
     "${LONEJSON_GENERATED_FIXTURE_DIR}"
@@ -377,17 +417,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 endif()
 
 if(LONEJSON_BUILD_FUZZERS)
-  if(LONEJSON_ENABLE_TSAN OR LONEJSON_ENABLE_MSAN)
+  if(LONEJSON_ENABLE_TSAN)
     message(FATAL_ERROR
-      "LONEJSON_BUILD_FUZZERS is incompatible with "
-      "LONEJSON_ENABLE_TSAN and LONEJSON_ENABLE_MSAN.")
+      "LONEJSON_BUILD_FUZZERS is incompatible with LONEJSON_ENABLE_TSAN.")
   endif()
-  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "LONEJSON_BUILD_FUZZERS requires Clang/libFuzzer.")
+  if(NOT LONEJSON_AFLPP_ROOT)
+    message(FATAL_ERROR
+      "LONEJSON_BUILD_FUZZERS requires the pinned AFL++ GCC-plugin toolchain.")
   endif()
-  target_compile_options(lonejson_static PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
 endif()
 
 set_target_properties(lonejson_shared PROPERTIES
@@ -407,7 +444,7 @@ set_target_properties(lonejson_static PROPERTIES
 
 if(LONEJSON_BUILD_TESTS)
   enable_testing()
-  if(LONEJSON_BUILD_WITH_CURL AND LONEJSON_TARGET_ID IN_LIST LONEJSON_RELEASE_TARGET_IDS)
+  if(LONEJSON_BUILD_WITH_CURL AND LONEJSON_IS_SUPPORTED_RELEASE_TARGET)
     add_test(NAME lonejson_build_tree_curl_abi_tests
       COMMAND bash
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_curl_abi_symbols.sh"
@@ -425,7 +462,7 @@ if(LONEJSON_BUILD_TESTS)
       AND LONEJSON_BUILD_WITH_OPENSSL
       AND LONEJSON_BUILD_WITH_JWT
       AND LONEJSON_BUILD_WITH_OIDC
-      AND LONEJSON_TARGET_ID IN_LIST LONEJSON_RELEASE_TARGET_IDS)
+      AND LONEJSON_IS_SUPPORTED_RELEASE_TARGET)
     add_test(NAME lonejson_build_tree_jwt_abi_tests
       COMMAND bash
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_jwt_abi_symbols.sh"
@@ -584,7 +621,6 @@ if(LONEJSON_BUILD_TESTS)
       LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
       LONEJSON_TEST_MAP_ANALYSIS_COUNTER=1
       LONEJSON_TEST_LUA_ENCODE_STATS=1
-      LONEJSON_TEST_LUA_CANDIDATE_INFO=1
       LONEJSON_TEST_LUA_SIMULATE_NO_MAXINTEGER=1)
     target_link_libraries(lonejson_lua_target_core PRIVATE
       lonejson_shared
@@ -649,7 +685,6 @@ if(LONEJSON_BUILD_TESTS)
       LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
       LONEJSON_TEST_MAP_ANALYSIS_COUNTER=1
       LONEJSON_TEST_LUA_ENCODE_STATS=1
-      LONEJSON_TEST_LUA_CANDIDATE_INFO=1
       LONEJSON_TEST_LUA_SIMULATE_NO_MAXINTEGER=1)
     target_link_libraries(lonejson_lua_interop_tests PRIVATE
       lonejson_shared
@@ -689,9 +724,69 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_makefile_fuzz_targets.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
+      NAME lonejson_fuzz_affinity_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fuzz_affinity.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
       NAME lonejson_discover_target_tools_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_discover_target_tools.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_compiler_selection_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compiler_selection.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_bootlin_host_arch_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bootlin_host_arch.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_native_bootlin_target_tests
+      COMMAND "${CMAKE_COMMAND}"
+        -D LONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_bootlin_target.cmake")
+    add_test(
+      NAME lonejson_native_bootlin_target_command_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_bootlin_target_command.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_cpkt_toolchain_resolver_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpkt_toolchain_resolver.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_cpkt_aflpp_resolver_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpkt_aflpp_resolver.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_lifecycle_preset_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lifecycle_presets.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_clean_safety_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_clean_safety.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_lifecycle_make_surface_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lifecycle_make_surface.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_e2e_keep_services_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_e2e_keep_services.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_compose_project_isolation_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compose_project_isolation.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_darwin_macho_metadata_tests
@@ -724,14 +819,19 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_c_pkt_systems_root.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
-      NAME lonejson_test_all_clang_optional_tests
+      NAME lonejson_test_all_hardening_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_test_all_clang_optional.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_test_all_hardening.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
-      NAME lonejson_check_clang_sanitizer_support_tests
+      NAME lonejson_bootlin_tsan_support_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_check_clang_sanitizer_support.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bootlin_tsan_support.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_msan_handle_probe_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_msan_handle_probes.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_cross_sanitizer_matrix_tests
@@ -770,6 +870,11 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_lua_src_rock_privacy_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_src_rock_privacy.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_lua55_resolution_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua55_resolution.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_lua_public_boundary_tests
@@ -818,6 +923,19 @@ if(LONEJSON_BUILD_TESTS)
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_checksum_manifest.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(
+      lonejson_release_checksum_manifest_tests
+      PROPERTIES RESOURCE_LOCK lonejson_release_test_tag)
+    add_test(
+      NAME lonejson_single_header_concurrency_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_concurrency.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_fixture_lock_timeout_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixture_lock_timeout.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_ctest_metadata_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
@@ -862,33 +980,32 @@ if(LONEJSON_BUILD_TESTS)
   set_tests_properties(lonejson_single_header_strict_warning_build_tests
     PROPERTIES RUN_SERIAL TRUE)
 
-  if(LONEJSON_CLANG_EXECUTABLE)
-    set(LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT
-      "${CMAKE_CURRENT_BINARY_DIR}/generated/lonejson_single_header_strict_clang.o")
-    add_custom_command(
-      OUTPUT "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}"
-      COMMAND "${CMAKE_COMMAND}" -E make_directory
-        "${CMAKE_CURRENT_BINARY_DIR}/generated"
-      COMMAND "${LONEJSON_CLANG_EXECUTABLE}"
-        ${LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS}
-        -D_POSIX_C_SOURCE=200809L
-        -D_FILE_OFFSET_BITS=64
-        -I "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}"
-        -c "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
-        -o "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}"
-      DEPENDS
-        package-single-header
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
-      VERBATIM)
-    add_custom_target(lonejson_single_header_strict_clang ALL
-      DEPENDS "${LONEJSON_SINGLE_HEADER_STRICT_CLANG_OBJECT}")
-    add_test(
-      NAME lonejson_single_header_strict_clang_build_tests
-      COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_CURRENT_BINARY_DIR}"
-        --target lonejson_single_header_strict_clang)
-    set_tests_properties(lonejson_single_header_strict_clang_build_tests
-      PROPERTIES RUN_SERIAL TRUE)
-  endif()
+  set(LONEJSON_SINGLE_HEADER_STRICT_TOOLCHAIN_OBJECT
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/lonejson_single_header_strict_toolchain.o")
+  add_custom_command(
+    OUTPUT "${LONEJSON_SINGLE_HEADER_STRICT_TOOLCHAIN_OBJECT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+      "${CMAKE_CURRENT_BINARY_DIR}/generated"
+    # This must follow the configured toolchain rather than a host compiler.
+    COMMAND "${CMAKE_C_COMPILER}"
+      ${LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS}
+      -D_POSIX_C_SOURCE=200809L
+      -D_FILE_OFFSET_BITS=64
+      -I "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}"
+      -c "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
+      -o "${LONEJSON_SINGLE_HEADER_STRICT_TOOLCHAIN_OBJECT}"
+    DEPENDS
+      package-single-header
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_single_header_strict_warnings.c"
+    VERBATIM)
+  add_custom_target(lonejson_single_header_strict_toolchain ALL
+    DEPENDS "${LONEJSON_SINGLE_HEADER_STRICT_TOOLCHAIN_OBJECT}")
+  add_test(
+    NAME lonejson_single_header_strict_toolchain_build_tests
+    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_CURRENT_BINARY_DIR}"
+      --target lonejson_single_header_strict_toolchain)
+  set_tests_properties(lonejson_single_header_strict_toolchain_build_tests
+    PROPERTIES RUN_SERIAL TRUE)
 
   function(lonejson_add_single_header_config_test target)
     add_executable(${target} tests/test_single_header_config_matrix.c)
@@ -918,9 +1035,6 @@ if(LONEJSON_BUILD_TESTS)
     lonejson_single_header_config_lj_config_aliases
     TEST_LJ_CONFIG_ALIASES
     TEST_USE_SHORT_NAMES)
-  lonejson_add_single_header_config_test(
-    lonejson_single_header_config_small_parser_default_candidate_rejects
-    TEST_SMALL_PARSER_DEFAULT_CANDIDATE_REJECTS)
   lonejson_add_single_header_config_test(
     lonejson_single_header_config_short_names_disabled
     TEST_DISABLE_SHORT_NAMES)
@@ -1058,192 +1172,60 @@ if(LONEJSON_BUILD_BENCHMARKS)
 endif()
 
 if(LONEJSON_BUILD_FUZZERS)
-  add_executable(lonejson_fuzz_base64 fuzz/fuzz_base64.c)
-  target_include_directories(lonejson_fuzz_base64 PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_base64 PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_base64 PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_base64 PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_base64)
+  add_library(lonejson_afl_driver STATIC fuzz/afl_driver.c)
+  lonejson_configure_c_target(lonejson_afl_driver)
+  # AFL++ instruments through its pinned GCC wrapper. Existing callbacks use
+  # a small native file-input driver rather than an LLVM runtime.
+  function(lonejson_add_afl_fuzz_target target source)
+    add_executable("${target}" "${source}")
+    target_include_directories("${target}" PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+    target_link_libraries("${target}" PRIVATE lonejson lonejson_afl_driver)
+    target_compile_options("${target}" PRIVATE -fno-omit-frame-pointer)
+    lonejson_configure_c_target("${target}")
+  endfunction()
 
-  add_executable(lonejson_fuzz_validate fuzz/fuzz_validate.c)
-  target_include_directories(lonejson_fuzz_validate PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_validate PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_validate PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_validate PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_validate)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_base64 fuzz/fuzz_base64.c)
 
-  add_executable(lonejson_fuzz_mapped_parse fuzz/fuzz_mapped_parse.c)
-  target_include_directories(lonejson_fuzz_mapped_parse PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_mapped_parse PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_mapped_parse PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_mapped_parse PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_mapped_parse)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_validate fuzz/fuzz_validate.c)
 
-  add_executable(lonejson_fuzz_array_stream fuzz/fuzz_array_stream.c)
-  target_include_directories(lonejson_fuzz_array_stream PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_array_stream PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_array_stream PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_array_stream PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_array_stream)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_mapped_parse fuzz/fuzz_mapped_parse.c)
 
-  add_executable(lonejson_fuzz_json_value fuzz/fuzz_json_value.c)
-  target_include_directories(lonejson_fuzz_json_value PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_json_value PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_json_value PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_json_value PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_json_value)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_array_stream fuzz/fuzz_array_stream.c)
 
-  add_executable(lonejson_fuzz_value_visitor fuzz/fuzz_value_visitor.c)
-  target_include_directories(lonejson_fuzz_value_visitor PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_value_visitor PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_value_visitor PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_value_visitor PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_value_visitor)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_json_value fuzz/fuzz_json_value.c)
 
-  add_executable(lonejson_fuzz_path_value_visitor
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_value_visitor fuzz/fuzz_value_visitor.c)
+
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_path_value_visitor
     fuzz/fuzz_path_value_visitor.c)
-  target_include_directories(lonejson_fuzz_path_value_visitor
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_path_value_visitor PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_path_value_visitor PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_path_value_visitor PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_path_value_visitor)
 
-  add_executable(lonejson_fuzz_candidate_stream
-    fuzz/fuzz_candidate_stream.c)
-  target_include_directories(lonejson_fuzz_candidate_stream
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_candidate_stream PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_candidate_stream PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_candidate_stream PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_candidate_stream)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
 
-  add_executable(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
-  target_include_directories(lonejson_fuzz_value_rewrite PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_value_rewrite PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_value_rewrite PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_value_rewrite PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_value_rewrite)
-
-  add_executable(lonejson_fuzz_reader_stream_generator
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_reader_stream_generator
     fuzz/fuzz_reader_stream_generator.c)
-  target_include_directories(lonejson_fuzz_reader_stream_generator
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_reader_stream_generator
-    PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_reader_stream_generator PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_reader_stream_generator PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_reader_stream_generator)
 
-  add_executable(lonejson_fuzz_writer_generator_backpressure
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_writer_generator_backpressure
     fuzz/fuzz_writer_generator_backpressure.c)
-  target_include_directories(lonejson_fuzz_writer_generator_backpressure
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_writer_generator_backpressure
-    PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_writer_generator_backpressure PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_writer_generator_backpressure PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_writer_generator_backpressure)
 
-  add_executable(lonejson_fuzz_writer_value_stream
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_writer_value_stream
     fuzz/fuzz_writer_value_stream.c)
-  target_include_directories(lonejson_fuzz_writer_value_stream
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_writer_value_stream PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_writer_value_stream PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined)
-  target_link_options(lonejson_fuzz_writer_value_stream PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_writer_value_stream)
 
-  add_executable(lonejson_fuzz_protocol_framing
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_protocol_framing
     fuzz/fuzz_protocol_framing.c)
-  target_include_directories(lonejson_fuzz_protocol_framing
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_protocol_framing
-    PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_protocol_framing PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_protocol_framing PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_protocol_framing)
 
-  add_executable(lonejson_fuzz_fixed_string_paths
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_fixed_string_paths
     fuzz/fuzz_fixed_string_paths.c)
-  target_include_directories(lonejson_fuzz_fixed_string_paths
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_fixed_string_paths PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_fixed_string_paths PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_fixed_string_paths PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_fixed_string_paths)
 
-  add_executable(lonejson_fuzz_alloc_ceiling
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_alloc_ceiling
     fuzz/fuzz_alloc_ceiling.c)
-  target_include_directories(lonejson_fuzz_alloc_ceiling
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_alloc_ceiling PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_alloc_ceiling PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_alloc_ceiling PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_alloc_ceiling)
 
-  add_executable(lonejson_fuzz_parser_boundaries
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_parser_boundaries
     fuzz/fuzz_parser_boundaries.c)
-  target_include_directories(lonejson_fuzz_parser_boundaries
-    PRIVATE "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-  target_link_libraries(lonejson_fuzz_parser_boundaries PRIVATE lonejson)
-  target_compile_options(lonejson_fuzz_parser_boundaries PRIVATE
-    -fsanitize=fuzzer-no-link,address,undefined
-    -fno-omit-frame-pointer)
-  target_link_options(lonejson_fuzz_parser_boundaries PRIVATE
-    -fsanitize=fuzzer,address,undefined)
-  lonejson_configure_c_target(lonejson_fuzz_parser_boundaries)
 
   if(LONEJSON_BUILD_WITH_CURL AND LONEJSON_BUILD_WITH_OPENSSL AND
       LONEJSON_BUILD_WITH_JWT AND LONEJSON_BUILD_WITH_OIDC)
-    add_executable(lonejson_fuzz_jwt fuzz/fuzz_jwt.c)
-    target_include_directories(lonejson_fuzz_jwt PRIVATE
-      "${LONEJSON_PUBLIC_INCLUDE_DIR}")
-    target_link_libraries(lonejson_fuzz_jwt PRIVATE lonejson)
+    lonejson_add_afl_fuzz_target(lonejson_fuzz_jwt fuzz/fuzz_jwt.c)
     lonejson_target_include_curl(lonejson_fuzz_jwt)
     lonejson_target_include_openssl(lonejson_fuzz_jwt)
     target_link_libraries(lonejson_fuzz_jwt PRIVATE OpenSSL::Crypto)
@@ -1252,12 +1234,6 @@ if(LONEJSON_BUILD_FUZZERS)
       LONEJSON_WITH_OPENSSL
       LONEJSON_WITH_JWT
       LONEJSON_WITH_OIDC)
-    target_compile_options(lonejson_fuzz_jwt PRIVATE
-      -fsanitize=fuzzer-no-link,address,undefined
-      -fno-omit-frame-pointer)
-    target_link_options(lonejson_fuzz_jwt PRIVATE
-      -fsanitize=fuzzer,address,undefined)
-    lonejson_configure_c_target(lonejson_fuzz_jwt)
   endif()
 endif()
 
@@ -1291,7 +1267,6 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/38_writer_api.h"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_candidate_transform_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_value_rewrite_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/src/impl/40_auth_api.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/bench/lonejson_bench.c"
@@ -1315,7 +1290,6 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_json_value.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_visitor.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_path_value_visitor.c"
-      "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_candidate_stream.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_value_rewrite.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_reader_stream_generator.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_writer_generator_backpressure.c"
@@ -1394,6 +1368,7 @@ install(TARGETS lonejson_static
 add_custom_target(package-archive
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
     -DLONEJSON_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
     -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
     -DLONEJSON_TARGET_ID=${LONEJSON_TARGET_ID}
@@ -1417,6 +1392,7 @@ add_custom_target(package-archive
 add_custom_target(package-darwin-smoke-bundle
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
     -DLONEJSON_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
     -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
     -DLONEJSON_TARGET_ID=${LONEJSON_TARGET_ID}
@@ -1454,6 +1430,7 @@ endforeach()
 add_custom_target(package-source
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
     -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_source.cmake
   VERBATIM
@@ -1466,6 +1443,8 @@ add_custom_command(
     ${LONEJSON_SINGLE_HEADER_DIST_GZ}
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
+    -DLONEJSON_LOCK_TIMEOUT_SECONDS=${LONEJSON_LOCK_TIMEOUT_SECONDS}
     -DLONEJSON_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
     -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
     -DLONEJSON_PUBLIC_HEADER=${CMAKE_CURRENT_SOURCE_DIR}/include/lonejson.h
@@ -1501,7 +1480,6 @@ add_custom_command(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/36_curl_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/37_array_rewrite_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/38_writer_api.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_candidate_transform_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/39_value_rewrite_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/impl/40_auth_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_single_header.cmake
@@ -1518,6 +1496,7 @@ add_custom_target(package-single-header
 add_custom_target(package-checksums
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
     -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_checksums.cmake
   VERBATIM
@@ -1526,6 +1505,7 @@ add_custom_target(package-checksums
 add_custom_target(package-clean-dist
   COMMAND "${CMAKE_COMMAND}"
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_clean_dist.cmake
   VERBATIM
 )

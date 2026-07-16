@@ -380,6 +380,10 @@ meaning beyond ordinary whitespace. A stream can therefore read:
 - one-object-per-line JSONL
 - pretty-printed objects separated by blank lines
 
+Streams yield mapped top-level objects only. The Lua facade does not expose an
+arbitrary-value stream iterator; use `lj.decode_json` / `lj.decode_value` when
+one complete schema-free JSON value is needed.
+
 The Lua API mirrors the C design:
 
 ```lua
@@ -438,7 +442,9 @@ schema-mapped record.
 
 Use `lj.encode_json(value)` / `lj.encode_value(value)` and
 `lj.decode_json(json)` / `lj.decode_value(json)` for schema-free top-level JSON
-values. `lj.json_null` represents JSON null when nil would be ambiguous.
+values. Each decode consumes one complete value rather than iterating a
+multi-value input. `lj.json_null` represents JSON null when nil would be
+ambiguous.
 
 For callback-driven output, `lj.encode_json_to_sink(value, sink)` and
 `lj.encode_value_to_sink(value, sink)` stream encoded chunks to `sink(chunk)`

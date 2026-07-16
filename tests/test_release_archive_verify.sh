@@ -33,7 +33,7 @@ package_root="$tmp_dir/package/liblonejson-9.9.9-x86_64-linux-gnu"
 dependency_root="$tmp_dir/deps"
 mkdir -p \
   "$dist_dir" \
-  "$build_root/linux-gnu-release" \
+  "$build_root/x86_64-linux-gnu-release" \
   "$dependency_root/lib/cmake/CURL" \
   "$dependency_root/lib/cmake/OpenSSL" \
   "$dependency_root/lib/pkgconfig" \
@@ -559,10 +559,10 @@ cat >"$package_root/share/lonejson/dependencies.json" <<'EOF'
   "dependencies": [
     {
       "name": "c.pkt.systems",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "target_id": "x86_64-linux-gnu",
-      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.7.0/c.pkt.systems-0.7.0-x86_64-linux-gnu.tar.gz",
-      "sha256": "35e50e02ca4b0f7ba7ff0e3683c1c19b1ae07aa0c47b349e52025e45e0e35b28",
+      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.8.0/c.pkt.systems-0.8.0-x86_64-linux-gnu.tar.gz",
+      "sha256": "966d2f5468758e2c275c90d1e7dfa12f281238c955db34f999ca78e4fd199324",
       "bundled": false,
       "external": false,
       "role": "release-sdk-build-input",
@@ -577,7 +577,7 @@ EOF
 printf 'license\n' >"$package_root/share/doc/liblonejson/LICENSE"
 printf 'readme\n' >"$package_root/share/doc/liblonejson/README.md"
 
-cat >"$build_root/linux-gnu-release/CMakeCache.txt" <<EOF
+cat >"$build_root/x86_64-linux-gnu-release/CMakeCache.txt" <<EOF
 CMAKE_C_COMPILER:FILEPATH=$(command -v cc)
 CMAKE_NM:FILEPATH=$(command -v nm)
 CMAKE_READELF:FILEPATH=$(command -v readelf)

@@ -2164,7 +2164,7 @@ static void test_json_value_reuse_and_cleanup_ownership(void) {
   EXPECT(g_alloc_record_count == 0u);
 }
 
-static void test_init_releases_existing_json_value_storage(void) {
+static void test_reset_releases_existing_json_value_storage(void) {
   lonejson_error error;
   test_json_value_doc doc;
 
@@ -2177,14 +2177,14 @@ static void test_init_releases_existing_json_value_storage(void) {
                                         &error) == LONEJSON_STATUS_OK);
   EXPECT(g_alloc_record_count == 1u);
   reset_lonejson_alloc_stats();
-  lonejson_init(test_default_runtime(), &test_json_value_doc_map, &doc);
+  lonejson_reset(test_default_runtime(), &test_json_value_doc_map, &doc);
   EXPECT(g_lonejson_free_calls > 0u);
   EXPECT(g_alloc_record_count == 0u);
   EXPECT(doc.selector.kind == LONEJSON_JSON_VALUE_NULL);
   lonejson_cleanup(&test_json_value_doc_map, &doc);
 }
 
-static void test_init_releases_existing_spooled_storage(void) {
+static void test_reset_releases_existing_spooled_storage(void) {
   lonejson_error error;
   test_spool_doc doc;
 
@@ -2195,7 +2195,7 @@ static void test_init_releases_existing_spooled_storage(void) {
          LONEJSON_STATUS_OK);
   EXPECT(g_alloc_record_count > 0u);
   reset_lonejson_alloc_stats();
-  lonejson_init(test_default_runtime(), &test_spool_doc_map, &doc);
+  lonejson_reset(test_default_runtime(), &test_spool_doc_map, &doc);
   EXPECT(g_lonejson_free_calls > 0u);
   EXPECT(g_alloc_record_count == 0u);
   EXPECT(lonejson_spooled_size(&doc.text) == 0u);

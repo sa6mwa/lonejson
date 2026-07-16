@@ -903,14 +903,6 @@ static int ljlua_push_u64(lua_State *L, lonejson_uint64 value) {
   return 1;
 }
 
-static int ljlua_push_u64_plus_one(lua_State *L, lonejson_uint64 value) {
-  if (value != LONEJSON_UINT64_MAX) {
-    return ljlua_push_u64(L, value + 1u);
-  }
-  lua_pushstring(L, "18446744073709551616");
-  return 1;
-}
-
 static void *ljlua_xrealloc(void *ptr, size_t size) {
   void *next = realloc(ptr, size);
   if (next == NULL) {

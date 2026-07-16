@@ -75,7 +75,7 @@ runtime method pointers are available when that call style fits better.
 The curl examples also define `LONEJSON_WITH_CURL` and need curl headers/libs. With a host-native `c.pkt.systems` dependency bundle downloaded via `make deps-host`, a typical command is:
 
 ```sh
-export PKG_CONFIG_PATH=../.deps/c.pkt.systems/x86_64-linux-gnu/root/lib/pkgconfig
+export PKG_CONFIG_PATH=../.cache/c.pkt.systems/x86_64-linux-gnu/root/lib/pkgconfig
 cc -I ../include $(pkg-config --cflags libcurl) \
    ../src/lonejson.c curl_get.c \
    $(pkg-config --libs --static libcurl) \

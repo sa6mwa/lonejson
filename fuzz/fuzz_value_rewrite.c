@@ -116,7 +116,7 @@ fuzz_replace_with(lonejson_writer *writer,
   }
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson *runtime;
   static const char *const path_count[] = {"count"};
   static const char *const path_meta_count[] = {"meta", "count"};

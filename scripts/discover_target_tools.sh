@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 build_dir=
 target_id=
 
@@ -53,12 +54,10 @@ cache_value() {
 
 target_default_compiler() {
   case "$target_id" in
-    x86_64-linux-gnu) printf '%s\n' cc ;;
-    x86_64-linux-musl) printf '%s\n' musl-gcc ;;
-    aarch64-linux-gnu) printf '%s\n' aarch64-linux-gnu-gcc ;;
-    aarch64-linux-musl) printf '%s\n' "${CPKT_AARCH64_MUSL_PREFIX:-$HOME/.local/cross/aarch64-linux-musl}/bin/aarch64-linux-musl-gcc" ;;
-    armhf-linux-gnu) printf '%s\n' arm-linux-gnueabihf-gcc ;;
-    armhf-linux-musl) printf '%s\n' "${CPKT_ARMHF_MUSL_PREFIX:-$HOME/.local/cross/arm-linux-musleabihf}/bin/arm-linux-musleabihf-gcc" ;;
+    x86_64-linux-gnu|x86_64-linux-musl|aarch64-linux-gnu|aarch64-linux-musl|armhf-linux-gnu|armhf-linux-musl)
+      "$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" |
+        sed -n 's/^cc=//p'
+      ;;
     arm64-apple-darwin)
       printf '%s\n' "${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/${CPKT_OSXCROSS_HOST:-arm64-apple-darwin25}-clang"
       ;;
@@ -112,8 +111,10 @@ target_allows_unprefixed_path_tool() {
 }
 
 cc="$(cache_value CMAKE_C_COMPILER)"
+used_default_compiler=0
 if [[ -z "$cc" ]]; then
   cc="$(target_default_compiler)"
+  used_default_compiler=1
 fi
 cc="$(first_executable "$cc" || true)"
 if [[ -z "$cc" ]]; then
@@ -135,6 +136,14 @@ configured_nm="$(cache_value CMAKE_NM)"
 configured_install_name_tool="$(cache_value CMAKE_INSTALL_NAME_TOOL)"
 configured_otool="$(cache_value CMAKE_OTOOL)"
 configured_readelf="$(cache_value CMAKE_READELF)"
+configured_target="$(cache_value CMAKE_C_COMPILER_TARGET)"
+configured_external_toolchain="$(cache_value CMAKE_C_COMPILER_EXTERNAL_TOOLCHAIN)"
+configured_sysroot="$(cache_value CMAKE_SYSROOT)"
+if [[ "$used_default_compiler" -eq 1 && "$target_id" == *linux* ]]; then
+  configured_ar="$("$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" | sed -n 's/^ar=//p')"
+  configured_strip="$("$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" | sed -n 's/^strip=//p')"
+  configured_readelf="$("$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" | sed -n 's/^readelf=//p')"
+fi
 if [[ -z "$configured_otool" ]]; then
   configured_otool="${CPKT_OTOOL:-}"
 fi
@@ -217,3 +226,11 @@ quote_assignment NM "$nm_tool"
 quote_assignment READELF "$readelf_tool"
 quote_assignment OTOOL "$otool_tool"
 quote_assignment INSTALL_NAME_TOOL "$install_name_tool"
+
+target_compiler_flags=
+if [[ "$cc" == *clang* && -n "$configured_target" &&
+    -n "$configured_external_toolchain" && -n "$configured_sysroot" ]]; then
+  target_bin="${configured_sysroot%/sysroot}/bin"
+  target_compiler_flags="--target=$configured_target --gcc-toolchain=$configured_external_toolchain --sysroot=$configured_sysroot -B$target_bin"
+fi
+quote_assignment TARGET_CFLAGS "$target_compiler_flags"

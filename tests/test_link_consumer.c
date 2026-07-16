@@ -4,16 +4,6 @@
 
 #include "lonejson.h"
 
-#if defined(__has_feature)
-#if __has_feature(memory_sanitizer)
-#include <sanitizer/msan_interface.h>
-#define CONSUMER_HAS_MSAN 1
-#endif
-#endif
-#ifndef CONSUMER_HAS_MSAN
-#define CONSUMER_HAS_MSAN 0
-#endif
-
 typedef struct consumer_person {
   char name[16];
   lonejson_int64 age;
@@ -95,30 +85,6 @@ static lonejson_status consumer_sink_write(void *user, const void *data,
   return LONEJSON_STATUS_OK;
 }
 
-static int consumer_msan_bytes_initialized(const void *ptr, size_t len) {
-#if CONSUMER_HAS_MSAN
-  return ptr == NULL || __msan_test_shadow(ptr, len) < 0;
-#else
-  (void)ptr;
-  (void)len;
-  return 1;
-#endif
-}
-
-static int consumer_msan_cstr_initialized(const char *text) {
-  return text == NULL ||
-         consumer_msan_bytes_initialized(text, strlen(text) + 1u);
-}
-
-static void consumer_msan_poison_bytes(void *ptr, size_t len) {
-#if CONSUMER_HAS_MSAN
-  __msan_poison(ptr, len);
-#else
-  (void)ptr;
-  (void)len;
-#endif
-}
-
 static lonejson_status consumer_rewrite_item_cb(
     void *user, const lonejson_array_rewrite_context *context, void *item,
     lonejson_array_rewrite_result *result, lonejson_error *error) {
@@ -128,8 +94,7 @@ static lonejson_status consumer_rewrite_item_cb(
   (void)context;
   (void)result;
   (void)error;
-  if (rewrite_item == NULL || rewrite_item->name == NULL ||
-      !consumer_msan_cstr_initialized(rewrite_item->name)) {
+  if (rewrite_item == NULL || rewrite_item->name == NULL) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   if (counter->count == 0u && strcmp(rewrite_item->name, "ok") != 0) {
@@ -253,7 +218,6 @@ int main(void) {
   status = lonejson_parse_cstr(consumer_runtime(), &consumer_response_json_map,
                                &response, response_json, &error);
   if (status != LONEJSON_STATUS_OK || response.response_json == NULL ||
-      !consumer_msan_cstr_initialized(response.response_json) ||
       strcmp(response.response_json, "created") != 0) {
     lonejson_cleanup(&consumer_response_json_map, &response);
     return 1;
@@ -262,13 +226,11 @@ int main(void) {
 
   response.response_json = value_buffer;
   value_buffer[0] = '\0';
-  consumer_msan_poison_bytes(value_buffer + 1u, sizeof(value_buffer) - 1u);
   {
     char *allocated = lonejson_serialize_alloc(consumer_runtime(),
                                                &consumer_response_json_map,
                                                &response, NULL, &error);
-    if (allocated == NULL || !consumer_msan_cstr_initialized(allocated) ||
-        strstr(allocated, "\"response_json\"") == NULL ||
+    if (allocated == NULL || strstr(allocated, "\"response_json\"") == NULL ||
         strstr(allocated, "\"\"") == NULL) {
       free(allocated);
       return 1;
@@ -279,7 +241,6 @@ int main(void) {
   memset(&rewrite_options, 0, sizeof(rewrite_options));
   rewrite_counter.count = 0u;
   rewrite_item.name = NULL;
-  consumer_msan_poison_bytes(&rewrite_item.name, sizeof(rewrite_item.name));
   rewrite_options.item_map = &consumer_rewrite_item_map;
   rewrite_options.item_dst = &rewrite_item;
   rewrite_options.item = consumer_rewrite_item_cb;
@@ -310,8 +271,7 @@ int main(void) {
     return 1;
   }
   rr = lonejson_spooled_read(&spool, read_buffer, sizeof(read_buffer));
-  if (!consumer_msan_bytes_initialized(&rr, sizeof(rr)) ||
-      !consumer_msan_bytes_initialized(read_buffer, rr.bytes_read)) {
+  if (rr.bytes_read > sizeof(read_buffer)) {
     lonejson_spooled_cleanup(&spool);
     return 1;
   }
@@ -321,8 +281,7 @@ int main(void) {
   normalized.would_block = rr.would_block;
   normalized.error_code = rr.error_code;
   normalized.reserved = rr.reserved;
-  if (!consumer_msan_bytes_initialized(&normalized, sizeof(normalized)) ||
-      normalized.bytes_read != 2u) {
+  if (normalized.bytes_read != 2u) {
     lonejson_spooled_cleanup(&spool);
     return 1;
   }

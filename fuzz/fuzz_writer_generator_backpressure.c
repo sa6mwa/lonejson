@@ -339,7 +339,7 @@ static int fuzz_render_with_generator(fuzz_writer_ctx *ctx, size_t first_cap,
   return eof != 0;
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson *runtime;
   lonejson_error error;
   fuzz_writer_ctx sink_ctx;

@@ -17,7 +17,6 @@
         "LONEJSON_BUILD_EXAMPLES": "ON",
         "LONEJSON_ENABLE_ASAN": "OFF",
         "LONEJSON_ENABLE_TSAN": "OFF",
-        "LONEJSON_ENABLE_MSAN": "OFF",
         "LONEJSON_BUILD_WITH_CURL": "OFF",
         "LONEJSON_BUILD_WITH_OPENSSL": "OFF",
         "LONEJSON_BUILD_WITH_JWT": "OFF",
@@ -27,6 +26,7 @@
     {
       "name": "debug",
       "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-native.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -36,8 +36,13 @@
       "inherits": "debug"
     },
     {
+      "name": "valgrind",
+      "inherits": "debug"
+    },
+    {
       "name": "host",
       "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-native.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
@@ -53,29 +58,34 @@
       }
     },
     {
-      "name": "linux-gnu-release",
+      "name": "x86_64-linux-gnu-release",
       "inherits": "host",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-gnu.cmake",
       "cacheVariables": {
-        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-gnu/root",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.cache/c.pkt.systems/x86_64-linux-gnu/root",
+        "LONEJSON_DIST_DIR": "${sourceDir}/dist",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_BUILD_WITH_JWT": "ON",
         "LONEJSON_BUILD_WITH_OIDC": "ON",
+        "LONEJSON_TARGET_ID": "x86_64-linux-gnu",
         "LONEJSON_TARGET_ARCH": "x86_64",
         "LONEJSON_TARGET_OS": "linux",
         "LONEJSON_TARGET_LIBC": "gnu"
       }
     },
     {
-      "name": "linux-musl-release",
+      "name": "x86_64-linux-musl-release",
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-musl.cmake",
       "cacheVariables": {
-        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/x86_64-linux-musl/root",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.cache/c.pkt.systems/x86_64-linux-musl/root",
+        "LONEJSON_DIST_DIR": "${sourceDir}/dist",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_BUILD_WITH_JWT": "ON",
         "LONEJSON_BUILD_WITH_OIDC": "ON",
+        "LONEJSON_TARGET_ID": "x86_64-linux-musl",
         "LONEJSON_TARGET_ARCH": "x86_64",
         "LONEJSON_TARGET_OS": "linux",
         "LONEJSON_TARGET_LIBC": "musl"
@@ -86,11 +96,16 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-gnu.cmake",
       "cacheVariables": {
-        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-gnu/root",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.cache/c.pkt.systems/aarch64-linux-gnu/root",
+        "LONEJSON_DIST_DIR": "${sourceDir}/dist",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_BUILD_WITH_JWT": "ON",
-        "LONEJSON_BUILD_WITH_OIDC": "ON"
+        "LONEJSON_BUILD_WITH_OIDC": "ON",
+        "LONEJSON_TARGET_ID": "aarch64-linux-gnu",
+        "LONEJSON_TARGET_ARCH": "aarch64",
+        "LONEJSON_TARGET_OS": "linux",
+        "LONEJSON_TARGET_LIBC": "gnu"
       }
     },
     {
@@ -98,11 +113,16 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-aarch64-musl.cmake",
       "cacheVariables": {
-        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/aarch64-linux-musl/root",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.cache/c.pkt.systems/aarch64-linux-musl/root",
+        "LONEJSON_DIST_DIR": "${sourceDir}/dist",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_BUILD_WITH_JWT": "ON",
-        "LONEJSON_BUILD_WITH_OIDC": "ON"
+        "LONEJSON_BUILD_WITH_OIDC": "ON",
+        "LONEJSON_TARGET_ID": "aarch64-linux-musl",
+        "LONEJSON_TARGET_ARCH": "aarch64",
+        "LONEJSON_TARGET_OS": "linux",
+        "LONEJSON_TARGET_LIBC": "musl"
       }
     },
     {
@@ -110,11 +130,16 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-gnu.cmake",
       "cacheVariables": {
-        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-gnu/root",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.cache/c.pkt.systems/armhf-linux-gnu/root",
+        "LONEJSON_DIST_DIR": "${sourceDir}/dist",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_BUILD_WITH_JWT": "ON",
-        "LONEJSON_BUILD_WITH_OIDC": "ON"
+        "LONEJSON_BUILD_WITH_OIDC": "ON",
+        "LONEJSON_TARGET_ID": "armhf-linux-gnu",
+        "LONEJSON_TARGET_ARCH": "armhf",
+        "LONEJSON_TARGET_OS": "linux",
+        "LONEJSON_TARGET_LIBC": "gnu"
       }
     },
     {
@@ -122,11 +147,16 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/linux-armhf-musl.cmake",
       "cacheVariables": {
-        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/armhf-linux-musl/root",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.cache/c.pkt.systems/armhf-linux-musl/root",
+        "LONEJSON_DIST_DIR": "${sourceDir}/dist",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_BUILD_WITH_JWT": "ON",
-        "LONEJSON_BUILD_WITH_OIDC": "ON"
+        "LONEJSON_BUILD_WITH_OIDC": "ON",
+        "LONEJSON_TARGET_ID": "armhf-linux-musl",
+        "LONEJSON_TARGET_ARCH": "armhf",
+        "LONEJSON_TARGET_OS": "linux",
+        "LONEJSON_TARGET_LIBC": "musl"
       }
     },
     {
@@ -134,11 +164,16 @@
       "inherits": "host",
       "toolchainFile": "${sourceDir}/cmake/toolchains/arm64-apple-darwin.cmake",
       "cacheVariables": {
-        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.deps/c.pkt.systems/arm64-apple-darwin/root",
+        "LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.cache/c.pkt.systems/arm64-apple-darwin/root",
+        "LONEJSON_DIST_DIR": "${sourceDir}/dist",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_BUILD_WITH_JWT": "ON",
-        "LONEJSON_BUILD_WITH_OIDC": "ON"
+        "LONEJSON_BUILD_WITH_OIDC": "ON",
+        "LONEJSON_TARGET_ID": "arm64-apple-darwin",
+        "LONEJSON_TARGET_ARCH": "arm64",
+        "LONEJSON_TARGET_OS": "darwin",
+        "LONEJSON_TARGET_LIBC": ""
       }
     },
     {
@@ -152,25 +187,17 @@
       "name": "tsan",
       "inherits": "debug",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
         "LONEJSON_ENABLE_TSAN": "ON"
-      }
-    },
-    {
-      "name": "msan",
-      "inherits": "debug",
-      "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang",
-        "LONEJSON_ENABLE_MSAN": "ON"
       }
     },
     {
       "name": "fuzz",
       "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-x86_64-aflpp.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_C_COMPILER": "clang",
         "LONEJSON_BUILD_FUZZERS": "ON",
+        "LONEJSON_ENABLE_ASAN": "ON",
         "LONEJSON_BUILD_WITH_CURL": "ON",
         "LONEJSON_BUILD_WITH_OPENSSL": "ON",
         "LONEJSON_BUILD_WITH_JWT": "ON",
@@ -213,20 +240,20 @@
       "configurePreset": "tsan"
     },
     {
-      "name": "msan",
-      "configurePreset": "msan"
+      "name": "valgrind",
+      "configurePreset": "valgrind"
     },
     {
       "name": "fuzz",
       "configurePreset": "fuzz"
     },
     {
-      "name": "linux-gnu-release",
-      "configurePreset": "linux-gnu-release"
+      "name": "x86_64-linux-gnu-release",
+      "configurePreset": "x86_64-linux-gnu-release"
     },
     {
-      "name": "linux-musl-release",
-      "configurePreset": "linux-musl-release"
+      "name": "x86_64-linux-musl-release",
+      "configurePreset": "x86_64-linux-musl-release"
     },
     {
       "name": "aarch64-linux-gnu-release",
@@ -263,15 +290,15 @@
       ]
     },
     {
-      "name": "package-archive-linux-gnu",
-      "configurePreset": "linux-gnu-release",
+      "name": "package-archive-x86_64-linux-gnu",
+      "configurePreset": "x86_64-linux-gnu-release",
       "targets": [
         "package-archive"
       ]
     },
     {
-      "name": "package-archive-linux-musl",
-      "configurePreset": "linux-musl-release",
+      "name": "package-archive-x86_64-linux-musl",
+      "configurePreset": "x86_64-linux-musl-release",
       "targets": [
         "package-archive"
       ]
@@ -391,22 +418,22 @@
       }
     },
     {
-      "name": "msan",
-      "configurePreset": "msan",
+      "name": "valgrind",
+      "configurePreset": "valgrind",
       "output": {
         "outputOnFailure": true
       }
     },
     {
-      "name": "linux-gnu-release",
-      "configurePreset": "linux-gnu-release",
+      "name": "x86_64-linux-gnu-release",
+      "configurePreset": "x86_64-linux-gnu-release",
       "output": {
         "outputOnFailure": true
       }
     },
     {
-      "name": "linux-musl-release",
-      "configurePreset": "linux-musl-release",
+      "name": "x86_64-linux-musl-release",
+      "configurePreset": "x86_64-linux-musl-release",
       "output": {
         "outputOnFailure": true
       }

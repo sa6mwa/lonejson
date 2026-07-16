@@ -2,11 +2,13 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-issuer=${LONEJSON_OIDC_E2E_ISSUER:-https://localhost:18443/default}
+oidc_port=${LONEJSON_OIDC_E2E_PORT:-18443}
+api_fixture_port=${LONEJSON_API_FIXTURE_E2E_PORT:-18080}
+issuer=${LONEJSON_OIDC_E2E_ISSUER:-https://localhost:${oidc_port}/default}
 audience=${LONEJSON_OIDC_E2E_AUDIENCE:-lonejson-api}
 server_port=${LONEJSON_OIDC_E2E_SERVER_PORT:-18081}
-ca_file=${LONEJSON_OIDC_E2E_CAINFO:-$repo_root/docker/nginx/certs/server.crt}
-discovery_url=${LONEJSON_OIDC_E2E_DISCOVERY_URL:-https://localhost:18443/.well-known/openid-configuration/default}
+ca_file=${LONEJSON_OIDC_E2E_CAINFO:-$repo_root/devenv/volumes/nginx/certs/server.crt}
+discovery_url=${LONEJSON_OIDC_E2E_DISCOVERY_URL:-https://localhost:${oidc_port}/.well-known/openid-configuration/default}
 server_pid=
 
 cleanup() {
@@ -273,8 +275,8 @@ assert_protected_rejected "$missing_azp_token" claims_invalid missing-azp
 wait "$server_pid"
 server_pid=
 
-curl -fsS --max-time 5 "http://127.0.0.1:18080/health" >/dev/null
-curl -fsS --max-time 5 "http://127.0.0.1:18080/protected" \
+curl -fsS --max-time 5 "http://127.0.0.1:${api_fixture_port}/health" >/dev/null
+curl -fsS --max-time 5 "http://127.0.0.1:${api_fixture_port}/protected" \
   -H "Authorization: Bearer $access_token" >/dev/null
 
 printf '%s\n' 'OIDC/OAuth2 e2e passed'

@@ -109,10 +109,6 @@ local core_exports = {
   "visit_path_value_path",
   "visit_path_value_file",
   "visit_path_value_fd",
-  "visit_candidates_string",
-  "visit_candidates_path",
-  "visit_candidates_file",
-  "visit_candidates_fd",
   "fixed_string_scratch",
   "jwt_parse_compact",
   "jwt_decode_compact",
@@ -290,22 +286,6 @@ function M.new(config)
   obj.visit_path_value_fd = function(first, ...)
     local fd, callbacks = runtime_method_args(obj, first, ...)
     return runtime:visit_path_value_fd(fd, callbacks)
-  end
-  obj.visit_candidates_string = function(first, ...)
-    local json, options = runtime_method_args(obj, first, ...)
-    return runtime:visit_candidates_string(json, options)
-  end
-  obj.visit_candidates_path = function(first, ...)
-    local path, options = runtime_method_args(obj, first, ...)
-    return runtime:visit_candidates_path(path, options)
-  end
-  obj.visit_candidates_file = function(first, ...)
-    local file, options = runtime_method_args(obj, first, ...)
-    return runtime:visit_candidates_file(file, options)
-  end
-  obj.visit_candidates_fd = function(first, ...)
-    local fd, options = runtime_method_args(obj, first, ...)
-    return runtime:visit_candidates_fd(fd, options)
   end
 
   for _, name in ipairs(runtime_exports) do

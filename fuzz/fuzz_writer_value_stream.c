@@ -170,7 +170,7 @@ static void fuzz_spooled_check_and_cleanup(fuzz_spooled_state *state,
   state->initialized = 0;
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson_config config;
   lonejson *runtime;
   lonejson_writer writer;

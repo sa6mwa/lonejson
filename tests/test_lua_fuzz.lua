@@ -453,13 +453,6 @@ do
       })
     end)
     pcall(function()
-      lj.visit_candidates_string(sample, {
-        framing = "auto",
-        capture = "buffer",
-        candidate_end = function() end,
-      })
-    end)
-    pcall(function()
       lj.array_rewrite_string("items", sample, {
         item = function(value)
           return value

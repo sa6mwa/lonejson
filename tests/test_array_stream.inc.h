@@ -2317,7 +2317,7 @@ test_array_stream_mapped_string_field_lifecycle_preserves_set_handler_method(
 }
 
 static void
-test_array_stream_mapped_string_field_reinit_preserves_handler(void) {
+test_array_stream_mapped_string_field_reset_preserves_handler(void) {
   test_mapped_string_array_stream_doc doc;
   test_array_stream_string_seen seen;
   lonejson_array_stream_string_handler handler;
@@ -2332,7 +2332,7 @@ test_array_stream_mapped_string_field_reinit_preserves_handler(void) {
   runtime->init(runtime, &test_mapped_string_array_stream_doc_map, &doc);
   EXPECT(doc.keys.set_handler(&doc.keys, &handler, &seen, &error) ==
          LONEJSON_STATUS_OK);
-  runtime->init(runtime, &test_mapped_string_array_stream_doc_map, &doc);
+  runtime->reset(runtime, &test_mapped_string_array_stream_doc_map, &doc);
   EXPECT(doc.keys.set_handler == lonejson_string_array_stream_set_handler);
   EXPECT(doc.keys.handler.chunk == handler.chunk);
   EXPECT(doc.keys.user == &seen);
@@ -2876,7 +2876,7 @@ test_array_stream_mapped_field_lifecycle_preserves_set_handler_method(void) {
   runtime->cleanup(runtime, &test_item_map, &item);
 }
 
-static void test_array_stream_mapped_field_reinit_preserves_handler(void) {
+static void test_array_stream_mapped_field_reset_preserves_handler(void) {
   test_mapped_stream_store store;
   test_mapped_stream_board board;
   test_item item;
@@ -2912,8 +2912,8 @@ static void test_array_stream_mapped_field_reinit_preserves_handler(void) {
   EXPECT(store.boards.set_handler(&store.boards, &board_handler, &error) ==
          LONEJSON_STATUS_OK);
 
-  runtime->init(runtime, &test_mapped_stream_board_map, &board);
-  runtime->init(runtime, &test_mapped_stream_store_map, &store);
+  runtime->reset(runtime, &test_mapped_stream_board_map, &board);
+  runtime->reset(runtime, &test_mapped_stream_store_map, &store);
   EXPECT(board.items.set_handler == lonejson_mapped_array_stream_set_handler);
   EXPECT(store.boards.set_handler == lonejson_mapped_array_stream_set_handler);
   EXPECT(board.items.handler.item == item_handler.item);

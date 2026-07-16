@@ -95,7 +95,7 @@ static void fuzz_decode_segment(const char *data, size_t len) {
   }
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson_jwt_compact jwt;
   lonejson_jwt_header header;
   lonejson_jwt_claims claims;

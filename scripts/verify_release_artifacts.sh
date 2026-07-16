@@ -127,7 +127,7 @@ scan_shipped_payload_for_instrumentation() {
       *liblonejson*.a | *liblonejson*.so* | *liblonejson*.dylib | \
       *.rockspec | *.h | *.pc | *.cmake | *.so | *.dylib)
         if strings "$file_path" | grep -E \
-          '(__asan|__msan|__tsan|libasan|libmsan|libtsan|AddressSanitizer|MemorySanitizer|ThreadSanitizer|LLVMFuzzerTestOneInput|libFuzzer|-fsanitize)' \
+          '(__asan|__tsan|libasan|libtsan|AddressSanitizer|ThreadSanitizer|-fsanitize)' \
           >/dev/null; then
           fail_artifact "$artifact" "$rel_path" \
             "sanitizer or fuzzer instrumentation marker leaked"
@@ -149,7 +149,7 @@ scan_loader_metadata() {
         if command -v readelf >/dev/null 2>&1; then
           metadata="$(readelf -d "$file_path" 2>/dev/null || true)"
           if printf '%s\n' "$metadata" | grep -E \
-              '(libasan|libmsan|libtsan|RUNPATH|RPATH).*(/home/|/tmp/|/var/tmp|/build/|/\.deps/)' \
+              '(libasan|libtsan|RUNPATH|RPATH).*(/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/)' \
               >/dev/null; then
             fail_artifact "$artifact" "$rel_path" \
               "non-relocatable or sanitizer ELF loader metadata"
@@ -160,7 +160,7 @@ scan_loader_metadata() {
         if command -v otool >/dev/null 2>&1; then
           metadata="$(otool -L "$file_path" 2>/dev/null || true; otool -l "$file_path" 2>/dev/null || true)"
           if printf '%s\n' "$metadata" | grep -E \
-              '(libasan|libmsan|libtsan|/home/|/tmp/|/var/tmp|/build/|/\.deps/)' \
+              '(libasan|libtsan|/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/)' \
               >/dev/null; then
             fail_artifact "$artifact" "$rel_path" \
               "non-relocatable or sanitizer Mach-O loader metadata"

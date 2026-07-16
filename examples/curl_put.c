@@ -9,12 +9,21 @@ typedef struct upload_payload {
 } upload_payload;
 
 static const char *find_test_ca_path(void) {
+  const char *configured_path = getenv("LONEJSON_CURL_E2E_CAINFO");
   static const char *const candidates[] = {
-      "docker/nginx/certs/server.crt", "../docker/nginx/certs/server.crt",
-      "../../docker/nginx/certs/server.crt"};
+      "devenv/volumes/nginx/certs/server.crt",
+      "../devenv/volumes/nginx/certs/server.crt",
+      "../../devenv/volumes/nginx/certs/server.crt"};
   FILE *fp;
   size_t i;
 
+  if (configured_path != NULL && configured_path[0] != '\0') {
+    fp = fopen(configured_path, "rb");
+    if (fp != NULL) {
+      fclose(fp);
+      return configured_path;
+    }
+  }
   for (i = 0u; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
     fp = fopen(candidates[i], "rb");
     if (fp != NULL) {
@@ -34,6 +43,7 @@ int main(void) {
   CURL *curl;
   CURLcode rc;
   const char *ca_path;
+  const char *url;
   upload_payload payload = {"from curl_put.c", 77};
   lonejson_curl_upload upload_ctx;
   lonejson *runtime;
@@ -66,14 +76,18 @@ int main(void) {
 
   ca_path = find_test_ca_path();
   if (ca_path == NULL) {
-    fprintf(stderr, "could not locate docker/nginx/certs/server.crt\n");
+    fprintf(stderr, "could not locate e2e TLS certificate\n");
     curl_easy_cleanup(curl);
     lonejson_curl_upload_cleanup(&upload_ctx);
     lonejson_free(runtime);
     return 1;
   }
 
-  curl_easy_setopt(curl, CURLOPT_URL, "https://localhost:8443/ingest");
+  url = getenv("LONEJSON_CURL_E2E_PUT_URL");
+  if (url == NULL || url[0] == '\0') {
+    url = "https://localhost:8443/ingest";
+  }
+  curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_CAINFO, ca_path);
   curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
   curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");

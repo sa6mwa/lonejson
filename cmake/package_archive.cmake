@@ -273,8 +273,9 @@ if(PACKAGE_FIND_VERSION)
 endif()
 ")
 
-file(MAKE_DIRECTORY "${LONEJSON_ROOT}/dist")
-set(archive_base "${LONEJSON_ROOT}/dist/${archive_name}.tar")
+include("${LONEJSON_ROOT}/cmake/lonejson_dist_dir.cmake")
+lonejson_prepare_dist_dir()
+set(archive_base "${LONEJSON_DIST_DIR}/${archive_name}.tar")
 set(archive "${archive_base}.gz")
 
 find_program(LONEJSON_TAR_BIN NAMES tar)

@@ -418,7 +418,7 @@ static void fuzz_multipart(const uint8_t *data, size_t size) {
   lonejson_multipart_close(mp);
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   if (size > 0u && data[0] == (uint8_t)'M') {
     fuzz_multipart(data + 1u, size - 1u);
   } else if (size > 0u && data[0] == (uint8_t)'S') {

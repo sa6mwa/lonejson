@@ -15,11 +15,22 @@ if [ "$git_top" = "$root_dir" ]; then
     case "$tag" in
       v[0-9]*.[0-9]*.[0-9]*)
         printf '%s\n' "${tag#v}"
-        ;;
-      *)
-        printf '%s\n' "0.0.0"
+        exit 0
         ;;
     esac
+    if [ -n "${LONEJSON_VERSION_OVERRIDE:-}" ]; then
+        case "$LONEJSON_VERSION_OVERRIDE" in
+          [0-9]*.[0-9]*.[0-9]*)
+            if [[ "$LONEJSON_VERSION_OVERRIDE" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+                printf '%s\n' "$LONEJSON_VERSION_OVERRIDE"
+                exit 0
+            fi
+            ;;
+        esac
+        printf 'release_version.sh: invalid LONEJSON_VERSION_OVERRIDE value: %s\n' "$LONEJSON_VERSION_OVERRIDE" >&2
+        exit 1
+    fi
+    printf '%s\n' "0.0.0"
     exit 0
 fi
 

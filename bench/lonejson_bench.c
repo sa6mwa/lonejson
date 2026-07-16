@@ -4,16 +4,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if defined(__unix__) || defined(__APPLE__)
-#include <sys/resource.h>
-#endif
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "lonejson.h"
 
-#define BENCH_MAX_RESULTS 96u
+#define BENCH_MAX_RESULTS 88u
 #define BENCH_MAX_FILES 512u
 #define BENCH_PARSE_ITEM_CAPACITY 8u
 #define BENCH_JSONL_RECORDS 8u
@@ -22,7 +19,7 @@
 #define BENCH_NOISE_DELTA_PCT 3.0
 #define BENCH_MATERIAL_DELTA_PCT 10.0
 #define BENCH_REVIEW_IMPROVEMENT_PCT 15.0
-#define BENCH_SCHEMA_VERSION 22u
+#define BENCH_SCHEMA_VERSION 21u
 
 typedef enum bench_doc_kind {
   BENCH_DOC_VALID = 1,
@@ -47,15 +44,6 @@ typedef struct bench_result {
   double mib_per_sec;
   double docs_per_sec;
   double ns_per_byte;
-  lonejson_uint64 peak_rss_bytes;
-  lonejson_uint64 read_calls;
-  lonejson_uint64 source_read_bytes;
-  lonejson_uint64 candidate_read_buffer_size;
-  lonejson_uint64 candidate_count;
-  lonejson_uint64 candidates_spooled;
-  lonejson_uint64 candidates_replayed;
-  lonejson_uint64 candidates_dropped;
-  lonejson_uint64 output_bytes;
 } bench_result;
 
 typedef struct bench_sample {
@@ -141,15 +129,7 @@ typedef struct bench_mem_reader {
   size_t len;
   size_t offset;
   size_t chunk_size;
-  size_t read_calls;
-  size_t bytes_read;
 } bench_mem_reader;
-
-typedef struct bench_file_reader {
-  FILE *fp;
-  size_t read_calls;
-  size_t bytes_read;
-} bench_file_reader;
 
 typedef struct bench_validation_case {
   const bench_doc *docs;
@@ -373,27 +353,6 @@ typedef struct bench_writer_value_stream_bench_case {
   size_t chunk_size;
 } bench_writer_value_stream_bench_case;
 
-typedef struct bench_candidate_hot_path_case {
-  lonejson *runtime;
-  unsigned char *json;
-  size_t json_len;
-  FILE *source_file;
-  size_t candidate_count;
-  size_t reader_chunk_size;
-  size_t min_read_calls;
-  size_t expected_candidates_replayed;
-  int framing;
-  int use_buffer;
-  int gated_drop_unmatched;
-  int transform_mode;
-  size_t last_read_calls;
-  size_t last_source_read_bytes;
-  size_t last_output_bytes;
-  size_t last_candidates_spooled;
-  size_t last_candidates_replayed;
-  size_t last_candidates_dropped;
-} bench_candidate_hot_path_case;
-
 typedef int (*bench_validate_fn)(const unsigned char *data, size_t len);
 typedef int (*bench_simple_case_fn)(void *ctx);
 
@@ -401,32 +360,6 @@ static volatile lonejson_uint64 g_bench_sink = 0u;
 static lonejson *g_bench_runtime_default = NULL;
 static lonejson *g_bench_runtime_reuse = NULL;
 static lonejson *g_bench_runtime_pretty = NULL;
-static lonejson *g_bench_runtime_candidate_16k = NULL;
-static lonejson *g_bench_runtime_candidate_64k = NULL;
-static lonejson *g_bench_runtime_candidate_128k = NULL;
-static lonejson *g_bench_runtime_candidate_256k = NULL;
-static lonejson *g_bench_runtime_candidate_1m = NULL;
-
-static int bench_init_candidate_runtime(lonejson **out, size_t buffer_size) {
-  lonejson_config config;
-  lonejson_error error;
-
-  config = lonejson_default_config();
-  config.candidate_read_buffer_size = buffer_size;
-  *out = lonejson_new(&config, &error);
-  return *out != NULL;
-}
-
-static size_t bench_candidate_read_buffer_size(const lonejson *runtime) {
-  const lonejson_runtime *runtime_state;
-  size_t buffer_size;
-
-  runtime_state = lonejson__runtime_const(runtime);
-  buffer_size = runtime_state != NULL
-                    ? runtime_state->config.candidate_read_buffer_size
-                    : LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
-  return buffer_size != 0u ? buffer_size : LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
-}
 
 static int bench_init_runtimes(void) {
   lonejson_config config;
@@ -457,52 +390,13 @@ static int bench_init_runtimes(void) {
     g_bench_runtime_default = NULL;
     return 1;
   }
-
-  if (!bench_init_candidate_runtime(&g_bench_runtime_candidate_16k,
-                                    16u * 1024u) ||
-      !bench_init_candidate_runtime(&g_bench_runtime_candidate_64k,
-                                    64u * 1024u) ||
-      !bench_init_candidate_runtime(&g_bench_runtime_candidate_128k,
-                                    128u * 1024u) ||
-      !bench_init_candidate_runtime(&g_bench_runtime_candidate_256k,
-                                    256u * 1024u) ||
-      !bench_init_candidate_runtime(&g_bench_runtime_candidate_1m,
-                                    1024u * 1024u)) {
-    lonejson_free(g_bench_runtime_candidate_1m);
-    lonejson_free(g_bench_runtime_candidate_256k);
-    lonejson_free(g_bench_runtime_candidate_128k);
-    lonejson_free(g_bench_runtime_candidate_64k);
-    lonejson_free(g_bench_runtime_candidate_16k);
-    lonejson_free(g_bench_runtime_pretty);
-    lonejson_free(g_bench_runtime_reuse);
-    lonejson_free(g_bench_runtime_default);
-    g_bench_runtime_candidate_1m = NULL;
-    g_bench_runtime_candidate_256k = NULL;
-    g_bench_runtime_candidate_128k = NULL;
-    g_bench_runtime_candidate_64k = NULL;
-    g_bench_runtime_candidate_16k = NULL;
-    g_bench_runtime_pretty = NULL;
-    g_bench_runtime_reuse = NULL;
-    g_bench_runtime_default = NULL;
-    return 1;
-  }
   return 0;
 }
 
 static void bench_cleanup_runtimes(void) {
-  lonejson_free(g_bench_runtime_candidate_1m);
-  lonejson_free(g_bench_runtime_candidate_256k);
-  lonejson_free(g_bench_runtime_candidate_128k);
-  lonejson_free(g_bench_runtime_candidate_64k);
-  lonejson_free(g_bench_runtime_candidate_16k);
   lonejson_free(g_bench_runtime_pretty);
   lonejson_free(g_bench_runtime_reuse);
   lonejson_free(g_bench_runtime_default);
-  g_bench_runtime_candidate_1m = NULL;
-  g_bench_runtime_candidate_256k = NULL;
-  g_bench_runtime_candidate_128k = NULL;
-  g_bench_runtime_candidate_64k = NULL;
-  g_bench_runtime_candidate_16k = NULL;
   g_bench_runtime_pretty = NULL;
   g_bench_runtime_reuse = NULL;
   g_bench_runtime_default = NULL;
@@ -827,18 +721,7 @@ static const lonejson_field bench_result_fields[] = {
     LONEJSON_FIELD_U64_REQ(bench_result, mismatch_count, "mismatch_count"),
     LONEJSON_FIELD_F64(bench_result, mib_per_sec, "mib_per_sec"),
     LONEJSON_FIELD_F64(bench_result, docs_per_sec, "docs_per_sec"),
-    LONEJSON_FIELD_F64(bench_result, ns_per_byte, "ns_per_byte"),
-    LONEJSON_FIELD_U64(bench_result, peak_rss_bytes, "peak_rss_bytes"),
-    LONEJSON_FIELD_U64(bench_result, read_calls, "read_calls"),
-    LONEJSON_FIELD_U64(bench_result, source_read_bytes, "source_read_bytes"),
-    LONEJSON_FIELD_U64(bench_result, candidate_read_buffer_size,
-                       "candidate_read_buffer_size"),
-    LONEJSON_FIELD_U64(bench_result, candidate_count, "candidate_count"),
-    LONEJSON_FIELD_U64(bench_result, candidates_spooled, "candidates_spooled"),
-    LONEJSON_FIELD_U64(bench_result, candidates_replayed,
-                       "candidates_replayed"),
-    LONEJSON_FIELD_U64(bench_result, candidates_dropped, "candidates_dropped"),
-    LONEJSON_FIELD_U64(bench_result, output_bytes, "output_bytes")};
+    LONEJSON_FIELD_F64(bench_result, ns_per_byte, "ns_per_byte")};
 LONEJSON_MAP_DEFINE(bench_result_map, bench_result, bench_result_fields);
 
 static const lonejson_field bench_run_fields[] = {
@@ -1085,23 +968,6 @@ static lonejson_uint64 bench_now_ns(clockid_t clock_id) {
          (lonejson_uint64)ts.tv_nsec;
 }
 
-static lonejson_uint64 bench_peak_rss_bytes(void) {
-#if defined(__unix__) || defined(__APPLE__)
-  struct rusage usage;
-
-  if (getrusage(RUSAGE_SELF, &usage) != 0) {
-    return 0u;
-  }
-#if defined(__APPLE__)
-  return (lonejson_uint64)usage.ru_maxrss;
-#else
-  return (lonejson_uint64)usage.ru_maxrss * (lonejson_uint64)1024u;
-#endif
-#else
-  return 0u;
-#endif
-}
-
 static void bench_fill_timestamp(bench_run *run) {
   struct timespec ts;
   time_t now;
@@ -1121,41 +987,13 @@ static void bench_fill_timestamp(bench_run *run) {
   }
 }
 
-static int bench_read_host_id_from_command(char *dst, size_t dst_size) {
-  FILE *pipe;
-  char buffer[128];
-  size_t len;
-
-  if (dst == NULL || dst_size == 0u) {
-    return -1;
-  }
-  pipe = popen("./scripts/bench_host_id.sh 2>/dev/null", "r");
-  if (pipe == NULL) {
-    return -1;
-  }
-  if (fgets(buffer, sizeof(buffer), pipe) == NULL) {
-    pclose(pipe);
-    return -1;
-  }
-  if (pclose(pipe) == -1) {
-    return -1;
-  }
-  len = strcspn(buffer, " \t\r\n");
-  if (len == 0u || len >= dst_size) {
-    return -1;
-  }
-  memcpy(dst, buffer, len);
-  dst[len] = '\0';
-  return 0;
-}
-
 static void bench_fill_host_and_compiler(bench_run *run) {
-  const char *host_id = getenv("LONEJSON_BENCH_HOST_ID");
+  const char *host_id;
 
+  host_id = getenv("LONEJSON_BENCH_HOST_ID");
   if (host_id != NULL && host_id[0] != '\0') {
     snprintf(run->host, sizeof(run->host), "%s", host_id);
-  } else if (bench_read_host_id_from_command(run->host, sizeof(run->host)) !=
-             0) {
+  } else if (gethostname(run->host, sizeof(run->host) - 1u) != 0) {
     snprintf(run->host, sizeof(run->host), "unknown");
   }
   run->host[sizeof(run->host) - 1u] = '\0';
@@ -1237,7 +1075,6 @@ bench_mem_reader_fn(void *user, unsigned char *buffer, size_t capacity) {
     rr.eof = 1;
     return rr;
   }
-  ++reader->read_calls;
   chunk = reader->chunk_size;
   if (chunk > remaining) {
     chunk = remaining;
@@ -1247,35 +1084,8 @@ bench_mem_reader_fn(void *user, unsigned char *buffer, size_t capacity) {
   }
   memcpy(buffer, reader->data + reader->offset, chunk);
   reader->offset += chunk;
-  reader->bytes_read += chunk;
   rr.bytes_read = chunk;
   rr.eof = reader->offset == reader->len ? 1 : 0;
-  return rr;
-}
-
-static lonejson_read_result
-bench_file_reader_fn(void *user, unsigned char *buffer, size_t capacity) {
-  bench_file_reader *reader;
-  lonejson_read_result rr;
-
-  reader = (bench_file_reader *)user;
-  memset(&rr, 0, sizeof(rr));
-  if (reader == NULL || reader->fp == NULL || buffer == NULL ||
-      capacity == 0u) {
-    rr.eof = 1;
-    return rr;
-  }
-  rr.bytes_read = fread(buffer, 1u, capacity, reader->fp);
-  if (rr.bytes_read != 0u) {
-    ++reader->read_calls;
-    reader->bytes_read += rr.bytes_read;
-  }
-  if (rr.bytes_read < capacity && ferror(reader->fp)) {
-    rr.error_code = errno != 0 ? errno : 1;
-  }
-  if (rr.bytes_read == 0u && feof(reader->fp)) {
-    rr.eof = 1;
-  }
   return rr;
 }
 
@@ -2369,383 +2179,6 @@ static int bench_writer_value_stream_sink_case(void *user) {
   return sink.total >= ctx->json_len;
 }
 
-typedef struct bench_candidate_state {
-  size_t candidates_begin;
-  size_t candidates_end;
-  size_t transform_decisions;
-  size_t candidate_decisions;
-} bench_candidate_state;
-
-static int
-bench_prepare_candidate_hot_path_source(bench_candidate_hot_path_case *ctx,
-                                        size_t candidate_count) {
-  static const char pattern[] =
-      "{\"id\":%lu,\"status\":\"%s\",\"blob\":\""
-      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}\n";
-  size_t i;
-  size_t offset;
-  size_t capacity;
-  int written;
-
-  memset(ctx, 0, sizeof(*ctx));
-  capacity = candidate_count * 192u;
-  ctx->json = (unsigned char *)malloc(capacity);
-  if (ctx->json == NULL) {
-    return 0;
-  }
-  offset = 0u;
-  for (i = 0u; i < candidate_count; ++i) {
-    const char *status = (i & 3u) == 0u ? "open" : "closed";
-    written = snprintf((char *)ctx->json + offset, capacity - offset, pattern,
-                       (unsigned long)i, status);
-    if (written <= 0 || (size_t)written >= capacity - offset) {
-      free(ctx->json);
-      memset(ctx, 0, sizeof(*ctx));
-      return 0;
-    }
-    offset += (size_t)written;
-  }
-  ctx->json_len = offset;
-  ctx->candidate_count = candidate_count;
-  ctx->reader_chunk_size = ctx->json_len;
-  ctx->min_read_calls = 1u;
-  ctx->framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
-  return 1;
-}
-
-static int bench_prepare_candidate_recursive_array_source(
-    bench_candidate_hot_path_case *ctx, size_t candidate_count) {
-  static const char pattern[] =
-      "{\"id\":%lu,\"status\":\"%s\",\"blob\":\""
-      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}";
-  size_t i;
-  size_t offset;
-  size_t capacity;
-  int written;
-
-  memset(ctx, 0, sizeof(*ctx));
-  capacity = candidate_count * 160u;
-  ctx->json = (unsigned char *)malloc(capacity);
-  if (ctx->json == NULL) {
-    return 0;
-  }
-  offset = 0u;
-  ctx->json[offset++] = '[';
-  for (i = 0u; i < candidate_count; ++i) {
-    const char *status = (i & 3u) == 0u ? "open" : "closed";
-    if (i != 0u) {
-      ctx->json[offset++] = ',';
-    }
-    if ((i & 3u) == 1u) {
-      ctx->json[offset++] = '[';
-    } else if ((i & 3u) == 2u) {
-      ctx->json[offset++] = '[';
-    }
-    written = snprintf((char *)ctx->json + offset, capacity - offset, pattern,
-                       (unsigned long)i, status);
-    if (written <= 0 || (size_t)written >= capacity - offset) {
-      free(ctx->json);
-      memset(ctx, 0, sizeof(*ctx));
-      return 0;
-    }
-    offset += (size_t)written;
-    if ((i & 3u) == 2u) {
-      ctx->json[offset++] = ']';
-      ctx->json[offset++] = ']';
-    }
-  }
-  ctx->json[offset++] = ']';
-  ctx->json_len = offset;
-  ctx->candidate_count = candidate_count;
-  ctx->reader_chunk_size = ctx->json_len;
-  ctx->min_read_calls = 1u;
-  ctx->framing = LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS;
-  return 1;
-}
-
-static int
-bench_prepare_candidate_hot_path_file_source(bench_candidate_hot_path_case *ctx,
-                                             size_t candidate_count) {
-  if (!bench_prepare_candidate_hot_path_source(ctx, candidate_count)) {
-    return 0;
-  }
-  ctx->source_file = tmpfile();
-  if (ctx->source_file == NULL) {
-    free(ctx->json);
-    memset(ctx, 0, sizeof(*ctx));
-    return 0;
-  }
-  if (fwrite(ctx->json, 1u, ctx->json_len, ctx->source_file) != ctx->json_len) {
-    fclose(ctx->source_file);
-    free(ctx->json);
-    memset(ctx, 0, sizeof(*ctx));
-    return 0;
-  }
-  if (fflush(ctx->source_file) != 0 ||
-      fseek(ctx->source_file, 0L, SEEK_SET) != 0) {
-    fclose(ctx->source_file);
-    free(ctx->json);
-    memset(ctx, 0, sizeof(*ctx));
-    return 0;
-  }
-  return 1;
-}
-
-static void
-bench_cleanup_candidate_hot_path_source(bench_candidate_hot_path_case *ctx) {
-  if (ctx == NULL) {
-    return;
-  }
-  if (ctx->source_file != NULL) {
-    fclose(ctx->source_file);
-  }
-  free(ctx->json);
-  memset(ctx, 0, sizeof(*ctx));
-}
-
-static lonejson_candidate_callback_result
-bench_candidate_begin(void *user, const lonejson_candidate_info *candidate,
-                      lonejson_error *error) {
-  bench_candidate_state *state;
-  (void)candidate;
-  (void)error;
-  state = (bench_candidate_state *)user;
-  ++state->candidates_begin;
-  return LONEJSON_CANDIDATE_CONTINUE;
-}
-
-static lonejson_candidate_callback_result
-bench_candidate_end(void *user, const lonejson_candidate_info *candidate,
-                    lonejson_error *error) {
-  bench_candidate_state *state;
-  (void)error;
-  state = (bench_candidate_state *)user;
-  if (candidate == NULL ||
-      candidate->byte_size == LONEJSON_CANDIDATE_BYTE_SIZE_UNKNOWN) {
-    return LONEJSON_CANDIDATE_ERROR;
-  }
-  ++state->candidates_end;
-  return LONEJSON_CANDIDATE_CONTINUE;
-}
-
-static lonejson_candidate_transform_action
-bench_candidate_transform_keep(void *user,
-                               const lonejson_candidate_transform_event *event,
-                               lonejson_error *error) {
-  bench_candidate_state *state;
-  (void)event;
-  (void)error;
-  state = (bench_candidate_state *)user;
-  ++state->transform_decisions;
-  return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
-}
-
-static lonejson_candidate_transform_candidate_policy
-bench_candidate_transform_emit_candidate(
-    void *user, const lonejson_candidate_info *candidate,
-    const lonejson_candidate_transform_candidate_info *transform_candidate,
-    lonejson_error *error) {
-  bench_candidate_state *state;
-  lonejson_candidate_transform_candidate_policy policy;
-  (void)candidate;
-  (void)transform_candidate;
-  (void)error;
-  state = (bench_candidate_state *)user;
-  ++state->candidate_decisions;
-  memset(&policy, 0, sizeof(policy));
-  policy.decision = LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_EMIT;
-  return policy;
-}
-
-static lonejson_candidate_transform_candidate_policy
-bench_candidate_transform_drop_unmatched_candidate(
-    void *user, const lonejson_candidate_info *candidate,
-    const lonejson_candidate_transform_candidate_info *transform_candidate,
-    lonejson_error *error) {
-  bench_candidate_state *state;
-  lonejson_candidate_transform_candidate_policy policy;
-  (void)transform_candidate;
-  (void)error;
-  state = (bench_candidate_state *)user;
-  ++state->candidate_decisions;
-  memset(&policy, 0, sizeof(policy));
-  policy.decision = candidate != NULL && (candidate->index & 3u) == 0u
-                        ? LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_EMIT
-                        : LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_DROP;
-  return policy;
-}
-
-static int bench_candidate_decision_only_case(void *user) {
-  bench_candidate_hot_path_case *ctx;
-  bench_mem_reader reader;
-  bench_file_reader file_reader;
-  lonejson_reader_fn reader_fn;
-  void *reader_user;
-  bench_candidate_state state;
-  lonejson_candidate_stream_options options;
-  lonejson_status status;
-  lonejson_error error;
-
-  ctx = (bench_candidate_hot_path_case *)user;
-  memset(&reader, 0, sizeof(reader));
-  reader.data = ctx->json;
-  reader.len = ctx->json_len;
-  reader.chunk_size = ctx->reader_chunk_size;
-  memset(&file_reader, 0, sizeof(file_reader));
-  if (ctx->source_file != NULL) {
-    if (fseek(ctx->source_file, 0L, SEEK_SET) != 0) {
-      return 0;
-    }
-    file_reader.fp = ctx->source_file;
-    reader_fn = bench_file_reader_fn;
-    reader_user = &file_reader;
-  } else {
-    reader_fn = bench_mem_reader_fn;
-    reader_user = &reader;
-  }
-  memset(&state, 0, sizeof(state));
-  memset(&options, 0, sizeof(options));
-  options.framing = (lonejson_candidate_framing)ctx->framing;
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  options.candidate_begin = bench_candidate_begin;
-  options.candidate_end = bench_candidate_end;
-  options.candidate_user = &state;
-  if (ctx->use_buffer) {
-    status = lonejson_visit_candidates_buffer(ctx->runtime, ctx->json,
-                                              ctx->json_len, &options, &error);
-  } else {
-    status = lonejson_visit_candidates_reader(ctx->runtime, reader_fn,
-                                              reader_user, &options, &error);
-  }
-  if (status != LONEJSON_STATUS_OK) {
-    return 0;
-  }
-  if (state.candidates_begin != ctx->candidate_count ||
-      state.candidates_end != ctx->candidate_count ||
-      (!ctx->use_buffer &&
-       (ctx->source_file != NULL ? file_reader.read_calls : reader.read_calls) <
-           ctx->min_read_calls)) {
-    return 0;
-  }
-  ctx->last_read_calls =
-      ctx->use_buffer ? 0u
-                      : (ctx->source_file != NULL ? file_reader.read_calls
-                                                  : reader.read_calls);
-  ctx->last_source_read_bytes =
-      ctx->use_buffer ? 0u
-                      : (ctx->source_file != NULL ? file_reader.bytes_read
-                                                  : reader.bytes_read);
-  ctx->last_output_bytes = 0u;
-  ctx->last_candidates_spooled = 0u;
-  ctx->last_candidates_replayed = 0u;
-  ctx->last_candidates_dropped = 0u;
-  g_bench_sink +=
-      (lonejson_uint64)(state.candidates_end + ctx->last_read_calls);
-  return 1;
-}
-
-static int bench_candidate_transform_case(void *user) {
-  bench_candidate_hot_path_case *ctx;
-  bench_mem_reader reader;
-  bench_file_reader file_reader;
-  lonejson_reader_fn reader_fn;
-  void *reader_user;
-  bench_candidate_state state;
-  bench_count_sink sink;
-  lonejson_candidate_transform_options options;
-  lonejson_candidate_transform_result result;
-  lonejson_status status;
-  lonejson_error error;
-  size_t expected_replayed;
-
-  ctx = (bench_candidate_hot_path_case *)user;
-  memset(&reader, 0, sizeof(reader));
-  reader.data = ctx->json;
-  reader.len = ctx->json_len;
-  reader.chunk_size = ctx->reader_chunk_size;
-  memset(&file_reader, 0, sizeof(file_reader));
-  if (ctx->source_file != NULL) {
-    if (fseek(ctx->source_file, 0L, SEEK_SET) != 0) {
-      return 0;
-    }
-    file_reader.fp = ctx->source_file;
-    reader_fn = bench_file_reader_fn;
-    reader_user = &file_reader;
-  } else {
-    reader_fn = bench_mem_reader_fn;
-    reader_user = &reader;
-  }
-  memset(&state, 0, sizeof(state));
-  memset(&sink, 0, sizeof(sink));
-  memset(&result, 0, sizeof(result));
-  memset(&options, 0, sizeof(options));
-  options.framing = (lonejson_candidate_framing)ctx->framing;
-  options.output_framing = LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON;
-  options.mode = (lonejson_candidate_transform_mode)ctx->transform_mode;
-  options.sink = bench_count_sink_write;
-  options.sink_user = &sink;
-  options.transform = bench_candidate_transform_keep;
-  options.transform_user = &state;
-  options.candidate_begin = bench_candidate_begin;
-  options.candidate_end = bench_candidate_end;
-  options.candidate_user = &state;
-  options.result = &result;
-  if (ctx->transform_mode == LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED) {
-    options.candidate_decision =
-        ctx->gated_drop_unmatched
-            ? bench_candidate_transform_drop_unmatched_candidate
-            : bench_candidate_transform_emit_candidate;
-    options.candidate_decision_user = &state;
-  }
-  if (ctx->use_buffer) {
-    status = lonejson_transform_candidates_buffer(
-        ctx->runtime, ctx->json, ctx->json_len, &options, &error);
-  } else {
-    status = lonejson_transform_candidates_reader(
-        ctx->runtime, reader_fn, reader_user, &options, &error);
-  }
-  if (status != LONEJSON_STATUS_OK) {
-    return 0;
-  }
-  if (state.candidates_begin != ctx->candidate_count ||
-      state.candidates_end != ctx->candidate_count || sink.total == 0u ||
-      (!ctx->use_buffer &&
-       (ctx->source_file != NULL ? file_reader.read_calls : reader.read_calls) <
-           ctx->min_read_calls)) {
-    return 0;
-  }
-  if (ctx->transform_mode == LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED) {
-    expected_replayed = ctx->expected_candidates_replayed != 0u
-                            ? ctx->expected_candidates_replayed
-                            : ctx->candidate_count;
-    if (state.candidate_decisions != ctx->candidate_count ||
-        result.candidates_spooled != ctx->candidate_count ||
-        result.candidates_replayed != expected_replayed ||
-        result.candidates_dropped != ctx->candidate_count - expected_replayed) {
-      return 0;
-    }
-  } else if (result.candidates_streamed != ctx->candidate_count ||
-             result.candidates_spooled != 0u) {
-    return 0;
-  }
-  ctx->last_read_calls =
-      ctx->use_buffer ? 0u
-                      : (ctx->source_file != NULL ? file_reader.read_calls
-                                                  : reader.read_calls);
-  ctx->last_source_read_bytes =
-      ctx->use_buffer ? 0u
-                      : (ctx->source_file != NULL ? file_reader.bytes_read
-                                                  : reader.bytes_read);
-  ctx->last_output_bytes = sink.total;
-  ctx->last_candidates_spooled = (size_t)result.candidates_spooled;
-  ctx->last_candidates_replayed = (size_t)result.candidates_replayed;
-  ctx->last_candidates_dropped = (size_t)result.candidates_dropped;
-  g_bench_sink += (lonejson_uint64)(sink.total + reader.read_calls +
-                                    state.transform_decisions);
-  return 1;
-}
-
 static void bench_fill_rates(bench_result *result) {
   double elapsed_seconds;
 
@@ -2830,24 +2263,6 @@ static void bench_run_simple_case(bench_result *result, const char *name,
   result->total_bytes = samples[0].total_bytes;
   result->total_documents = samples[0].total_documents;
   bench_fill_rates(result);
-  result->peak_rss_bytes = bench_peak_rss_bytes();
-}
-
-static void bench_run_candidate_case(bench_result *result, const char *name,
-                                     bench_simple_case_fn fn,
-                                     bench_candidate_hot_path_case *ctx,
-                                     unsigned iterations) {
-  bench_run_simple_case(result, name, "candidate", fn, ctx, iterations,
-                        ctx->json_len, ctx->candidate_count);
-  result->read_calls = (lonejson_uint64)ctx->last_read_calls;
-  result->source_read_bytes = (lonejson_uint64)ctx->last_source_read_bytes;
-  result->candidate_read_buffer_size =
-      (lonejson_uint64)bench_candidate_read_buffer_size(ctx->runtime);
-  result->candidate_count = (lonejson_uint64)ctx->candidate_count;
-  result->candidates_spooled = (lonejson_uint64)ctx->last_candidates_spooled;
-  result->candidates_replayed = (lonejson_uint64)ctx->last_candidates_replayed;
-  result->candidates_dropped = (lonejson_uint64)ctx->last_candidates_dropped;
-  result->output_bytes = (lonejson_uint64)ctx->last_output_bytes;
 }
 
 static void bench_run_validation_case(bench_result *result, const char *name,
@@ -2895,7 +2310,6 @@ static void bench_run_validation_case(bench_result *result, const char *name,
   result->total_bytes = samples[0].total_bytes;
   result->total_documents = samples[0].total_documents;
   bench_fill_rates(result);
-  result->peak_rss_bytes = bench_peak_rss_bytes();
 }
 
 static void bench_print_run_report(const bench_run *run) {
@@ -3262,44 +2676,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   bench_visit_case visit_selector_reader_case;
   bench_visit_case visit_mixed_case;
   bench_visit_case visit_japanese_wide_case;
-  bench_candidate_hot_path_case candidate_decision_case;
-  bench_candidate_hot_path_case candidate_decision_16k_case;
-  bench_candidate_hot_path_case candidate_decision_64k_case;
-  bench_candidate_hot_path_case candidate_decision_128k_case;
-  bench_candidate_hot_path_case candidate_decision_256k_case;
-  bench_candidate_hot_path_case candidate_decision_1m_case;
-  bench_candidate_hot_path_case candidate_recursive_decision_case;
-  bench_candidate_hot_path_case candidate_recursive_decision_64k_case;
-  bench_candidate_hot_path_case candidate_recursive_decision_buffer_case;
-  bench_candidate_hot_path_case candidate_source_decision_case;
-  bench_candidate_hot_path_case candidate_source_decision_64k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_16k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_64k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_128k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_256k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_1m_case;
-  bench_candidate_hot_path_case candidate_recursive_transform_streaming_case;
-  bench_candidate_hot_path_case
-      candidate_recursive_transform_streaming_64k_case;
-  bench_candidate_hot_path_case
-      candidate_recursive_transform_streaming_buffer_case;
-  bench_candidate_hot_path_case candidate_source_transform_streaming_case;
-  bench_candidate_hot_path_case candidate_source_transform_streaming_64k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_case;
-  bench_candidate_hot_path_case candidate_transform_gated_16k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_64k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_drop_64k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_128k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_256k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_1m_case;
-  bench_candidate_hot_path_case candidate_recursive_transform_gated_case;
-  bench_candidate_hot_path_case candidate_recursive_transform_gated_64k_case;
-  bench_candidate_hot_path_case
-      candidate_recursive_transform_gated_drop_64k_case;
-  bench_candidate_hot_path_case candidate_recursive_transform_gated_buffer_case;
-  bench_candidate_hot_path_case candidate_source_transform_gated_case;
-  bench_candidate_hot_path_case candidate_source_transform_gated_64k_case;
   bench_jsonl_serialize_case jsonl_case;
   bench_jsonl_serialize_case jsonl_pretty_case;
   bench_record_fixed serialize_record;
@@ -3347,72 +2723,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   hebrew_wide_json_len = 0u;
   arabic_wide_json_data = NULL;
   arabic_wide_json_len = 0u;
-  memset(&candidate_decision_case, 0, sizeof(candidate_decision_case));
-  memset(&candidate_decision_16k_case, 0, sizeof(candidate_decision_16k_case));
-  memset(&candidate_decision_64k_case, 0, sizeof(candidate_decision_64k_case));
-  memset(&candidate_decision_128k_case, 0,
-         sizeof(candidate_decision_128k_case));
-  memset(&candidate_decision_256k_case, 0,
-         sizeof(candidate_decision_256k_case));
-  memset(&candidate_decision_1m_case, 0, sizeof(candidate_decision_1m_case));
-  memset(&candidate_recursive_decision_case, 0,
-         sizeof(candidate_recursive_decision_case));
-  memset(&candidate_recursive_decision_64k_case, 0,
-         sizeof(candidate_recursive_decision_64k_case));
-  memset(&candidate_recursive_decision_buffer_case, 0,
-         sizeof(candidate_recursive_decision_buffer_case));
-  memset(&candidate_source_decision_case, 0,
-         sizeof(candidate_source_decision_case));
-  memset(&candidate_source_decision_64k_case, 0,
-         sizeof(candidate_source_decision_64k_case));
-  memset(&candidate_transform_streaming_case, 0,
-         sizeof(candidate_transform_streaming_case));
-  memset(&candidate_transform_streaming_16k_case, 0,
-         sizeof(candidate_transform_streaming_16k_case));
-  memset(&candidate_transform_streaming_64k_case, 0,
-         sizeof(candidate_transform_streaming_64k_case));
-  memset(&candidate_transform_streaming_128k_case, 0,
-         sizeof(candidate_transform_streaming_128k_case));
-  memset(&candidate_transform_streaming_256k_case, 0,
-         sizeof(candidate_transform_streaming_256k_case));
-  memset(&candidate_transform_streaming_1m_case, 0,
-         sizeof(candidate_transform_streaming_1m_case));
-  memset(&candidate_recursive_transform_streaming_case, 0,
-         sizeof(candidate_recursive_transform_streaming_case));
-  memset(&candidate_recursive_transform_streaming_64k_case, 0,
-         sizeof(candidate_recursive_transform_streaming_64k_case));
-  memset(&candidate_recursive_transform_streaming_buffer_case, 0,
-         sizeof(candidate_recursive_transform_streaming_buffer_case));
-  memset(&candidate_source_transform_streaming_case, 0,
-         sizeof(candidate_source_transform_streaming_case));
-  memset(&candidate_source_transform_streaming_64k_case, 0,
-         sizeof(candidate_source_transform_streaming_64k_case));
-  memset(&candidate_transform_gated_case, 0,
-         sizeof(candidate_transform_gated_case));
-  memset(&candidate_transform_gated_16k_case, 0,
-         sizeof(candidate_transform_gated_16k_case));
-  memset(&candidate_transform_gated_64k_case, 0,
-         sizeof(candidate_transform_gated_64k_case));
-  memset(&candidate_transform_gated_drop_64k_case, 0,
-         sizeof(candidate_transform_gated_drop_64k_case));
-  memset(&candidate_transform_gated_128k_case, 0,
-         sizeof(candidate_transform_gated_128k_case));
-  memset(&candidate_transform_gated_256k_case, 0,
-         sizeof(candidate_transform_gated_256k_case));
-  memset(&candidate_transform_gated_1m_case, 0,
-         sizeof(candidate_transform_gated_1m_case));
-  memset(&candidate_recursive_transform_gated_case, 0,
-         sizeof(candidate_recursive_transform_gated_case));
-  memset(&candidate_recursive_transform_gated_64k_case, 0,
-         sizeof(candidate_recursive_transform_gated_64k_case));
-  memset(&candidate_recursive_transform_gated_drop_64k_case, 0,
-         sizeof(candidate_recursive_transform_gated_drop_64k_case));
-  memset(&candidate_recursive_transform_gated_buffer_case, 0,
-         sizeof(candidate_recursive_transform_gated_buffer_case));
-  memset(&candidate_source_transform_gated_case, 0,
-         sizeof(candidate_source_transform_gated_case));
-  memset(&candidate_source_transform_gated_64k_case, 0,
-         sizeof(candidate_source_transform_gated_64k_case));
   if (bench_load_corpus(corpus_dir, &docs, &doc_count, &total_bytes, &y_count,
                         &n_count, &i_count) != 0) {
     return 1;
@@ -3441,7 +2751,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
     free(japanese_wide_json_data);
     free(hebrew_wide_json_data);
     free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
     bench_free_docs(docs, doc_count);
     return 1;
   }
@@ -3485,7 +2794,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
     free(japanese_wide_json_data);
     free(hebrew_wide_json_data);
     free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
     bench_free_docs(docs, doc_count);
     return 1;
   }
@@ -3591,178 +2899,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   visit_japanese_wide_case.min_objects = 2u;
   visit_japanese_wide_case.min_arrays = 0u;
   visit_japanese_wide_case.use_reader = 1;
-  if (!bench_prepare_candidate_hot_path_source(&candidate_decision_case,
-                                               4096u)) {
-    bench_cleanup_json_value_doc(&json_value_record);
-    bench_cleanup_json_value_doc(&json_value_source_record);
-    LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
-    LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
-    LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
-    LONEJSON_FREE(
-        (void *)json_value_source_serialize_pretty_case.expected_json);
-    free(workload_jsonl_data);
-    free(japanese_json_data);
-    free(hebrew_json_data);
-    free(arabic_json_data);
-    free(japanese_wide_json_data);
-    free(hebrew_wide_json_data);
-    free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
-    bench_free_docs(docs, doc_count);
-    return 1;
-  }
-  if (!bench_prepare_candidate_hot_path_file_source(
-          &candidate_source_decision_case, 4096u)) {
-    bench_cleanup_json_value_doc(&json_value_record);
-    bench_cleanup_json_value_doc(&json_value_source_record);
-    LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
-    LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
-    LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
-    LONEJSON_FREE(
-        (void *)json_value_source_serialize_pretty_case.expected_json);
-    free(workload_jsonl_data);
-    free(japanese_json_data);
-    free(hebrew_json_data);
-    free(arabic_json_data);
-    free(japanese_wide_json_data);
-    free(hebrew_wide_json_data);
-    free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
-    bench_free_docs(docs, doc_count);
-    return 1;
-  }
-  if (!bench_prepare_candidate_recursive_array_source(
-          &candidate_recursive_decision_case, 4096u)) {
-    bench_cleanup_json_value_doc(&json_value_record);
-    bench_cleanup_json_value_doc(&json_value_source_record);
-    LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
-    LONEJSON_FREE((void *)json_value_serialize_pretty_case.expected_json);
-    LONEJSON_FREE((void *)json_value_source_serialize_case.expected_json);
-    LONEJSON_FREE(
-        (void *)json_value_source_serialize_pretty_case.expected_json);
-    free(workload_jsonl_data);
-    free(japanese_json_data);
-    free(hebrew_json_data);
-    free(arabic_json_data);
-    free(japanese_wide_json_data);
-    free(hebrew_wide_json_data);
-    free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_recursive_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_source_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
-    bench_free_docs(docs, doc_count);
-    return 1;
-  }
-  candidate_transform_streaming_case = candidate_decision_case;
-  candidate_decision_case.runtime = g_bench_runtime_default;
-  candidate_decision_16k_case = candidate_decision_case;
-  candidate_decision_16k_case.runtime = g_bench_runtime_candidate_16k;
-  candidate_decision_64k_case = candidate_decision_case;
-  candidate_decision_64k_case.runtime = g_bench_runtime_candidate_64k;
-  candidate_decision_128k_case = candidate_decision_case;
-  candidate_decision_128k_case.runtime = g_bench_runtime_candidate_128k;
-  candidate_decision_256k_case = candidate_decision_case;
-  candidate_decision_256k_case.runtime = g_bench_runtime_candidate_256k;
-  candidate_decision_1m_case = candidate_decision_case;
-  candidate_decision_1m_case.runtime = g_bench_runtime_candidate_1m;
-  candidate_recursive_decision_case.runtime = g_bench_runtime_default;
-  candidate_recursive_decision_64k_case = candidate_recursive_decision_case;
-  candidate_recursive_decision_64k_case.runtime = g_bench_runtime_candidate_64k;
-  candidate_recursive_decision_buffer_case = candidate_recursive_decision_case;
-  candidate_recursive_decision_buffer_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_decision_buffer_case.use_buffer = 1;
-  candidate_recursive_decision_buffer_case.min_read_calls = 0u;
-  candidate_source_decision_case.runtime = g_bench_runtime_default;
-  candidate_source_decision_64k_case = candidate_source_decision_case;
-  candidate_source_decision_64k_case.runtime = g_bench_runtime_candidate_64k;
-  candidate_transform_streaming_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING;
-  candidate_transform_streaming_case.runtime = g_bench_runtime_default;
-  candidate_transform_streaming_16k_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_16k_case.runtime =
-      g_bench_runtime_candidate_16k;
-  candidate_transform_streaming_64k_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_transform_streaming_128k_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_128k_case.runtime =
-      g_bench_runtime_candidate_128k;
-  candidate_transform_streaming_256k_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_256k_case.runtime =
-      g_bench_runtime_candidate_256k;
-  candidate_transform_streaming_1m_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_1m_case.runtime = g_bench_runtime_candidate_1m;
-  candidate_recursive_transform_streaming_case =
-      candidate_recursive_decision_case;
-  candidate_recursive_transform_streaming_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING;
-  candidate_recursive_transform_streaming_case.runtime =
-      g_bench_runtime_default;
-  candidate_recursive_transform_streaming_64k_case =
-      candidate_recursive_transform_streaming_case;
-  candidate_recursive_transform_streaming_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_transform_streaming_buffer_case =
-      candidate_recursive_transform_streaming_case;
-  candidate_recursive_transform_streaming_buffer_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_transform_streaming_buffer_case.use_buffer = 1;
-  candidate_recursive_transform_streaming_buffer_case.min_read_calls = 0u;
-  candidate_source_transform_streaming_case = candidate_source_decision_case;
-  candidate_source_transform_streaming_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING;
-  candidate_source_transform_streaming_case.runtime = g_bench_runtime_default;
-  candidate_source_transform_streaming_64k_case =
-      candidate_source_transform_streaming_case;
-  candidate_source_transform_streaming_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_transform_gated_case = candidate_decision_case;
-  candidate_transform_gated_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
-  candidate_transform_gated_case.runtime = g_bench_runtime_default;
-  candidate_transform_gated_16k_case = candidate_transform_gated_case;
-  candidate_transform_gated_16k_case.runtime = g_bench_runtime_candidate_16k;
-  candidate_transform_gated_64k_case = candidate_transform_gated_case;
-  candidate_transform_gated_64k_case.runtime = g_bench_runtime_candidate_64k;
-  candidate_transform_gated_drop_64k_case = candidate_transform_gated_64k_case;
-  candidate_transform_gated_drop_64k_case.gated_drop_unmatched = 1;
-  candidate_transform_gated_drop_64k_case.expected_candidates_replayed =
-      candidate_transform_gated_drop_64k_case.candidate_count / 4u;
-  candidate_transform_gated_128k_case = candidate_transform_gated_case;
-  candidate_transform_gated_128k_case.runtime = g_bench_runtime_candidate_128k;
-  candidate_transform_gated_256k_case = candidate_transform_gated_case;
-  candidate_transform_gated_256k_case.runtime = g_bench_runtime_candidate_256k;
-  candidate_transform_gated_1m_case = candidate_transform_gated_case;
-  candidate_transform_gated_1m_case.runtime = g_bench_runtime_candidate_1m;
-  candidate_recursive_transform_gated_case = candidate_recursive_decision_case;
-  candidate_recursive_transform_gated_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
-  candidate_recursive_transform_gated_case.runtime = g_bench_runtime_default;
-  candidate_recursive_transform_gated_64k_case =
-      candidate_recursive_transform_gated_case;
-  candidate_recursive_transform_gated_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_transform_gated_drop_64k_case =
-      candidate_recursive_transform_gated_64k_case;
-  candidate_recursive_transform_gated_drop_64k_case.gated_drop_unmatched = 1;
-  candidate_recursive_transform_gated_drop_64k_case
-      .expected_candidates_replayed =
-      candidate_recursive_transform_gated_drop_64k_case.candidate_count / 4u;
-  candidate_recursive_transform_gated_buffer_case =
-      candidate_recursive_transform_gated_case;
-  candidate_recursive_transform_gated_buffer_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_transform_gated_buffer_case.use_buffer = 1;
-  candidate_recursive_transform_gated_buffer_case.min_read_calls = 0u;
-  candidate_source_transform_gated_case = candidate_source_decision_case;
-  candidate_source_transform_gated_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
-  candidate_source_transform_gated_case.runtime = g_bench_runtime_default;
-  candidate_source_transform_gated_64k_case =
-      candidate_source_transform_gated_case;
-  candidate_source_transform_gated_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
 
   {
     size_t result_index = 0u;
@@ -3805,166 +2941,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
                           bench_stream_fixed_case, &stream_prepared_case,
                           iterations, stream_prepared_case.stream_len,
                           stream_prepared_case.object_count);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/decision_only_reader/lonejson",
-                             bench_candidate_decision_only_case,
-                             &candidate_decision_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/decision_only_reader_16k/lonejson",
-                             bench_candidate_decision_only_case,
-                             &candidate_decision_16k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/decision_only_reader_64k/lonejson",
-                             bench_candidate_decision_only_case,
-                             &candidate_decision_64k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/decision_only_reader_128k/lonejson",
-                             bench_candidate_decision_only_case,
-                             &candidate_decision_128k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/decision_only_reader_256k/lonejson",
-                             bench_candidate_decision_only_case,
-                             &candidate_decision_256k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/decision_only_reader_1m/lonejson",
-                             bench_candidate_decision_only_case,
-                             &candidate_decision_1m_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/decision_only_recursive_reader/lonejson",
-        bench_candidate_decision_only_case, &candidate_recursive_decision_case,
-        iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/decision_only_recursive_reader_64k/lonejson",
-        bench_candidate_decision_only_case,
-        &candidate_recursive_decision_64k_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/decision_only_recursive_buffer_64k/lonejson",
-        bench_candidate_decision_only_case,
-        &candidate_recursive_decision_buffer_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/decision_only_source/lonejson",
-                             bench_candidate_decision_only_case,
-                             &candidate_source_decision_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/decision_only_source_64k/lonejson",
-                             bench_candidate_decision_only_case,
-                             &candidate_source_decision_64k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_streaming_reader/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_transform_streaming_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_streaming_reader_16k/lonejson",
-        bench_candidate_transform_case, &candidate_transform_streaming_16k_case,
-        iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_streaming_reader_64k/lonejson",
-        bench_candidate_transform_case, &candidate_transform_streaming_64k_case,
-        iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_streaming_reader_128k/lonejson",
-        bench_candidate_transform_case,
-        &candidate_transform_streaming_128k_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_streaming_reader_256k/lonejson",
-        bench_candidate_transform_case,
-        &candidate_transform_streaming_256k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_streaming_reader_1m/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_transform_streaming_1m_case,
-                             iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_streaming_recursive_reader/lonejson",
-        bench_candidate_transform_case,
-        &candidate_recursive_transform_streaming_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_streaming_recursive_reader_64k/lonejson",
-        bench_candidate_transform_case,
-        &candidate_recursive_transform_streaming_64k_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_streaming_recursive_buffer_64k/lonejson",
-        bench_candidate_transform_case,
-        &candidate_recursive_transform_streaming_buffer_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_streaming_source/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_source_transform_streaming_case,
-                             iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_streaming_source_64k/lonejson",
-        bench_candidate_transform_case,
-        &candidate_source_transform_streaming_64k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_gated_reader/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_transform_gated_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_gated_reader_16k/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_transform_gated_16k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_gated_reader_64k/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_transform_gated_64k_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_gated_drop_reader_64k/lonejson",
-        bench_candidate_transform_case,
-        &candidate_transform_gated_drop_64k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_gated_reader_128k/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_transform_gated_128k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_gated_reader_256k/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_transform_gated_256k_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_gated_reader_1m/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_transform_gated_1m_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_gated_recursive_reader/lonejson",
-        bench_candidate_transform_case,
-        &candidate_recursive_transform_gated_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_gated_recursive_reader_64k/lonejson",
-        bench_candidate_transform_case,
-        &candidate_recursive_transform_gated_64k_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_gated_drop_recursive_reader_64k/lonejson",
-        bench_candidate_transform_case,
-        &candidate_recursive_transform_gated_drop_64k_case, iterations);
-    bench_run_candidate_case(
-        &run.result_storage[result_index++],
-        "candidate/transform_gated_recursive_buffer_64k/lonejson",
-        bench_candidate_transform_case,
-        &candidate_recursive_transform_gated_buffer_case, iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_gated_source/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_source_transform_gated_case,
-                             iterations);
-    bench_run_candidate_case(&run.result_storage[result_index++],
-                             "candidate/transform_gated_source_64k/lonejson",
-                             bench_candidate_transform_case,
-                             &candidate_source_transform_gated_64k_case,
-                             iterations);
     bench_run_simple_case(
         &run.result_storage[result_index++],
         "array_stream/pull_mapped_items/lonejson", "array_stream",
@@ -4168,9 +3144,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
     free(japanese_wide_json_data);
     free(hebrew_wide_json_data);
     free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_recursive_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_source_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
     bench_free_docs(docs, doc_count);
     return 1;
   }
@@ -4196,9 +3169,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
     free(japanese_wide_json_data);
     free(hebrew_wide_json_data);
     free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_recursive_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_source_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
     bench_free_docs(docs, doc_count);
     return 1;
   }
@@ -4217,9 +3187,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
     free(japanese_wide_json_data);
     free(hebrew_wide_json_data);
     free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_recursive_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_source_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
     bench_free_docs(docs, doc_count);
     return 1;
   }
@@ -4236,9 +3203,6 @@ static int bench_run_command(const char *corpus_dir, const char *latest_path,
   free(japanese_wide_json_data);
   free(hebrew_wide_json_data);
   free(arabic_wide_json_data);
-  bench_cleanup_candidate_hot_path_source(&candidate_recursive_decision_case);
-  bench_cleanup_candidate_hot_path_source(&candidate_source_decision_case);
-  bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
   bench_free_docs(docs, doc_count);
   return 0;
 }
@@ -4278,44 +3242,6 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   bench_visit_case visit_selector_reader_case;
   bench_visit_case visit_mixed_case;
   bench_visit_case visit_japanese_wide_case;
-  bench_candidate_hot_path_case candidate_decision_case;
-  bench_candidate_hot_path_case candidate_decision_16k_case;
-  bench_candidate_hot_path_case candidate_decision_64k_case;
-  bench_candidate_hot_path_case candidate_decision_128k_case;
-  bench_candidate_hot_path_case candidate_decision_256k_case;
-  bench_candidate_hot_path_case candidate_decision_1m_case;
-  bench_candidate_hot_path_case candidate_recursive_decision_case;
-  bench_candidate_hot_path_case candidate_recursive_decision_64k_case;
-  bench_candidate_hot_path_case candidate_recursive_decision_buffer_case;
-  bench_candidate_hot_path_case candidate_source_decision_case;
-  bench_candidate_hot_path_case candidate_source_decision_64k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_16k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_64k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_128k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_256k_case;
-  bench_candidate_hot_path_case candidate_transform_streaming_1m_case;
-  bench_candidate_hot_path_case candidate_recursive_transform_streaming_case;
-  bench_candidate_hot_path_case
-      candidate_recursive_transform_streaming_64k_case;
-  bench_candidate_hot_path_case
-      candidate_recursive_transform_streaming_buffer_case;
-  bench_candidate_hot_path_case candidate_source_transform_streaming_case;
-  bench_candidate_hot_path_case candidate_source_transform_streaming_64k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_case;
-  bench_candidate_hot_path_case candidate_transform_gated_16k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_64k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_drop_64k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_128k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_256k_case;
-  bench_candidate_hot_path_case candidate_transform_gated_1m_case;
-  bench_candidate_hot_path_case candidate_recursive_transform_gated_case;
-  bench_candidate_hot_path_case candidate_recursive_transform_gated_64k_case;
-  bench_candidate_hot_path_case
-      candidate_recursive_transform_gated_drop_64k_case;
-  bench_candidate_hot_path_case candidate_recursive_transform_gated_buffer_case;
-  bench_candidate_hot_path_case candidate_source_transform_gated_case;
-  bench_candidate_hot_path_case candidate_source_transform_gated_64k_case;
   bench_jsonl_serialize_case jsonl_case;
   bench_jsonl_serialize_case jsonl_pretty_case;
   bench_record_fixed serialize_record;
@@ -4363,68 +3289,6 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   hebrew_wide_json_len = 0u;
   arabic_wide_json_data = NULL;
   arabic_wide_json_len = 0u;
-  memset(&candidate_decision_case, 0, sizeof(candidate_decision_case));
-  memset(&candidate_decision_16k_case, 0, sizeof(candidate_decision_16k_case));
-  memset(&candidate_decision_64k_case, 0, sizeof(candidate_decision_64k_case));
-  memset(&candidate_decision_128k_case, 0,
-         sizeof(candidate_decision_128k_case));
-  memset(&candidate_decision_256k_case, 0,
-         sizeof(candidate_decision_256k_case));
-  memset(&candidate_decision_1m_case, 0, sizeof(candidate_decision_1m_case));
-  memset(&candidate_recursive_decision_case, 0,
-         sizeof(candidate_recursive_decision_case));
-  memset(&candidate_recursive_decision_64k_case, 0,
-         sizeof(candidate_recursive_decision_64k_case));
-  memset(&candidate_recursive_decision_buffer_case, 0,
-         sizeof(candidate_recursive_decision_buffer_case));
-  memset(&candidate_source_decision_case, 0,
-         sizeof(candidate_source_decision_case));
-  memset(&candidate_source_decision_64k_case, 0,
-         sizeof(candidate_source_decision_64k_case));
-  memset(&candidate_transform_streaming_case, 0,
-         sizeof(candidate_transform_streaming_case));
-  memset(&candidate_transform_streaming_16k_case, 0,
-         sizeof(candidate_transform_streaming_16k_case));
-  memset(&candidate_transform_streaming_64k_case, 0,
-         sizeof(candidate_transform_streaming_64k_case));
-  memset(&candidate_transform_streaming_128k_case, 0,
-         sizeof(candidate_transform_streaming_128k_case));
-  memset(&candidate_transform_streaming_256k_case, 0,
-         sizeof(candidate_transform_streaming_256k_case));
-  memset(&candidate_transform_streaming_1m_case, 0,
-         sizeof(candidate_transform_streaming_1m_case));
-  memset(&candidate_recursive_transform_streaming_case, 0,
-         sizeof(candidate_recursive_transform_streaming_case));
-  memset(&candidate_recursive_transform_streaming_64k_case, 0,
-         sizeof(candidate_recursive_transform_streaming_64k_case));
-  memset(&candidate_recursive_transform_streaming_buffer_case, 0,
-         sizeof(candidate_recursive_transform_streaming_buffer_case));
-  memset(&candidate_source_transform_streaming_case, 0,
-         sizeof(candidate_source_transform_streaming_case));
-  memset(&candidate_source_transform_streaming_64k_case, 0,
-         sizeof(candidate_source_transform_streaming_64k_case));
-  memset(&candidate_transform_gated_case, 0,
-         sizeof(candidate_transform_gated_case));
-  memset(&candidate_transform_gated_16k_case, 0,
-         sizeof(candidate_transform_gated_16k_case));
-  memset(&candidate_transform_gated_64k_case, 0,
-         sizeof(candidate_transform_gated_64k_case));
-  memset(&candidate_transform_gated_128k_case, 0,
-         sizeof(candidate_transform_gated_128k_case));
-  memset(&candidate_transform_gated_256k_case, 0,
-         sizeof(candidate_transform_gated_256k_case));
-  memset(&candidate_transform_gated_1m_case, 0,
-         sizeof(candidate_transform_gated_1m_case));
-  memset(&candidate_recursive_transform_gated_case, 0,
-         sizeof(candidate_recursive_transform_gated_case));
-  memset(&candidate_recursive_transform_gated_64k_case, 0,
-         sizeof(candidate_recursive_transform_gated_64k_case));
-  memset(&candidate_recursive_transform_gated_buffer_case, 0,
-         sizeof(candidate_recursive_transform_gated_buffer_case));
-  memset(&candidate_source_transform_gated_case, 0,
-         sizeof(candidate_source_transform_gated_case));
-  memset(&candidate_source_transform_gated_64k_case, 0,
-         sizeof(candidate_source_transform_gated_64k_case));
   if (bench_prepare_benchmark_cases(
           &parse_fixed_case, &parse_fixed_short_case, &parse_dynamic_case,
           &stream_case, &serialize_case, &serialize_pretty_case,
@@ -4463,7 +3327,6 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     free(japanese_wide_json_data);
     free(hebrew_wide_json_data);
     free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
     return 1;
   }
   parse_fixed_prepared_case = parse_fixed_case;
@@ -4566,154 +3429,6 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   visit_japanese_wide_case.min_objects = 2u;
   visit_japanese_wide_case.min_arrays = 0u;
   visit_japanese_wide_case.use_reader = 1;
-  if (!bench_prepare_candidate_hot_path_source(&candidate_decision_case,
-                                               4096u)) {
-    free(workload_jsonl_data);
-    free(japanese_json_data);
-    free(hebrew_json_data);
-    free(arabic_json_data);
-    free(japanese_wide_json_data);
-    free(hebrew_wide_json_data);
-    free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_recursive_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
-    return 1;
-  }
-  if (!bench_prepare_candidate_recursive_array_source(
-          &candidate_recursive_decision_case, 4096u)) {
-    free(workload_jsonl_data);
-    free(japanese_json_data);
-    free(hebrew_json_data);
-    free(arabic_json_data);
-    free(japanese_wide_json_data);
-    free(hebrew_wide_json_data);
-    free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
-    return 1;
-  }
-  if (!bench_prepare_candidate_hot_path_file_source(
-          &candidate_source_decision_case, 4096u)) {
-    free(workload_jsonl_data);
-    free(japanese_json_data);
-    free(hebrew_json_data);
-    free(arabic_json_data);
-    free(japanese_wide_json_data);
-    free(hebrew_wide_json_data);
-    free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_recursive_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
-    return 1;
-  }
-  candidate_transform_streaming_case = candidate_decision_case;
-  candidate_decision_case.runtime = g_bench_runtime_default;
-  candidate_decision_16k_case = candidate_decision_case;
-  candidate_decision_16k_case.runtime = g_bench_runtime_candidate_16k;
-  candidate_decision_64k_case = candidate_decision_case;
-  candidate_decision_64k_case.runtime = g_bench_runtime_candidate_64k;
-  candidate_decision_128k_case = candidate_decision_case;
-  candidate_decision_128k_case.runtime = g_bench_runtime_candidate_128k;
-  candidate_decision_256k_case = candidate_decision_case;
-  candidate_decision_256k_case.runtime = g_bench_runtime_candidate_256k;
-  candidate_decision_1m_case = candidate_decision_case;
-  candidate_decision_1m_case.runtime = g_bench_runtime_candidate_1m;
-  candidate_recursive_decision_case.runtime = g_bench_runtime_default;
-  candidate_recursive_decision_64k_case = candidate_recursive_decision_case;
-  candidate_recursive_decision_64k_case.runtime = g_bench_runtime_candidate_64k;
-  candidate_recursive_decision_buffer_case = candidate_recursive_decision_case;
-  candidate_recursive_decision_buffer_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_decision_buffer_case.use_buffer = 1;
-  candidate_recursive_decision_buffer_case.min_read_calls = 0u;
-  candidate_source_decision_case.runtime = g_bench_runtime_default;
-  candidate_source_decision_64k_case = candidate_source_decision_case;
-  candidate_source_decision_64k_case.runtime = g_bench_runtime_candidate_64k;
-  candidate_transform_streaming_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING;
-  candidate_transform_streaming_case.runtime = g_bench_runtime_default;
-  candidate_transform_streaming_16k_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_16k_case.runtime =
-      g_bench_runtime_candidate_16k;
-  candidate_transform_streaming_64k_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_transform_streaming_128k_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_128k_case.runtime =
-      g_bench_runtime_candidate_128k;
-  candidate_transform_streaming_256k_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_256k_case.runtime =
-      g_bench_runtime_candidate_256k;
-  candidate_transform_streaming_1m_case = candidate_transform_streaming_case;
-  candidate_transform_streaming_1m_case.runtime = g_bench_runtime_candidate_1m;
-  candidate_recursive_transform_streaming_case =
-      candidate_recursive_decision_case;
-  candidate_recursive_transform_streaming_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING;
-  candidate_recursive_transform_streaming_case.runtime =
-      g_bench_runtime_default;
-  candidate_recursive_transform_streaming_64k_case =
-      candidate_recursive_transform_streaming_case;
-  candidate_recursive_transform_streaming_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_transform_streaming_buffer_case =
-      candidate_recursive_transform_streaming_case;
-  candidate_recursive_transform_streaming_buffer_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_transform_streaming_buffer_case.use_buffer = 1;
-  candidate_recursive_transform_streaming_buffer_case.min_read_calls = 0u;
-  candidate_source_transform_streaming_case = candidate_source_decision_case;
-  candidate_source_transform_streaming_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING;
-  candidate_source_transform_streaming_case.runtime = g_bench_runtime_default;
-  candidate_source_transform_streaming_64k_case =
-      candidate_source_transform_streaming_case;
-  candidate_source_transform_streaming_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_transform_gated_case = candidate_decision_case;
-  candidate_transform_gated_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
-  candidate_transform_gated_case.runtime = g_bench_runtime_default;
-  candidate_transform_gated_16k_case = candidate_transform_gated_case;
-  candidate_transform_gated_16k_case.runtime = g_bench_runtime_candidate_16k;
-  candidate_transform_gated_64k_case = candidate_transform_gated_case;
-  candidate_transform_gated_64k_case.runtime = g_bench_runtime_candidate_64k;
-  candidate_transform_gated_drop_64k_case = candidate_transform_gated_64k_case;
-  candidate_transform_gated_drop_64k_case.gated_drop_unmatched = 1;
-  candidate_transform_gated_drop_64k_case.expected_candidates_replayed =
-      candidate_transform_gated_drop_64k_case.candidate_count / 4u;
-  candidate_transform_gated_128k_case = candidate_transform_gated_case;
-  candidate_transform_gated_128k_case.runtime = g_bench_runtime_candidate_128k;
-  candidate_transform_gated_256k_case = candidate_transform_gated_case;
-  candidate_transform_gated_256k_case.runtime = g_bench_runtime_candidate_256k;
-  candidate_transform_gated_1m_case = candidate_transform_gated_case;
-  candidate_transform_gated_1m_case.runtime = g_bench_runtime_candidate_1m;
-  candidate_recursive_transform_gated_case = candidate_recursive_decision_case;
-  candidate_recursive_transform_gated_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
-  candidate_recursive_transform_gated_case.runtime = g_bench_runtime_default;
-  candidate_recursive_transform_gated_64k_case =
-      candidate_recursive_transform_gated_case;
-  candidate_recursive_transform_gated_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_transform_gated_drop_64k_case =
-      candidate_recursive_transform_gated_64k_case;
-  candidate_recursive_transform_gated_drop_64k_case.gated_drop_unmatched = 1;
-  candidate_recursive_transform_gated_drop_64k_case
-      .expected_candidates_replayed =
-      candidate_recursive_transform_gated_drop_64k_case.candidate_count / 4u;
-  candidate_recursive_transform_gated_buffer_case =
-      candidate_recursive_transform_gated_case;
-  candidate_recursive_transform_gated_buffer_case.runtime =
-      g_bench_runtime_candidate_64k;
-  candidate_recursive_transform_gated_buffer_case.use_buffer = 1;
-  candidate_recursive_transform_gated_buffer_case.min_read_calls = 0u;
-  candidate_source_transform_gated_case = candidate_source_decision_case;
-  candidate_source_transform_gated_case.transform_mode =
-      LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
-  candidate_source_transform_gated_case.runtime = g_bench_runtime_default;
-  candidate_source_transform_gated_64k_case =
-      candidate_source_transform_gated_case;
-  candidate_source_transform_gated_64k_case.runtime =
-      g_bench_runtime_candidate_64k;
 
   fn = NULL;
   ctx = NULL;
@@ -4733,268 +3448,6 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     group = "stream";
     bytes_per_call = stream_prepared_case.stream_len;
     docs_per_call = stream_prepared_case.object_count;
-  } else if (strcmp(case_name, "candidate/decision_only_reader/lonejson") ==
-             0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_decision_case;
-    group = "candidate";
-    bytes_per_call = candidate_decision_case.json_len;
-    docs_per_call = candidate_decision_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/decision_only_reader_16k/lonejson") ==
-             0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_decision_16k_case;
-    group = "candidate";
-    bytes_per_call = candidate_decision_16k_case.json_len;
-    docs_per_call = candidate_decision_16k_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/decision_only_reader_64k/lonejson") ==
-             0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_decision_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_decision_64k_case.json_len;
-    docs_per_call = candidate_decision_64k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/decision_only_reader_128k/lonejson") == 0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_decision_128k_case;
-    group = "candidate";
-    bytes_per_call = candidate_decision_128k_case.json_len;
-    docs_per_call = candidate_decision_128k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/decision_only_reader_256k/lonejson") == 0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_decision_256k_case;
-    group = "candidate";
-    bytes_per_call = candidate_decision_256k_case.json_len;
-    docs_per_call = candidate_decision_256k_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/decision_only_reader_1m/lonejson") ==
-             0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_decision_1m_case;
-    group = "candidate";
-    bytes_per_call = candidate_decision_1m_case.json_len;
-    docs_per_call = candidate_decision_1m_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/decision_only_recursive_reader/lonejson") == 0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_recursive_decision_case;
-    group = "candidate";
-    bytes_per_call = candidate_recursive_decision_case.json_len;
-    docs_per_call = candidate_recursive_decision_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/decision_only_recursive_reader_64k/lonejson") ==
-             0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_recursive_decision_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_recursive_decision_64k_case.json_len;
-    docs_per_call = candidate_recursive_decision_64k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/decision_only_recursive_buffer_64k/lonejson") ==
-             0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_recursive_decision_buffer_case;
-    group = "candidate";
-    bytes_per_call = candidate_recursive_decision_buffer_case.json_len;
-    docs_per_call = candidate_recursive_decision_buffer_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/decision_only_source/lonejson") ==
-             0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_source_decision_case;
-    group = "candidate";
-    bytes_per_call = candidate_source_decision_case.json_len;
-    docs_per_call = candidate_source_decision_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/decision_only_source_64k/lonejson") ==
-             0) {
-    fn = bench_candidate_decision_only_case;
-    ctx = &candidate_source_decision_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_source_decision_64k_case.json_len;
-    docs_per_call = candidate_source_decision_64k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_reader/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_streaming_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_streaming_case.json_len;
-    docs_per_call = candidate_transform_streaming_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_reader_16k/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_streaming_16k_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_streaming_16k_case.json_len;
-    docs_per_call = candidate_transform_streaming_16k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_reader_64k/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_streaming_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_streaming_64k_case.json_len;
-    docs_per_call = candidate_transform_streaming_64k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_reader_128k/lonejson") ==
-             0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_streaming_128k_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_streaming_128k_case.json_len;
-    docs_per_call = candidate_transform_streaming_128k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_reader_256k/lonejson") ==
-             0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_streaming_256k_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_streaming_256k_case.json_len;
-    docs_per_call = candidate_transform_streaming_256k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_reader_1m/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_streaming_1m_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_streaming_1m_case.json_len;
-    docs_per_call = candidate_transform_streaming_1m_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/transform_streaming_recursive_reader/"
-                               "lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_recursive_transform_streaming_case;
-    group = "candidate";
-    bytes_per_call = candidate_recursive_transform_streaming_case.json_len;
-    docs_per_call =
-        candidate_recursive_transform_streaming_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_recursive_reader_64k/"
-                    "lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_recursive_transform_streaming_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_recursive_transform_streaming_64k_case.json_len;
-    docs_per_call =
-        candidate_recursive_transform_streaming_64k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_recursive_buffer_64k/"
-                    "lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_recursive_transform_streaming_buffer_case;
-    group = "candidate";
-    bytes_per_call =
-        candidate_recursive_transform_streaming_buffer_case.json_len;
-    docs_per_call =
-        candidate_recursive_transform_streaming_buffer_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_source/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_source_transform_streaming_case;
-    group = "candidate";
-    bytes_per_call = candidate_source_transform_streaming_case.json_len;
-    docs_per_call = candidate_source_transform_streaming_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_streaming_source_64k/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_source_transform_streaming_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_source_transform_streaming_64k_case.json_len;
-    docs_per_call =
-        candidate_source_transform_streaming_64k_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/transform_gated_reader/lonejson") ==
-             0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_gated_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_gated_case.json_len;
-    docs_per_call = candidate_transform_gated_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_gated_reader_16k/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_gated_16k_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_gated_16k_case.json_len;
-    docs_per_call = candidate_transform_gated_16k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_gated_reader_64k/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_gated_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_gated_64k_case.json_len;
-    docs_per_call = candidate_transform_gated_64k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_gated_drop_reader_64k/lonejson") ==
-             0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_gated_drop_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_gated_drop_64k_case.json_len;
-    docs_per_call = candidate_transform_gated_drop_64k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_gated_reader_128k/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_gated_128k_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_gated_128k_case.json_len;
-    docs_per_call = candidate_transform_gated_128k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_gated_reader_256k/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_gated_256k_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_gated_256k_case.json_len;
-    docs_per_call = candidate_transform_gated_256k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_gated_reader_1m/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_transform_gated_1m_case;
-    group = "candidate";
-    bytes_per_call = candidate_transform_gated_1m_case.json_len;
-    docs_per_call = candidate_transform_gated_1m_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_gated_recursive_reader/lonejson") ==
-             0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_recursive_transform_gated_case;
-    group = "candidate";
-    bytes_per_call = candidate_recursive_transform_gated_case.json_len;
-    docs_per_call = candidate_recursive_transform_gated_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/transform_gated_recursive_reader_64k/"
-                               "lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_recursive_transform_gated_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_recursive_transform_gated_64k_case.json_len;
-    docs_per_call =
-        candidate_recursive_transform_gated_64k_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_gated_drop_recursive_reader_64k/"
-                    "lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_recursive_transform_gated_drop_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_recursive_transform_gated_drop_64k_case.json_len;
-    docs_per_call =
-        candidate_recursive_transform_gated_drop_64k_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/transform_gated_recursive_buffer_64k/"
-                               "lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_recursive_transform_gated_buffer_case;
-    group = "candidate";
-    bytes_per_call = candidate_recursive_transform_gated_buffer_case.json_len;
-    docs_per_call =
-        candidate_recursive_transform_gated_buffer_case.candidate_count;
-  } else if (strcmp(case_name, "candidate/transform_gated_source/lonejson") ==
-             0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_source_transform_gated_case;
-    group = "candidate";
-    bytes_per_call = candidate_source_transform_gated_case.json_len;
-    docs_per_call = candidate_source_transform_gated_case.candidate_count;
-  } else if (strcmp(case_name,
-                    "candidate/transform_gated_source_64k/lonejson") == 0) {
-    fn = bench_candidate_transform_case;
-    ctx = &candidate_source_transform_gated_64k_case;
-    group = "candidate";
-    bytes_per_call = candidate_source_transform_gated_64k_case.json_len;
-    docs_per_call = candidate_source_transform_gated_64k_case.candidate_count;
   } else if (strcmp(case_name, "array_stream/pull_mapped_items/lonejson") ==
              0) {
     fn = bench_array_stream_pull_mapped_case;
@@ -5302,33 +3755,11 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
     free(japanese_wide_json_data);
     free(hebrew_wide_json_data);
     free(arabic_wide_json_data);
-    bench_cleanup_candidate_hot_path_source(&candidate_recursive_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_source_decision_case);
-    bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
     return 1;
   }
 
   bench_run_simple_case(&result, case_name, group, fn, ctx, iterations,
                         bytes_per_call, docs_per_call);
-  if (strcmp(group, "candidate") == 0 && ctx != NULL) {
-    bench_candidate_hot_path_case *candidate_ctx;
-
-    candidate_ctx = (bench_candidate_hot_path_case *)ctx;
-    result.read_calls = (lonejson_uint64)candidate_ctx->last_read_calls;
-    result.source_read_bytes =
-        (lonejson_uint64)candidate_ctx->last_source_read_bytes;
-    result.candidate_read_buffer_size =
-        (lonejson_uint64)bench_candidate_read_buffer_size(
-            candidate_ctx->runtime);
-    result.candidate_count = (lonejson_uint64)candidate_ctx->candidate_count;
-    result.candidates_spooled =
-        (lonejson_uint64)candidate_ctx->last_candidates_spooled;
-    result.candidates_replayed =
-        (lonejson_uint64)candidate_ctx->last_candidates_replayed;
-    result.candidates_dropped =
-        (lonejson_uint64)candidate_ctx->last_candidates_dropped;
-    result.output_bytes = (lonejson_uint64)candidate_ctx->last_output_bytes;
-  }
   bench_cleanup_json_value_doc(&json_value_record);
   bench_cleanup_json_value_doc(&json_value_source_record);
   LONEJSON_FREE((void *)json_value_serialize_case.expected_json);
@@ -5342,9 +3773,6 @@ static int bench_case_command(const char *case_name, unsigned iterations) {
   free(japanese_wide_json_data);
   free(hebrew_wide_json_data);
   free(arabic_wide_json_data);
-  bench_cleanup_candidate_hot_path_source(&candidate_recursive_decision_case);
-  bench_cleanup_candidate_hot_path_source(&candidate_source_decision_case);
-  bench_cleanup_candidate_hot_path_source(&candidate_decision_case);
   printf("%s %.3f MiB/s %.1f docs/s %.3f ns/byte mismatches=%.0f\n",
          result.name, result.mib_per_sec, result.docs_per_sec,
          result.ns_per_byte, (double)result.mismatch_count);

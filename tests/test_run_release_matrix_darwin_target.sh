@@ -29,10 +29,15 @@ printf '%s\n' "$verify_script" | grep -F -- 'target_raw_compile_flags()' >/dev/n
 printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-mmacosx-version-min=$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'raw_compile_flags="$(target_raw_compile_flags "$target_id")"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "--ld-path=$LINKER"' >/dev/null
-printf '%s\n' "$verify_script" | grep -F -- 'run_with_target_path "$target_id" "$CC" "$consumer_source" $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"' >/dev/null
+printf '%s\n' "$verify_script" | grep -F -- 'target_toolchain_file()' >/dev/null
+printf '%s\n' "$verify_script" | grep -F -- '$TARGET_CFLAGS $raw_compile_flags $pkg_config_flags' >/dev/null
+printf '%s\n' "$verify_script" | grep -F -- '-D "CMAKE_TOOLCHAIN_FILE=$(target_toolchain_file "$target_id")"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'scripts/discover_target_tools.sh' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'package-darwin-smoke-bundle' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'make package-verify' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'scripts/osxcross_available.sh' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'require_command qemu-x86_64' >/dev/null
+printf '%s\n' "$matrix_script" | grep -Fx -- 'set -euo pipefail' >/dev/null
 grep -F 'liblonejson.${LONEJSON_ABI_VERSION}.dylib' \
   "$darwin_smoke_script_path" >/dev/null
 grep -F 'LONEJSON_ABI_VERSION is required for Darwin smoke bundle' \
@@ -75,23 +80,26 @@ fi
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OPENSSL=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_JWT=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OIDC=ON' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'run_target linux-gnu-release x86_64-linux-gnu package-archive-linux-gnu full' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset"' >/dev/null
-if printf '%s\n' "$matrix_script" | grep -F -- 'host_policy_ctest_exclude=' >/dev/null; then
-  printf 'release matrix must not keep a filtered cross-target CTest replay surface\n' >&2
-  exit 1
-fi
-if printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset" -E' >/dev/null; then
-  printf 'release matrix must not rerun prerelease CTest subsets for package targets\n' >&2
-  exit 1
-fi
+printf '%s\n' "$matrix_script" | grep -F -- 'run_target x86_64-linux-gnu-release x86_64-linux-gnu package-archive-x86_64-linux-gnu full' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'cross_ctest_exclude=' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset" --output-on-failure -E "$ctest_exclude"' >/dev/null
 for non_host_target in \
-    'run_target linux-musl-release x86_64-linux-musl package-archive-linux-musl' \
-    'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu' \
-    'run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl' \
-    'run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu' \
-    'run_target armhf-linux-musl-release armhf-linux-musl package-archive-armhf-linux-musl'; do
+    'run_target x86_64-linux-musl-release x86_64-linux-musl package-archive-x86_64-linux-musl full "$cross_ctest_exclude"' \
+    'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu full "$cross_ctest_exclude"' \
+    'run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl full "$cross_ctest_exclude"' \
+    'run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu full "$cross_ctest_exclude"' \
+    'run_target armhf-linux-musl-release armhf-linux-musl package-archive-armhf-linux-musl full "$cross_ctest_exclude"'; do
   printf '%s\n' "$matrix_script" | grep -F -- "$non_host_target" >/dev/null
+done
+for target_id in \
+    x86_64-linux-gnu \
+    x86_64-linux-musl \
+    aarch64-linux-gnu \
+    aarch64-linux-musl \
+    armhf-linux-gnu \
+    armhf-linux-musl \
+    arm64-apple-darwin; do
+  printf '%s\n' "$matrix_script" | grep -F -- "\"\$repo_root/scripts/deps.sh\" $target_id" >/dev/null
 done
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OPENSSL=${LONEJSON_BUILD_WITH_OPENSSL}' >/dev/null
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_JWT=${LONEJSON_BUILD_WITH_JWT}' >/dev/null
@@ -121,14 +129,9 @@ if printf '%s\n' "$matrix_script" | grep -F -- '-U OPENSSL_' >/dev/null; then
 fi
 
 fake_bin="$tmp_dir/bin"
-aarch64_musl_prefix="$tmp_dir/aarch64-linux-musl"
-armhf_musl_prefix="$tmp_dir/arm-linux-musleabihf"
+toolchain_cache="$tmp_dir/toolchain-cache"
 mkdir -p \
-  "$fake_bin" \
-  "$aarch64_musl_prefix/bin" \
-  "$aarch64_musl_prefix/aarch64-linux-musl/lib" \
-  "$armhf_musl_prefix/bin" \
-  "$armhf_musl_prefix/arm-linux-musleabihf/lib"
+  "$fake_bin"
 for tool in \
   cmake \
   ctest \
@@ -138,35 +141,38 @@ for tool in \
   make \
   lua \
   luarocks \
-  musl-gcc \
-  aarch64-linux-gnu-gcc \
-  arm-linux-gnueabihf-gcc \
+  qemu-x86_64 \
   qemu-aarch64 \
   qemu-arm; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_bin/$tool"
   chmod +x "$fake_bin/$tool"
 done
-for tool in \
-  aarch64-linux-musl-gcc \
-  aarch64-linux-musl-ar \
-  aarch64-linux-musl-ranlib; do
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$aarch64_musl_prefix/bin/$tool"
-  chmod +x "$aarch64_musl_prefix/bin/$tool"
-done
-for tool in \
-  arm-linux-musleabihf-gcc \
-  arm-linux-musleabihf-ar \
-  arm-linux-musleabihf-ranlib; do
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$armhf_musl_prefix/bin/$tool"
-  chmod +x "$armhf_musl_prefix/bin/$tool"
-done
-touch \
-  "$aarch64_musl_prefix/aarch64-linux-musl/lib/ld-musl-aarch64.so.1" \
-  "$armhf_musl_prefix/arm-linux-musleabihf/lib/ld-musl-armhf.so.1"
+while IFS='|' read -r name prefix triple; do
+  root="$toolchain_cache/roots/$name"
+  mkdir -p "$root/bin" "$root/$triple/sysroot/usr/include" "$root/$triple/sysroot/usr/lib"
+  mkdir -p "$root/lib"
+  touch "$root/$triple/sysroot/usr/include/stdio.h"
+  touch "$root/$triple/sysroot/usr/lib/libc.so"
+  touch "$root/lib/libstdc++.a" "$root/lib/libgcc.a"
+  for tool in gcc g++ ld ar ranlib strip nm objcopy objdump addr2line gdb readelf; do
+    if [[ "$tool" == g++ ]]; then
+      printf '#!/usr/bin/env bash\ncase "${1:-}" in\n  -print-file-name=libstdc++.a) printf "%%s\\n" "$(dirname "$0")/../lib/libstdc++.a" ;;\n  -print-file-name=libgcc.a) printf "%%s\\n" "$(dirname "$0")/../lib/libgcc.a" ;;\n  *) exit 0 ;;\nesac\n' >"$root/bin/$prefix-$tool"
+    else
+      printf '#!/usr/bin/env bash\nexit 0\n' >"$root/bin/$prefix-$tool"
+    fi
+    chmod +x "$root/bin/$prefix-$tool"
+  done
+done <<'EOF'
+x86-64--glibc--stable-2025.08-1|x86_64-linux|x86_64-buildroot-linux-gnu
+x86-64--musl--stable-2025.08-1|x86_64-linux|x86_64-buildroot-linux-musl
+aarch64--glibc--stable-2025.08-1|aarch64-linux|aarch64-buildroot-linux-gnu
+aarch64--musl--stable-2025.08-1|aarch64-linux|aarch64-buildroot-linux-musl
+armv7-eabihf--glibc--stable-2025.08-1|arm-linux|arm-buildroot-linux-gnueabihf
+armv7-eabihf--musl--stable-2025.08-1|arm-linux|arm-buildroot-linux-musleabihf
+EOF
 
 preflight_output="$(PATH="$fake_bin:/usr/bin:/bin" \
-  CPKT_AARCH64_MUSL_PREFIX="$aarch64_musl_prefix" \
-  CPKT_ARMHF_MUSL_PREFIX="$armhf_musl_prefix" \
+  CPKT_TOOLCHAIN_CACHE="$toolchain_cache" \
   LONEJSON_RELEASE_MATRIX_PREFLIGHT_ONLY=1 \
   "$matrix_script_path")"
-[[ "$preflight_output" == "Release matrix preflight completed successfully." ]]
+printf '%s\n' "$preflight_output" | grep -Fx 'Release matrix preflight completed successfully.' >/dev/null

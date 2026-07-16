@@ -4,6 +4,9 @@ endif()
 if(NOT DEFINED LONEJSON_SOURCE_FILE)
   message(FATAL_ERROR "LONEJSON_SOURCE_FILE is required")
 endif()
+if(NOT DEFINED LONEJSON_AFL_COMPILER)
+  message(FATAL_ERROR "LONEJSON_AFL_COMPILER is required")
+endif()
 
 file(READ "${LONEJSON_COMPILE_COMMANDS}" LONEJSON_COMPILE_COMMANDS_JSON)
 
@@ -18,13 +21,12 @@ foreach(LONEJSON_INDEX RANGE 0 ${LONEJSON_LAST_COMMAND})
     set(LONEJSON_FOUND_SOURCE ON)
     string(JSON LONEJSON_COMMAND GET "${LONEJSON_COMPILE_COMMANDS_JSON}"
            ${LONEJSON_INDEX} command)
-    string(FIND "${LONEJSON_COMMAND}"
-                "-fsanitize=fuzzer-no-link,address,undefined"
-                LONEJSON_SANITIZER_FLAG_INDEX)
-    string(FIND "${LONEJSON_COMMAND}" "-fno-omit-frame-pointer"
-                LONEJSON_FRAME_POINTER_FLAG_INDEX)
-    if(NOT LONEJSON_SANITIZER_FLAG_INDEX LESS 0 AND
-       NOT LONEJSON_FRAME_POINTER_FLAG_INDEX LESS 0)
+    string(FIND "${LONEJSON_COMMAND}" "${LONEJSON_AFL_COMPILER}"
+                LONEJSON_AFL_COMPILER_INDEX)
+    string(FIND "${LONEJSON_COMMAND}" "-fsanitize=fuzzer"
+                LONEJSON_LEGACY_FUZZER_INDEX)
+    if(NOT LONEJSON_AFL_COMPILER_INDEX LESS 0 AND
+       LONEJSON_LEGACY_FUZZER_INDEX LESS 0)
       return()
     endif()
   endif()
@@ -37,5 +39,4 @@ endif()
 
 message(FATAL_ERROR
         "fuzz build does not contain an instrumented ${LONEJSON_SOURCE_FILE}; "
-        "expected -fsanitize=fuzzer-no-link,address,undefined and "
-        "-fno-omit-frame-pointer")
+        "expected the pinned AFL++ GCC wrapper ${LONEJSON_AFL_COMPILER}")

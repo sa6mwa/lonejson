@@ -240,7 +240,7 @@ static char *fuzz_build_boundary_json(const uint8_t *data, size_t size) {
   return json;
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson_config config;
   lonejson *runtime;
   lonejson_error error;

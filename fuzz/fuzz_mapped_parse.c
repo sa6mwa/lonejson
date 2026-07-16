@@ -361,7 +361,7 @@ static void fuzz_parse_capped_alloc_doc(const uint8_t *data, size_t size) {
   free(json);
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   lonejson *runtime;
   fuzz_person person;
   lonejson_error error;

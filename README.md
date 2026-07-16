@@ -17,7 +17,7 @@ it is strongly typed, stream-oriented, and deliberate about ownership and
 allocation.
 
 Repository: <https://github.com/sa6mwa/lonejson>  
-Examples: <https://github.com/sa6mwa/lonejson/tree/main/examples>
+Examples: <https://github.com/sa6mwa/lonejson/tree/trunk/examples>
 
 ## Use-case
 
@@ -423,8 +423,9 @@ introspection, UserInfo, revocation, bearer rejection, and bearer acceptance
 against the live endpoints. The same e2e checks fail-closed bearer behavior for
 missing credentials, wrong audience, missing scope, wrong/missing `azp`, and
 acceptance for strict multi-audience tokens and `scp` array scopes. Compose
-commands prefer `nerdctl compose` and fall back to `docker compose`. The e2e
-also exercises refresh-token grant exchange against the mock provider and
+commands run through `scripts/compose.sh`, which prefers `nerdctl compose` and
+falls back to `docker compose`. The e2e also exercises refresh-token grant
+exchange against the mock provider and
 requires a returned access token.
 
 `make test-m2m-e2e` starts a tiny lonejson-backed API fixture and uses `curl`
@@ -475,13 +476,7 @@ covers the lower-level case where one arbitrary JSON value should be visited
 without a schema. Parse, write, and arbitrary-value limits are configured on
 the instantiated `lonejson` runtime through `lonejson_config`.
 
-Candidate stream and candidate transform reader/file/path/fd APIs use the
-runtime's `candidate_read_buffer_size` as their transport buffer size. The
-default is `LONEJSON_CANDIDATE_READ_BUFFER_SIZE`, currently the parser buffer
-size. Reader-heavy candidate workloads can raise it, for example to `64 KiB`,
-to reduce callback or file-read churn without materializing the whole input.
-Buffer-backed candidate APIs ignore this setting because their input is already
-memory-resident.
+
 
 Every public operation hangs off one instantiated runtime. You can call the
 free functions such as `lonejson_parse_cstr(lj, ...)` or the equivalent method
@@ -620,7 +615,10 @@ The Lua binding exposes the same reuse control through
 `lonejson` stream parsing is object-framed rather than delimiter-framed. It
 ignores whitespace between objects, so `{"a":1}{"a":2}`, pretty-printed
 objects separated by blank lines, and JSONL-style one-object-per-line input all
-fit the same model.
+fit the same model. This cursor emits mapped top-level objects only; it is not
+an iterator for arbitrary scalar, array, or object values. Use
+`lonejson_visit_value_*` to process exactly one arbitrary JSON value without a
+schema.
 
 ```c
 lonejson_stream *stream;
@@ -859,59 +857,6 @@ Structured old values are observable through `old_value_visitor`; visitor
 events are streamed and balanced, and the complete old value is not materialized.
 See `examples/value_rewrite_replace_with.c` for a complete integer increment
 program.
-
-### Transform candidate streams
-
-Use `lonejson_transform_candidates_*` when a stream of JSON candidates should be
-validated once and rewritten as candidates are parsed. The input can be a
-buffer, reader callback, `FILE *`, path, or file descriptor, with the same
-candidate framing modes used by `lonejson_visit_candidates_*`: repeated values,
-JSON Lines, a single value, or top-level array items.
-
-The transform mode is explicit and selected before output can leak.
-`LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING` streams source values directly
-when a plan can commit output as it parses. Kept strings and numbers stream by
-default; complete old string/number views are opt-in with
-`LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE`, either call-wide or through
-the per-event `old_scalar` policy callback for values whose replacement logic
-needs the complete old scalar.
-`LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED` retains each logical
-candidate in a bounded `lonejson_spooled` handle, spills according to the
-selected runtime spool policy, asks `candidate_decision` whether to emit, drop,
-stop, or error, and replays emitted candidates through the same transform
-executor. Result counters report streamed, spooled, spilled, replayed, dropped,
-stopped, and projected candidates plus per-candidate spool bytes.
-
-`observer` receives the original token stream first. In gated-spooled mode,
-replay callbacks receive the caller-owned candidate policy returned by
-`candidate_decision`; replay does not call `observer` again. Replacement JSON is
-emitted only through `lonejson_writer`, so callers never write raw commas,
-colons, string escapes, object keys, separators, or container punctuation.
-`insert` callbacks can add object members at object begin, before or after
-source members, and at object end.
-
-`LONEJSON_CANDIDATE_TRANSFORM_DROP` suppresses an object member, array element,
-or complete candidate root while preserving valid output. Emitted candidates are
-JSON Lines values terminated with `\n`, including the final emitted candidate.
-Dropped candidates emit no bytes, and an all-dropped transform emits no newline.
-
-Structural projection is configured with
-`lonejson_candidate_transform_projection_path` entries. Projection segment kinds
-distinguish object members from array indexes, so object key `"0"` and array
-index `0` are unambiguous. LoneJSON emits projection parent objects/arrays,
-groups missing object-member descendants, and writes `null` placeholders for
-projected sparse array indexes. Invalid projection shapes, such as mixed object
-and array roots, fail with `LONEJSON_STATUS_UNSUPPORTED` before partial output.
-`LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_SOURCE_EVENTS` is the default
-streaming-preferred projection/composition mode.
-`LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM` is available
-for gated-spooled transforms that must first build the projected logical
-candidate into a bounded spool, then replay that projected candidate through
-normal transform callbacks.
-
-`LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS` flattens nested root arrays
-into logical candidates. Transform mode, projection, mutation, gated spooling,
-replay, and candidate metadata apply to each logical candidate independently.
 
 ### Parse Server-Sent Events and multipart streams
 
@@ -1349,7 +1294,7 @@ string/file/JSONL serialization, optional curl integration, and the Lua binding.
 
 Online:
 
-- <https://github.com/sa6mwa/lonejson/tree/main/examples>
+- <https://github.com/sa6mwa/lonejson/tree/trunk/examples>
 
 ## Release artifacts
 
@@ -1370,13 +1315,80 @@ That command produces:
 The compressed header artifact is the standalone embedded form for
 single-header integration. Its version macros are regenerated to match the
 resolved release version, from `VERSION` when present in a source package,
-otherwise from an exact `vX.Y.Z` tag on `HEAD`, and otherwise `0.0.0`. The
+otherwise from an exact lightweight `vX.Y.Z` tag on `HEAD`, and otherwise
+`0.0.0`. Before `make release` cleans generated state or builds artifacts, it
+runs `make lifecycle-version-contract` to verify that git-worktree version
+detection, Make, and CMake agree on exact lightweight tags and explicit
+release-candidate overrides. The project-prefixed
+`LONEJSON_VERSION_OVERRIDE=X.Y.Z` escape hatch is for release-candidate
+rehearsals only; Make exports an explicit command-line override, and CMake
+honors an environment override for the current configure without caching it for
+later normal builds. The
 source-only archive contains the repository source tree
 without generated build output or local stash material. The Lua source package
 prefers a curl-enabled native build when curl is available in the build
 environment and falls back automatically to a curl-free build otherwise. The
 same release version source of truth is used for the source-only archive and
 the generated standalone header artifact.
+
+## Compiler and cross-toolchain policy
+
+Native debug, host, and Linux release builds use pinned Bootlin stable toolchain
+collections end to end: GCC, GNU ld, binutils, debugger, libc sysroot, and
+target runtime all come from one cached collection rather than a host compiler
+or any `~/.local/cross` installation. CMake rejects a target compiler whose
+`-dumpmachine` triple does not match the collection, and package verification
+uses the configured Bootlin target tools. Native memory checking uses the
+host-installed Valgrind Memcheck. Fuzzing uses a pinned AFL++ GCC-plugin build
+tied to the cached Bootlin x86_64 GCC collection; neither route uses a host
+compiler. ThreadSanitizer probes the selected native Bootlin GCC collection at
+gate time, after toolchain resolution, and skips only when that compiler cannot
+build the TSan probe. To prepare AFL++ for fuzzing:
+
+```sh
+make toolchains-aflpp
+```
+
+Each Linux CMake configuration provisions its selected, checksum-pinned
+Bootlin collection automatically. To inspect toolchain status or warm all
+Linux release collections before a matrix build:
+
+```sh
+make toolchains-all
+```
+
+They are shared across pkt.systems projects at
+`${CPKT_TOOLCHAIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains}`.
+Set `CPKT_TOOLCHAIN_CACHE` to relocate that cache. The Darwin target remains
+an explicit osxcross/SDK setup because Apple SDKs are not publicly
+downloadable. `scripts/cpkt-toolchains.sh discover` reports every supported
+target, including whether the optional local osxcross collection is ready.
+Shared Bootlin and AFL++ provisioning waits at most
+`${CPKT_TOOLCHAIN_LOCK_TIMEOUT:-600}` seconds for the matching cache lock.
+Checkout-local fixture, Lua-rock, and standalone-header locks use
+`${LONEJSON_LOCK_TIMEOUT_SECONDS:-120}` seconds.
+
+Pinned c.pkt.systems SDK archives use the adjacent shared cache
+`${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.
+Each archive is verified by SHA-256 before reuse and is keyed by that digest;
+only the extracted SDK root belongs to this checkout under `.cache/`. `make
+clean` preserves both shared caches.
+
+## Local compose e2e
+
+`make test-e2e` starts a deterministic local compose project whose default name
+is derived from the checkout path, waits for HTTPS, OIDC, and API-fixture
+readiness, then runs the curl, OIDC, and M2M workflows. Set
+`LONEJSON_COMPOSE_PROJECT_NAME` to select an explicit project name. Mutable
+service state, including the generated TLS certificate and nginx fixture data,
+is under `devenv/volumes/` and is removed by `make dev-reset` or `make clean`.
+
+Every published service port is overrideable for parallel checkouts:
+`LONEJSON_OAUTH2_E2E_PORT`, `LONEJSON_OIDC_E2E_PORT`,
+`LONEJSON_API_FIXTURE_E2E_PORT`, `LONEJSON_NGINX_HTTP_E2E_PORT`, and
+`LONEJSON_NGINX_HTTPS_E2E_PORT`. Set
+`LONEJSON_E2E_KEEP_DEVSERVICES=1` to retain the compose stack after an e2e
+run for debugging.
 
 ## Verification
 
@@ -1385,6 +1397,7 @@ The standard verification commands are:
 ```sh
 make test
 make test-all
+make test-e2e
 make cross-sanitizers
 make asan
 make bench-gate
@@ -1398,18 +1411,23 @@ raw `ctest --preset debug` as completion or release evidence; raw CTest is only
 diagnostic after a matching configure/build step. See
 [Local Verification](docs/local-verification.md) for the exact boundary.
 
-`make test-all` is the broader local confidence gate: debug, host, curl/auth
-host, cross presets, host sanitizers, benchmark checks, and fuzz smoke.
+`make test-all` is the broader deterministic local confidence gate: debug,
+host, curl/auth host, cross presets, host sanitizers, Valgrind, deterministic
+local e2e, and fuzz smoke. It deliberately does not run benchmark gates.
 `make cross-sanitizers` is an extra hardening check for the currently supported
 QEMU sanitizer route, `armhf-linux-gnu` ASan/UBSan; it is intentionally outside
 the normal release gate because the other pkt.systems C projects run sanitizer
 coverage on host debug targets. `make prerelease` runs the complete release
 pipeline without cleaning generated state first: `test-all`, then the release
 matrix that builds, checksums, and verifies every release artifact. `make
-release` is the final clean release gate; it cleans generated state, then runs
-the same release pipeline. No release-relevant check should exist only in one
-of those targets. `make test-all-bindings` is a compatibility alias for the Lua
-binding suite; it no longer expands to the full world gate.
+release` is the final clean release gate; it first runs the lightweight-tag
+version contract, then cleans generated state, then runs the same release
+pipeline. No release-relevant check should exist only in one of those targets.
+`make test-all-bindings` is a compatibility alias for the Lua
+binding suite; it no longer expands to the full world gate. Benchmark
+enforcement is explicit through `bench-check`, `bench-gate`, Lua benchmark
+targets, and `prerelease-hardening` so noisy host performance runs can be
+investigated separately from lifecycle alignment.
 
 ## License
 
