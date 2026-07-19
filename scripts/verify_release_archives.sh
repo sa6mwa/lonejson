@@ -308,9 +308,9 @@ require_archive_contract() {
   for required_metadata in \
       '"schema": "pkt.systems.dependencies.v1"' \
       '"name": "c.pkt.systems"' \
-      '"version": "0.8.0"' \
+      '"version": "0.9.0"' \
       "\"target_id\": \"$target_id\"" \
-      '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.8.0/c.pkt.systems-0.8.0-' \
+      '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.9.0/c.pkt.systems-0.9.0-' \
       '"sha256": "' \
       '"bundled": false' \
       '"external": false' \

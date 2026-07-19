@@ -7,7 +7,7 @@ set -euo pipefail
 repo_root=$1
 tmp_dir=$(mktemp -d)
 
-bundle_dir_name="c.pkt.systems-0.8.0-x86_64-linux-gnu"
+bundle_dir_name="c.pkt.systems-0.9.0-x86_64-linux-gnu"
 assets_dir="$tmp_dir/assets"
 bundle_root="$assets_dir/$bundle_dir_name"
 success_root="$tmp_dir/success-root"
