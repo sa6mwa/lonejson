@@ -36,18 +36,5 @@ if(LONEJSON_BUILD_FUZZERS)
   set(ENV{AFL_CXX} "")
   message(STATUS "Using pinned AFL++ ${_lonejson_afl_version} with Bootlin GCC")
 elseif(NOT CMAKE_TOOLCHAIN_FILE)
-  include("${CMAKE_CURRENT_LIST_DIR}/toolchains/lonejson_bootlin.cmake")
-  include("${CMAKE_CURRENT_LIST_DIR}/toolchains/lonejson_native_bootlin_target.cmake")
-  lonejson_detect_native_bootlin_target(
-    _lonejson_native_target_id
-    _lonejson_native_cmake_processor
-    _lonejson_native_target_arch
-    _lonejson_native_libc
-    _lonejson_native_emulator)
-  lonejson_configure_bootlin_toolchain(
-    "${_lonejson_native_target_id}"
-    "${_lonejson_native_cmake_processor}"
-    "${_lonejson_native_target_arch}"
-    "${_lonejson_native_libc}"
-    "${_lonejson_native_emulator}")
+  include("${CMAKE_CURRENT_LIST_DIR}/toolchains/native.cmake")
 endif()

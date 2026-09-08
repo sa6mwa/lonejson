@@ -16,6 +16,23 @@ lua_incdir="$6"
 lonejson_libdir="${LONEJSON_LIBDIR:-$7}"
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+native_system=$(uname -s)
+if [ "$native_system" = "Linux" ] || [ "$native_system" = "Darwin" ]; then
+  if [ "$native_system" = "Darwin" ]; then
+    target_id=arm64-apple-darwin
+  else
+    target_id=$("$repo_root/scripts/detect_native_bootlin_target.sh")
+  fi
+  toolchain=$("$repo_root/scripts/cpkt-toolchains.sh" ensure "$target_id")
+  cc=$(printf '%s\n' "$toolchain" | sed -n 's/^cc=//p')
+  if [ ! -x "$cc" ]; then
+    printf 'Native toolchain resolver did not provide an executable compiler\n' >&2
+    exit 1
+  fi
+  if [ "$native_system" = "Darwin" ]; then
+    apple_sdk=$(printf '%s\n' "$toolchain" | sed -n 's/^sysroot=//p')
+  fi
+fi
 build_root="${repo_root}/.luarocks-build"
 module_dir="${build_root}/lonejson"
 object_path="${build_root}/lonejson_lua.${obj_ext}"
@@ -30,6 +47,10 @@ if [ -z "${cc}" ]; then
 fi
 
 run_cc() {
+  if [ "$native_system" = "Darwin" ]; then
+    "$cc" -arch arm64 -isysroot "$apple_sdk" "$@"
+    return "$?"
+  fi
   if [ -x "${cc}" ]; then
     "${cc}" "$@"
     return "$?"
@@ -42,6 +63,22 @@ run_cc() {
 
 mkdir -p "${module_dir}" "${probe_dir}"
 rm -f "${object_path}" "${module_path}" "${probe_bin}"
+
+# Copy only the interpreter's public API headers. Never add a host system
+# include directory to Bootlin's search path, which would mix libc headers.
+if [ "$(uname -s)" = "Linux" ]; then
+  staged_lua_incdir="${build_root}/lua-include"
+  mkdir -p "$staged_lua_incdir"
+  for lua_header in lua.h luaconf.h lauxlib.h lualib.h; do
+    cp "${lua_incdir}/${lua_header}" "$staged_lua_incdir/$lua_header"
+  done
+  # Debian's Lua configuration also includes its package-owned path settings.
+  if grep -F '"lua5.5-deb-multiarch.h"' "$lua_incdir/luaconf.h" >/dev/null; then
+    lua_multiarch=$(dpkg-architecture -qDEB_HOST_MULTIARCH)
+    cp "$lua_incdir/../$lua_multiarch/lua5.5-deb-multiarch.h" "$staged_lua_incdir/"
+  fi
+  lua_incdir=$staged_lua_incdir
+fi
 
 common_cflags="${cflags} -I${repo_root}/include -I${lua_incdir}"
 linkflags="${LDFLAGS:-}"

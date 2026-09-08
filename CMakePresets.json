@@ -26,7 +26,7 @@
     {
       "name": "debug",
       "inherits": "base",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-native.cmake",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/native.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -42,7 +42,7 @@
     {
       "name": "host",
       "inherits": "base",
-      "toolchainFile": "${sourceDir}/cmake/toolchains/linux-native.cmake",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/native.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }

@@ -526,7 +526,7 @@ extern "C" {
 /** Patch component of the lonejson header version. */
 #define LONEJSON_VERSION_PATCH 0
 /** Shared-library ABI / SONAME version for binary compatibility tracking. */
-#define LONEJSON_ABI_VERSION 25
+#define LONEJSON_ABI_VERSION 26
 
 /** Marks a mapping field as required during parse. */
 #define LONEJSON_FIELD_REQUIRED (1u << 0)
@@ -8051,6 +8051,10 @@ struct lonejson_curl_upload {
   curl_off_t (*size_fn)(const struct lonejson_curl_upload *ctx);
   /** Releases resources owned by this upload adapter. */
   void (*cleanup)(struct lonejson_curl_upload *ctx);
+  /** Checks whether all emitted fields support replay without reading them. */
+  int (*is_rewindable)(const struct lonejson_curl_upload *ctx);
+  /** Restarts serialization; see lonejson_curl_upload_rewind for failures. */
+  lonejson_status (*rewind)(struct lonejson_curl_upload *ctx);
 };
 
 #ifdef LONEJSON_WITH_OIDC
@@ -8148,6 +8152,26 @@ lonejson_status lonejson_curl_upload_init(lonejson_curl_upload *ctx,
 /** Curl read callback that streams serialized JSON bytes to libcurl. */
 size_t lonejson_curl_read_callback(char *ptr, size_t size, size_t nmemb,
                                    void *userdata);
+/** Checks replay capability without reading source contents. File probes may
+ * seek and restore position. Omitted fields are ignored. Returns zero for an
+ * inactive adapter. Capability does not guarantee subsequent source I/O.
+ */
+int lonejson_curl_upload_is_rewindable(const lonejson_curl_upload *ctx);
+/** Restarts serialization from byte zero, including after partial reads or EOF.
+ * Map, values, source contents, and allocator context must remain alive and
+ * stable through cleanup. The runtime handle is not retained. No size pass or
+ * full-message buffering occurs. Returns INVALID_ARGUMENT for inactive or
+ * non-rewindable uploads. Failures set generator.error; allocation failure
+ * preserves the previous cursor. Source I/O errors are reported on later reads.
+ */
+lonejson_status lonejson_curl_upload_rewind(lonejson_curl_upload *ctx);
+/** Install as CURLOPT_SEEKFUNCTION with this upload as CURLOPT_SEEKDATA.
+ * Only (0, SEEK_SET) is supported. Unsupported seeks or one-shot documents
+ * return CURL_SEEKFUNC_CANTSEEK without consuming input or changing
+ * diagnostics. Inactive adapters and restart failures return
+ * CURL_SEEKFUNC_FAIL.
+ */
+int lonejson_curl_seek_callback(void *userdata, curl_off_t offset, int origin);
 /** Returns the upload size reported by a curl upload adapter. The value is
  * `-1` when lonejson is streaming with an unknown total length.
  */
@@ -11283,6 +11307,21 @@ LONEJSON_SHORT_ALIAS_INLINE size_t lj_curl_read_callback(char *ptr, size_t size,
 LONEJSON_SHORT_ALIAS_INLINE curl_off_t
 lj_curl_upload_size(const lj_curl_upload *ctx) {
   return lonejson_curl_upload_size(ctx);
+}
+/** Checks replay capability without consuming source contents. */
+LONEJSON_SHORT_ALIAS_INLINE int
+lj_curl_upload_is_rewindable(const lj_curl_upload *ctx) {
+  return lonejson_curl_upload_is_rewindable(ctx);
+}
+/** Restarts a mapped upload without buffering or measuring it. */
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_curl_upload_rewind(lj_curl_upload *ctx) {
+  return lonejson_curl_upload_rewind(ctx);
+}
+/** Curl seek callback; pass the upload adapter as userdata. */
+LONEJSON_SHORT_ALIAS_INLINE int
+lj_curl_seek_callback(void *userdata, curl_off_t offset, int origin) {
+  return lonejson_curl_seek_callback(userdata, offset, origin);
 }
 /** Releases resources owned by a curl upload adapter. */
 LONEJSON_SHORT_ALIAS_INLINE void lj_curl_upload_cleanup(lj_curl_upload *ctx) {

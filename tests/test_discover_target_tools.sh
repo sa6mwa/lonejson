@@ -109,8 +109,8 @@ eval "$(PATH="$host_bin:/usr/bin:/bin" "$repo_root/scripts/discover_target_tools
 [[ -z "$INSTALL_NAME_TOOL" ]]
 
 toolchain_cache="$tmp_dir/toolchain-cache"
-aarch64_musl_root="$toolchain_cache/roots/aarch64--musl--stable-2025.08-1"
-armhf_musl_root="$toolchain_cache/roots/armv7-eabihf--musl--stable-2025.08-1"
+aarch64_musl_root="$toolchain_cache/roots/aarch64--musl--stable-2026.08-1"
+armhf_musl_root="$toolchain_cache/roots/armv7-eabihf--musl--stable-2026.08-1"
 for spec in \
   "$aarch64_musl_root|aarch64-linux|aarch64-buildroot-linux-musl" \
   "$armhf_musl_root|arm-linux|arm-buildroot-linux-musleabihf"; do

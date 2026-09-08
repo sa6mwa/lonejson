@@ -133,7 +133,7 @@ cat >"$fake_toolchain" <<EOF
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-set(CMAKE_C_COMPILER /usr/bin/cc CACHE FILEPATH "")
+include("$repo_root/cmake/toolchains/linux-x86_64-gnu.cmake")
 set(CMAKE_FIND_ROOT_PATH "$tmp_dir/nonexistent-sysroot")
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 EOF

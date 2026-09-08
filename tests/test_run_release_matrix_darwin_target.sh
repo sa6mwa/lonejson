@@ -163,12 +163,12 @@ while IFS='|' read -r name prefix triple; do
     chmod +x "$root/bin/$prefix-$tool"
   done
 done <<'EOF'
-x86-64--glibc--stable-2025.08-1|x86_64-linux|x86_64-buildroot-linux-gnu
-x86-64--musl--stable-2025.08-1|x86_64-linux|x86_64-buildroot-linux-musl
-aarch64--glibc--stable-2025.08-1|aarch64-linux|aarch64-buildroot-linux-gnu
-aarch64--musl--stable-2025.08-1|aarch64-linux|aarch64-buildroot-linux-musl
-armv7-eabihf--glibc--stable-2025.08-1|arm-linux|arm-buildroot-linux-gnueabihf
-armv7-eabihf--musl--stable-2025.08-1|arm-linux|arm-buildroot-linux-musleabihf
+x86-64--glibc--stable-2026.08-1|x86_64-linux|x86_64-buildroot-linux-gnu
+x86-64--musl--stable-2026.08-1|x86_64-linux|x86_64-buildroot-linux-musl
+aarch64--glibc--stable-2026.08-1|aarch64-linux|aarch64-buildroot-linux-gnu
+aarch64--musl--stable-2026.08-1|aarch64-linux|aarch64-buildroot-linux-musl
+armv7-eabihf--glibc--stable-2026.08-1|arm-linux|arm-buildroot-linux-gnueabihf
+armv7-eabihf--musl--stable-2026.08-1|arm-linux|arm-buildroot-linux-musleabihf
 EOF
 
 preflight_output="$(PATH="$fake_bin:/usr/bin:/bin" \

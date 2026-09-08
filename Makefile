@@ -78,6 +78,10 @@ LUA_ROCK_BUILD_BYPRODUCTS := \
 LUA_ROCK_SOURCES := \
 	lonejson.rockspec.in \
 	scripts/build_lua_rock.sh \
+	scripts/cpkt-toolchains.sh \
+	scripts/detect_native_bootlin_target.sh \
+	cmake/toolchains/print_native_bootlin_target.cmake \
+	cmake/toolchains/lonejson_native_bootlin_target.cmake \
 	scripts/package_lua_src_rock.sh \
 	scripts/render_release_rockspec.sh \
 	scripts/release_version.sh \
@@ -255,7 +259,7 @@ help:
 		'make asan                   Build and run the ASan/UBSan preset.' \
 		'make tsan                   Build the TSan preset and run the pure-C CTest subset that does not depend on external unsanitized runtimes.' \
 		'make valgrind               Run the native x86_64 debug CTest suite under Valgrind Memcheck.' \
-		'make fuzz-smoke             Build all AFL++ targets, run a seeded 1s smoke pass for each, and run Lua binding fuzz smoke.' \
+		'make fuzz-smoke             Build all AFL++ targets, run a fixed-seed 1000-execution pass for each, and run Lua binding fuzz smoke.' \
 		'make fuzz                   Build all AFL++ targets, run a seeded 30s pass for each and run Lua binding fuzz smoke; missing large synthetic seeds are regenerated automatically.' \
 		'make fuzz-long              Run the same fuzz targets with a several-minute soak per target.' \
 		'make stack-usage            Build with compiler stack-usage reporting and print the report.' \
@@ -291,7 +295,7 @@ help:
 		'make compose-logs           Compatibility alias for make dev-logs.' \
 		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
 		'make test-e2e               Run all deterministic local e2e gates serially; set LONEJSON_*_E2E_PORT to avoid host-port conflicts.' \
-		'make test-curl-e2e          Build and run the curl examples against the local HTTPS rig.' \
+		'make test-curl-e2e          Run curl examples and the 72-case upload rewind matrix against the local HTTPS rig.' \
 		'make test-oidc-e2e          Build and run OIDC/OAuth2/JWKS e2e against the local compose rig.' \
 		'make test-m2m-e2e           Build and run M2M Basic/Bearer auth e2e with curl as the client.' \
 		'make release-source-artifact Build the source-only release tarball in dist/.' \
@@ -401,6 +405,8 @@ release-pipeline:
 	+$(TIME_STEP) prerelease/format $(MAKE) format
 	+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0
 	+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix
+	+$(TIME_STEP) prerelease/source-smoke $(MAKE) package-source-smoke
+	+$(TIME_STEP) prerelease/package-verify $(MAKE) package-verify
 
 release-matrix:
 	./scripts/run_linux_release_matrix.sh
@@ -612,6 +618,7 @@ fuzz: deps-host toolchains-aflpp
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_base64 lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_path_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries lonejson_fuzz_jwt
 	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -D LONEJSON_AFL_COMPILER="$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^cc=//p')" -P cmake/check_fuzz_instrumentation.cmake
+	bash tests/test_fuzz_crash_handling.sh "$(CURDIR)"
 	$(TIME_STEP) fuzz/base64 ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" base64 ./build/$(FUZZ_PRESET)/lonejson_fuzz_base64 fuzz/corpus/base64
 	$(TIME_STEP) fuzz/validate ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" validate ./build/$(FUZZ_PRESET)/lonejson_fuzz_validate tests/fixtures/vendor/json_test_suite/test_parsing tests/fixtures/spec tests/fixtures/languages
 	$(TIME_STEP) fuzz/mapped ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" mapped ./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse fuzz/corpus/mapped tests/fixtures/spec
@@ -634,7 +641,7 @@ fuzz-long:
 	$(MAKE) fuzz FUZZ_TIME=$(FUZZ_LONG_TIME)
 
 fuzz-smoke:
-	$(MAKE) fuzz FUZZ_TIME=1
+	LONEJSON_FUZZ_EXECUTIONS=1000 $(MAKE) fuzz
 
 stack-usage:
 	cmake --preset stack-usage
@@ -652,7 +659,7 @@ toolchains-aflpp:
 deps-release: deps-all
 
 deps-host:
-	target_id="$$(./scripts/detect_native_bootlin_target.sh)" && ./scripts/deps.sh "$$target_id"
+	target_id="$$(./scripts/detect_native_target.sh)" && ./scripts/deps.sh "$$target_id"
 
 toolchains-x86_64-linux-gnu:
 	./scripts/cpkt-toolchains.sh ensure x86_64-linux-gnu

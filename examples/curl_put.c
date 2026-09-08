@@ -93,6 +93,8 @@ int main(void) {
   curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
   curl_easy_setopt(curl, CURLOPT_READFUNCTION, lonejson_curl_read_callback);
   curl_easy_setopt(curl, CURLOPT_READDATA, &upload_ctx);
+  curl_easy_setopt(curl, CURLOPT_SEEKFUNCTION, lonejson_curl_seek_callback);
+  curl_easy_setopt(curl, CURLOPT_SEEKDATA, &upload_ctx);
   curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE,
                    lonejson_curl_upload_size(&upload_ctx));
 

@@ -51,13 +51,32 @@ Methodology:
 * The wide multilingual document lanes exist to make that schema-guided advantage visible on a less toy-like shape than the original single-field UTF-8 fixtures.
 * `bench-compare` labels deltas under `3%` as `noise`, deltas under `10%` as `small`, and larger deltas as `material`.
 * `bench-gate` is the hard check:
+  * it requires recorded toolchain provenance and rejects different host,
+    compiler, or toolchain identities before comparing throughput
   * it fails if the baseline schema version differs from the latest run
   * it fails if the benchmark configuration differs from the baseline
   * it fails if the baseline is missing any current benchmark lanes
   * it fails on any material negative throughput regression
-* `bench-check`, as used by `test-all`, writes temporary result files instead
+* `bench-check` writes temporary result files instead
   of updating `latest.json`, then reruns a failed C or Lua benchmark gate
   once into a separate result file before failing. This keeps transient host
   scheduling noise from breaking the full test suite while still requiring
   reproducible material regressions to fail.
 * Freeze a new host-specific `baseline.json` whenever the benchmark schema, benchmark case set, measurement method, or benchmark host changes.
+
+After a compiler collection change, measure the prior released implementation
+with the same current harness, Bootlin collection, and host as the candidate.
+Use that reference measurement as the new baseline; do not relabel historical
+measurements or freeze the candidate to erase a regression. Historical records
+without toolchain provenance cannot establish a comparable baseline.
+
+The baseline for host `242867651d905848bc891b3cac236c45` was remeasured on
+2026-09-07 from the released `v0.42.0` single header, using the current benchmark
+harness and its CMake compile flags with Bootlin `stable-2026.08-1` / GCC 15.3.0.
+The reference build changed only the harness's lonejson include directory to
+the released header; it retained the candidate's compiler, options, and
+toolchain metadata. Both runs used 40 iterations and the same fixture corpus.
+All 50 cases matched, with no material candidate regressions (one small
+regression, 3.7%). The old host-compiler baseline remains in Git history; its
+measurements were not relabeled. Other hosts must establish their own measured
+Bootlin baseline before comparison.

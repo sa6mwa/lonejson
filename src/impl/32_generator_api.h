@@ -89,6 +89,10 @@ typedef struct lonejson__generator_state {
   unsigned magic;
   lonejson_allocator allocator;
   lonejson__write_options options;
+#ifdef LONEJSON_WITH_CURL
+  const lonejson_map *map;
+  const void *src;
+#endif
   lonejson__generator_frame *frames;
   size_t frame_count;
   size_t frame_capacity;
@@ -1184,6 +1188,11 @@ lonejson__generator_init_with_options(lonejson_generator *generator,
   state->magic = LONEJSON__GENERATOR_MAGIC;
   state->allocator = allocator;
   state->options = options ? *options : lonejson__default_write_options();
+#ifdef LONEJSON_WITH_CURL
+  state->options.allocator = &state->allocator;
+  state->map = map;
+  state->src = src;
+#endif
   memset(&root, 0, sizeof(root));
   root.kind = LONEJSON__GEN_FRAME_MAP;
   root.u.map.map = map;

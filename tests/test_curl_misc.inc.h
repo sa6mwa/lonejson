@@ -1,5 +1,231 @@
 #ifdef LONEJSON_WITH_CURL
 
+static size_t test_curl_drain(lonejson_curl_upload *upload, char *out,
+                              size_t capacity) {
+  size_t total = 0u;
+  size_t got;
+  while (total < capacity) {
+    got = upload->read_callback(upload, out + total, 1u, 1u);
+    EXPECT(got != CURL_READFUNC_ABORT);
+    if (got == 0u || got == CURL_READFUNC_ABORT) {
+      break;
+    }
+    total += got;
+  }
+  return total;
+}
+
+static void test_curl_upload_rewind(void) {
+  test_event event;
+  lonejson_curl_upload upload;
+  lonejson *runtime;
+  lonejson_config config;
+  char expected[512];
+  char actual[512];
+  size_t length;
+  size_t prefix;
+  int i;
+
+  memset(&event, 0, sizeof(event));
+  strcpy(event.id, "replay");
+  memset(&upload, 0, sizeof(upload));
+  EXPECT(lonejson_curl_seek_callback(NULL, 0, SEEK_SET) == CURL_SEEKFUNC_FAIL);
+  EXPECT(lonejson_curl_upload_rewind(NULL) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(!lonejson_curl_upload_is_rewindable(&upload));
+  EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_SET) ==
+         CURL_SEEKFUNC_FAIL);
+  config = lonejson_default_config();
+  config.write_pretty = 1;
+  runtime = lonejson_new(&config, NULL);
+  EXPECT(runtime != NULL);
+  EXPECT(lonejson_curl_upload_init(&upload, runtime, &test_event_map, &event) ==
+         LONEJSON_STATUS_OK);
+  lonejson_free(runtime);
+  EXPECT(lj_curl_upload_is_rewindable(&upload));
+  EXPECT(lj_curl_upload_rewind(&upload) == LONEJSON_STATUS_OK);
+  EXPECT(lj_curl_seek_callback(&upload, 0, SEEK_SET) == CURL_SEEKFUNC_OK);
+  EXPECT(upload.is_rewindable(&upload));
+  EXPECT(upload.size_fn(&upload) == (curl_off_t)-1);
+  EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+  length = test_curl_drain(&upload, expected, sizeof(expected));
+  EXPECT(length > 0u && length < sizeof(expected));
+  EXPECT(memchr(expected, '\n', length) != NULL);
+  for (i = 0; i < 3; ++i) {
+    EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_SET) ==
+           CURL_SEEKFUNC_OK);
+    prefix = upload.read_callback(&upload, actual, 1u, 5u);
+    EXPECT(prefix == 5u);
+    EXPECT(lonejson_curl_seek_callback(&upload, 1, SEEK_SET) ==
+           CURL_SEEKFUNC_CANTSEEK);
+    EXPECT(lonejson_curl_seek_callback(&upload, -1, SEEK_SET) ==
+           CURL_SEEKFUNC_CANTSEEK);
+    EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_CUR) ==
+           CURL_SEEKFUNC_CANTSEEK);
+    EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_END) ==
+           CURL_SEEKFUNC_CANTSEEK);
+    EXPECT(test_curl_drain(&upload, actual + prefix, sizeof(actual) - prefix) +
+               prefix ==
+           length);
+    EXPECT(memcmp(actual, expected, length) == 0);
+    EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+    EXPECT(upload.read_callback(&upload, actual, 1u, 7u) == 7u);
+    EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+    EXPECT(test_curl_drain(&upload, actual, sizeof(actual)) == length);
+    EXPECT(memcmp(actual, expected, length) == 0);
+  }
+  upload.cleanup(&upload);
+  EXPECT(!upload.is_rewindable(&upload));
+  EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_INVALID_ARGUMENT);
+  EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_SET) ==
+         CURL_SEEKFUNC_FAIL);
+  upload.cleanup(&upload);
+}
+
+static void test_curl_upload_rewind_one_shot(void) {
+  test_nested_json_value_doc doc;
+  lonejson_curl_upload upload;
+  lonejson_buffer_reader reader;
+  char actual[512];
+  size_t prefix;
+  size_t length;
+
+  memset(&doc, 0, sizeof(doc));
+  strcpy(doc.type, "mixed");
+  strcpy(doc.response.status, "ok");
+  lonejson_json_value_init(NULL, &doc.response.payload);
+  lonejson_buffer_reader_init(&reader, "[1,2]", 5u);
+  EXPECT(lonejson_json_value_set_reader(&doc.response.payload,
+                                        lonejson_buffer_reader_read, &reader,
+                                        NULL) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_upload_init(&upload, test_default_runtime(),
+                                   &test_nested_json_value_doc_map,
+                                   &doc) == LONEJSON_STATUS_OK);
+  EXPECT(!upload.is_rewindable(&upload));
+  EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_SET) ==
+         CURL_SEEKFUNC_CANTSEEK);
+  EXPECT(upload.generator.error.code == LONEJSON_STATUS_OK);
+  prefix = upload.read_callback(&upload, actual, 1u, 3u);
+  EXPECT(prefix == 3u);
+  EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_SET) ==
+         CURL_SEEKFUNC_CANTSEEK);
+  length = prefix + test_curl_drain(&upload, actual + prefix,
+                                    sizeof(actual) - prefix - 1u);
+  actual[length] = '\0';
+  EXPECT(strcmp(actual, "{\"type\":\"mixed\",\"response\":{\"status\":\"ok\","
+                        "\"payload\":[1,2]}}") == 0);
+  EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_SET) ==
+         CURL_SEEKFUNC_CANTSEEK);
+  upload.cleanup(&upload);
+  lonejson_cleanup(&test_nested_json_value_doc_map, &doc);
+}
+
+typedef struct test_curl_array_doc {
+  lonejson_object_array items;
+} test_curl_array_doc;
+static const lonejson_field test_curl_array_fields[] = {
+    LONEJSON_FIELD_OBJECT_ARRAY_OMIT_EMPTY(
+        test_curl_array_doc, items, "items", test_nested_json_value_response,
+        &test_nested_json_value_response_map, LONEJSON_OVERFLOW_FAIL)};
+LONEJSON_MAP_DEFINE(test_curl_array_map, test_curl_array_doc,
+                    test_curl_array_fields);
+
+static void test_curl_upload_rewind_array(void) {
+  test_curl_array_doc doc;
+  test_nested_json_value_response items[2];
+  lonejson_buffer_reader reader;
+  lonejson_curl_upload upload;
+  char expected[512];
+  char actual[512];
+  size_t length;
+
+  memset(&doc, 0, sizeof(doc));
+  memset(items, 0, sizeof(items));
+  lonejson_json_value_init(NULL, &items[0].payload);
+  lonejson_json_value_init(NULL, &items[1].payload);
+  EXPECT(lonejson_json_value_set_buffer(&items[0].payload, "true", 4u, NULL) ==
+         LONEJSON_STATUS_OK);
+  lonejson_buffer_reader_init(&reader, "false", 5u);
+  EXPECT(lonejson_json_value_set_reader(&items[1].payload,
+                                        lonejson_buffer_reader_read, &reader,
+                                        NULL) == LONEJSON_STATUS_OK);
+  doc.items.items = items;
+  /* The omitted empty array must not inspect or consume its backing items. */
+  EXPECT(lonejson_curl_upload_init(&upload, test_default_runtime(),
+                                   &test_curl_array_map,
+                                   &doc) == LONEJSON_STATUS_OK);
+  EXPECT(upload.is_rewindable(&upload));
+  EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+  EXPECT(test_curl_drain(&upload, actual, sizeof(actual)) == 2u);
+  EXPECT(memcmp(actual, "{}", 2u) == 0);
+  upload.cleanup(&upload);
+  doc.items.count = 2u;
+  EXPECT(lonejson_curl_upload_init(&upload, test_default_runtime(),
+                                   &test_curl_array_map,
+                                   &doc) == LONEJSON_STATUS_OK);
+  EXPECT(!upload.is_rewindable(&upload));
+  EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_SET) ==
+         CURL_SEEKFUNC_CANTSEEK);
+  length = test_curl_drain(&upload, expected, sizeof(expected));
+  EXPECT(length < sizeof(expected));
+  expected[length] = '\0';
+  EXPECT(strstr(expected, "\"payload\":false") != NULL);
+  upload.cleanup(&upload);
+  EXPECT(lonejson_json_value_set_buffer(&items[1].payload, "false", 5u, NULL) ==
+         LONEJSON_STATUS_OK);
+  EXPECT(lonejson_curl_upload_init(&upload, test_default_runtime(),
+                                   &test_curl_array_map,
+                                   &doc) == LONEJSON_STATUS_OK);
+  EXPECT(upload.is_rewindable(&upload));
+  EXPECT(test_curl_drain(&upload, actual, sizeof(actual)) == length);
+  EXPECT(memcmp(actual, expected, length) == 0);
+  EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+  EXPECT(test_curl_drain(&upload, actual, sizeof(actual)) == length);
+  EXPECT(memcmp(actual, expected, length) == 0);
+  upload.cleanup(&upload);
+  lonejson_json_value_cleanup(&items[0].payload);
+  lonejson_json_value_cleanup(&items[1].payload);
+}
+
+static void test_curl_upload_rewind_allocation_failure(void) {
+  test_fail_after_allocator_state alloc;
+  lonejson_config config;
+  lonejson *runtime;
+  lonejson_curl_upload upload;
+  test_event event;
+  char expected[512];
+  char actual[512];
+  size_t length;
+  size_t prefix;
+  size_t extra;
+
+  memset(&event, 0, sizeof(event));
+  test_fail_after_allocator_init(&alloc, (size_t)-1);
+  config = lonejson_default_config();
+  config.allocator = &alloc.allocator;
+  runtime = lonejson_new(&config, NULL);
+  EXPECT(runtime != NULL);
+  EXPECT(lonejson_curl_upload_init(&upload, runtime, &test_event_map, &event) ==
+         LONEJSON_STATUS_OK);
+  length = test_curl_drain(&upload, expected, sizeof(expected));
+  for (extra = 0u; extra < 2u; ++extra) {
+    EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+    prefix = upload.read_callback(&upload, actual, 1u, 3u);
+    alloc.successful_calls_before_failure = alloc.calls + extra;
+    EXPECT(lonejson_curl_seek_callback(&upload, 0, SEEK_SET) ==
+           CURL_SEEKFUNC_FAIL);
+    EXPECT(upload.generator.error.code == LONEJSON_STATUS_ALLOCATION_FAILED);
+    alloc.successful_calls_before_failure = (size_t)-1;
+    EXPECT(prefix + test_curl_drain(&upload, actual + prefix,
+                                    sizeof(actual) - prefix) ==
+           length);
+    EXPECT(memcmp(actual, expected, length) == 0);
+  }
+  EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+  EXPECT(upload.generator.error.code == LONEJSON_STATUS_OK);
+  upload.cleanup(&upload);
+  lonejson_free(runtime);
+}
+
 static int test_child_curl_upload_cleanup_default_allocator(void) {
   test_event event;
   lonejson_curl_upload upload;
@@ -122,6 +348,8 @@ static void test_curl_upload_streaming_does_not_buffer_payload(void) {
   fclose(fp);
 
   EXPECT(lonejson_source_set_path(&doc.text, path, NULL) == LONEJSON_STATUS_OK);
+  EXPECT(lonejson_source_set_path(&doc.bytes, path, NULL) ==
+         LONEJSON_STATUS_OK);
   EXPECT(lonejson_curl_upload_init(&upload, runtime, &test_source_doc_map,
                                    &doc) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_curl_upload_size(&upload) == (curl_off_t)-1);
@@ -140,6 +368,27 @@ static void test_curl_upload_streaming_does_not_buffer_payload(void) {
          upload.generator.error.code == LONEJSON_STATUS_TRUNCATED);
   EXPECT(total > 262144u);
   EXPECT(write_alloc.stats.peak_bytes_live < 65536u);
+  EXPECT(upload.is_rewindable(&upload));
+  EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+  EXPECT(upload.read_callback(&upload, chunk, 1u, sizeof(chunk)) ==
+         sizeof(chunk));
+  EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+  i = 0u;
+  for (;;) {
+    size_t got = upload.read_callback(&upload, chunk, 1u, sizeof(chunk));
+    EXPECT(got != CURL_READFUNC_ABORT);
+    if (got == 0u || got == CURL_READFUNC_ABORT) {
+      break;
+    }
+    i += got;
+  }
+  EXPECT(i == total);
+  EXPECT(write_alloc.stats.peak_bytes_live < 65536u);
+  EXPECT(unlink(path) == 0);
+  EXPECT(upload.rewind(&upload) == LONEJSON_STATUS_OK);
+  EXPECT(upload.read_callback(&upload, chunk, 1u, sizeof(chunk)) ==
+         CURL_READFUNC_ABORT);
+  EXPECT(upload.generator.error.code != LONEJSON_STATUS_OK);
   lonejson_curl_upload_cleanup(&upload);
   EXPECT(write_alloc.stats.bytes_live == runtime_bytes_live);
   lonejson_free(runtime);

@@ -68,6 +68,10 @@ resolve_staged_include() {
 }
 
 require_manifest_entry src/lua/lonejson_lua_visitor_facade.inc.h
+require_manifest_entry scripts/cpkt-toolchains.sh
+require_manifest_entry scripts/detect_native_bootlin_target.sh
+require_manifest_entry cmake/toolchains/print_native_bootlin_target.cmake
+require_manifest_entry cmake/toolchains/lonejson_native_bootlin_target.cmake
 
 (
   cd "$stage_dir"

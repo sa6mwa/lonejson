@@ -77,6 +77,17 @@ if grep -F 'CMAKE_CROSSCOMPILING_EMULATOR:STRING=' "$tmp_dir/default/CMakeCache.
   printf 'plain native Bootlin configuration must not install a QEMU emulator\n' >&2
   exit 1
 fi
+
+# A custom Linux toolchain must not bypass the complete collection contract.
+printf 'set(CMAKE_C_COMPILER "%s")\n' "$bootlin_cc" >"$tmp_dir/custom.cmake"
+if "$cmake_cmd" -S "$repo_root" -B "$tmp_dir/custom" -G Ninja \
+  -D CMAKE_TOOLCHAIN_FILE="$tmp_dir/custom.cmake" \
+  -D LONEJSON_BUILD_TESTS=OFF -D LONEJSON_BUILD_EXAMPLES=OFF \
+  >"$tmp_dir/custom.log" 2>&1; then
+  printf 'custom Linux toolchain bypassed Bootlin collection enforcement\n' >&2
+  exit 1
+fi
+grep -F 'Linux builds require the pinned Bootlin toolchain' "$tmp_dir/custom.log" >/dev/null
 grep -F 'LONEJSON_DEFAULT_C_COMPILER:INTERNAL=bootlin-gcc' \
   "$tmp_dir/default/CMakeCache.txt" >/dev/null
 
@@ -120,3 +131,17 @@ else
   grep -E 'must use its pinned Bootlin compiler|Bootlin compiler triple mismatch' \
     "$tmp_dir/explicit-gcc.log" >/dev/null
 fi
+
+if "$cmake_cmd" -S "$repo_root" --preset host -B "$tmp_dir/host" \
+  -D LONEJSON_BOOTLIN_TOOLCHAIN_ROOT="$tmp_dir/obsolete-collection" \
+  >"$tmp_dir/changed-collection.log" 2>&1; then
+  printf 'changed Bootlin collection silently discarded preset settings\n' >&2
+  exit 1
+fi
+grep -F 'Bootlin collection changed; rerun CMake with --fresh' \
+  "$tmp_dir/changed-collection.log" >/dev/null
+"$cmake_cmd" --fresh -S "$repo_root" --preset host -B "$tmp_dir/host" \
+  -D LONEJSON_BUILD_TESTS=OFF -D LONEJSON_BUILD_EXAMPLES=ON \
+  >"$tmp_dir/fresh.log" 2>&1
+[[ "$(cache_value "$tmp_dir/host/CMakeCache.txt" CMAKE_C_COMPILER)" == "$bootlin_cc" ]]
+[[ "$(cache_value "$tmp_dir/host/CMakeCache.txt" LONEJSON_BUILD_EXAMPLES)" == ON ]]

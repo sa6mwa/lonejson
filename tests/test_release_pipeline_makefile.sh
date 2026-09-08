@@ -33,6 +33,8 @@ require_text 'release-pipeline:'
 require_text '+$(TIME_STEP) prerelease/format $(MAKE) format'
 require_text '+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0'
 require_text '+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix'
+require_text '+$(TIME_STEP) prerelease/source-smoke $(MAKE) package-source-smoke'
+require_text '+$(TIME_STEP) prerelease/package-verify $(MAKE) package-verify'
 require_text 'Skipping test-host-curl: release-matrix runs the full curl-enabled host release tests before packaging'
 require_text 'verify-release-privacy: package-verify'
 require_text 'lifecycle-version-contract:'
@@ -61,12 +63,14 @@ line_number() {
 format_line=$(line_number '+$(TIME_STEP) prerelease/format $(MAKE) format')
 test_all_line=$(line_number '+$(TIME_STEP) prerelease/test-all $(MAKE) test-all LONEJSON_TEST_ALL_HOST_CURL=0')
 matrix_line=$(line_number '+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix')
+source_smoke_line=$(line_number '+$(TIME_STEP) prerelease/source-smoke $(MAKE) package-source-smoke')
+package_verify_line=$(line_number '+$(TIME_STEP) prerelease/package-verify $(MAKE) package-verify')
 clean_line=$(line_number '$(TIME_STEP) release/clean ./scripts/clean.sh')
 version_contract_line=$(line_number '+$(TIME_STEP) release/version-contract $(MAKE) lifecycle-version-contract')
 pipeline_line=$(line_number '+$(TIME_STEP) release/pipeline $(MAKE) release-pipeline')
 
-if (( format_line >= test_all_line || test_all_line >= matrix_line )); then
-  printf 'release-pipeline must run format, test-all, then release-matrix\n' >&2
+if (( format_line >= test_all_line || test_all_line >= matrix_line || matrix_line >= source_smoke_line || source_smoke_line >= package_verify_line )); then
+  printf 'release-pipeline must run format, test-all, release-matrix, source-smoke, then package-verify\n' >&2
   exit 1
 fi
 

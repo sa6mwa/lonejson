@@ -2,7 +2,14 @@
 set -euo pipefail
 
 repo_root=${1:?usage: test_oidc_pkce_provider_no_openssl.sh REPO_ROOT}
-cc_bin=${CC:-cc}
+target_id=$("$repo_root/scripts/detect_native_target.sh")
+toolchain_env=$("$repo_root/scripts/cpkt-toolchains.sh" env "$target_id")
+eval "$toolchain_env"
+cc_bin=$CC
+target_flags=()
+if [[ "$target_id" == arm64-apple-darwin ]]; then
+  target_flags=(-arch arm64 -isysroot "$CPKT_SYSROOT")
+fi
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -125,7 +132,7 @@ int main(void) {
 }
 C_EOF
 
-"$cc_bin" -std=c89 -Wall -Wextra -Werror -Wpedantic -pedantic-errors \
+"$cc_bin" "${target_flags[@]}" -std=c89 -Wall -Wextra -Werror -Wpedantic -pedantic-errors \
   -D_POSIX_C_SOURCE=200809L -D_FILE_OFFSET_BITS=64 \
   -DLONEJSON_WITH_JWT -DLONEJSON_WITH_OIDC \
   -I"$repo_root/include" \

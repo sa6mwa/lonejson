@@ -60,12 +60,14 @@ symbol_present() {
   ' <<<"$symbols"
 }
 
-if ! symbol_present "$shared_symbols" lonejson_curl_parse_init "$symbol_prefix_optional"; then
-  printf 'missing lonejson_curl_* ABI symbol in shared library for %s\n' "$context" >&2
-  exit 1
-fi
-
-if ! symbol_present "$static_symbols" lonejson_curl_parse_init "$symbol_prefix_optional"; then
-  printf 'missing lonejson_curl_* ABI symbol in static library for %s\n' "$context" >&2
-  exit 1
-fi
+for symbol in lonejson_curl_parse_init lonejson_curl_upload_is_rewindable \
+    lonejson_curl_upload_rewind lonejson_curl_seek_callback; do
+  if ! symbol_present "$shared_symbols" "$symbol" "$symbol_prefix_optional"; then
+    printf 'missing %s ABI symbol in shared library for %s\n' "$symbol" "$context" >&2
+    exit 1
+  fi
+  if ! symbol_present "$static_symbols" "$symbol" "$symbol_prefix_optional"; then
+    printf 'missing %s ABI symbol in static library for %s\n' "$symbol" "$context" >&2
+    exit 1
+  fi
+done

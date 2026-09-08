@@ -4,7 +4,7 @@ set -euo pipefail
 # Rationale: benchmark gates are release blockers only if the host identity,
 # baseline format, and comparison semantics are stable across runs.
 
-repo_root=$1
+repo_root="$(CDPATH= cd -- "$1" && pwd)"
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}
 tmp_dir=$(mktemp -d)
@@ -41,7 +41,11 @@ if [ "$(PATH="$tmp_dir/bin:/usr/bin:/bin" "$repo_root/scripts/bench_host_id.sh" 
   exit 1
 fi
 
-if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+git_top="$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$git_top" ]]; then
+  git_top="$(CDPATH= cd -- "$git_top" && pwd)"
+fi
+if [[ "$git_top" == "$repo_root" ]]; then
   for path in \
     perflogs/hosts/testhost/history.jsonl \
     perflogs/hosts/testhost/latest.json \
@@ -64,6 +68,15 @@ if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     perflogs/hosts/f259bcc951a8f53802cc755f08e5e218/lua/baseline.json; do
     if ! git -C "$repo_root" ls-files --error-unmatch "$path" >/dev/null 2>&1; then
       printf '%s must remain tracked as the frozen benchmark contract\n' "$path" >&2
+      exit 1
+    fi
+  done
+elif [[ -f "$repo_root/RELEASE_MANIFEST" ]]; then
+  for path in \
+    perflogs/hosts/f259bcc951a8f53802cc755f08e5e218/baseline.json \
+    perflogs/hosts/f259bcc951a8f53802cc755f08e5e218/lua/baseline.json; do
+    if [[ ! -f "$repo_root/$path" ]] || ! grep -Fxq "$path" "$repo_root/RELEASE_MANIFEST"; then
+      printf '%s must be shipped in the source manifest as the frozen benchmark contract\n' "$path" >&2
       exit 1
     fi
   done

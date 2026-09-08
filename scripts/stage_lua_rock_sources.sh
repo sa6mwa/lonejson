@@ -15,6 +15,10 @@ static_files=(
   README.md
   lonejson.rockspec.in
   scripts/build_lua_rock.sh
+  scripts/cpkt-toolchains.sh
+  scripts/detect_native_bootlin_target.sh
+  cmake/toolchains/print_native_bootlin_target.cmake
+  cmake/toolchains/lonejson_native_bootlin_target.cmake
   scripts/render_release_rockspec.sh
   include/lonejson.h
   src/lua/lonejson_lua.c

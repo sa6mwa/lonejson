@@ -29,6 +29,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonCompiler.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CpktDependencyCache.cmake")
 project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT LONEJSON_BOOTLIN_TOOLCHAIN_ROOT)
+  message(FATAL_ERROR "Linux builds require the pinned Bootlin toolchain; host or custom compiler collections are unsupported")
+endif()
+
 cpkt_resolve_dependency_cache(LONEJSON_RESOLVED_DEPENDENCY_CACHE)
 
 include(CTest)
@@ -81,7 +85,7 @@ option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled."
 option(LONEJSON_BUILD_WITH_OPENSSL "Build lonejson with OpenSSL-backed auth/crypto support enabled." OFF)
 option(LONEJSON_BUILD_WITH_JWT "Build lonejson with JWT/JWK auth APIs enabled." OFF)
 option(LONEJSON_BUILD_WITH_OIDC "Build lonejson with OIDC/OAuth2 helper APIs enabled." OFF)
-set(LONEJSON_ABI_VERSION "25" CACHE STRING "Shared-library ABI / SONAME version"
+set(LONEJSON_ABI_VERSION "26" CACHE STRING "Shared-library ABI / SONAME version"
     FORCE)
 
 set(LONEJSON_PUBLIC_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -502,6 +506,25 @@ if(LONEJSON_BUILD_TESTS)
   add_test(NAME lonejson_tests COMMAND lonejson_tests)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_tests)
 
+  if(LONEJSON_BUILD_WITH_CURL AND UNIX)
+    add_executable(lonejson_curl_rewind_e2e tests/curl_rewind_e2e.c)
+    target_include_directories(lonejson_curl_rewind_e2e PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+    target_compile_definitions(lonejson_curl_rewind_e2e PRIVATE LONEJSON_WITH_CURL)
+    target_link_libraries(lonejson_curl_rewind_e2e PRIVATE lonejson CURL::libcurl)
+    lonejson_configure_c_target(lonejson_curl_rewind_e2e)
+
+    add_executable(lonejson_curl_rewind_tests tests/test_curl_rewind.c)
+    target_include_directories(lonejson_curl_rewind_tests PRIVATE
+      "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+    target_compile_definitions(lonejson_curl_rewind_tests PRIVATE LONEJSON_WITH_CURL)
+    target_link_libraries(lonejson_curl_rewind_tests PRIVATE lonejson CURL::libcurl)
+    lonejson_configure_c_target(lonejson_curl_rewind_tests)
+    add_test(NAME lonejson_curl_rewind_tests COMMAND lonejson_curl_rewind_tests)
+    set_tests_properties(lonejson_curl_rewind_tests PROPERTIES
+      LABELS "integration;local;offline" TIMEOUT 60)
+  endif()
+
   if(LONEJSON_BUILD_WITH_CURL AND LONEJSON_BUILD_WITH_OPENSSL AND
       LONEJSON_BUILD_WITH_JWT AND LONEJSON_BUILD_WITH_OIDC)
     add_executable(lonejson_oidc_fixture_server
@@ -737,6 +760,11 @@ if(LONEJSON_BUILD_TESTS)
       NAME lonejson_compiler_selection_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compiler_selection.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME lonejson_native_darwin_toolchain_tests
+      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_native_darwin_toolchain.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_bootlin_host_arch_tests
@@ -1148,6 +1176,17 @@ endif()
 
 if(LONEJSON_BUILD_BENCHMARKS)
   add_executable(lonejson_bench bench/lonejson_bench.c)
+  if(LONEJSON_BOOTLIN_TOOLCHAIN_ROOT)
+    get_filename_component(_lonejson_bench_collection
+      "${LONEJSON_BOOTLIN_TOOLCHAIN_ROOT}" NAME)
+    set(_lonejson_bench_toolchain "bootlin:${_lonejson_bench_collection}")
+  elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_CROSSCOMPILING)
+    set(_lonejson_bench_toolchain "apple:${CMAKE_C_COMPILER_ID}-${CMAKE_C_COMPILER_VERSION}")
+  else()
+    set(_lonejson_bench_toolchain "osxcross:${CMAKE_C_COMPILER_ID}-${CMAKE_C_COMPILER_VERSION}")
+  endif()
+  target_compile_definitions(lonejson_bench PRIVATE
+    "LONEJSON_BENCH_TOOLCHAIN=\"${_lonejson_bench_toolchain}\"")
   target_include_directories(lonejson_bench PRIVATE
     "${LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR}")
   # Keep the core JSON benchmark focused on JSON hot paths; protocol framing has
@@ -1304,6 +1343,8 @@ if(CLANG_FORMAT_BIN)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_array_stream.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_base64.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_curl_misc.inc.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_curl_rewind.c"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/curl_rewind_e2e.c"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixtures_public.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generator_omit.inc.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_json_value_sources.inc.h"

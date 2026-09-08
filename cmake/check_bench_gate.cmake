@@ -13,7 +13,7 @@ set(_latest_improve "${_tmp_dir}/latest-improve.json")
 set(_latest_broken "${_tmp_dir}/latest-broken.json")
 
 set(_common_prefix [=[
-{"schema_version":12,"timestamp_epoch_ns":1,"timestamp_utc":"2026-04-05T00:00:00Z","host":"test","compiler":"test","corpus_path":"test","corpus_file_count":1,"corpus_total_bytes":1,"corpus_y_count":1,"corpus_n_count":0,"corpus_i_count":0,"iterations":100,"parser_buffer_size":4096,"push_parser_buffer_size":4096,"reader_buffer_size":1024,"stream_buffer_size":1024,"results":[
+{"schema_version":12,"timestamp_epoch_ns":1,"timestamp_utc":"2026-04-05T00:00:00Z","host":"test","compiler":"test","toolchain":"test","corpus_path":"test","corpus_file_count":1,"corpus_total_bytes":1,"corpus_y_count":1,"corpus_n_count":0,"corpus_i_count":0,"iterations":100,"parser_buffer_size":4096,"push_parser_buffer_size":4096,"reader_buffer_size":1024,"stream_buffer_size":1024,"results":[
 ]=])
 set(_common_suffix "]}")
 
@@ -69,6 +69,37 @@ foreach(_needle "small-reg" "material-reg" "material-imp" "review-imp")
   if(NOT _compare_out MATCHES "${_needle}")
     message(FATAL_ERROR "bench compare output missing ${_needle}:\n${_compare_out}")
   endif()
+endforeach()
+
+# Runs with identical performance still cannot pass across hosts or compilers.
+# Reject before classifying deltas so the diagnostic cannot blame source code.
+file(READ "${_baseline}" _reference_json)
+string(REPLACE "\"toolchain\":\"test\"," "" _unproven_json "${_reference_json}")
+file(WRITE "${_tmp_dir}/unproven.json" "${_unproven_json}")
+foreach(_command compare gate)
+  execute_process(
+    COMMAND "${LONEJSON_BENCH_EXE}" "${_command}" "${_tmp_dir}/unproven.json" "${_baseline}"
+    RESULT_VARIABLE _status OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+  if(_status EQUAL 0 OR NOT _err MATCHES "cannot read benchmark run.*toolchain")
+    message(FATAL_ERROR "${_command} did not diagnose missing provenance: ${_out}${_err}")
+  endif()
+endforeach()
+foreach(_field host compiler toolchain)
+  string(REPLACE "\"${_field}\":\"test\"" "\"${_field}\":\"different\""
+    _different_json "${_reference_json}")
+  set(_different "${_tmp_dir}/different-${_field}.json")
+  file(WRITE "${_different}" "${_different_json}")
+  foreach(_command compare gate)
+    execute_process(
+      COMMAND "${LONEJSON_BENCH_EXE}" "${_command}" "${_baseline}" "${_different}"
+      RESULT_VARIABLE _status OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+    if(_status EQUAL 0 OR NOT _err MATCHES "benchmark ${_field} mismatch")
+      message(FATAL_ERROR "${_command} accepted incompatible ${_field}: ${_out}${_err}")
+    endif()
+    if(_out MATCHES "material regressions|material-reg")
+      message(FATAL_ERROR "${_command} classified incomparable results: ${_out}")
+    endif()
+  endforeach()
 endforeach()
 
 execute_process(

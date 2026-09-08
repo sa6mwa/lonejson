@@ -414,6 +414,10 @@ int main(void) {
   test_curl_parse_survives_runtime_free();
   test_curl_parse_reinit_releases_previous_parser();
   test_curl_parse_init_accepts_poisoned_stack_state();
+  test_curl_upload_rewind();
+  test_curl_upload_rewind_one_shot();
+  test_curl_upload_rewind_array();
+  test_curl_upload_rewind_allocation_failure();
   test_curl_upload_cleanup_default_allocator();
   test_curl_upload_custom_allocator_balance();
   test_curl_upload_streaming_does_not_buffer_payload();

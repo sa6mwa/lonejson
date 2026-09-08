@@ -19,7 +19,7 @@ mkdir -p "$rock_tree"
   ./scripts/render_release_rockspec.sh \
     "0.0.0" "$rockspec" "git+file://$repo_root" "" "$lib_ext"
   LONEJSON_LIBDIR="$libdir" \
-    "$luarocks_exec" make --tree "$rock_tree" "$rockspec" >/dev/null
+    "$luarocks_exec" make --tree "$rock_tree" "$rockspec" CC=/bin/false >/dev/null
 )
 
 module_path=$(

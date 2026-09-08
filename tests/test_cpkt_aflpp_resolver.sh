@@ -10,7 +10,7 @@ resolver="$repo_root/scripts/cpkt-aflpp.sh"
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
-grep -F 'lock_file="$lock_dir/aflplusplus-${version}-x86_64-linux-gnu.lock"' "$resolver" >/dev/null
+grep -F 'lock_file="$lock_dir/${r##*/}.lock"' "$resolver" >/dev/null
 grep -F 'CPKT_TOOLCHAIN_LOCK_TIMEOUT' "$resolver" >/dev/null
 grep -F 'flock -w "$lock_wait_seconds" "$lock_fd"' "$resolver" >/dev/null
 grep -F 'while this process waited for the shared-cache lock' "$resolver" >/dev/null
@@ -81,3 +81,30 @@ if [[ $invalid_timeout_status -eq 0 ]]; then
 fi
 grep -F 'CPKT_TOOLCHAIN_LOCK_TIMEOUT must be a positive integer' \
   "$tmp_dir/invalid-timeout.err" >/dev/null
+
+# An AFL GCC plugin is compiler-specific. Changing the Bootlin collection
+# must select another immutable cache root rather than reuse an older plugin.
+cat >"$tmp_dir/bootlin" <<'EOF'
+#!/usr/bin/env bash
+printf 'archive=%s.tar.xz\n' "$TEST_BOOTLIN_COLLECTION"
+EOF
+chmod +x "$tmp_dir/bootlin"
+CPKT_TOOLCHAIN_CACHE="$tmp_dir/cache" bash -s "$resolver" "$tmp_dir/bootlin" <<'EOF'
+set -euo pipefail
+resolver=$1
+fixture_bootlin=$2
+source "$resolver"
+bootlin=$fixture_bootlin
+export TEST_BOOTLIN_COLLECTION=x86-64--glibc--stable-2025.08-1
+old_root=$(root)
+export TEST_BOOTLIN_COLLECTION=x86-64--glibc--stable-2026.08-1
+new_root=$(root)
+[[ "$old_root" != "$new_root" ]]
+[[ "$new_root" == *-x86-64--glibc--stable-2026.08-1 ]]
+[[ "$(root)" == "$new_root" ]]
+export TEST_BOOTLIN_COLLECTION=
+if (root); then
+  printf 'AFL cache accepted a missing Bootlin collection identity\n' >&2
+  exit 1
+fi
+EOF

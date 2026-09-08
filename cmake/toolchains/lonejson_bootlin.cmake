@@ -31,6 +31,14 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
     set(_lonejson_${_lonejson_key} "${CMAKE_MATCH_1}")
   endforeach()
 
+  # CMake otherwise restarts configuration after a compiler change and drops
+  # command-line/preset feature settings. Require a fresh cache explicitly.
+  if(LONEJSON_BOOTLIN_TOOLCHAIN_ROOT AND
+      NOT "${LONEJSON_BOOTLIN_TOOLCHAIN_ROOT}" STREQUAL "${_lonejson_root}")
+    message(FATAL_ERROR
+      "Bootlin collection changed; rerun CMake with --fresh and the intended preset to preserve its feature settings")
+  endif()
+
   # This function is called before project() for the default native build.
   # CMake has not populated its host metadata at that point, so query the
   # host directly before deciding whether the selected runtime needs QEMU.

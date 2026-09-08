@@ -363,6 +363,9 @@ local CLatestResult = lj.object {
 }
 
 local CLatestRun = lj.schema("CBenchRunSubset", {
+  lj.field("host", lj.string { required = true, fixed_capacity = 64, overflow = "fail" }),
+  lj.field("compiler", lj.string { required = true, fixed_capacity = 64, overflow = "fail" }),
+  lj.field("toolchain", lj.string { required = true, fixed_capacity = 128, overflow = "fail" }),
   lj.field("schema_version", lj.i64 { required = true }),
   lj.field("iterations", lj.i64 { required = true }),
   lj.field("parser_buffer_size", lj.i64 { required = true }),
@@ -1654,6 +1657,11 @@ end
 local function confirm_c_gate(bench_bin, baseline_path, latest_path, iterations)
   local baseline = CLatestRun:decode_path(baseline_path)
   local latest = CLatestRun:decode_path(latest_path)
+  if baseline.host ~= latest.host or baseline.compiler ~= latest.compiler or
+      baseline.toolchain ~= latest.toolchain then
+    io.stderr:write("c benchmark retry cannot confirm a host/compiler/toolchain mismatch\n")
+    os.exit(1)
+  end
   local baseline_index = index_results(baseline)
   local schema_mismatch = baseline.schema_version ~= latest.schema_version
   local config_mismatch =

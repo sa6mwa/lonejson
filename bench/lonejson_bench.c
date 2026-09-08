@@ -10,6 +10,10 @@
 
 #include "lonejson.h"
 
+#ifndef LONEJSON_BENCH_TOOLCHAIN
+#error "Build benchmarks through CMake with the pinned toolchain"
+#endif
+
 #define BENCH_MAX_RESULTS 88u
 #define BENCH_MAX_FILES 512u
 #define BENCH_PARSE_ITEM_CAPACITY 8u
@@ -60,6 +64,7 @@ typedef struct bench_run {
   char timestamp_utc[32];
   char host[64];
   char compiler[64];
+  char toolchain[128];
   char corpus_path[256];
   lonejson_uint64 corpus_file_count;
   lonejson_uint64 corpus_total_bytes;
@@ -733,6 +738,8 @@ static const lonejson_field bench_run_fields[] = {
                                     LONEJSON_OVERFLOW_FAIL),
     LONEJSON_FIELD_STRING_FIXED_REQ(bench_run, compiler, "compiler",
                                     LONEJSON_OVERFLOW_FAIL),
+    LONEJSON_FIELD_STRING_FIXED_REQ(bench_run, toolchain, "toolchain",
+                                    LONEJSON_OVERFLOW_FAIL),
     LONEJSON_FIELD_STRING_FIXED_REQ(bench_run, corpus_path, "corpus_path",
                                     LONEJSON_OVERFLOW_FAIL),
     LONEJSON_FIELD_U64_REQ(bench_run, corpus_file_count, "corpus_file_count"),
@@ -990,6 +997,8 @@ static void bench_fill_timestamp(bench_run *run) {
 static void bench_fill_host_and_compiler(bench_run *run) {
   const char *host_id;
 
+  snprintf(run->toolchain, sizeof(run->toolchain), "%s",
+           LONEJSON_BENCH_TOOLCHAIN);
   host_id = getenv("LONEJSON_BENCH_HOST_ID");
   if (host_id != NULL && host_id[0] != '\0') {
     snprintf(run->host, sizeof(run->host), "%s", host_id);
@@ -3785,6 +3794,7 @@ static int bench_read_run(const char *path, bench_run *run) {
   bench_run_prepare(run);
   if (lonejson_parse_path(g_bench_runtime_reuse, &bench_run_map, run, path,
                           &error) != LONEJSON_STATUS_OK) {
+    fprintf(stderr, "cannot read benchmark run %s: %s\n", path, error.message);
     return 1;
   }
   run->results.items = run->result_storage;
@@ -4065,6 +4075,34 @@ static int bench_is_large_improvement(const bench_result *baseline,
   return strcmp(bench_delta_classification(mib_delta_pct), "review-imp") == 0;
 }
 
+static int bench_environment_matches(const bench_run *baseline,
+                                     const bench_run *latest) {
+  int matches;
+
+  matches = 1;
+  if (strcmp(baseline->host, latest->host) != 0) {
+    fprintf(stderr, "benchmark host mismatch: baseline=%s latest=%s\n",
+            baseline->host, latest->host);
+    matches = 0;
+  }
+  if (strcmp(baseline->compiler, latest->compiler) != 0) {
+    fprintf(stderr, "benchmark compiler mismatch: baseline=%s latest=%s\n",
+            baseline->compiler, latest->compiler);
+    matches = 0;
+  }
+  if (strcmp(baseline->toolchain, latest->toolchain) != 0) {
+    fprintf(stderr, "benchmark toolchain mismatch: baseline=%s latest=%s\n",
+            baseline->toolchain, latest->toolchain);
+    matches = 0;
+  }
+  if (!matches) {
+    fputs("benchmark runs are not comparable; measure the reference and "
+          "candidate on the same host with the same toolchain\n",
+          stderr);
+  }
+  return matches;
+}
+
 static int bench_compare_command(const char *baseline_path,
                                  const char *latest_path) {
   bench_run baseline;
@@ -4084,6 +4122,9 @@ static int bench_compare_command(const char *baseline_path,
     return 1;
   }
 
+  if (!bench_environment_matches(&baseline, &latest)) {
+    return 1;
+  }
   printf("compare baseline=%s latest=%s\n", baseline_path, latest_path);
   printf("%-40s %11s %11s %10s %-12s %11s %10s\n", "benchmark", "latest MiB/s",
          "base MiB/s", "delta", "class", "docs delta", "mismatch");
@@ -4151,6 +4192,9 @@ static int bench_gate_command(const char *baseline_path,
     return 1;
   }
 
+  if (!bench_environment_matches(&baseline, &latest)) {
+    return 1;
+  }
   schema_mismatch = baseline.schema_version != latest.schema_version;
   config_mismatch =
       baseline.parser_buffer_size != latest.parser_buffer_size ||

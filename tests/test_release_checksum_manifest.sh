@@ -6,38 +6,10 @@ set -euo pipefail
 
 repo_root=$1
 tmp_dir="$(mktemp -d)"
-temp_exact_tag=""
-
-# This test intentionally mutates the checkout under test. Checksum manifest
-# generation must be proven against the same git metadata a real release build
-# consumes. The impossible version below is reserved as a lightweight test-only
-# tag; a stale copy means a previous interrupted test left cleanup work behind.
-release_test_tag="v99.99.99"
-release_test_version="${release_test_tag#v}"
-delete_test_tag() {
-  local tag_name=$1
-  if git -C "$repo_root" rev-parse --verify "refs/tags/$tag_name" \
-    >/dev/null 2>&1; then
-    git -C "$repo_root" tag -d "$tag_name" >/dev/null
-  fi
-}
-create_test_tag() {
-  local tag_name=$1
-  delete_test_tag "$tag_name"
-  git -C "$repo_root" tag "$tag_name"
-  temp_exact_tag="$tag_name"
-}
-cleanup() {
-  if [[ -n "$temp_exact_tag" ]]; then
-    delete_test_tag "$temp_exact_tag" || true
-  fi
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT HUP INT TERM
-
-# Remove any stale copy of the reserved test-only tag before untagged manifest
-# checks, then recreate and delete it only inside the tagged manifest block.
-delete_test_tag "$release_test_tag"
+# Tag mutation belongs only to make lifecycle-version-contract. This test also
+# runs from source archives nested inside a checkout and must not touch its refs.
+trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+trap 'printf "checksum manifest check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 dist_dir="$tmp_dir/dist"
 mkdir -p "$dist_dir"
@@ -92,24 +64,3 @@ cmake --build "$custom_build_dir" --target package-checksums >/dev/null
 custom_manifest="$custom_dist_dir/lonejson-${default_version}-CHECKSUMS"
 [[ -f "$custom_manifest" ]]
 grep -F "  lonejson-${default_version}.tar.gz" "$custom_manifest" >/dev/null
-
-if ! git -C "$repo_root" describe --tags --exact-match >/dev/null 2>&1; then
-  temp_exact_tag="$release_test_tag"
-  create_test_tag "$temp_exact_tag"
-  tagged_dist_dir="$tmp_dir/tagged-dist"
-  tagged_build_dir="$tmp_dir/tagged-build"
-  mkdir -p "$tagged_dist_dir"
-  printf '%s\n' 'lonejson lifecycle artifact directory' >"$tagged_dist_dir/.lonejson-dist"
-  printf '%s\n' tagged >"$tagged_dist_dir/lonejson-${release_test_version}.tar.gz"
-  env -u LONEJSON_VERSION_OVERRIDE cmake \
-    -S "$repo_root" -B "$tagged_build_dir" -G Ninja \
-    -D LONEJSON_DIST_DIR="$tagged_dist_dir" \
-    -D LONEJSON_BUILD_TESTS=OFF \
-    -D LONEJSON_BUILD_EXAMPLES=OFF >/dev/null
-  cmake --build "$tagged_build_dir" --target package-checksums >/dev/null
-  tagged_manifest="$tagged_dist_dir/lonejson-${release_test_version}-CHECKSUMS"
-  [[ -f "$tagged_manifest" ]]
-  grep -F "  lonejson-${release_test_version}.tar.gz" "$tagged_manifest" >/dev/null
-  delete_test_tag "$temp_exact_tag"
-  temp_exact_tag=""
-fi

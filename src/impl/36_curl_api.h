@@ -124,6 +124,8 @@ static void lonejson__curl_upload_assign_methods(lonejson_curl_upload *ctx) {
   }
   ctx->read_callback = lonejson__curl_upload_read_method;
   ctx->size_fn = lonejson__curl_upload_size_method;
+  ctx->is_rewindable = lonejson_curl_upload_is_rewindable;
+  ctx->rewind = lonejson_curl_upload_rewind;
   ctx->cleanup = lonejson_curl_upload_cleanup;
 }
 
@@ -516,6 +518,59 @@ size_t lonejson_curl_read_callback(char *ptr, size_t size, size_t nmemb,
     return CURL_READFUNC_ABORT;
   }
   return out_len;
+}
+
+int lonejson_curl_upload_is_rewindable(const lonejson_curl_upload *ctx) {
+  const lonejson__generator_state *state;
+
+  if (ctx == NULL || !lonejson__curl_state_is_live(ctx->_reserved_state) ||
+      ctx->generator.state == NULL) {
+    return 0;
+  }
+  state = (const lonejson__generator_state *)ctx->generator.state;
+  return state->magic == LONEJSON__GENERATOR_MAGIC &&
+         lonejson__map_is_rewindable_for_serialize(state->map, state->src);
+}
+
+lonejson_status lonejson_curl_upload_rewind(lonejson_curl_upload *ctx) {
+  lonejson__generator_state *state;
+  lonejson_generator replacement;
+  lonejson_status status;
+
+  if (ctx == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  if (!lonejson_curl_upload_is_rewindable(ctx)) {
+    return lonejson__set_error(&ctx->generator.error,
+                               LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+                               "curl upload is inactive or non-rewindable");
+  }
+  state = (lonejson__generator_state *)ctx->generator.state;
+  status = lonejson__generator_init_with_options(&replacement, state->map,
+                                                 state->src, &state->options);
+  if (status != LONEJSON_STATUS_OK) {
+    ctx->generator.error = replacement.error;
+    return status;
+  }
+  lonejson_generator_cleanup(&ctx->generator);
+  ctx->generator = replacement;
+  return LONEJSON_STATUS_OK;
+}
+
+int lonejson_curl_seek_callback(void *userdata, curl_off_t offset, int origin) {
+  lonejson_curl_upload *ctx = (lonejson_curl_upload *)userdata;
+
+  if (ctx == NULL || !lonejson__curl_state_is_live(ctx->_reserved_state) ||
+      ctx->generator.state == NULL) {
+    return CURL_SEEKFUNC_FAIL;
+  }
+  if (origin != SEEK_SET || offset != 0 ||
+      !lonejson_curl_upload_is_rewindable(ctx)) {
+    return CURL_SEEKFUNC_CANTSEEK;
+  }
+  return lonejson_curl_upload_rewind(ctx) == LONEJSON_STATUS_OK
+             ? CURL_SEEKFUNC_OK
+             : CURL_SEEKFUNC_FAIL;
 }
 
 curl_off_t lonejson_curl_upload_size(const lonejson_curl_upload *ctx) {

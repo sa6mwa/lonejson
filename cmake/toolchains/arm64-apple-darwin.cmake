@@ -1,3 +1,8 @@
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+  include("${CMAKE_CURRENT_LIST_DIR}/lonejson_native_darwin.cmake")
+  return()
+endif()
+
 set(CMAKE_SYSTEM_NAME Darwin)
 set(CMAKE_SYSTEM_PROCESSOR arm64)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)

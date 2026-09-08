@@ -5,6 +5,8 @@ set -euo pipefail
 # CMake/pkg-config consumers so metadata drift is caught before upload.
 
 repo_root=${1:?usage: test_release_archive_verify.sh REPO_ROOT}
+toolchain_env=$("$repo_root/scripts/cpkt-toolchains.sh" env x86_64-linux-gnu)
+eval "$toolchain_env"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -13,14 +15,14 @@ require_command() {
   fi
 }
 
-require_command cc
-require_command ar
+require_command "$CC"
+require_command "$AR"
 require_command cmake
 require_command ninja
-require_command nm
+require_command "$NM"
 require_command perl
 require_command pkg-config
-require_command readelf
+require_command "$CPKT_TOOLCHAIN_READELF"
 require_command sha256sum
 require_command tar
 
@@ -83,6 +85,9 @@ lonejson *lonejson_new(const void *config, lonejson_error *error);
 void lonejson_free(lonejson *runtime);
 lonejson_status lonejson_validate_cstr(lonejson *runtime, const char *json, lonejson_error *error);
 void lonejson_curl_parse_init(void);
+void lonejson_curl_upload_is_rewindable(void);
+void lonejson_curl_upload_rewind(void);
+void lonejson_curl_seek_callback(void);
 void lonejson_jwt_parse_compact(void);
 void lonejson_jwk_parse_json(void);
 void lonejson_jwks_parse_json(void);
@@ -201,6 +206,12 @@ lonejson_status lonejson_validate_cstr(lonejson *runtime_arg, const char *json, 
 }
 
 void lonejson_curl_parse_init(void) {
+}
+void lonejson_curl_upload_is_rewindable(void) {
+}
+void lonejson_curl_upload_rewind(void) {
+}
+void lonejson_curl_seek_callback(void) {
 }
 
 void lonejson_jwt_parse_compact(void) {
@@ -450,11 +461,11 @@ lonejson_status lonejson_auth_provider_init_openssl(
 }
 EOF
 
-cc -shared -fPIC -I"$package_root/include" "$tmp_dir/lonejson_stub.c" \
+"$CC" -shared -fPIC -I"$package_root/include" "$tmp_dir/lonejson_stub.c" \
   -o "$package_root/lib/liblonejson.so"
-cc -c -I"$package_root/include" "$tmp_dir/lonejson_stub.c" \
+"$CC" -c -I"$package_root/include" "$tmp_dir/lonejson_stub.c" \
   -o "$tmp_dir/lonejson_stub.o"
-ar rcs "$package_root/lib/liblonejson.a" "$tmp_dir/lonejson_stub.o"
+"$AR" rcs "$package_root/lib/liblonejson.a" "$tmp_dir/lonejson_stub.o"
 
 cat >"$package_root/lib/pkgconfig/lonejson.pc" <<'EOF'
 prefix=${pcfiledir}/../..
@@ -578,14 +589,14 @@ printf 'license\n' >"$package_root/share/doc/liblonejson/LICENSE"
 printf 'readme\n' >"$package_root/share/doc/liblonejson/README.md"
 
 cat >"$build_root/x86_64-linux-gnu-release/CMakeCache.txt" <<EOF
-CMAKE_C_COMPILER:FILEPATH=$(command -v cc)
-CMAKE_NM:FILEPATH=$(command -v nm)
-CMAKE_READELF:FILEPATH=$(command -v readelf)
+CMAKE_C_COMPILER:FILEPATH=$CC
+CMAKE_NM:FILEPATH=$NM
+CMAKE_READELF:FILEPATH=$CPKT_TOOLCHAIN_READELF
 LONEJSON_C_PKT_SYSTEMS_ROOT:PATH=$dependency_root
 EOF
 
-ar rcs "$dependency_root/lib/libcurl.a"
-ar rcs "$dependency_root/lib/libcrypto.a"
+"$AR" rcs "$dependency_root/lib/libcurl.a"
+"$AR" rcs "$dependency_root/lib/libcrypto.a"
 cat >"$dependency_root/lib/pkgconfig/libcurl.pc" <<EOF
 prefix=$dependency_root
 libdir=\${prefix}/lib
@@ -775,10 +786,10 @@ lonejson_status lonejson_validate_cstr(lonejson *runtime_arg, const char *json, 
 }
 EOF
 
-cc -c -I"$broken_package_root/include" "$tmp_dir/lonejson_static_without_curl.c" \
+"$CC" -c -I"$broken_package_root/include" "$tmp_dir/lonejson_static_without_curl.c" \
   -o "$tmp_dir/lonejson_static_without_curl.o"
 rm -f "$broken_package_root/lib/liblonejson.a"
-ar rcs "$broken_package_root/lib/liblonejson.a" \
+"$AR" rcs "$broken_package_root/lib/liblonejson.a" \
   "$tmp_dir/lonejson_static_without_curl.o"
 
 tar -C "$broken_package_dir" -czf \
@@ -794,7 +805,7 @@ if "$repo_root/scripts/verify_release_archives.sh" \
   printf 'expected archive verification to fail when static library lacks curl ABI\n' >&2
   exit 1
 fi
-grep -F 'missing lonejson_curl_* ABI symbol in static library' "$broken_log" >/dev/null
+grep -F 'missing lonejson_curl_parse_init ABI symbol in static library' "$broken_log" >/dev/null
 
 jwt_broken_dist_dir="$tmp_dir/jwt-broken-dist"
 jwt_broken_package_dir="$tmp_dir/jwt-broken-package"
@@ -836,12 +847,18 @@ lonejson_status lonejson_validate_cstr(lonejson *runtime_arg, const char *json, 
 
 void lonejson_curl_parse_init(void) {
 }
+void lonejson_curl_upload_is_rewindable(void) {
+}
+void lonejson_curl_upload_rewind(void) {
+}
+void lonejson_curl_seek_callback(void) {
+}
 EOF
 
-cc -c -I"$jwt_broken_package_root/include" "$tmp_dir/lonejson_static_without_jwt.c" \
+"$CC" -c -I"$jwt_broken_package_root/include" "$tmp_dir/lonejson_static_without_jwt.c" \
   -o "$tmp_dir/lonejson_static_without_jwt.o"
 rm -f "$jwt_broken_package_root/lib/liblonejson.a"
-ar rcs "$jwt_broken_package_root/lib/liblonejson.a" \
+"$AR" rcs "$jwt_broken_package_root/lib/liblonejson.a" \
   "$tmp_dir/lonejson_static_without_jwt.o"
 
 tar -C "$jwt_broken_package_dir" -czf \

@@ -4,20 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 detect_target_id() {
-  case "$("${UNAME:-uname}" -s)" in
-    Darwin)
-      case "$("${UNAME:-uname}" -m)" in
-        arm64|aarch64) printf '%s' arm64-apple-darwin ;;
-        *) printf '%s' unsupported ;;
-      esac
-      ;;
-    Linux)
-      "$repo_root/scripts/detect_native_bootlin_target.sh"
-      ;;
-    *)
-      printf '%s' unsupported
-      ;;
-  esac
+  "$repo_root/scripts/detect_native_target.sh"
 }
 
 target_id="${LONEJSON_C_PKT_SYSTEMS_TARGET_ID:-}"

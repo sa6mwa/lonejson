@@ -27,6 +27,11 @@ require_line 'lonejson_fuzz_base64' \
   'make fuzz does not build/run lonejson_fuzz_base64'
 require_line 'scripts/fuzz.sh' \
   'make fuzz does not run the pinned AFL++ driver'
+require_line 'tests/test_fuzz_crash_handling.sh' \
+  'make fuzz does not verify real crash handling'
+smoke_dry_run=$(make --no-print-directory -C "$repo_root" -n fuzz-smoke)
+require_line 'LONEJSON_FUZZ_EXECUTIONS=1000' \
+  'fuzz-smoke must use an execution budget' "$smoke_dry_run"
 require_line 'fuzz/corpus/base64' \
   'make fuzz does not pass the base64 seed corpus to AFL++'
 require_line 'fuzz/corpus/path_value_visitor' \

@@ -1,4 +1,10 @@
-# Host workflows must use a Bootlin runtime matching the host processor and
+# Apple Silicon uses the active Apple SDK; Linux uses its pinned collection.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+  include("${CMAKE_CURRENT_LIST_DIR}/lonejson_native_darwin.cmake")
+  return()
+endif()
+
+# Linux workflows must use a Bootlin runtime matching the host processor and
 # libc, so a host Lua interpreter remains ABI-compatible with liblonejson.
 include("${CMAKE_CURRENT_LIST_DIR}/lonejson_bootlin.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/lonejson_native_bootlin_target.cmake")

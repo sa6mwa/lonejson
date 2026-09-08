@@ -59,7 +59,8 @@ target_default_compiler() {
         sed -n 's/^cc=//p'
       ;;
     arm64-apple-darwin)
-      printf '%s\n' "${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/${CPKT_OSXCROSS_HOST:-arm64-apple-darwin25}-clang"
+      "$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" |
+        sed -n 's/^cc=//p'
       ;;
     *)
       printf 'unknown target id: %s\n' "$target_id" >&2

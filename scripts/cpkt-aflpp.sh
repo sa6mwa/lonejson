@@ -22,7 +22,13 @@ lock_timeout() {
     die 'CPKT_TOOLCHAIN_LOCK_TIMEOUT must be a positive integer number of seconds'
   printf '%s\n' "$timeout"
 }
-root() { printf '%s/roots/aflplusplus-%s-x86_64-linux-gnu\n' "$(cache)" "$version"; }
+root() {
+  local description archive
+  description=$("$bootlin" discover x86_64-linux-gnu)
+  archive=$(value archive "$description")
+  [[ "$archive" =~ ^[a-zA-Z0-9._-]+\.tar\.xz$ ]] || die 'Bootlin resolver returned no valid archive identity'
+  printf '%s/roots/aflplusplus-%s-%s\n' "$(cache)" "$version" "${archive%.tar.xz}"
+}
 value() { sed -n "s/^$1=//p" <<<"$2" | tail -1; }
 ready() {
   local r=$1
@@ -41,7 +47,7 @@ ensure() {
   r=$(root); c=$(cache); archive="$c/archives/$archive_name"
   ready "$r" && return
   lock_dir="$c/locks"
-  lock_file="$lock_dir/aflplusplus-${version}-x86_64-linux-gnu.lock"
+  lock_file="$lock_dir/${r##*/}.lock"
   lock_wait_seconds="$(lock_timeout)"
   command -v flock >/dev/null 2>&1 || die 'flock is required for shared AFL++ cache provisioning'
   mkdir -p "$c/archives" "$lock_dir"

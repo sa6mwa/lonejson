@@ -83,6 +83,8 @@ else
     2>"$tmp_dir/cmake-temporary-tag-version.err"
   grep -qx "CMAKE_PROJECT_VERSION:STATIC=$release_test_version" \
     "$tmp_dir/cmake-temporary-tag-version/CMakeCache.txt"
+  # Verify tag-derived checksum naming only within the pre-clean tag contract.
+  bash "$repo_root/tests/test_release_checksum_manifest.sh" "$repo_root"
   delete_test_tag "$temp_exact_tag"
   temp_exact_tag=""
 fi

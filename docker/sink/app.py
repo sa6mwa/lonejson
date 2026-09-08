@@ -1,9 +1,19 @@
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from rewind import RewindFixture
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "lonejson-sink/0.1"
+    rewind = RewindFixture()
+
+    def do_GET(self):
+        if not self.rewind.handle(self):
+            self.send_error(404)
+
+    def do_PATCH(self):
+        self._handle_ingest()
 
     def do_POST(self):
         self._handle_ingest()
@@ -12,6 +22,8 @@ class Handler(BaseHTTPRequestHandler):
         self._handle_ingest()
 
     def _handle_ingest(self):
+        if self.rewind.handle(self):
+            return
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length) if length else b""
         status = 200

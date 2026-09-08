@@ -88,6 +88,13 @@ The repository helper also writes the curl binaries to `examples/bin/`:
 make curl-examples
 ```
 
+`curl_put.c` streams its JSON body through `CURLOPT_READFUNCTION` and also
+registers `lonejson_curl_seek_callback` with `CURLOPT_SEEKFUNCTION`. This lets
+curl replay a mapped upload after a redirect when its sources are rewindable;
+the example keeps the upload adapter as both curl's read and seek userdata.
+The adapter reports an unknown size, so it remains streaming rather than
+materializing or pre-counting the body.
+
 Start the local test rig first:
 
 ```sh

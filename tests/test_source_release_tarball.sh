@@ -117,6 +117,32 @@ LONEJSON_VERSION_OVERRIDE=7.8.9 "$cmake_bin" \
 grep -qx 'CMAKE_PROJECT_VERSION:STATIC=9.8.7' "$build_dir/CMakeCache.txt"
 "$cmake_bin" --build "$build_dir" --target lonejson_static
 
+# These ordinary checks must also work under a parent checkout, where Git
+# discovery succeeds but the archive has its own VERSION and source manifest.
+# Block tag operations so a regression cannot mutate the parent repository.
+mkdir -p "$test_root/bin"
+export LONEJSON_TEST_REAL_GIT="$(command -v git)"
+export LONEJSON_TEST_TAG_ATTEMPT="$test_root/tag-attempt"
+cat >"$test_root/bin/git" <<'EOF'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "$arg" == tag ]]; then
+    printf '%s\n' 'source archive tests must not mutate Git tags' >"$LONEJSON_TEST_TAG_ATTEMPT"
+    cat "$LONEJSON_TEST_TAG_ATTEMPT" >&2
+    exit 1
+  fi
+done
+exec "$LONEJSON_TEST_REAL_GIT" "$@"
+EOF
+chmod +x "$test_root/bin/git"
+lua_exec=$("$repo_root/scripts/resolve_lua55.sh")
+PATH="$test_root/bin:$PATH" bash "$stage_dir/tests/test_bench_baseline_history.sh" "$stage_dir" "$lua_exec"
+PATH="$test_root/bin:$PATH" bash "$stage_dir/tests/test_release_checksum_manifest.sh" "$stage_dir"
+if [[ -f "$LONEJSON_TEST_TAG_ATTEMPT" ]]; then
+  cat "$LONEJSON_TEST_TAG_ATTEMPT" >&2
+  exit 1
+fi
+
 cp -R "$stage_dir" "$missing_version_dir"
 rm -f "$missing_version_dir/VERSION"
 if LONEJSON_VERSION_OVERRIDE=7.8.9 "$cmake_bin" \

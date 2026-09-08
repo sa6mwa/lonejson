@@ -134,7 +134,13 @@ link libcurl. `lonejson_curl_upload_init()` now sits on top of the public
 pull-style generator API and feeds libcurl through `CURLOPT_READFUNCTION`
 without materializing the whole JSON payload first. That upload path currently
 reports `-1` for the total size because lonejson does not prebuffer or
-pre-count the payload.
+pre-count the payload. For redirects or authentication retries, install
+`lonejson_curl_seek_callback` as `CURLOPT_SEEKFUNCTION` and pass the same
+upload adapter through both `CURLOPT_SEEKDATA` and `CURLOPT_READDATA`.
+Replay is available only when every emitted mapped value is rewindable; use
+`lonejson_curl_upload_is_rewindable()` when an application needs to know that
+before it starts the transfer. One-shot readers remain streaming sources and
+cause curl's normal rewind failure when a replay is required.
 
 HTTP behavior used by OAuth2/OIDC helpers is callback-backed through
 `lonejson_http_provider`. The callback may use libcurl, a platform HTTP client,
@@ -1333,7 +1339,7 @@ the generated standalone header artifact.
 
 ## Compiler and cross-toolchain policy
 
-Native debug, host, and Linux release builds use pinned Bootlin stable toolchain
+Linux native debug, host, and release builds use pinned Bootlin stable toolchain
 collections end to end: GCC, GNU ld, binutils, debugger, libc sysroot, and
 target runtime all come from one cached collection rather than a host compiler
 or any `~/.local/cross` installation. CMake rejects a target compiler whose
@@ -1359,10 +1365,13 @@ make toolchains-all
 
 They are shared across pkt.systems projects at
 `${CPKT_TOOLCHAIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains}`.
-Set `CPKT_TOOLCHAIN_CACHE` to relocate that cache. The Darwin target remains
-an explicit osxcross/SDK setup because Apple SDKs are not publicly
-downloadable. `scripts/cpkt-toolchains.sh discover` reports every supported
-target, including whether the optional local osxcross collection is ready.
+Set `CPKT_TOOLCHAIN_CACHE` to relocate that cache. Native Apple Silicon macOS
+builds use the active Apple compiler and macOS SDK reported by `xcrun`, including
+native presets, the Darwin release preset, curl examples, and LuaRocks. Install
+Xcode or Command Line Tools first. Building Darwin artifacts on Linux requires
+an explicit osxcross/SDK setup; the project never downloads Apple SDKs.
+`scripts/cpkt-toolchains.sh discover` reports every supported target, including
+native Apple tools on macOS and optional local osxcross availability on Linux.
 Shared Bootlin and AFL++ provisioning waits at most
 `${CPKT_TOOLCHAIN_LOCK_TIMEOUT:-600}` seconds for the matching cache lock.
 Checkout-local fixture, Lua-rock, and standalone-header locks use

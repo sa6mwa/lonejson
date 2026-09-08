@@ -19,7 +19,7 @@ export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
 write_run() {
   local path=$1
   shift
-  printf '{"schema_version":1,"iterations":1,"parser_buffer_size":4096,"push_parser_buffer_size":4096,"reader_buffer_size":4096,"stream_buffer_size":4096,"results":[' >"$path"
+  printf '{"schema_version":1,"host":"test","compiler":"test","toolchain":"test","iterations":1,"parser_buffer_size":4096,"push_parser_buffer_size":4096,"reader_buffer_size":4096,"stream_buffer_size":4096,"results":[' >"$path"
   local first=1
   while [ "$#" -gt 0 ]; do
     local name=$1
@@ -121,7 +121,7 @@ if [ "$(grep -cx 'case case/a 1' "$fake_log")" -ne 3 ]; then
 fi
 
 write_run "$baseline" "case/a" 100 0
-printf '{"schema_version":2,"iterations":1,"parser_buffer_size":4096,"push_parser_buffer_size":4096,"reader_buffer_size":4096,"stream_buffer_size":4096,"results":[{"name":"case/a","mib_per_sec":100,"mismatch_count":0}]}\n' >"$latest"
+printf '{"schema_version":2,"host":"test","compiler":"test","toolchain":"test","iterations":1,"parser_buffer_size":4096,"push_parser_buffer_size":4096,"reader_buffer_size":4096,"stream_buffer_size":4096,"results":[{"name":"case/a","mib_per_sec":100,"mismatch_count":0}]}\n' >"$latest"
 rm -f "$fake_log"
 if FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="pass-one" \
   LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
@@ -133,6 +133,19 @@ if [ -f "$fake_log" ] && [ -s "$fake_log" ]; then
   printf 'confirm-c retried cases despite a schema mismatch\n' >&2
   exit 1
 fi
+
+for field in host compiler toolchain; do
+  write_run "$baseline" "case/a" 100 0
+  sed "s/\"$field\":\"test\"/\"$field\":\"different\"/" "$baseline" >"$latest"
+  rm -f "$fake_log"
+  if FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="pass-one" \
+    bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >"$tmp_dir/environment.out" 2>&1; then
+    printf 'confirm-c accepted a %s mismatch\n' "$field" >&2
+    exit 1
+  fi
+  grep -q 'host/compiler/toolchain mismatch' "$tmp_dir/environment.out"
+  test ! -s "$fake_log"
+done
 
 c_latest="$tmp_dir/c-latest.json"
 write_run "$c_latest" "parse/buffer_fixed/lonejson" 100 0

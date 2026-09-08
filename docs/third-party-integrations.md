@@ -46,6 +46,13 @@ That adapter target defines `LONEJSON_WITH_CURL` and links `CURL::libcurl`.
 With pkg-config, use `lonejson-curl`. The plain `lonejson` package remains
 independent of curl.
 
+For replayable mapped uploads, install `lonejson_curl_seek_callback` as
+`CURLOPT_SEEKFUNCTION` and use the upload adapter for both `CURLOPT_SEEKDATA`
+and `CURLOPT_READDATA`. The adapter's `is_rewindable` and `rewind` methods expose
+replay capability and explicit rewind without measuring or buffering the body.
+Only rewind to byte zero is supported. See [the upload rewind contract](curl-upload-rewind.md)
+for source lifetime, failure behavior, and verification requirements.
+
 The HTTP provider boundary is callback-backed. OAuth2/OIDC helpers call a
 `lonejson_http_provider`; the provider implementation may use libcurl, a
 platform HTTP client, a service framework, a test fixture, or another transport.
