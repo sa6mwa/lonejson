@@ -98,6 +98,41 @@ target_raw_link_flags() {
   esac
 }
 
+target_development_runtime_flags() {
+  local target_id=$1
+  local preset=$2
+  local extra_dirs=$3
+  local sysroot loader libc runtime_dirs
+
+  # Only the native x86_64 glibc target can execute on this lifecycle host.
+  # Cross targets retain their configured QEMU/sysroot route and Darwin uses
+  # its native loader metadata.
+  if [[ "$target_id" != x86_64-linux-gnu || "$(uname -m)" != x86_64 ]]; then
+    printf '%s\n' ""
+    return
+  fi
+  sysroot="$(target_cache_value "$preset" CMAKE_SYSROOT)"
+  libc="$(target_cache_value "$preset" LONEJSON_BOOTLIN_LIBC)"
+  if [[ -z "$sysroot" && -z "$libc" ]]; then
+    # Metadata-only archive checks may deliberately run without the original
+    # build tree. Runtime execution is covered whenever that configured state
+    # is available.
+    printf '%s\n' ""
+    return
+  fi
+  if [[ "$libc" != gnu || ! -d "$sysroot/lib" ]]; then
+    printf 'native package consumer lacks the selected Bootlin glibc sysroot\n' >&2
+    exit 1
+  fi
+  loader=$(printf '%s\n' "$sysroot"/lib/ld-linux*.so.2)
+  if [[ ! -x "$loader" ]]; then
+    printf 'native package consumer lacks Bootlin loader under %s/lib\n' "$sysroot" >&2
+    exit 1
+  fi
+  runtime_dirs="$sysroot/lib:$extra_dirs"
+  printf '%s\n' "-Wl,--dynamic-linker,$loader -Wl,--disable-new-dtags -Wl,-rpath,$runtime_dirs"
+}
+
 load_target_tools() {
   local preset=$1
   local target_id=$2
@@ -222,6 +257,38 @@ extract_archive() {
   printf '%s\n' "$package_root"
 }
 
+require_no_bootlin_toolchain_paths() {
+  local archive=$1
+  local package_root=$2
+  local toolchain_path_pattern
+
+  # Release packages must be relocatable.  A Bootlin collection path belongs
+  # only to a local development executable, never to a packaged library,
+  # static archive, or consumer metadata.  The collection-name match also
+  # catches installations moved through CPKT_TOOLCHAIN_CACHE.
+  toolchain_path_pattern='/(c\.pkt\.systems/)?toolchains(/roots)?/|/[^[:space:]:;]*(x86-64|aarch64|armv7-eabihf)--(glibc|musl)--stable-[^[:space:]:;]*'
+  if grep -aRE "$toolchain_path_pattern" "$package_root" >/dev/null 2>&1; then
+    printf 'pinned Bootlin toolchain path leaked in release archive: %s\n' \
+      "$archive" >&2
+    exit 1
+  fi
+}
+
+require_no_bootlin_elf_loader_metadata() {
+  local archive=$1
+  local metadata=$2
+  local bootlin_loader_path_pattern
+
+  bootlin_loader_path_pattern='c\.pkt\.systems/toolchains/|/(x86-64|aarch64|armv7-eabihf)--(glibc|musl)--stable-'
+  if printf '%s\n' "$metadata" |
+      grep -E '(Requesting program interpreter|RUNPATH|RPATH)' |
+      grep -E "$bootlin_loader_path_pattern" >/dev/null; then
+    printf 'pinned Bootlin ELF interpreter or RPATH leaked in release archive: %s\n' \
+      "$archive" >&2
+    exit 1
+  fi
+}
+
 require_archive_contract() {
   local archive=$1
   local target_id=$2
@@ -271,6 +338,8 @@ require_archive_contract() {
   tmp_dir="$(mktemp -d)"
   package_root="$(extract_archive "$archive" "$tmp_dir")"
 
+  require_no_bootlin_toolchain_paths "$archive" "$package_root"
+
   require_file "$package_root/lib/pkgconfig/lonejson.pc"
   require_file "$package_root/lib/cmake/lonejson/lonejsonConfig.cmake"
   require_file "$package_root/lib/cmake/lonejson/lonejsonConfigVersion.cmake"
@@ -308,9 +377,9 @@ require_archive_contract() {
   for required_metadata in \
       '"schema": "pkt.systems.dependencies.v1"' \
       '"name": "c.pkt.systems"' \
-      '"version": "0.9.0"' \
+      '"version": "0.10.0"' \
       "\"target_id\": \"$target_id\"" \
-      '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.9.0/c.pkt.systems-0.9.0-' \
+      '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.10.0/c.pkt.systems-0.10.0-' \
       '"sha256": "' \
       '"bundled": false' \
       '"external": false' \
@@ -365,6 +434,7 @@ require_archive_contract() {
       exit 1
     fi
     dynamic_metadata="$("$READELF" -d "$shared_lib")"
+    require_no_bootlin_elf_loader_metadata "$archive" "$dynamic_metadata"
     case "$dynamic_metadata" in
       *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".cache/"* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
         printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
@@ -382,10 +452,11 @@ require_archive_consumer_metadata() {
   local target_id=$2
   local preset=$3
   local tmp_dir package_root consumer_source pkg_config_flags raw_compile_flags
-  local pkg_config_static_flags raw_link_flags cmake_source_dir cmake_build_dir
+  local pkg_config_static_flags raw_link_flags runtime_link_flags cmake_source_dir cmake_build_dir
   local adapter_source adapter_cmake_source_dir adapter_cmake_build_dir
   local adapter_pkg_config_flags adapter_c89_flags cmake_prefix_path pkg_config_path
-  local adapter_dependency_root darwin_deployment_target cmake_system_name
+  local adapter_dependency_root adapter_runtime_link_flags
+  local darwin_deployment_target cmake_system_name
 
   load_target_tools "$preset" "$target_id"
 
@@ -423,10 +494,11 @@ EOF
   pkg_config_static_flags="$(PKG_CONFIG_PATH="$pkg_config_path" pkg-config --cflags --static --libs lonejson)"
   raw_compile_flags="$(target_raw_compile_flags "$target_id")"
   raw_link_flags="$(target_raw_link_flags "$target_id")"
+  runtime_link_flags="$(target_development_runtime_flags "$target_id" "$preset" "$package_root/lib")"
   # shellcheck disable=SC2086
-  run_with_target_path "$target_id" "$CC" "$consumer_source" $TARGET_CFLAGS $raw_compile_flags $pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-consumer"
+  run_with_target_path "$target_id" "$CC" "$consumer_source" $TARGET_CFLAGS $raw_compile_flags $pkg_config_flags $raw_link_flags $runtime_link_flags -o "$tmp_dir/pkg-config-consumer"
   # shellcheck disable=SC2086
-  run_with_target_path "$target_id" "$CC" "$consumer_source" $TARGET_CFLAGS $raw_compile_flags $pkg_config_static_flags $raw_link_flags -o "$tmp_dir/pkg-config-static-consumer"
+  run_with_target_path "$target_id" "$CC" "$consumer_source" $TARGET_CFLAGS $raw_compile_flags $pkg_config_static_flags $raw_link_flags $runtime_link_flags -o "$tmp_dir/pkg-config-static-consumer"
 
   cmake_source_dir="$tmp_dir/cmake-consumer"
   cmake_build_dir="$tmp_dir/cmake-build"
@@ -435,11 +507,14 @@ EOF
   cat >"$cmake_source_dir/CMakeLists.txt" <<'EOF'
 cmake_minimum_required(VERSION 3.21)
 project(lonejson_archive_consumer C)
+include("${LONEJSON_DEVELOPMENT_RUNTIME_MODULE}")
 find_package(lonejson CONFIG REQUIRED)
 add_executable(lonejson_archive_consumer_shared main.c)
 target_link_libraries(lonejson_archive_consumer_shared PRIVATE lonejson::lonejson)
 add_executable(lonejson_archive_consumer_static main.c)
 target_link_libraries(lonejson_archive_consumer_static PRIVATE lonejson::lonejson_static)
+lonejson_configure_development_runtime(lonejson_archive_consumer_shared)
+lonejson_configure_development_runtime(lonejson_archive_consumer_static)
 EOF
 
   if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
@@ -450,6 +525,8 @@ EOF
       -G Ninja
       -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
+      -D "LONEJSON_DEVELOPMENT_RUNTIME_MODULE=$repo_root/cmake/LonejsonDevelopmentRuntime.cmake"
+      -D "LONEJSON_DEVELOPMENT_RUNTIME_EXTRA_DIRS=$package_root/lib"
       -D "CMAKE_TOOLCHAIN_FILE=$repo_root/cmake/toolchains/arm64-apple-darwin.cmake"
       -D "LONEJSON_MACOS_DEPLOYMENT_TARGET=$darwin_deployment_target"
       -D "CMAKE_OSX_DEPLOYMENT_TARGET=$darwin_deployment_target"
@@ -462,11 +539,22 @@ EOF
       -G Ninja
       -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
+      -D "LONEJSON_DEVELOPMENT_RUNTIME_MODULE=$repo_root/cmake/LonejsonDevelopmentRuntime.cmake"
+      -D "LONEJSON_DEVELOPMENT_RUNTIME_EXTRA_DIRS=$package_root/lib"
       -D "CMAKE_TOOLCHAIN_FILE=$(target_toolchain_file "$target_id")"
     )
   fi
   run_with_target_path "$target_id" cmake "${cmake_args[@]}"
   run_with_target_path "$target_id" cmake --build "$cmake_build_dir"
+  if [[ "$target_id" == x86_64-linux-gnu &&
+        -f "$build_root/$preset/CMakeCache.txt" ]]; then
+    "$repo_root/tests/test_bootlin_runtime.sh" \
+      "$build_root/$preset" "$cmake_build_dir/lonejson_archive_consumer_shared" --run
+    "$repo_root/tests/test_bootlin_runtime.sh" \
+      "$build_root/$preset" "$cmake_build_dir/lonejson_archive_consumer_static" --run
+    "$tmp_dir/pkg-config-consumer"
+    "$tmp_dir/pkg-config-static-consumer"
+  fi
 
   if [[ -z "$adapter_dependency_root" ]]; then
     rm -rf "$tmp_dir"
@@ -511,8 +599,9 @@ EOF
 
   adapter_pkg_config_flags="$(PKG_CONFIG_PATH="$pkg_config_path" pkg-config --cflags --libs lonejson-curl lonejson-oidc lonejson-openssl)"
   adapter_c89_flags="-std=c89 -Wall -Wextra -Werror -Werror=implicit-function-declaration"
+  adapter_runtime_link_flags="$(target_development_runtime_flags "$target_id" "$preset" "$package_root/lib:$adapter_dependency_root/lib")"
   # shellcheck disable=SC2086
-  run_with_target_path "$target_id" "$CC" "$adapter_source" $TARGET_CFLAGS $raw_compile_flags $adapter_c89_flags $adapter_pkg_config_flags $raw_link_flags -o "$tmp_dir/pkg-config-adapter-consumer"
+  run_with_target_path "$target_id" "$CC" "$adapter_source" $TARGET_CFLAGS $raw_compile_flags $adapter_c89_flags $adapter_pkg_config_flags $raw_link_flags $adapter_runtime_link_flags -o "$tmp_dir/pkg-config-adapter-consumer"
 
   adapter_cmake_source_dir="$tmp_dir/cmake-adapter-consumer"
   adapter_cmake_build_dir="$tmp_dir/cmake-adapter-build"
@@ -521,6 +610,7 @@ EOF
   cat >"$adapter_cmake_source_dir/CMakeLists.txt" <<'EOF'
 cmake_minimum_required(VERSION 3.21)
 project(lonejson_archive_adapter_consumer C)
+include("${LONEJSON_DEVELOPMENT_RUNTIME_MODULE}")
 find_package(lonejson CONFIG REQUIRED COMPONENTS curl oidc openssl)
 add_executable(lonejson_archive_adapter_consumer main.c)
 target_compile_options(lonejson_archive_adapter_consumer PRIVATE
@@ -534,6 +624,7 @@ target_link_libraries(lonejson_archive_adapter_consumer PRIVATE
   lonejson::curl
   lonejson::oidc
   lonejson::openssl)
+lonejson_configure_development_runtime(lonejson_archive_adapter_consumer)
 EOF
 
   if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
@@ -543,6 +634,8 @@ EOF
       -G Ninja
       -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
+      -D "LONEJSON_DEVELOPMENT_RUNTIME_MODULE=$repo_root/cmake/LonejsonDevelopmentRuntime.cmake"
+      -D "LONEJSON_DEVELOPMENT_RUNTIME_EXTRA_DIRS=$package_root/lib;$adapter_dependency_root/lib"
       -D "CMAKE_TOOLCHAIN_FILE=$repo_root/cmake/toolchains/arm64-apple-darwin.cmake"
       -D "LONEJSON_MACOS_DEPLOYMENT_TARGET=$darwin_deployment_target"
       -D "CMAKE_OSX_DEPLOYMENT_TARGET=$darwin_deployment_target"
@@ -555,11 +648,19 @@ EOF
       -G Ninja
       -D "CMAKE_PREFIX_PATH=$cmake_prefix_path"
       -D "lonejson_DIR=$package_root/lib/cmake/lonejson"
+      -D "LONEJSON_DEVELOPMENT_RUNTIME_MODULE=$repo_root/cmake/LonejsonDevelopmentRuntime.cmake"
+      -D "LONEJSON_DEVELOPMENT_RUNTIME_EXTRA_DIRS=$package_root/lib;$adapter_dependency_root/lib"
       -D "CMAKE_TOOLCHAIN_FILE=$(target_toolchain_file "$target_id")"
     )
   fi
   run_with_target_path "$target_id" cmake "${cmake_args[@]}"
   run_with_target_path "$target_id" cmake --build "$adapter_cmake_build_dir"
+  if [[ "$target_id" == x86_64-linux-gnu &&
+        -f "$build_root/$preset/CMakeCache.txt" ]]; then
+    "$repo_root/tests/test_bootlin_runtime.sh" \
+      "$build_root/$preset" "$adapter_cmake_build_dir/lonejson_archive_adapter_consumer" --run
+    "$tmp_dir/pkg-config-adapter-consumer"
+  fi
 
   rm -rf "$tmp_dir"
 }

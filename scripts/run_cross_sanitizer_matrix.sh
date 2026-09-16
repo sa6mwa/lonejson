@@ -77,6 +77,19 @@ target_emulator() {
     esac
 }
 
+target_sanitizer_runtime_dir() {
+    target_id="$1"
+    sanitizer="$2"
+    case "$target_id:$sanitizer" in
+        armhf-linux-gnu:asan)
+            compiler="$(target_compiler "$target_id")"
+            target_triple="$("$toolchain_resolver" discover "$target_id" | sed -n 's/^target_triple=//p')"
+            printf '%s/%s/lib\n' "$(dirname "$(dirname "$compiler")")" "$target_triple"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 target_toolchain_file() {
     case "$1" in
         aarch64-linux-gnu) printf '%s\n' "$repo_root/cmake/toolchains/linux-aarch64-gnu.cmake" ;;
@@ -118,6 +131,7 @@ sanitizer_env_value() {
 run_probe() {
     target_id="$1"
     sanitizer="$2"
+    runtime_dir="$3"
     if [ "$dry_run" -eq 1 ]; then
         printf '+ probe %s %s with lifecycle-managed Bootlin GCC and QEMU\n' "$target_id" "$sanitizer"
         return 0
@@ -135,6 +149,7 @@ run_probe() {
     require_file "$compiler"
     require_file "$sysroot"
     require_file "$emulator"
+    require_file "$runtime_dir"
 
     rm -rf "$probe_dir"
     mkdir -p "$probe_dir"
@@ -146,8 +161,9 @@ run_probe() {
         exit 1
     fi
     set +e
-    dash -c 'env "$1=$2" "$3" -L "$4" "$5"' sh \
-        "$env_name" "$env_value" "$emulator" "$sysroot" "$probe_exe" \
+    dash -c 'env "$1=$2" "$3" -L "$4" -E "$5" "$6"' sh \
+        "$env_name" "$env_value" "$emulator" "$sysroot" \
+        "LD_LIBRARY_PATH=$runtime_dir" "$probe_exe" \
         >"$probe_dir/run.out" 2>"$probe_dir/run.err"
     probe_status=$?
     set -e
@@ -167,20 +183,30 @@ run_target_sanitizer() {
     toolchain_file="$(target_toolchain_file "$target_id")"
     bundle_root="$repo_root/.cache/c.pkt.systems/$target_id/root"
     sanitizer_flag="$(sanitizer_cmake_flag "$sanitizer")"
+    sanitizer_runtime_dir=""
     env_name="$(sanitizer_env_name "$sanitizer")"
     env_value="$(sanitizer_env_value "$sanitizer")"
     compiler_args=()
+    runtime_args=(-DLONEJSON_ASAN_DISABLE_LEAK_DETECTION=ON)
     if [ "$dry_run" -eq 0 ]; then
         compiler_args=(-DCMAKE_C_COMPILER="$(target_compiler "$target_id")")
+        sanitizer_runtime_dir="$(target_sanitizer_runtime_dir "$target_id" "$sanitizer")"
+        require_file "$sanitizer_runtime_dir"
+        runtime_args+=("-DLONEJSON_QEMU_LD_LIBRARY_PATH=$sanitizer_runtime_dir")
     fi
 
     printf '\n== %s %s ==\n' "$preset" "$sanitizer"
-    run_probe "$target_id" "$sanitizer"
+    if [ "$dry_run" -eq 0 ]; then
+        run_probe "$target_id" "$sanitizer" "$sanitizer_runtime_dir"
+    else
+        run_probe "$target_id" "$sanitizer" ""
+    fi
     run_or_print cmake -S "$repo_root" -B "$build_dir" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" \
         "${compiler_args[@]}" \
         -DCMAKE_BUILD_TYPE=Debug \
         "$sanitizer_flag" \
+        "${runtime_args[@]}" \
         -DLONEJSON_BUILD_WITH_CURL=ON \
         -DLONEJSON_BUILD_WITH_OPENSSL=ON \
         -DLONEJSON_BUILD_WITH_JWT=ON \

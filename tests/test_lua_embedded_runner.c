@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 
 #include <lauxlib.h>
 #include <lua.h>
@@ -49,6 +50,23 @@ static int run_script(lua_State *L, const char *path) {
   return 0;
 }
 
+static void set_script_arguments(lua_State *L, const char *script_path,
+                                 int argc, char **argv, int start_index) {
+  int argument_index;
+  int lua_index;
+
+  lua_createtable(L, argc - start_index + 2, 0);
+  lua_pushstring(L, script_path);
+  lua_rawseti(L, -2, 0);
+  lua_index = 1;
+  for (argument_index = start_index; argument_index < argc; ++argument_index) {
+    lua_pushstring(L, argv[argument_index]);
+    lua_rawseti(L, -2, lua_index);
+    ++lua_index;
+  }
+  lua_setglobal(L, "arg");
+}
+
 int main(int argc, char **argv) {
   const char *source_dir;
   const char *binary_dir;
@@ -57,8 +75,10 @@ int main(int argc, char **argv) {
   int rc;
 
   if (argc < 4) {
-    fprintf(stderr, "usage: %s <source-dir> <binary-dir> <script>...\n",
-            argv[0]);
+    fprintf(stderr,
+            "usage: %s <source-dir> <binary-dir> <script>...\n"
+            "       %s <source-dir> <binary-dir> -- <script> [argument...]\n",
+            argv[0], argv[0]);
     return 1;
   }
 
@@ -80,10 +100,20 @@ int main(int argc, char **argv) {
     lua_pop(L, 1);
   }
   if (rc == 0) {
-    for (i = 3; i < argc; ++i) {
-      if (run_script(L, argv[i]) != 0) {
+    if (strcmp(argv[3], "--") == 0) {
+      if (argc < 5) {
+        fprintf(stderr, "missing script after --\n");
         rc = 1;
-        break;
+      } else {
+        set_script_arguments(L, argv[4], argc, argv, 5);
+        rc = run_script(L, argv[4]);
+      }
+    } else {
+      for (i = 3; i < argc; ++i) {
+        if (run_script(L, argv[i]) != 0) {
+          rc = 1;
+          break;
+        }
       }
     }
   }

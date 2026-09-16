@@ -7,14 +7,32 @@ set -euo pipefail
 repo_root=$1
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}
+runner_build=${4:-}
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
-make --no-print-directory -C "$repo_root" lua-rock \
-  LUA="$lua_exec" LUAROCKS="$luarocks_exec" >/dev/null
-eval "$("$luarocks_exec" path --tree "$repo_root/build/luarocks")"
-export LD_LIBRARY_PATH="$repo_root/build/debug:${LD_LIBRARY_PATH:-}"
-export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
+if [[ -n "$runner_build" && "$(uname -s)" == Linux &&
+      ! -x "$runner_build/lonejson_lua_target_runner" ]]; then
+  printf 'skipping Lua benchmark fixture: missing Bootlin target runner\n'
+  exit 77
+fi
+
+run_lua_bench() {
+  if [[ -x "$runner_build/lonejson_lua_target_runner" ]]; then
+    "$repo_root/scripts/run_lua_benchmark.sh" "$repo_root" "$runner_build" \
+      "$repo_root/bench/lonejson_lua_bench.lua" "$@"
+  else
+    (cd "$repo_root" && "$lua_exec" bench/lonejson_lua_bench.lua "$@")
+  fi
+}
+
+if [[ ! -x "$runner_build/lonejson_lua_target_runner" ]]; then
+  make --no-print-directory -C "$repo_root" lua-rock \
+    LUA="$lua_exec" LUAROCKS="$luarocks_exec" >/dev/null
+  eval "$("$luarocks_exec" path --tree "$repo_root/build/luarocks")"
+  export LD_LIBRARY_PATH="$repo_root/build/debug:${LD_LIBRARY_PATH:-}"
+  export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
+fi
 
 write_run() {
   local path=$1
@@ -83,7 +101,7 @@ write_run "$latest" "case/a" 90 0 "case/b" 100 0
 rm -f "$fake_log"
 FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="pass-one" \
   LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
-  bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >/dev/null
+  run_lua_bench confirm-c "$fake_bench" "$baseline" "$latest" 1 >/dev/null
 grep -qx 'case case/a 1' "$fake_log"
 if grep -q 'case case/b 1' "$fake_log"; then
   printf 'confirm-c reran a non-failing case\n' >&2
@@ -95,7 +113,7 @@ write_run "$latest" "case/a" 97 0
 rm -f "$fake_log"
 FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="pass-one" \
   LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
-  bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >/dev/null
+  run_lua_bench confirm-c "$fake_bench" "$baseline" "$latest" 1 >/dev/null
 if [ -f "$fake_log" ] && [ -s "$fake_log" ]; then
   printf 'confirm-c retried a small-only regression\n' >&2
   exit 1
@@ -106,7 +124,7 @@ write_run "$latest" "case/a" 90 0 "case/b" 80 0 "case/c" 100 0
 rm -f "$fake_log"
 if FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="fail-first" \
   LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
-  bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >/dev/null 2>&1; then
+  run_lua_bench confirm-c "$fake_bench" "$baseline" "$latest" 1 >/dev/null 2>&1; then
   printf 'confirm-c succeeded despite a confirmed failure\n' >&2
   exit 1
 fi
@@ -125,7 +143,7 @@ printf '{"schema_version":2,"host":"test","compiler":"test","toolchain":"test","
 rm -f "$fake_log"
 if FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="pass-one" \
   LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
-  bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >/dev/null 2>&1; then
+  run_lua_bench confirm-c "$fake_bench" "$baseline" "$latest" 1 >/dev/null 2>&1; then
   printf 'confirm-c succeeded despite a schema mismatch\n' >&2
   exit 1
 fi
@@ -139,7 +157,7 @@ for field in host compiler toolchain; do
   sed "s/\"$field\":\"test\"/\"$field\":\"different\"/" "$baseline" >"$latest"
   rm -f "$fake_log"
   if FAKE_BENCH_LOG="$fake_log" FAKE_BENCH_MODE="pass-one" \
-    bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-c $(printf '%q' "$fake_bench") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >"$tmp_dir/environment.out" 2>&1; then
+    run_lua_bench confirm-c "$fake_bench" "$baseline" "$latest" 1 >"$tmp_dir/environment.out" 2>&1; then
     printf 'confirm-c accepted a %s mismatch\n' "$field" >&2
     exit 1
   fi
@@ -152,7 +170,7 @@ write_run "$c_latest" "parse/buffer_fixed/lonejson" 100 0
 write_lua_run "$baseline" "decode/record_fixed/lua" 100 0
 write_lua_run "$latest" "decode/record_fixed/lua" 97 0
 if ! LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
-  bash -lc "cd $(printf '%q' "$repo_root") && exec $(printf '%q' "$lua_exec") bench/lonejson_lua_bench.lua confirm-lua $(printf '%q' "$c_latest") $(printf '%q' "$baseline") $(printf '%q' "$latest") 1" >"$tmp_dir/confirm-lua-small.out" 2>"$tmp_dir/confirm-lua-small.err"; then
+  run_lua_bench confirm-lua "$c_latest" "$baseline" "$latest" 1 >"$tmp_dir/confirm-lua-small.out" 2>"$tmp_dir/confirm-lua-small.err"; then
   printf 'confirm-lua failed a small-only regression\n' >&2
   cat "$tmp_dir/confirm-lua-small.err" >&2
   exit 1
@@ -161,3 +179,12 @@ if grep -q 'retrying lua benchmark case' "$tmp_dir/confirm-lua-small.err"; then
   printf 'confirm-lua retried a small-only regression\n' >&2
   exit 1
 fi
+
+# Force the retry branch, then execute a real case in the child interpreter.
+# A tiny baseline avoids making this routing check a performance gate.
+write_lua_run "$baseline" "decode/record_fixed/lua" 0.000000000001 0
+write_lua_run "$latest" "decode/record_fixed/lua" 0 0
+LONEJSON_BENCH_CONFIRM_COOLDOWN_SECONDS=0 \
+  run_lua_bench confirm-lua "$c_latest" "$baseline" "$latest" 1 \
+  >"$tmp_dir/confirm-lua-retry.out" 2>"$tmp_dir/confirm-lua-retry.err"
+grep -F 'retrying lua benchmark case 1/' "$tmp_dir/confirm-lua-retry.err" >/dev/null

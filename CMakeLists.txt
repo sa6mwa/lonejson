@@ -27,6 +27,7 @@ endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonCompiler.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CpktDependencyCache.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonDevelopmentRuntime.cmake")
 project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT LONEJSON_BOOTLIN_TOOLCHAIN_ROOT)
@@ -79,6 +80,8 @@ option(LONEJSON_BUILD_EXAMPLES "Build lonejson examples." OFF)
 option(LONEJSON_BUILD_BENCHMARKS "Build lonejson benchmarks." OFF)
 option(LONEJSON_BUILD_FUZZERS "Build lonejson AFL++ fuzz targets." OFF)
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
+option(LONEJSON_ASAN_DISABLE_LEAK_DETECTION
+  "Disable LeakSanitizer in cross-emulated ASan test executables." OFF)
 option(LONEJSON_ENABLE_TSAN "Enable ThreadSanitizer." OFF)
 option(LONEJSON_ENABLE_STACK_USAGE "Emit compiler stack-usage reports when supported." OFF)
 option(LONEJSON_BUILD_WITH_CURL "Build lonejson with curl adapter APIs enabled." OFF)
@@ -131,6 +134,7 @@ function(lonejson_configure_c_target target)
       $<$<CONFIG:Release>:-Werror>
     )
   endif()
+  lonejson_configure_development_runtime(${target})
 endfunction()
 
 set(LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS
@@ -161,6 +165,7 @@ function(lonejson_configure_strict_downstream_target target)
     target_compile_options(${target} PRIVATE
       ${LONEJSON_STRICT_DOWNSTREAM_WARNING_FLAGS})
   endif()
+  lonejson_configure_development_runtime(${target})
 endfunction()
 
 function(lonejson_configure_lua_c_target target)
@@ -179,6 +184,7 @@ function(lonejson_configure_lua_c_target target)
       -Wextra
       $<$<CONFIG:Release>:-Werror>)
   endif()
+  lonejson_configure_development_runtime(${target})
 endfunction()
 
 string(TOLOWER "${LONEJSON_TARGET_OS}" LONEJSON_TARGET_OS_LOWER)
@@ -350,9 +356,22 @@ if(LONEJSON_ENABLED_SANITIZER_COUNT GREATER 1)
     "Enable at most one of LONEJSON_ENABLE_ASAN or LONEJSON_ENABLE_TSAN at a time.")
 endif()
 
+if(LONEJSON_ASAN_DISABLE_LEAK_DETECTION AND NOT LONEJSON_ENABLE_ASAN)
+  message(FATAL_ERROR
+    "LONEJSON_ASAN_DISABLE_LEAK_DETECTION requires LONEJSON_ENABLE_ASAN.")
+endif()
+if(LONEJSON_ASAN_DISABLE_LEAK_DETECTION AND NOT CMAKE_CROSSCOMPILING)
+  message(FATAL_ERROR
+    "LONEJSON_ASAN_DISABLE_LEAK_DETECTION is only supported for cross-emulated tests.")
+endif()
+
 if(LONEJSON_ENABLE_ASAN AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
+endif()
+if(LONEJSON_ASAN_DISABLE_LEAK_DETECTION)
+  add_compile_options(-include
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lonejson_cross_asan_defaults.h")
 endif()
 
 if(LONEJSON_ENABLE_TSAN)
@@ -504,6 +523,18 @@ if(LONEJSON_BUILD_TESTS)
   lonejson_configure_c_target(lonejson_tests)
   add_dependencies(lonejson_tests lonejson_generate_fixtures)
   add_test(NAME lonejson_tests COMMAND lonejson_tests)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
+    add_test(NAME lonejson_bootlin_runtime_tests
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bootlin_runtime.sh"
+        "${CMAKE_CURRENT_BINARY_DIR}" "$<TARGET_FILE:lonejson_tests>")
+    set_tests_properties(lonejson_bootlin_runtime_tests PROPERTIES
+      LABELS "smoke;local" TIMEOUT 20)
+    add_test(NAME lonejson_bootlin_runtime_symlink_cache_tests
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bootlin_runtime_symlink_cache.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(lonejson_bootlin_runtime_symlink_cache_tests PROPERTIES
+      LABELS "smoke;local" TIMEOUT 20)
+  endif()
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_tests)
 
   if(LONEJSON_BUILD_WITH_CURL AND UNIX)
@@ -513,6 +544,14 @@ if(LONEJSON_BUILD_TESTS)
     target_compile_definitions(lonejson_curl_rewind_e2e PRIVATE LONEJSON_WITH_CURL)
     target_link_libraries(lonejson_curl_rewind_e2e PRIVATE lonejson CURL::libcurl)
     lonejson_configure_c_target(lonejson_curl_rewind_e2e)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
+      add_test(NAME lonejson_curl_bootlin_runtime_tests
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bootlin_runtime.sh"
+          "${CMAKE_CURRENT_BINARY_DIR}"
+          "$<TARGET_FILE:lonejson_curl_rewind_tests>" --run)
+      set_tests_properties(lonejson_curl_bootlin_runtime_tests PROPERTIES
+        LABELS "smoke;local;integration" TIMEOUT 20)
+    endif()
 
     add_executable(lonejson_curl_rewind_tests tests/test_curl_rewind.c)
     target_include_directories(lonejson_curl_rewind_tests PRIVATE
@@ -579,46 +618,18 @@ if(LONEJSON_BUILD_TESTS)
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_baseline_history.sh"
           "${CMAKE_CURRENT_SOURCE_DIR}"
           "${LONEJSON_LUA_EXECUTABLE}"
-          "${LONEJSON_LUAROCKS_EXECUTABLE}")
+          "${LONEJSON_LUAROCKS_EXECUTABLE}"
+          "${CMAKE_CURRENT_BINARY_DIR}")
       add_test(
         NAME lonejson_bench_retry_confirm_tests
         COMMAND "${LONEJSON_BASH_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_retry_confirm.sh"
           "${CMAKE_CURRENT_SOURCE_DIR}"
           "${LONEJSON_LUA_EXECUTABLE}"
-          "${LONEJSON_LUAROCKS_EXECUTABLE}")
-      add_test(
-        NAME lonejson_lua_legacy_uservalue_tests
-        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_legacy_uservalue.sh"
-          "${CMAKE_CURRENT_SOURCE_DIR}"
-          "${LONEJSON_LUA_EXECUTABLE}"
           "${LONEJSON_LUAROCKS_EXECUTABLE}"
           "${CMAKE_CURRENT_BINARY_DIR}")
-      add_test(
-        NAME lonejson_lua_schema_cache_tests
-        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.sh"
-          "${CMAKE_CURRENT_SOURCE_DIR}"
-          "${LONEJSON_LUA_EXECUTABLE}"
-          "${LONEJSON_LUAROCKS_EXECUTABLE}"
-          "${CMAKE_CURRENT_BINARY_DIR}")
-      add_test(
-        NAME lonejson_lua_encode_stats_tests
-        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.sh"
-          "${CMAKE_CURRENT_SOURCE_DIR}"
-          "${LONEJSON_LUA_EXECUTABLE}"
-          "${LONEJSON_LUAROCKS_EXECUTABLE}"
-          "${CMAKE_CURRENT_BINARY_DIR}")
-      add_test(
-        NAME lonejson_lua_external_liblonejson_tests
-        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_external_liblonejson.sh"
-          "${CMAKE_CURRENT_SOURCE_DIR}"
-          "${LONEJSON_LUA_EXECUTABLE}"
-          "${LONEJSON_LUAROCKS_EXECUTABLE}"
-          "${CMAKE_CURRENT_BINARY_DIR}")
+      set_tests_properties(lonejson_bench_baseline_history_tests
+        lonejson_bench_retry_confirm_tests PROPERTIES SKIP_RETURN_CODE 77)
       add_test(
         NAME lonejson_lua_rock_makefile_deps_tests
         COMMAND "${LONEJSON_BASH_EXECUTABLE}"
@@ -636,46 +647,54 @@ if(LONEJSON_BUILD_TESTS)
       LONEJSON_C_PKT_SYSTEMS_ROOT AND
       EXISTS "${LONEJSON_TARGET_LUA_INCLUDE_DIR}/lua.h" AND
       EXISTS "${LONEJSON_TARGET_LUA_LIBRARY}")
-    add_library(lonejson_lua_target_core MODULE src/lua/lonejson_lua.c)
-    target_include_directories(lonejson_lua_target_core PRIVATE
-      "${LONEJSON_PUBLIC_INCLUDE_DIR}"
-      "${LONEJSON_TARGET_LUA_INCLUDE_DIR}")
+    foreach(lua_module_target IN ITEMS lonejson_lua_target_core lonejson_lua_benchmark_core)
+      set(lua_module_output "${CMAKE_CURRENT_BINARY_DIR}")
+      if(lua_module_target STREQUAL "lonejson_lua_benchmark_core")
+        set(lua_module_output "${CMAKE_CURRENT_BINARY_DIR}/lua-benchmark")
+      endif()
+      add_library(${lua_module_target} MODULE src/lua/lonejson_lua.c)
+      target_include_directories(${lua_module_target} PRIVATE
+        "${LONEJSON_PUBLIC_INCLUDE_DIR}"
+        "${LONEJSON_TARGET_LUA_INCLUDE_DIR}")
+      target_link_libraries(${lua_module_target} PRIVATE
+        lonejson_shared
+        "${LONEJSON_TARGET_LUA_LIBRARY}")
+      set_target_properties(${lua_module_target} PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME core
+        LIBRARY_OUTPUT_DIRECTORY
+          "${lua_module_output}/lua-target/lonejson"
+        BUILD_RPATH
+          "${CMAKE_CURRENT_BINARY_DIR};${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
+      if(LONEJSON_BUILD_WITH_CURL)
+        target_compile_definitions(${lua_module_target} PRIVATE
+          LONEJSON_WITH_CURL)
+        lonejson_target_include_curl(${lua_module_target})
+        target_link_libraries(${lua_module_target} PRIVATE CURL::libcurl)
+      endif()
+      if(LONEJSON_BUILD_WITH_OPENSSL AND LONEJSON_BUILD_WITH_JWT)
+        target_compile_definitions(${lua_module_target} PRIVATE
+          LONEJSON_WITH_OPENSSL)
+        lonejson_target_include_openssl(${lua_module_target})
+        target_link_libraries(${lua_module_target} PRIVATE OpenSSL::Crypto)
+      endif()
+      if(LONEJSON_BUILD_WITH_JWT)
+        target_compile_definitions(${lua_module_target} PRIVATE
+          LONEJSON_WITH_JWT)
+      endif()
+      if(LONEJSON_BUILD_WITH_OIDC)
+        target_compile_definitions(${lua_module_target} PRIVATE
+          LONEJSON_WITH_OIDC)
+      endif()
+      lonejson_configure_lua_c_target(${lua_module_target})
+    endforeach()
+    target_sources(lonejson_lua_benchmark_core PRIVATE
+      tests/test_lua_benchmark_configuration.c)
     target_compile_definitions(lonejson_lua_target_core PRIVATE
       LONEJSON_TEST_FORCE_LUA_LEGACY_USERVALUE=1
       LONEJSON_TEST_MAP_ANALYSIS_COUNTER=1
       LONEJSON_TEST_LUA_ENCODE_STATS=1
       LONEJSON_TEST_LUA_SIMULATE_NO_MAXINTEGER=1)
-    target_link_libraries(lonejson_lua_target_core PRIVATE
-      lonejson_shared
-      "${LONEJSON_TARGET_LUA_LIBRARY}")
-    set_target_properties(lonejson_lua_target_core PROPERTIES
-      PREFIX ""
-      OUTPUT_NAME core
-      LIBRARY_OUTPUT_DIRECTORY
-        "${CMAKE_CURRENT_BINARY_DIR}/lua-target/lonejson"
-      BUILD_RPATH
-        "${CMAKE_CURRENT_BINARY_DIR};${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
-    if(LONEJSON_BUILD_WITH_CURL)
-      target_compile_definitions(lonejson_lua_target_core PRIVATE
-        LONEJSON_WITH_CURL)
-      lonejson_target_include_curl(lonejson_lua_target_core)
-      target_link_libraries(lonejson_lua_target_core PRIVATE CURL::libcurl)
-    endif()
-    if(LONEJSON_BUILD_WITH_OPENSSL AND LONEJSON_BUILD_WITH_JWT)
-      target_compile_definitions(lonejson_lua_target_core PRIVATE
-        LONEJSON_WITH_OPENSSL)
-      lonejson_target_include_openssl(lonejson_lua_target_core)
-      target_link_libraries(lonejson_lua_target_core PRIVATE OpenSSL::Crypto)
-    endif()
-    if(LONEJSON_BUILD_WITH_JWT)
-      target_compile_definitions(lonejson_lua_target_core PRIVATE
-        LONEJSON_WITH_JWT)
-    endif()
-    if(LONEJSON_BUILD_WITH_OIDC)
-      target_compile_definitions(lonejson_lua_target_core PRIVATE
-        LONEJSON_WITH_OIDC)
-    endif()
-    lonejson_configure_lua_c_target(lonejson_lua_target_core)
 
     add_executable(lonejson_lua_target_runner
       tests/test_lua_embedded_runner.c)
@@ -686,7 +705,14 @@ if(LONEJSON_BUILD_TESTS)
     set_target_properties(lonejson_lua_target_runner PROPERTIES
       BUILD_RPATH "${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
     lonejson_configure_lua_c_target(lonejson_lua_target_runner)
-    add_dependencies(lonejson_lua_target_runner lonejson_lua_target_core)
+    add_dependencies(lonejson_lua_target_runner
+      lonejson_lua_target_core lonejson_lua_benchmark_core)
+    if(NOT CMAKE_CROSSCOMPILING)
+      add_test(NAME lonejson_lua_benchmark_configuration_tests
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_lua_benchmark.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_benchmark_configuration.lua")
+    endif()
     add_test(
       NAME lonejson_lua_target_tests
       COMMAND lonejson_lua_target_runner
@@ -696,6 +722,13 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_fuzz.lua"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.lua"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.lua")
+    add_test(
+      NAME lonejson_lua_target_runner_argument_tests
+      COMMAND lonejson_lua_target_runner
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        -- "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_embedded_runner_args.lua"
+        runner-argument)
 
     add_executable(lonejson_lua_interop_tests
       src/lua/lonejson_lua.c
@@ -1172,6 +1205,20 @@ if(LONEJSON_BUILD_EXAMPLES)
     lonejson_configure_c_target("example_${example_name}")
     list(APPEND LONEJSON_STACK_USAGE_TARGETS "example_${example_name}")
   endforeach()
+
+  if(LONEJSON_BUILD_WITH_CURL)
+    foreach(example_name curl_get curl_put)
+      add_executable("example_${example_name}" "examples/${example_name}.c")
+      target_include_directories("example_${example_name}" PRIVATE
+        "${LONEJSON_PUBLIC_INCLUDE_DIR}")
+      target_compile_definitions("example_${example_name}" PRIVATE
+        LONEJSON_WITH_CURL)
+      lonejson_target_include_curl("example_${example_name}")
+      target_link_libraries("example_${example_name}" PRIVATE lonejson CURL::libcurl)
+      lonejson_configure_c_target("example_${example_name}")
+      list(APPEND LONEJSON_STACK_USAGE_TARGETS "example_${example_name}")
+    endforeach()
+  endif()
 endif()
 
 if(LONEJSON_BUILD_BENCHMARKS)
@@ -1273,6 +1320,31 @@ if(LONEJSON_BUILD_FUZZERS)
       LONEJSON_WITH_OPENSSL
       LONEJSON_WITH_JWT
       LONEJSON_WITH_OIDC)
+  endif()
+endif()
+
+if(LONEJSON_BUILD_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+    NOT CMAKE_CROSSCOMPILING)
+  # Keep this after every executable declaration. A new local executable
+  # fails configuration until it records the pinned Bootlin runtime.
+  lonejson_verify_development_runtime_coverage()
+  get_property(_lonejson_runtime_targets DIRECTORY
+    PROPERTY BUILDSYSTEM_TARGETS)
+  set(_lonejson_runtime_test_targets)
+  foreach(_lonejson_runtime_target IN LISTS _lonejson_runtime_targets)
+    get_target_property(_lonejson_runtime_target_type
+      ${_lonejson_runtime_target} TYPE)
+    if(_lonejson_runtime_target_type STREQUAL "EXECUTABLE")
+      list(APPEND _lonejson_runtime_test_targets
+        "$<TARGET_FILE:${_lonejson_runtime_target}>")
+    endif()
+  endforeach()
+  if(_lonejson_runtime_test_targets)
+    add_test(NAME lonejson_bootlin_runtime_target_coverage_tests
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bootlin_runtime_targets.sh"
+        "${CMAKE_CURRENT_BINARY_DIR}" ${_lonejson_runtime_test_targets})
+    set_tests_properties(lonejson_bootlin_runtime_target_coverage_tests
+      PROPERTIES LABELS "smoke;local" TIMEOUT 60)
   endif()
 endif()
 

@@ -28,6 +28,15 @@ CROSS_RELEASE_PRESETS := \
 	armhf-linux-musl-release
 LUA ?= $(shell ./scripts/resolve_lua55.sh 2>/dev/null)
 LUAROCKS ?= luarocks
+LONEJSON_HOST_OS ?= $(shell uname -s)
+ifeq ($(LONEJSON_HOST_OS),Linux)
+LUA_BENCH_BUILD_DIR := $(CURDIR)/build/host-curl
+LUA_BENCH_PREPARE := lua-target-runner
+else
+LUA_BENCH_BUILD_DIR := $(CURDIR)/build/$(HOST_PRESET)
+LUA_BENCH_PREPARE := lua-host-runtime
+endif
+LUA_BENCH_RUN = LUA="$(LUA)" LUAROCKS="$(LUAROCKS)" LUA_ROCK_TREE="$(CURDIR)/$(LUA_ROCK_TREE)" LONEJSON_LUA_BENCH_LIBDIR="$(LONEJSON_LUA_BENCH_LIBDIR)" "$(CURDIR)/scripts/run_lua_benchmark.sh" "$(CURDIR)" "$(LUA_BENCH_BUILD_DIR)"
 GENERATED_FIXTURE_DIR := $(CURDIR)/build/generated/fixtures
 ifneq ($(LONEJSON_VERSION_OVERRIDE),)
 export LONEJSON_VERSION_OVERRIDE
@@ -133,6 +142,9 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 	print-release-version \
 	lua-rock \
 	lua-env \
+	lua-target-runner \
+	lua-host-runtime \
+	lua-bench-prerequisite \
 	lua-test \
 	lua-fuzz \
 	lua-bench \
@@ -232,15 +244,18 @@ help:
 		'make release-darwin-smoke-bundle Build the Darwin smoke ZIP with example and link-smoke binaries.' \
 		'make lua-rock               Generate a local rockspec in build/luarocks and install the Lua module there.' \
 		'make lua-env                Print shell exports for using the repo-local Lua rock and debug C library.' \
+		'make lua-target-runner      Build the native Bootlin Lua runner used by Linux tests and benchmarks.' \
+		'make lua-host-runtime       Build the native library used by Darwin Lua benchmarks.' \
+		'make lua-bench-prerequisite Prepare the platform-native Lua benchmark runtime.' \
 		'make lua-test               Build the Lua module and run the Lua integration test.' \
 		'make lua-fuzz               Build the Lua module and run the Lua randomized binding fuzz smoke.' \
 		'make lua-bench              Run the standalone Lua benchmark harness, compare it, and enforce the Lua benchmark gate.' \
-		'make lua-bench-freeze-baseline Freeze the last Lua benchmark history entry as the Lua baseline.' \
+		'make lua-bench-freeze-baseline Run fresh C and Lua measurements, then freeze the Lua baseline.' \
 		'make lua-bench-compare      Run a fresh Lua benchmark, then compare against the committed Lua baseline.' \
 		'make lua-bench-gate         Run a fresh Lua benchmark, then enforce the Lua benchmark gate against the committed Lua baseline.' \
 		'make bench                  Build and run the host benchmark against the vendored JSON corpus, then compare/gate against the working baseline file if present.' \
 		'make bench-check            Run C and Lua benchmark gates using temporary result files, leaving perflogs/ clean.' \
-		'make bench-freeze-baseline  Freeze the last history entry as the current benchmark baseline.' \
+		'make bench-freeze-baseline  Run a fresh C measurement, then freeze it as the current benchmark baseline.' \
 		'make bench-compare          Run a fresh C benchmark, then compare against the committed C baseline.' \
 		'make bench-baseline-history Compare frozen C/Lua benchmark baselines across git history.' \
 		'make bench-gate             Run a fresh C benchmark, then enforce the C benchmark gate against the committed C baseline.' \
@@ -438,7 +453,7 @@ ifeq ($(and $(wildcard $(PERF_BASELINE)),$(wildcard $(LUA_PERF_BASELINE))),)
 		exit 0; \
 	fi
 else
-	@$(MAKE) lua-rock
+	@$(MAKE) lua-bench-prerequisite
 	@tmp_dir="$$(mktemp -d)"; \
 	trap 'rm -rf "$$tmp_dir"' EXIT; \
 	c_latest="$$tmp_dir/c-latest.json"; \
@@ -447,29 +462,26 @@ else
 	lua_latest="$$tmp_dir/lua-latest.json"; \
 	lua_history="$$tmp_dir/lua-history.jsonl"; \
 	lua_runs="$$tmp_dir/lua-runs"; \
-	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && \
-	export LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" && \
-	export DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" && \
-	export LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" && \
 	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench lonejson_shared && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$$c_latest" "$$c_history" "$$c_runs" "$(PERF_ITERATIONS)" && \
 	if ! ./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$$c_latest"; then \
 		./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$$c_latest"; \
 		printf '%s\n' 'C benchmark gate failed once; rerunning only failing cases once to confirm.' >&2; \
-		$(LUA) bench/lonejson_lua_bench.lua confirm-c "./build/$(HOST_PRESET)/lonejson_bench" "$(PERF_BASELINE)" "$$c_latest" "$(PERF_ITERATIONS)"; \
+		$(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua confirm-c "./build/$(HOST_PRESET)/lonejson_bench" "$(PERF_BASELINE)" "$$c_latest" "$(PERF_ITERATIONS)"; \
 	fi && \
-	$(LUA) bench/lonejson_lua_bench.lua run "$$c_latest" "$$lua_latest" "$$lua_history" "$$lua_runs" "$(LUA_PERF_ITERATIONS)" && \
-	if ! $(LUA) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$$lua_latest"; then \
-		$(LUA) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$$lua_latest"; \
+	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" $(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua run "$$c_latest" "$$lua_latest" "$$lua_history" "$$lua_runs" "$(LUA_PERF_ITERATIONS)" && \
+	if ! $(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$$lua_latest"; then \
+		$(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$$lua_latest"; \
 		printf '%s\n' 'Lua benchmark gate failed once; rerunning only failing cases once to confirm.' >&2; \
-		$(LUA) bench/lonejson_lua_bench.lua confirm-lua "$$c_latest" "$(LUA_PERF_BASELINE)" "$$lua_latest" "$(LUA_PERF_ITERATIONS)"; \
+		$(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua confirm-lua "$$c_latest" "$(LUA_PERF_BASELINE)" "$$lua_latest" "$(LUA_PERF_ITERATIONS)"; \
 	fi
 endif
 
 bench-freeze-baseline:
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
+	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
 	./build/$(HOST_PRESET)/lonejson_bench freeze-baseline "$(PERF_HISTORY)" "$(PERF_BASELINE)"
 
 bench-compare:
@@ -479,13 +491,8 @@ bench-compare:
 	./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$(PERF_LATEST)"
 
 bench-baseline-history:
-	@$(MAKE) --no-print-directory lua-rock >/dev/null
-	@cmake --preset $(HOST_PRESET) >/dev/null
-	@cmake --build --preset $(HOST_PRESET) --target lonejson_shared >/dev/null
-	@eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && \
-		LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" \
-		DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" \
-		$(LUA) scripts/bench_baseline_history.lua --repo "$(CURDIR)" --host-id "$(PERF_HOST_ID)"
+	@$(MAKE) --no-print-directory lua-bench-prerequisite >/dev/null
+	$(LUA_BENCH_RUN) scripts/bench_baseline_history.lua --repo "$(CURDIR)" --host-id "$(PERF_HOST_ID)"
 
 bench-gate:
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
@@ -553,41 +560,59 @@ $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES) $(LUA_ROCK_LIBLONEJSON_SO
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared
 	lock_timeout="$(LONEJSON_LOCK_TIMEOUT_SECONDS)"; case "$$lock_timeout" in (*[!0-9]*|0|'') printf '%s\n' 'LONEJSON_LOCK_TIMEOUT_SECONDS must be a positive integer number of seconds' >&2; exit 1;; esac; flock -w "$$lock_timeout" "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"'
 
+lua-target-runner: deps-host
+	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
+	cmake --build --preset host-curl --target lonejson_lua_target_runner
+
+lua-host-runtime: lua-rock
+	cmake --preset $(HOST_PRESET)
+	cmake --build --preset $(HOST_PRESET) --target lonejson_shared
+
+ifeq ($(LONEJSON_HOST_OS),Linux)
+lua-test: lua-target-runner
+	./build/host-curl/lonejson_lua_target_runner "$(CURDIR)" "$(CURDIR)/build/host-curl" tests/test_lua.lua tests/test_lua_fuzz.lua tests/test_lua_schema_cache.lua tests/test_lua_encode_stats.lua
+
+lua-fuzz: lua-target-runner
+	./build/host-curl/lonejson_lua_target_runner "$(CURDIR)" "$(CURDIR)/build/host-curl" tests/test_lua_fuzz.lua
+else
 lua-test: lua-rock
-	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && LD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) tests/test_lua.lua
-	$(MAKE) lua-fuzz
+	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && \
+	for script in tests/test_lua.lua tests/test_lua_fuzz.lua; do \
+		DYLD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) "$$script" || exit $$?; \
+	done
+	bash tests/test_lua_schema_cache.sh "$(CURDIR)" "$(LUA)" "$(LUAROCKS)" "$(LONEJSON_LUA_LIBDIR)"
+	bash tests/test_lua_encode_stats.sh "$(CURDIR)" "$(LUA)" "$(LUAROCKS)" "$(LONEJSON_LUA_LIBDIR)"
 
 lua-fuzz: lua-rock
 	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && LD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) tests/test_lua_fuzz.lua
+endif
+
+lua-bench-prerequisite: $(LUA_BENCH_PREPARE)
 
 lua-bench:
-	@$(MAKE) lua-rock
-	@cmake --preset $(HOST_PRESET) >/dev/null
-	@cmake --build --preset $(HOST_PRESET) --target lonejson_shared >/dev/null
-	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
+	@$(MAKE) lua-bench-prerequisite
+	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" $(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
 	if [ -f "$(LUA_PERF_BASELINE)" ]; then \
-		LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)" && \
-		LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"; \
+		$(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)" && \
+		$(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"; \
 	fi
 
-lua-bench-freeze-baseline: lua-rock
-	@cmake --preset $(HOST_PRESET) >/dev/null
-	@cmake --build --preset $(HOST_PRESET) --target lonejson_shared >/dev/null
-	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) bench/lonejson_lua_bench.lua freeze-baseline "$(LUA_PERF_HISTORY)" "$(LUA_PERF_BASELINE)"
+lua-bench-freeze-baseline: lua-bench-prerequisite
+	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
+	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
+	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
+	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" $(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
+	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" $(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua freeze-baseline "$(LUA_PERF_HISTORY)" "$(LUA_PERF_BASELINE)"
 
 lua-bench-compare:
-	@$(MAKE) lua-rock
-	@cmake --preset $(HOST_PRESET) >/dev/null
-	@cmake --build --preset $(HOST_PRESET) --target lonejson_shared >/dev/null
-	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
-	LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
+	@$(MAKE) lua-bench-prerequisite
+	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" $(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
+	$(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua compare "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
 
 lua-bench-gate:
-	@$(MAKE) lua-rock
-	@cmake --preset $(HOST_PRESET) >/dev/null
-	@cmake --build --preset $(HOST_PRESET) --target lonejson_shared >/dev/null
-	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
-	LD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="$(LONEJSON_LUA_BENCH_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
+	@$(MAKE) lua-bench-prerequisite
+	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" $(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
+	$(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
 
 asan:
 	cmake --preset $(ASAN_PRESET)

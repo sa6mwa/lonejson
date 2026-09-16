@@ -79,9 +79,13 @@ require_file CMakePresets.json
 require_file Makefile
 require_file include/lonejson.h
 require_file scripts/bench_host_id.sh
+require_file scripts/run_lua_benchmark.sh
 require_file src/lonejson.c
 require_file src/lua/lonejson_lua.c
 require_file lua/lonejson/init.lua
+require_file tests/test_bootlin_runtime_targets.sh
+require_file tests/test_bootlin_runtime_symlink_cache.sh
+require_file tests/test_lua_embedded_runner_args.lua
 
 grep -qx '9.8.7' "$stage_dir/VERSION"
 grep -qx 'VERSION' "$stage_dir/RELEASE_MANIFEST"

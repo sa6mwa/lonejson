@@ -41,10 +41,6 @@ assert_has_native_lua_tests() {
 
   printf '%s\n' "$tests" | grep -F 'lonejson_bench_baseline_history_tests' >/dev/null
   printf '%s\n' "$tests" | grep -F 'lonejson_bench_retry_confirm_tests' >/dev/null
-  printf '%s\n' "$tests" | grep -F 'lonejson_lua_legacy_uservalue_tests' >/dev/null
-  printf '%s\n' "$tests" | grep -F 'lonejson_lua_schema_cache_tests' >/dev/null
-  printf '%s\n' "$tests" | grep -F 'lonejson_lua_encode_stats_tests' >/dev/null
-  printf '%s\n' "$tests" | grep -F 'lonejson_lua_external_liblonejson_tests' >/dev/null
   printf '%s\n' "$tests" | grep -F 'lonejson_lua_rock_makefile_deps_tests' >/dev/null
 }
 
@@ -57,22 +53,6 @@ assert_lacks_native_lua_tests() {
   fi
   if printf '%s\n' "$tests" | grep -F 'lonejson_bench_retry_confirm_tests' >/dev/null; then
     printf 'bench retry Lua workflow tests must not run for non-host libc targets\n' >&2
-    exit 1
-  fi
-  if printf '%s\n' "$tests" | grep -F 'lonejson_lua_legacy_uservalue_tests' >/dev/null; then
-    printf 'legacy Lua native tests must not run for non-host libc targets\n' >&2
-    exit 1
-  fi
-  if printf '%s\n' "$tests" | grep -F 'lonejson_lua_schema_cache_tests' >/dev/null; then
-    printf 'schema-cache Lua native tests must not run for non-host libc targets\n' >&2
-    exit 1
-  fi
-  if printf '%s\n' "$tests" | grep -F 'lonejson_lua_encode_stats_tests' >/dev/null; then
-    printf 'encode-stats Lua native tests must not run for non-host libc targets\n' >&2
-    exit 1
-  fi
-  if printf '%s\n' "$tests" | grep -F 'lonejson_lua_external_liblonejson_tests' >/dev/null; then
-    printf 'external liblonejson Lua native tests must not run for non-host libc targets\n' >&2
     exit 1
   fi
   if printf '%s\n' "$tests" | grep -F 'lonejson_lua_rock_makefile_deps_tests' >/dev/null; then

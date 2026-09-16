@@ -26,6 +26,18 @@ write_checksums "$dist_dir" "$dist_dir/lonejson-1.2.3-CHECKSUMS" \
 "$repo_root/scripts/verify_release_artifacts.sh" \
   "$repo_root" "$dist_dir/lonejson-1.2.3-CHECKSUMS" >/dev/null
 
+dist_dir="$tmp_dir/source-dist/dist"
+source_root="$tmp_dir/source-dist/lonejson-1.2.3/cmake"
+mkdir -p "$dist_dir" "$source_root"
+printf '%s\n' 'set(LONEJSON_TOOLCHAIN_DIR "/toolchains/")' \
+  >"$source_root/fetch_c_pkt_systems.cmake"
+tar -czf "$dist_dir/lonejson-1.2.3.tar.gz" \
+  -C "$tmp_dir/source-dist" lonejson-1.2.3
+write_checksums "$dist_dir" "$dist_dir/lonejson-1.2.3-CHECKSUMS" \
+  lonejson-1.2.3.tar.gz
+"$repo_root/scripts/verify_release_artifacts.sh" \
+  "$repo_root" "$dist_dir/lonejson-1.2.3-CHECKSUMS" >/dev/null
+
 dist_dir="$tmp_dir/bad-sanitizer-dist/dist"
 mkdir -p "$dist_dir"
 bad_sanitizer_root="$tmp_dir/bad-sanitizer/liblonejson-1.2.3-x86_64-linux-gnu/lib"
@@ -63,3 +75,70 @@ if "$repo_root/scripts/verify_release_artifacts.sh" \
   exit 1
 fi
 grep -q 'repository path leaked' "$tmp_dir/bad-path.err"
+
+dist_dir="$tmp_dir/bad-bootlin-dist/dist"
+mkdir -p "$dist_dir"
+bad_bootlin_root="$tmp_dir/bad-bootlin/liblonejson-1.2.3-x86_64-linux-gnu/lib"
+mkdir -p "$bad_bootlin_root"
+printf '%s\n' \
+  '/srv/build-cache/c.pkt.systems/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib' \
+  >"$bad_bootlin_root/liblonejson.so"
+tar -czf "$dist_dir/liblonejson-1.2.3-x86_64-linux-gnu.tar.gz" \
+  -C "$tmp_dir/bad-bootlin" liblonejson-1.2.3-x86_64-linux-gnu
+write_checksums "$dist_dir" "$dist_dir/bad-bootlin-CHECKSUMS" \
+  liblonejson-1.2.3-x86_64-linux-gnu.tar.gz
+if "$repo_root/scripts/verify_release_artifacts.sh" \
+    "$repo_root" "$dist_dir/bad-bootlin-CHECKSUMS" \
+    >"$tmp_dir/bad-bootlin.out" 2>"$tmp_dir/bad-bootlin.err"; then
+  printf 'expected pinned Bootlin path leak to fail release artifact verification\n' >&2
+  exit 1
+fi
+grep -q 'pinned Bootlin toolchain path leaked' "$tmp_dir/bad-bootlin.err"
+
+dist_dir="$tmp_dir/bad-custom-cache-dist/dist"
+mkdir -p "$dist_dir"
+bad_custom_cache_root="$tmp_dir/bad-custom-cache/liblonejson-1.2.3-x86_64-linux-gnu/lib/pkgconfig"
+mkdir -p "$bad_custom_cache_root"
+printf '%s\n' \
+  'Libs.private: -L/srv/cpkt-cache/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib' \
+  >"$bad_custom_cache_root/lonejson.pc"
+tar -czf "$dist_dir/liblonejson-1.2.3-x86_64-linux-gnu.tar.gz" \
+  -C "$tmp_dir/bad-custom-cache" liblonejson-1.2.3-x86_64-linux-gnu
+write_checksums "$dist_dir" "$dist_dir/bad-custom-cache-CHECKSUMS" \
+  liblonejson-1.2.3-x86_64-linux-gnu.tar.gz
+if "$repo_root/scripts/verify_release_artifacts.sh" \
+    "$repo_root" "$dist_dir/bad-custom-cache-CHECKSUMS" \
+    >"$tmp_dir/bad-custom-cache.out" 2>"$tmp_dir/bad-custom-cache.err"; then
+  printf 'expected custom toolchain cache path leak to fail release artifact verification\n' >&2
+  exit 1
+fi
+grep -q 'pinned Bootlin toolchain path leaked' "$tmp_dir/bad-custom-cache.err"
+
+if [[ "$(uname -s)" == Linux ]]; then
+  loader_dist_dir="$tmp_dir/bad-bootlin-loader-dist/dist"
+  loader_root="$tmp_dir/bad-bootlin-loader/liblonejson-1.2.3-x86_64-linux-gnu"
+  mkdir -p "$loader_dist_dir" "$loader_root/bin"
+  cat >"$tmp_dir/release-probe.c" <<'EOF'
+int main(void) {
+  return 0;
+}
+EOF
+  toolchain_env=$("$repo_root/scripts/cpkt-toolchains.sh" env x86_64-linux-gnu)
+  eval "$toolchain_env"
+  "$CC" "$tmp_dir/release-probe.c" \
+    -Wl,--dynamic-linker,/srv/build-cache/c.pkt.systems/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib/ld-linux-x86-64.so.2 \
+    -Wl,-rpath,/srv/build-cache/c.pkt.systems/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib \
+    -o "$loader_root/bin/release-probe"
+  tar -czf "$loader_dist_dir/liblonejson-1.2.3-x86_64-linux-gnu.tar.gz" \
+    -C "$tmp_dir/bad-bootlin-loader" liblonejson-1.2.3-x86_64-linux-gnu
+  write_checksums "$loader_dist_dir" "$loader_dist_dir/bad-bootlin-loader-CHECKSUMS" \
+    liblonejson-1.2.3-x86_64-linux-gnu.tar.gz
+  if "$repo_root/scripts/verify_release_artifacts.sh" \
+      "$repo_root" "$loader_dist_dir/bad-bootlin-loader-CHECKSUMS" \
+      >"$tmp_dir/bad-bootlin-loader.out" 2>"$tmp_dir/bad-bootlin-loader.err"; then
+    printf 'expected Bootlin ELF loader metadata to fail release artifact verification\n' >&2
+    exit 1
+  fi
+  grep -q 'pinned Bootlin ELF interpreter or RPATH leaked' \
+    "$tmp_dir/bad-bootlin-loader.err"
+fi

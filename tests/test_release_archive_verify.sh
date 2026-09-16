@@ -570,10 +570,10 @@ cat >"$package_root/share/lonejson/dependencies.json" <<'EOF'
   "dependencies": [
     {
       "name": "c.pkt.systems",
-      "version": "0.9.0",
+      "version": "0.10.0",
       "target_id": "x86_64-linux-gnu",
-      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.9.0/c.pkt.systems-0.9.0-x86_64-linux-gnu.tar.gz",
-      "sha256": "0bbb1cbaf60b0a94fb5a6b3756123088b45e2bef9e38079038f22e3c07febb2e",
+      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.10.0/c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
+      "sha256": "fb64caa3cad66e01669705412cd88cb4267025ca0a083fa936fe25786011391d",
       "bundled": false,
       "external": false,
       "role": "release-sdk-build-input",
@@ -592,6 +592,9 @@ cat >"$build_root/x86_64-linux-gnu-release/CMakeCache.txt" <<EOF
 CMAKE_C_COMPILER:FILEPATH=$CC
 CMAKE_NM:FILEPATH=$NM
 CMAKE_READELF:FILEPATH=$CPKT_TOOLCHAIN_READELF
+CMAKE_SYSROOT:PATH=$CPKT_SYSROOT
+LONEJSON_BOOTLIN_LIBC:STRING=gnu
+LONEJSON_BOOTLIN_TOOLCHAIN_ROOT:PATH=$CPKT_TOOLCHAIN_ROOT
 LONEJSON_C_PKT_SYSTEMS_ROOT:PATH=$dependency_root
 EOF
 
@@ -641,6 +644,50 @@ tar -C "$tmp_dir/package" -czf \
   "$repo_root" \
   "$dist_dir/lonejson-9.9.9-CHECKSUMS" \
   "$tmp_dir/missing-build-root"
+
+bootlin_path_dist_dir="$tmp_dir/bootlin-path-dist"
+bootlin_path_package_dir="$tmp_dir/bootlin-path-package"
+bootlin_path_root="$bootlin_path_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$bootlin_path_dist_dir"
+cp -R "$tmp_dir/package" "$bootlin_path_package_dir"
+cat >>"$bootlin_path_root/lib/pkgconfig/lonejson.pc" <<'EOF'
+Libs.private: -Wl,-rpath,/srv/build-cache/c.pkt.systems/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib
+EOF
+tar -C "$bootlin_path_package_dir" -czf \
+  "$bootlin_path_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$bootlin_path_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+bootlin_path_log="$tmp_dir/bootlin-path.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+    "$repo_root" \
+    "$bootlin_path_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+    "$build_root" >"$bootlin_path_log" 2>&1; then
+  printf 'expected archive verification to fail on a pinned Bootlin path leak\n' >&2
+  exit 1
+fi
+grep -F 'pinned Bootlin toolchain path leaked in release archive' "$bootlin_path_log" >/dev/null
+
+custom_cache_dist_dir="$tmp_dir/custom-cache-dist"
+custom_cache_package_dir="$tmp_dir/custom-cache-package"
+custom_cache_root="$custom_cache_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
+mkdir -p "$custom_cache_dist_dir"
+cp -R "$tmp_dir/package" "$custom_cache_package_dir"
+cat >>"$custom_cache_root/lib/pkgconfig/lonejson.pc" <<'EOF'
+Libs.private: -L/srv/cpkt-cache/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib
+EOF
+tar -C "$custom_cache_package_dir" -czf \
+  "$custom_cache_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  "liblonejson-9.9.9-x86_64-linux-gnu"
+(cd "$custom_cache_dist_dir" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >lonejson-9.9.9-CHECKSUMS)
+custom_cache_log="$tmp_dir/custom-cache.log"
+if "$repo_root/scripts/verify_release_archives.sh" \
+    "$repo_root" \
+    "$custom_cache_dist_dir/lonejson-9.9.9-CHECKSUMS" \
+    "$build_root" >"$custom_cache_log" 2>&1; then
+  printf 'expected archive verification to fail on a custom toolchain cache path leak\n' >&2
+  exit 1
+fi
+grep -F 'pinned Bootlin toolchain path leaked in release archive' "$custom_cache_log" >/dev/null
 
 missing_metadata_dist_dir="$tmp_dir/missing-metadata-dist"
 missing_metadata_package_dir="$tmp_dir/missing-metadata-package"

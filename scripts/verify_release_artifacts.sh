@@ -112,6 +112,33 @@ scan_payload_for_local_paths() {
   done < <(find "$root" -type f | sort)
 }
 
+scan_shipped_payload_for_bootlin_toolchain_paths() {
+  local artifact=$1
+  local root=$2
+  local toolchain_path_pattern
+
+  # A development executable may record this collection's loader and RPATH,
+  # but a distributed library or its package metadata must never name a local
+  # Bootlin collection.  Match both the lifecycle cache layout and the stable
+  # collection directory itself so a CPKT_TOOLCHAIN_CACHE override cannot hide
+  # the leak behind a different parent directory.
+  toolchain_path_pattern='/(c\.pkt\.systems/)?toolchains(/roots)?/|/[^[:space:]:;]*(x86-64|aarch64|armv7-eabihf)--(glibc|musl)--stable-[^[:space:]:;]*'
+
+  while IFS= read -r file_path; do
+    rel_path="${file_path#"$root"/}"
+    case "$rel_path" in
+      *liblonejson*.a | *liblonejson*.so* | *liblonejson*.dylib | \
+      */lib/pkgconfig/*.pc | */lib/cmake/lonejson/*.cmake | \
+      */share/lonejson/dependencies.json | *.rockspec | *.so | *.dylib)
+        if grep -aE "$toolchain_path_pattern" "$file_path" >/dev/null 2>&1; then
+          fail_artifact "$artifact" "$rel_path" \
+            "pinned Bootlin toolchain path leaked"
+        fi
+        ;;
+    esac
+  done < <(find "$root" -type f | sort)
+}
+
 scan_shipped_payload_for_instrumentation() {
   local artifact=$1
   local root=$2
@@ -140,6 +167,11 @@ scan_shipped_payload_for_instrumentation() {
 scan_loader_metadata() {
   local artifact=$1
   local root=$2
+  local bootlin_loader_path_pattern
+
+  # Keep this separate from the general path scan: ELF interpreter and
+  # RPATH metadata must never point at a pinned Bootlin collection.
+  bootlin_loader_path_pattern='c\.pkt\.systems/toolchains/|/(x86-64|aarch64|armv7-eabihf)--(glibc|musl)--stable-'
 
   while IFS= read -r file_path; do
     rel_path="${file_path#"$root"/}"
@@ -147,12 +179,18 @@ scan_loader_metadata() {
     case "$description" in
       *ELF*shared\ object* | *ELF*executable*)
         if command -v readelf >/dev/null 2>&1; then
-          metadata="$(readelf -d "$file_path" 2>/dev/null || true)"
+          metadata="$(readelf -l -d "$file_path" 2>/dev/null || true)"
+          if printf '%s\n' "$metadata" |
+              grep -E '(Requesting program interpreter|RUNPATH|RPATH)' |
+              grep -E "$bootlin_loader_path_pattern" >/dev/null; then
+            fail_artifact "$artifact" "$rel_path" \
+              "pinned Bootlin ELF interpreter or RPATH leaked"
+          fi
           if printf '%s\n' "$metadata" | grep -E \
-              '(libasan|libtsan|RUNPATH|RPATH).*(/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/)' \
+              '(libasan|libtsan|RUNPATH|RPATH|Requesting program interpreter).*(/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/|c\.pkt\.systems/toolchains/|--(glibc|musl)--stable-)' \
               >/dev/null; then
             fail_artifact "$artifact" "$rel_path" \
-              "non-relocatable or sanitizer ELF loader metadata"
+              "non-relocatable, pinned Bootlin, or sanitizer ELF loader metadata"
           fi
         fi
         ;;
@@ -160,10 +198,10 @@ scan_loader_metadata() {
         if command -v otool >/dev/null 2>&1; then
           metadata="$(otool -L "$file_path" 2>/dev/null || true; otool -l "$file_path" 2>/dev/null || true)"
           if printf '%s\n' "$metadata" | grep -E \
-              '(libasan|libtsan|/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/)' \
+              '(libasan|libtsan|/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/|c\.pkt\.systems/toolchains/|--(glibc|musl)--stable-)' \
               >/dev/null; then
             fail_artifact "$artifact" "$rel_path" \
-              "non-relocatable or sanitizer Mach-O loader metadata"
+              "non-relocatable, pinned Bootlin, or sanitizer Mach-O loader metadata"
           fi
         fi
         ;;
@@ -214,6 +252,7 @@ extract_artifact() {
     sort)
 
   scan_payload_for_local_paths "$artifact" "$artifact_root"
+  scan_shipped_payload_for_bootlin_toolchain_paths "$artifact" "$artifact_root"
   case "$artifact" in
     lonejson-[0-9]*.tar.gz | lonejson-[0-9]*.tgz)
       ;;

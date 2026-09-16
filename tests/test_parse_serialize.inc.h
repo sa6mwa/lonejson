@@ -1279,6 +1279,26 @@ static void test_f64_boundary_exponents_stay_on_fast_path(void) {
   EXPECT(parsed < 1.0e-308);
 }
 
+static void test_f64_serializer_fast_format_matches_snprintf(void) {
+  static const double values[] = {
+      0.0625, 0.1, 0.5, 1.5, 99.5, -99.5, 999999999999.9375, 1.0e12, -0.0};
+  size_t i;
+
+  for (i = 0u; i < sizeof(values) / sizeof(values[0]); ++i) {
+    char expected[64];
+    char actual[64];
+    int expected_len;
+    int actual_len;
+
+    expected_len = snprintf(expected, sizeof(expected), "%.17g", values[i]);
+    actual_len = lonejson__format_f64_text(actual, sizeof(actual), values[i]);
+    EXPECT(actual_len == expected_len);
+    if (actual_len == expected_len && actual_len >= 0) {
+      EXPECT(memcmp(actual, expected, (size_t)actual_len + 1u) == 0);
+    }
+  }
+}
+
 static void test_f64_boundary_exponents_are_locale_independent(void) {
   static const char *const locales[] = {"sv_SE.UTF-8", "sv_SE.utf8",
                                         "de_DE.UTF-8", "de_DE.utf8",

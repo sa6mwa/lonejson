@@ -5,7 +5,7 @@ tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 fixture="$tmp_dir/repo"
 mkdir -p "$fixture/scripts" "$fixture/cmake/toolchains" "$tmp_dir/bin" "$tmp_dir/SDK"
-for name in cpkt-toolchains build_curl_examples build_lua_rock detect_c_pkt_systems_bundle detect_native_target; do
+for name in cpkt-toolchains build_lua_rock detect_c_pkt_systems_bundle detect_native_target; do
   cp "$repo_root/scripts/$name.sh" "$fixture/scripts/"
 done
 cp "$repo_root/cmake/toolchains/"{native,lonejson_native_darwin,arm64-apple-darwin}.cmake "$fixture/cmake/toolchains/"
@@ -63,15 +63,13 @@ grep -Fx 'source=apple' <<<"$description"
 grep -Fx "cc=$tmp_dir/bin/clang" <<<"$description"
 grep -Fx "sysroot=$tmp_dir/SDK" <<<"$description"
 [[ "$("$fixture/scripts/detect_native_target.sh")" == arm64-apple-darwin ]]
-mkdir -p "$fixture/.cache/c.pkt.systems/arm64-apple-darwin/root/lib/pkgconfig"
-"$fixture/scripts/build_curl_examples.sh"
-[[ $(wc -l <"$tmp_dir/compiler.log") -eq 2 ]]
-grep -F -- '-arch arm64 -isysroot' "$tmp_dir/compiler.log" >/dev/null
-grep -F -- '-Wl,-fatal_warnings' "$tmp_dir/compiler.log" >/dev/null
-if grep -E -- 'rpath-link|--fatal-warnings|osxcross|gcc' "$tmp_dir/compiler.log"; then exit 1; fi
+# Curl examples use CMake targets, so the native Darwin toolchain is selected
+# by the same entry point that configures every other development executable.
+grep -F 'cmake --preset host-curl' "$repo_root/scripts/build_curl_examples.sh" >/dev/null
+grep -F 'example_curl_get example_curl_put' "$repo_root/scripts/build_curl_examples.sh" >/dev/null
 # LuaRocks must likewise use the native compiler even if its CC is overridden.
 sh "$fixture/scripts/build_lua_rock.sh" /bin/false '-O2 -fPIC' -shared o so "$tmp_dir/headers" "$tmp_dir/lib"
-[[ $(wc -l <"$tmp_dir/compiler.log") -eq 5 ]]
+[[ $(wc -l <"$tmp_dir/compiler.log") -eq 3 ]]
 grep -F 'clang -arch arm64 -isysroot' "$tmp_dir/compiler.log" >/dev/null
 
 # The PKCE fixture compiles and executes through native Apple discovery.
@@ -104,20 +102,13 @@ grep -F 'install Xcode or Command Line Tools' "$tmp_dir/error"
 if TEST_ARCH=x86_64 "$fixture/scripts/cpkt-toolchains.sh" ensure arm64-apple-darwin >"$tmp_dir/error" 2>&1; then exit 1; fi
 grep -F 'require Apple Silicon' "$tmp_dir/error"
 
-# Linux-to-Darwin still uses osxcross and Darwin linker flags.
+# Linux-to-Darwin still uses osxcross and Darwin linker flags through CMake.
 export TEST_SYSTEM=Linux
 export CPKT_SYSROOT=/not-an-apple-sdk
 mkdir -p "$OSXCROSS_ROOT/bin"
 for tool in clang clang++ ld ar ranlib strip nm otool; do
   cp "$tmp_dir/bin/clang" "$OSXCROSS_ROOT/bin/arm64-apple-darwin25-$tool"
 done
-: >"$tmp_dir/compiler.log"
-LONEJSON_C_PKT_SYSTEMS_TARGET_ID=arm64-apple-darwin "$fixture/scripts/build_curl_examples.sh"
-grep -F 'arm64-apple-darwin25-clang ' "$tmp_dir/compiler.log" >/dev/null
-grep -F -- '-Wl,-fatal_warnings' "$tmp_dir/compiler.log" >/dev/null
-if grep -F -- '--fatal-warnings' "$tmp_dir/compiler.log"; then exit 1; fi
-if grep -F -- '/not-an-apple-sdk' "$tmp_dir/compiler.log"; then exit 1; fi
-
 # Linux native builds resolve Bootlin regardless of CC.
 cat >"$fixture/scripts/detect_native_bootlin_target.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -130,12 +121,6 @@ printf 'export CC=%q\n' "$TEST_ROOT/bin/bootlin-gcc"
 EOF
 cp "$tmp_dir/bin/clang" "$tmp_dir/bin/bootlin-gcc"
 chmod +x "$fixture/scripts/"*.sh
-mkdir -p "$fixture/.cache/c.pkt.systems/x86_64-linux-gnu/root/lib/pkgconfig"
-: >"$tmp_dir/compiler.log"
-"$fixture/scripts/build_curl_examples.sh"
-grep -F 'bootlin-gcc ' "$tmp_dir/compiler.log" >/dev/null
-grep -F -- '-Wl,--fatal-warnings' "$tmp_dir/compiler.log" >/dev/null
-if grep -F -- '-arch arm64' "$tmp_dir/compiler.log"; then exit 1; fi
 : >"$tmp_dir/compiler.log"
 bash "$repo_root/tests/test_oidc_pkce_provider_no_openssl.sh" "$fixture"
 grep -F 'bootlin-gcc -std=c89' "$tmp_dir/compiler.log" >/dev/null

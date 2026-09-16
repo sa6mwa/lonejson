@@ -15,6 +15,7 @@ printf '%s\n' "$script_text" | grep -F -- 'armhf-linux-gnu-release armhf-linux-g
 
 printf '%s\n' "$script_text" | grep -F -- '/usr/bin/qemu-arm' >/dev/null
 printf '%s\n' "$output" | grep -F -- '-DLONEJSON_ENABLE_ASAN=ON' >/dev/null
+printf '%s\n' "$output" | grep -F -- '-DLONEJSON_ASAN_DISABLE_LEAK_DETECTION=ON' >/dev/null
 printf '%s\n' "$output" | grep -F -- '-DLONEJSON_BUILD_WITH_CURL=ON' >/dev/null
 printf '%s\n' "$output" | grep -F -- '-DLONEJSON_BUILD_WITH_OPENSSL=ON' >/dev/null
 printf '%s\n' "$output" | grep -F -- '-DLONEJSON_BUILD_WITH_JWT=ON' >/dev/null
@@ -49,6 +50,12 @@ fi
 
 printf '%s\n' "$script_text" | grep -F -- 'toolchain_resolver="$repo_root/scripts/cpkt-toolchains.sh"' >/dev/null
 printf '%s\n' "$script_text" | grep -F -- 'lifecycle-managed Bootlin GCC' >/dev/null
+printf '%s\n' "$script_text" | grep -F -- 'target_sanitizer_runtime_dir' >/dev/null
+printf '%s\n' "$script_text" | grep -F -- 'LD_LIBRARY_PATH=$runtime_dir' >/dev/null
+printf '%s\n' "$script_text" | grep -F -- 'LONEJSON_QEMU_LD_LIBRARY_PATH' >/dev/null
+printf '%s\n' "$script_text" | grep -F -- 'LONEJSON_ASAN_DISABLE_LEAK_DETECTION=ON' >/dev/null
+grep -F -- 'LONEJSON_QEMU_LD_LIBRARY_PATH' \
+  "$repo_root/cmake/toolchains/lonejson_bootlin.cmake" >/dev/null
 if printf '%s\n' "$script_text" | grep -F -- '$HOME/.local/cross' >/dev/null; then
   printf 'cross sanitizer matrix must not depend on a workstation-local cross prefix\n' >&2
   exit 1

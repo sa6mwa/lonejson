@@ -187,17 +187,53 @@ static lonejson_status lonejson__serialize_jsonl_records_compact(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status lonejson__emit_number_text(lonejson_sink_fn sink,
-                                                  void *user,
-                                                  lonejson_error *error,
-                                                  const char *fmt, ...) {
+/* Exact small binary fractions need no decimal rounding.  Keep the general
+ * formatter for every value outside this narrow, proven representation. */
+static int lonejson__format_f64_text(char *buf, size_t capacity, double value) {
+  double magnitude = value < 0.0 ? -value : value;
+
+  if (magnitude >= 0.0625 && magnitude < 1.0e12 && capacity >= 32u) {
+    double scaled = magnitude * 16.0;
+    lonejson_uint64 units = (lonejson_uint64)scaled;
+    if ((double)units == scaled) {
+      char digits[24];
+      size_t pos = sizeof(digits);
+      size_t len = 0u;
+      lonejson_uint64 whole = units / 16u;
+      unsigned fraction = (unsigned)(units % 16u) * 625u;
+      unsigned divisor;
+
+      do {
+        digits[--pos] = (char)('0' + (int)(whole % 10u));
+        whole /= 10u;
+      } while (whole != 0u);
+      if (value < 0.0) {
+        buf[len++] = '-';
+      }
+      memcpy(buf + len, digits + pos, sizeof(digits) - pos);
+      len += sizeof(digits) - pos;
+      if (fraction != 0u) {
+        buf[len++] = '.';
+        for (divisor = 1000u; fraction != 0u; divisor /= 10u) {
+          buf[len++] = (char)('0' + fraction / divisor);
+          fraction %= divisor;
+        }
+      }
+      buf[len] = '\0';
+      return (int)len;
+    }
+  }
+  return snprintf(buf, capacity, "%.17g", value);
+}
+
+static lonejson_status lonejson__emit_f64_value(lonejson_sink_fn sink,
+                                                void *user,
+                                                lonejson_error *error,
+                                                double value) {
   char buf[64];
-  va_list ap;
   int written;
 
-  va_start(ap, fmt);
-  written = vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
+  written = lonejson__format_f64_text(buf, sizeof(buf), value);
   if (written < 0) {
     return lonejson__set_error(
         error, LONEJSON_STATUS_INTERNAL_ERROR, error ? error->offset : 0u,
@@ -242,15 +278,13 @@ lonejson__emit_i64_value(lonejson_sink_fn sink, void *user,
   return lonejson__emit_u64_value(sink, user, error, magnitude);
 }
 
-static lonejson_status lonejson__buffer_emit_number_text_exact(
-    lonejson_buffer_sink *sink, lonejson_error *error, const char *fmt, ...) {
+static lonejson_status
+lonejson__buffer_emit_f64_value_exact(lonejson_buffer_sink *sink,
+                                      lonejson_error *error, double value) {
   char buf[64];
-  va_list ap;
   int written;
 
-  va_start(ap, fmt);
-  written = vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
+  written = lonejson__format_f64_text(buf, sizeof(buf), value);
   if (written < 0) {
     return lonejson__set_error(
         error, LONEJSON_STATUS_INTERNAL_ERROR, error ? error->offset : 0u,
@@ -586,8 +620,8 @@ lonejson__serialize_value_pretty(const lonejson_field *field, const void *ptr,
                                  state->error ? state->error->column : 0u,
                                  "non-finite double cannot be serialized");
     }
-    return lonejson__emit_number_text(state->sink, state->user, state->error,
-                                      "%.17g", *(const double *)ptr);
+    return lonejson__emit_f64_value(state->sink, state->user, state->error,
+                                    *(const double *)ptr);
   case LONEJSON_FIELD_KIND_BOOL:
     return lonejson__emit_cstr(state->sink, state->user, state->error,
                                *(const bool *)ptr ? "true" : "false");
@@ -747,8 +781,8 @@ lonejson__serialize_value_pretty(const lonejson_field *field, const void *ptr,
             state->error ? state->error->column : 0u,
             "non-finite double array element cannot be serialized");
       }
-      status = lonejson__emit_number_text(state->sink, state->user,
-                                          state->error, "%.17g", arr->items[i]);
+      status = lonejson__emit_f64_value(state->sink, state->user, state->error,
+                                        arr->items[i]);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
       }
@@ -941,8 +975,7 @@ lonejson__serialize_value_compact(const lonejson_field *field, const void *ptr,
           error ? error->line : 0u, error ? error->column : 0u,
           "non-finite double cannot be serialized");
     }
-    return lonejson__emit_number_text(sink, user, error, "%.17g",
-                                      *(const double *)ptr);
+    return lonejson__emit_f64_value(sink, user, error, *(const double *)ptr);
   case LONEJSON_FIELD_KIND_BOOL:
     return lonejson__emit_cstr(sink, user, error,
                                *(const bool *)ptr ? "true" : "false");
@@ -1036,8 +1069,7 @@ lonejson__serialize_value_compact(const lonejson_field *field, const void *ptr,
             error ? error->line : 0u, error ? error->column : 0u,
             "non-finite double array element cannot be serialized");
       }
-      status =
-          lonejson__emit_number_text(sink, user, error, "%.17g", arr->items[i]);
+      status = lonejson__emit_f64_value(sink, user, error, arr->items[i]);
       if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
         return status;
       }
@@ -1188,8 +1220,8 @@ static lonejson_status lonejson__serialize_value_compact_buffer_exact(
           error ? error->line : 0u, error ? error->column : 0u,
           "non-finite double cannot be serialized");
     }
-    return lonejson__buffer_emit_number_text_exact(sink, error, "%.17g",
-                                                   *(const double *)ptr);
+    return lonejson__buffer_emit_f64_value_exact(sink, error,
+                                                 *(const double *)ptr);
   case LONEJSON_FIELD_KIND_BOOL:
     return lonejson__buffer_emit_cstr_exact(
         sink, error, *(const bool *)ptr ? "true" : "false");
@@ -1281,8 +1313,8 @@ static lonejson_status lonejson__serialize_value_compact_buffer_exact(
             error ? error->line : 0u, error ? error->column : 0u,
             "non-finite double array element cannot be serialized");
       }
-      status = lonejson__buffer_emit_number_text_exact(sink, error, "%.17g",
-                                                       arr->items[i]);
+      status =
+          lonejson__buffer_emit_f64_value_exact(sink, error, arr->items[i]);
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }
@@ -1430,8 +1462,8 @@ static lonejson_status lonejson__serialize_value_compact_buffer_grow(
           error ? error->line : 0u, error ? error->column : 0u,
           "non-finite double cannot be serialized");
     }
-    return lonejson__emit_number_text(lonejson__sink_grow, sink, error, "%.17g",
-                                      *(const double *)ptr);
+    return lonejson__emit_f64_value(lonejson__sink_grow, sink, error,
+                                    *(const double *)ptr);
   case LONEJSON_FIELD_KIND_BOOL:
     return lonejson__buffer_emit_cstr_grow(
         sink, error, *(const bool *)ptr ? "true" : "false");
@@ -1523,8 +1555,8 @@ static lonejson_status lonejson__serialize_value_compact_buffer_grow(
             error ? error->line : 0u, error ? error->column : 0u,
             "non-finite double array element cannot be serialized");
       }
-      status = lonejson__emit_number_text(lonejson__sink_grow, sink, error,
-                                          "%.17g", arr->items[i]);
+      status = lonejson__emit_f64_value(lonejson__sink_grow, sink, error,
+                                        arr->items[i]);
       if (status != LONEJSON_STATUS_OK) {
         return status;
       }

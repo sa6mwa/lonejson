@@ -72,17 +72,9 @@ config, visitor, and read-result structs. They also stick to the instance-first
 surface only: free functions take `lonejson *` explicitly, and the equivalent
 runtime method pointers are available when that call style fits better.
 
-The curl examples also define `LONEJSON_WITH_CURL` and need curl headers/libs. With a host-native `c.pkt.systems` dependency bundle downloaded via `make deps-host`, a typical command is:
-
-```sh
-export PKG_CONFIG_PATH=../.cache/c.pkt.systems/x86_64-linux-gnu/root/lib/pkgconfig
-cc -I ../include $(pkg-config --cflags libcurl) \
-   ../src/lonejson.c curl_get.c \
-   $(pkg-config --libs --static libcurl) \
-   -o bin/curl_get
-```
-
-The repository helper also writes the curl binaries to `examples/bin/`:
+The curl examples are CMake development targets. `make curl-examples` resolves
+the pinned host bundle, builds them with the selected toolchain, and writes the
+binaries to `examples/bin/` for direct execution:
 
 ```sh
 make curl-examples

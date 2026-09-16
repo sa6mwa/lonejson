@@ -81,6 +81,7 @@ int main(void) {
   test_parse_spool_default_and_unbounded_limits();
   test_parse_base64_stream_default_limit();
   test_f64_boundary_exponents_stay_on_fast_path();
+  test_f64_serializer_fast_format_matches_snprintf();
   test_f64_boundary_exponents_are_locale_independent();
   test_parser_workspace_accounting();
   test_parser_workspace_alignment_regression();

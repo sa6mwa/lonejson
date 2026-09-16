@@ -18,6 +18,10 @@ require_text 'make dev-ps                 Show the local compose-backed e2e serv
 require_text 'make compose-ps             Compatibility alias for make dev-ps.'
 
 require_text 'lua-env: lua-rock'
+require_text 'lua-target-runner: deps-host'
+require_text 'lua-host-runtime: lua-rock'
+require_text 'lua-bench-prerequisite: $(LUA_BENCH_PREPARE)'
+require_text 'scripts/run_lua_benchmark.sh'
 require_text '@$(LUAROCKS) path --tree "$(LUA_ROCK_TREE)"'
 require_text 'dev-ps:'
 require_text 'compose-ps:'
@@ -49,6 +53,25 @@ require_text './scripts/validate_luarocks.sh'
 require_text './scripts/validate_luarocks.sh "$(RELEASE_ROCK)" "$(LONEJSON_LUA_LIBDIR)" "$(LUA)" "$(LUAROCKS)"'
 require_text './scripts/run_linux_release_matrix.sh'
 require_text './scripts/fuzz.sh'
+
+bench_freeze_plan=$(make --no-print-directory -C "$repo_root" -n bench-freeze-baseline)
+printf '%s\n' "$bench_freeze_plan" | grep -F 'lonejson_bench run' >/dev/null
+printf '%s\n' "$bench_freeze_plan" | grep -F 'lonejson_bench freeze-baseline' >/dev/null
+if [[ $(printf '%s\n' "$bench_freeze_plan" | grep -n -F 'lonejson_bench run' | head -n 1 | cut -d: -f1) -ge \
+      $(printf '%s\n' "$bench_freeze_plan" | grep -n -F 'lonejson_bench freeze-baseline' | head -n 1 | cut -d: -f1) ]]; then
+  printf 'C benchmark baseline freeze must record a fresh run first\n' >&2
+  exit 1
+fi
+
+lua_bench_freeze_plan=$(make --no-print-directory -C "$repo_root" -n lua-bench-freeze-baseline)
+printf '%s\n' "$lua_bench_freeze_plan" | grep -F 'lonejson_bench run' >/dev/null
+printf '%s\n' "$lua_bench_freeze_plan" | grep -F 'lonejson_lua_bench.lua run' >/dev/null
+printf '%s\n' "$lua_bench_freeze_plan" | grep -F 'lonejson_lua_bench.lua freeze-baseline' >/dev/null
+if [[ $(printf '%s\n' "$lua_bench_freeze_plan" | grep -n -F 'lonejson_lua_bench.lua run' | head -n 1 | cut -d: -f1) -ge \
+      $(printf '%s\n' "$lua_bench_freeze_plan" | grep -n -F 'lonejson_lua_bench.lua freeze-baseline' | head -n 1 | cut -d: -f1) ]]; then
+  printf 'Lua benchmark baseline freeze must record a fresh run first\n' >&2
+  exit 1
+fi
 
 if grep -F './scripts/run_release_matrix.sh' "$makefile" >/dev/null; then
   printf 'release-matrix must route through scripts/run_linux_release_matrix.sh\n' >&2
@@ -118,6 +141,19 @@ grep -F 'LUA ?= $(shell ./scripts/resolve_lua55.sh 2>/dev/null)' "$repo_root/Mak
 grep -F 'LUA="$(LUA)" ./scripts/dev-up.sh' "$repo_root/Makefile" >/dev/null
 grep -F 'Lua 5.5 executable' "$repo_root/scripts/resolve_lua55.sh" >/dev/null
 
+darwin_lua_test=$(make --no-print-directory -C "$repo_root" -n \
+  LONEJSON_HOST_OS=Darwin lua-test)
+if grep -F 'lonejson_lua_target_runner' <<<"$darwin_lua_test" >/dev/null; then
+  printf 'Darwin Lua tests must not require the Linux target runner\n' >&2
+  exit 1
+fi
+printf '%s\n' "$darwin_lua_test" | grep -F 'luarocks' >/dev/null
+
+darwin_lua_bench=$(make --no-print-directory -C "$repo_root" -n \
+  LONEJSON_HOST_OS=Darwin lua-bench)
+printf '%s\n' "$darwin_lua_bench" |
+  grep -F 'cmake --build --preset host --target lonejson_shared' >/dev/null
+
 grep -F 'name: ${LONEJSON_COMPOSE_PROJECT_NAME:-lonejson-e2e}' \
   "$repo_root/docker-compose.yaml" >/dev/null
 grep -F 'LONEJSON_NGINX_HTTPS_E2E_PORT' "$repo_root/docker-compose.yaml" >/dev/null
@@ -125,3 +161,44 @@ grep -F './devenv/volumes/nginx/generated' "$repo_root/docker-compose.yaml" >/de
 grep -F 'LONEJSON_COMPOSE_PROJECT_NAME' "$repo_root/scripts/compose.sh" >/dev/null
 grep -F 'service-readiness' "$repo_root/scripts/dev-up.sh" >/dev/null
 grep -F 'compose state and recent logs follow' "$repo_root/scripts/test-e2e.sh" >/dev/null
+
+# Execute the Darwin recipes with recording tools: each interpreter invocation
+# must receive exactly one script, and failures must propagate out of make.
+mkdir -p "$repo_root/build"
+lua_recipe_tmp=$(mktemp -d "$repo_root/build/lua-recipe.XXXXXX")
+trap 'rm -rf "$lua_recipe_tmp"' EXIT
+mkdir -p "$lua_recipe_tmp/bin"
+cat >"$lua_recipe_tmp/bin/lua" <<'LUA'
+#!/bin/bash
+[[ $# == 1 ]] || exit 90
+printf '%s\n' "$1" >>"$LUA_RECIPE_LOG"
+[[ "$1" != "${LUA_RECIPE_FAIL:-}" ]] || exit 91
+LUA
+cat >"$lua_recipe_tmp/bin/luarocks" <<'ROCKS'
+#!/bin/bash
+[[ "$1" == path ]]
+ROCKS
+cat >"$lua_recipe_tmp/bin/bash" <<'BASH'
+#!/bin/bash
+case "$1" in
+  tests/test_lua_schema_cache.sh | tests/test_lua_encode_stats.sh)
+    printf '%s\n' "$1" >>"$LUA_RECIPE_LOG" ;;
+  *) exec /bin/bash "$@" ;;
+esac
+BASH
+chmod +x "$lua_recipe_tmp/bin/"*
+export LUA_RECIPE_LOG="$lua_recipe_tmp/log"
+run_darwin_recipe() {
+  PATH="$lua_recipe_tmp/bin:$PATH" make --no-print-directory -C "$repo_root" \
+    SHELL=/bin/bash -o lua-rock LONEJSON_HOST_OS=Darwin \
+    LUA="$lua_recipe_tmp/bin/lua" LUAROCKS="$lua_recipe_tmp/bin/luarocks" lua-test
+}
+run_darwin_recipe >"$lua_recipe_tmp/output"
+printf '%s\n' tests/test_lua.lua tests/test_lua_fuzz.lua \
+  tests/test_lua_schema_cache.sh tests/test_lua_encode_stats.sh >"$lua_recipe_tmp/expected"
+diff -u "$lua_recipe_tmp/expected" "$LUA_RECIPE_LOG"
+: >"$LUA_RECIPE_LOG"
+if LUA_RECIPE_FAIL=tests/test_lua_fuzz.lua run_darwin_recipe >"$lua_recipe_tmp/failure" 2>&1; then
+  printf 'Darwin Lua recipe swallowed a failing test\n' >&2
+  exit 1
+fi

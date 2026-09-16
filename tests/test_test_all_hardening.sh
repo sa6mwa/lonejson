@@ -31,11 +31,9 @@ hardening_dry_run=$(make -C "$repo_root" -n prerelease-hardening LONEJSON_HAVE_T
 printf '%s\n' "$hardening_dry_run" | grep -E '(^|[[:space:]])make[[:space:]]+bench-check($|[[:space:]])' >/dev/null
 
 asan_dry_run=$(make -C "$repo_root" -n asan)
-printf '%s\n' "$asan_dry_run" | grep -F 'lua_external_liblonejson_tests' >/dev/null
 printf '%s\n' "$asan_dry_run" | grep -F 'lua_target_tests' >/dev/null
 
 tsan_dry_run=$(make -C "$repo_root" -n tsan)
-printf '%s\n' "$tsan_dry_run" | grep -F 'lua_external_liblonejson_tests' >/dev/null
 printf '%s\n' "$tsan_dry_run" | grep -F 'lua_target_tests' >/dev/null
 printf '%s\n' "$tsan_dry_run" | grep -F 'check_bootlin_tsan_support.sh' >/dev/null
 

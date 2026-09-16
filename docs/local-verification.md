@@ -76,6 +76,21 @@ ThreadSanitizer support is probed by `make tsan` after resolving the selected
 native Bootlin target, so broad gates do not make a parse-time skip decision
 before the toolchain exists.
 
+Every non-shipped Linux executable built by CMake—tests, fixture servers,
+examples, benchmarks, and fuzzers—also records that collection's ELF loader
+and private transitive `RPATH`. CTest and e2e scripts execute them directly;
+they do not set `LD_LIBRARY_PATH`. Linux Lua behavior runs through the
+embedded Lua runner linked against the selected bundle. Benchmarks load a
+separate production-configured module; test-only uservalue, integer, and
+statistics definitions remain confined to the test module. Native Darwin Lua
+tests and benchmarks use its native LuaRocks runtime and the host build;
+source-rock packaging remains host-side tooling.
+
+`make package-verify` rejects every checksum-listed artifact if a packaged
+library, archive, or consumer metadata contains a Bootlin cache or stable
+collection path. Development interpreter and RPATH settings are therefore
+confined to local executables and cannot enter a release upload.
+
 Fuzzing requires no root privileges or host sysctl changes. The native input
 driver disables its own Linux dumpability before processing each input, which
 prevents Apport or other piped core collectors from delaying crash reporting.

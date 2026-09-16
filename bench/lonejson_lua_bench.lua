@@ -1630,11 +1630,22 @@ local function benchmark_retry_cooldown()
 end
 
 local function run_lua_case_fresh(c_latest_path, case_name, iterations)
+  local target_runner = os.getenv("LONEJSON_LUA_TARGET_RUNNER")
   local lua_bin = arg[-1] or "lua"
   local script_path = arg[0] or "bench/lonejson_lua_bench.lua"
-  local cmd = string.format("%s %s case %s %s %d 2>/dev/null",
-    shell_quote(lua_bin), shell_quote(script_path), shell_quote(c_latest_path),
-    shell_quote(case_name), iterations)
+  local cmd
+  if target_runner ~= nil and target_runner ~= "" then
+    cmd = string.format("%s %s %s -- %s case %s %s %d 2>/dev/null",
+      shell_quote(target_runner),
+      shell_quote(assert(os.getenv("LONEJSON_LUA_SOURCE_DIR"))),
+      shell_quote(assert(os.getenv("LONEJSON_LUA_BUILD_DIR"))),
+      shell_quote(script_path), shell_quote(c_latest_path),
+      shell_quote(case_name), iterations)
+  else
+    cmd = string.format("%s %s case %s %s %d 2>/dev/null",
+      shell_quote(lua_bin), shell_quote(script_path), shell_quote(c_latest_path),
+      shell_quote(case_name), iterations)
+  end
   local pipe = assert(io.popen(cmd, "r"))
   local output = pipe:read("*a")
   local ok, _, status = pipe:close()

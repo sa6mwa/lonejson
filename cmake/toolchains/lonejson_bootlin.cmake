@@ -207,8 +207,18 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
   if(NOT _lonejson_is_native_runtime)
     find_program(_lonejson_emulator_path NAMES "${emulator}")
     if(_lonejson_emulator_path)
-      set(CMAKE_CROSSCOMPILING_EMULATOR "${_lonejson_emulator_path};-L;${_lonejson_sysroot}" CACHE STRING "" FORCE)
-      set(CMAKE_CROSSCOMPILING_EMULATOR "${_lonejson_emulator_path};-L;${_lonejson_sysroot}" PARENT_SCOPE)
+      set(_lonejson_emulator_args
+        "${_lonejson_emulator_path}" -L "${_lonejson_sysroot}")
+      if(LONEJSON_QEMU_LD_LIBRARY_PATH)
+        if(NOT IS_DIRECTORY "${LONEJSON_QEMU_LD_LIBRARY_PATH}")
+          message(FATAL_ERROR
+            "LONEJSON_QEMU_LD_LIBRARY_PATH is not a directory: ${LONEJSON_QEMU_LD_LIBRARY_PATH}")
+        endif()
+        list(APPEND _lonejson_emulator_args -E
+          "LD_LIBRARY_PATH=${LONEJSON_QEMU_LD_LIBRARY_PATH}")
+      endif()
+      set(CMAKE_CROSSCOMPILING_EMULATOR "${_lonejson_emulator_args}" CACHE STRING "" FORCE)
+      set(CMAKE_CROSSCOMPILING_EMULATOR "${_lonejson_emulator_args}" PARENT_SCOPE)
     else()
       message(STATUS
         "QEMU runner '${emulator}' is unavailable on PATH for ${target_id}; build-only configuration will continue without CMAKE_CROSSCOMPILING_EMULATOR")

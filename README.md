@@ -1219,6 +1219,8 @@ The repository includes two benchmark harnesses:
 - `make lua-bench` runs the Lua benchmark suite and compares Lua lanes against
   `perflogs/hosts/<host-id>/lua/baseline.json`, with informational sibling
   ratios against the latest C lonejson run for the same host id
+  through the embedded target runner and pinned Bootlin runtime on Linux;
+  native Darwin uses its system Lua runtime.
 
 `<host-id>` is the first field of `uname -n | md5sum`; benchmark JSON stores
 that hash instead of the raw hostname.
