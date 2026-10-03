@@ -4,7 +4,10 @@ set -euo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 preset="${1:-arm64-apple-darwin-release}"
-target_host="${LONEJSON_OSXCROSS_HOST:-arm64-apple-darwin25}"
+[[ $# -le 1 && "$preset" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || {
+    echo 'usage: smoke_darwin_release.sh [PRESET]' >&2; exit 2;
+}
+"$repo_root/scripts/require_build_workspace.sh" "$repo_root/build/$preset/darwin-smoke"
 deployment_target="${LONEJSON_MACOS_DEPLOYMENT_TARGET:-15.0}"
 build_dir="${repo_root}/build/${preset}"
 version="$("${repo_root}/scripts/release_version.sh")"
@@ -91,12 +94,12 @@ if [ -z "$packaged_dylib" ]; then
     exit 1
 fi
 
-"$cc" -std=c89 -Wall -Wextra -Werror -I "${package_root}/include" \
+"$cc" -std=c89 -Wall -Wextra -Werror -Wl,-fatal_warnings -I "${package_root}/include" \
     "-mmacosx-version-min=${deployment_target}" "--ld-path=${ld}" \
     "${repo_root}/tests/test_link_consumer.c" \
     "${package_root}/lib/liblonejson.a" \
     -o "${smoke_dir}/bin/static-link-smoke"
-"$cc" -std=c89 -Wall -Wextra -Werror -I "${package_root}/include" \
+"$cc" -std=c89 -Wall -Wextra -Werror -Wl,-fatal_warnings -I "${package_root}/include" \
     "-mmacosx-version-min=${deployment_target}" "--ld-path=${ld}" \
     "${repo_root}/tests/test_link_consumer.c" "$packaged_dylib" \
     -o "${smoke_dir}/bin/shared-link-smoke"

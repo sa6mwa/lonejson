@@ -232,8 +232,10 @@ static void test_source_fields_path_and_raw_sink(void) {
   test_source_doc doc;
   lonejson_error error;
   lonejson_status status;
-  char text_path[] = "/tmp/lonejson-source-text-XXXXXX";
-  char bytes_path[] = "/tmp/lonejson-source-bytes-XXXXXX";
+  char text_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-source-text-XXXXXX";
+  char bytes_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-source-bytes-XXXXXX";
   int text_fd;
   int bytes_fd;
   char *json;
@@ -318,8 +320,10 @@ static void test_source_fields_file_and_fd(void) {
   test_source_doc doc;
   lonejson_error error;
   lonejson_status status;
-  char text_path[] = "/tmp/lonejson-source-file-XXXXXX";
-  char bytes_path[] = "/tmp/lonejson-source-fd-XXXXXX";
+  char text_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-source-file-XXXXXX";
+  char bytes_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-source-fd-XXXXXX";
   int text_fd;
   int bytes_fd;
   FILE *fp;
@@ -454,8 +458,9 @@ static void test_source_fields_do_not_mutate_sink_on_open_failure(void) {
   char out[64];
 
   lonejson_source_init(&source);
-  status =
-      lonejson_source_set_path(&source, "/tmp/does-not-exist-lonejson", &error);
+  status = lonejson_source_set_path(
+      &source, LONEJSON_SOURCE_DIR "/build/test-tmp/does-not-exist-lonejson",
+      &error);
   EXPECT(status == LONEJSON_STATUS_OK);
 
   memset(&sink, 0, sizeof(sink));
@@ -1949,8 +1954,10 @@ static void test_json_value_setters_and_failures(void) {
       "\"value\":\"alice\"},\"fields\":[\"id\",\"name\",\"created_at\"],"
       "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"path\":\"/"
       "name\"}}}";
-  char selector_path[] = "/tmp/lonejson-json-value-selector-XXXXXX";
-  char error_path[] = "/tmp/lonejson-json-value-error-XXXXXX";
+  char selector_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-json-value-selector-XXXXXX";
+  char error_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-json-value-error-XXXXXX";
   test_json_value_doc doc;
   test_reader_state fields_reader;
   lonejson_error error;
@@ -2086,7 +2093,8 @@ static void test_json_value_scalars_null_and_reset(void) {
 }
 
 static void test_json_value_reuse_and_cleanup_ownership(void) {
-  char selector_path[] = "/tmp/lonejson-json-value-reuse-XXXXXX";
+  char selector_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-json-value-reuse-XXXXXX";
   test_json_value_doc doc;
   lonejson_json_value value;
   lonejson_error error;
@@ -2206,7 +2214,8 @@ static void test_init_preserves_shallow_copied_source_owner(void) {
   lonejson_error error;
   test_source_doc owner;
   test_source_doc alias;
-  char path[] = "/tmp/lonejson-source-owner-XXXXXX";
+  char path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-source-owner-XXXXXX";
   int fd;
   test_buffer_sink sink;
   unsigned char buffer[64];
@@ -2251,10 +2260,14 @@ static void test_json_value_source_validation_failures(void) {
   lonejson_json_value value;
   lonejson_error error;
   lonejson_status status;
-  char trailing_path[] = "/tmp/lonejson-json-value-trailing-XXXXXX";
-  char invalid_path[] = "/tmp/lonejson-json-value-invalid-XXXXXX";
-  char trailing_path2[] = "/tmp/lonejson-json-value-trailing-XXXXXX";
-  char invalid_path2[] = "/tmp/lonejson-json-value-invalid-XXXXXX";
+  char trailing_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-json-value-trailing-XXXXXX";
+  char invalid_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-json-value-invalid-XXXXXX";
+  char trailing_path2[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-json-value-trailing-XXXXXX";
+  char invalid_path2[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-json-value-invalid-XXXXXX";
   int trailing_fd;
   int invalid_fd;
   FILE *fp;
@@ -2498,7 +2511,8 @@ static void test_json_value_large_source_backed_serialization(void) {
   lonejson_error error;
   lonejson_status status;
   test_counting_sink sink;
-  char large_path[] = "/tmp/lonejson-json-value-large-XXXXXX";
+  char large_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-json-value-large-XXXXXX";
   char *large_array;
   size_t payload_len;
   int fd;
@@ -2572,7 +2586,8 @@ static void test_json_value_nested_failure_matrix(void) {
   lonejson_status status;
   lonejson_json_value value;
   test_counting_sink sink;
-  char path_template[] = "/tmp/lonejson-json-value-matrix-XXXXXX";
+  char path_template[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-json-value-matrix-XXXXXX";
   int fd;
   FILE *fp;
   test_reader_state reader_state;
@@ -2613,7 +2628,8 @@ static void test_json_value_nested_failure_matrix(void) {
                                                &sink, &error);
     EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
 
-    strcpy(path_template, "/tmp/lonejson-json-value-matrix-XXXXXX");
+    strcpy(path_template, LONEJSON_SOURCE_DIR
+           "/build/test-tmp/lonejson-json-value-matrix-XXXXXX");
     fd = write_temp_text_file(path_template, invalid_cases[i]);
     EXPECT(fd >= 0);
     if (fd >= 0) {
@@ -2627,7 +2643,8 @@ static void test_json_value_nested_failure_matrix(void) {
       unlink(path_template);
     }
 
-    strcpy(path_template, "/tmp/lonejson-json-value-matrix-XXXXXX");
+    strcpy(path_template, LONEJSON_SOURCE_DIR
+           "/build/test-tmp/lonejson-json-value-matrix-XXXXXX");
     fd = write_temp_text_file(path_template, invalid_cases[i]);
     EXPECT(fd >= 0);
     if (fd >= 0) {
@@ -2647,7 +2664,8 @@ static void test_json_value_nested_failure_matrix(void) {
       unlink(path_template);
     }
 
-    strcpy(path_template, "/tmp/lonejson-json-value-matrix-XXXXXX");
+    strcpy(path_template, LONEJSON_SOURCE_DIR
+           "/build/test-tmp/lonejson-json-value-matrix-XXXXXX");
     fd = write_temp_text_file(path_template, invalid_cases[i]);
     EXPECT(fd >= 0);
     if (fd >= 0) {

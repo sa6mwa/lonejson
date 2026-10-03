@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: LuaRocks release artifacts are public packages and must reject
 # local source URLs or repository paths before release.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_lua_src_rock_privacy.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 rockspec="$tmp_dir/lonejson-0.0.0-1.rockspec"

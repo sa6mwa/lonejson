@@ -11,9 +11,9 @@ typedef struct upload_payload {
 static const char *find_test_ca_path(void) {
   const char *configured_path = getenv("LONEJSON_CURL_E2E_CAINFO");
   static const char *const candidates[] = {
-      "devenv/volumes/nginx/certs/server.crt",
-      "../devenv/volumes/nginx/certs/server.crt",
-      "../../devenv/volumes/nginx/certs/server.crt"};
+      "build/devenv/credentials/server.crt",
+      "../build/devenv/credentials/server.crt",
+      "../../build/devenv/credentials/server.crt"};
   FILE *fp;
   size_t i;
 
@@ -45,7 +45,7 @@ int main(void) {
   const char *ca_path;
   const char *url;
   upload_payload payload = {"from curl_put.c", 77};
-  lonejson_curl_upload upload_ctx;
+  lonejson_curl_upload upload_ctx = {0};
   lonejson *runtime;
   lonejson_error error;
   lonejson_status status;
@@ -102,9 +102,8 @@ int main(void) {
   if (rc != CURLE_OK) {
     fprintf(stderr, "upload failed: %s\n", curl_easy_strerror(rc));
     if (rc == CURLE_COULDNT_CONNECT) {
-      fprintf(
-          stderr,
-          "hint: start the local compose environment with 'make compose-up'\n");
+      fprintf(stderr,
+              "hint: start the local Podman environment with 'make dev-up'\n");
     }
     curl_easy_cleanup(curl);
     lonejson_curl_upload_cleanup(&upload_ctx);

@@ -91,6 +91,8 @@ int main(int argc, char **argv) {
   }
 
   luaL_openlibs(L);
+  lua_pushfstring(L, "%s/build/test-tmp", source_dir);
+  lua_setglobal(L, "LONEJSON_TEST_TEMP_DIR");
   lua_pushfstring(L, "%s/lua/?.lua;%s/lua/?/init.lua", source_dir, source_dir);
   rc = set_package_field(L, "path", lua_tostring(L, -1));
   lua_pop(L, 1);

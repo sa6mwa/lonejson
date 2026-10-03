@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # ThreadSanitizer belongs to the selected native Bootlin toolchain, not to an
 # unrelated host compiler. Resolve the native target at gate time so test-all
 # cannot skip TSan because Make parsed before toolchain provisioning finished.
@@ -24,10 +27,10 @@ if [[ -z "$compiler" || ! -x "$compiler" ]]; then
   exit 1
 fi
 
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d "$workspace_root/build/check_bootlin_tsan_support.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 printf '%s\n' 'int main(void) { return 0; }' >"$tmp_dir/probe.c"
-if "$compiler" -std=c89 -fsanitize=thread "$tmp_dir/probe.c" -o "$tmp_dir/probe" >/dev/null 2>&1; then
+if "$compiler" -std=c89 -Wall -Wextra -Werror -Wl,--fatal-warnings -fsanitize=thread "$tmp_dir/probe.c" -o "$tmp_dir/probe" >/dev/null 2>&1; then
   printf '1\n'
 else
   printf '0\n'

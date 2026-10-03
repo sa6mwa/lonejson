@@ -10,6 +10,8 @@ fi
 lua_bin="$1"
 generator="$2"
 output_dir="$3"
+repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+"$repo_root/scripts/require_build_workspace.sh" "$output_dir"
 lock_dir="${output_dir}.lock"
 lock_timeout="${LONEJSON_LOCK_TIMEOUT_SECONDS:-120}"
 
@@ -34,6 +36,7 @@ prune_legacy_fixture_dirs() {
         if [ "$legacy_dir" = "$output_dir" ]; then
             continue
         fi
+        "$repo_root/scripts/require_build_workspace.sh" "$legacy_dir" || continue
         rm -rf -- "$legacy_dir"
     done
 }

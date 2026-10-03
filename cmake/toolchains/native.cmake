@@ -5,7 +5,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
 endif()
 
 # Linux workflows must use a Bootlin runtime matching the host processor and
-# libc, so a host Lua interpreter remains ABI-compatible with liblonejson.
+# libc. Lua module tests use a local embedding runner with this runtime.
 include("${CMAKE_CURRENT_LIST_DIR}/lonejson_bootlin.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/lonejson_native_bootlin_target.cmake")
 lonejson_detect_native_bootlin_target(

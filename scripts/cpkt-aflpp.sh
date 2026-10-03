@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Provision native AFL++ GCC-plugin instrumentation for the pkt.systems lifecycle.
 set -euo pipefail
+source "$(dirname -- "${BASH_SOURCE[0]}")/cpkt-archive-cache.sh"
 
 version=5.02c
 revision=2
@@ -68,7 +69,8 @@ ensure() {
   desc=$("$bootlin" discover x86_64-linux-gnu)
   cc=$(value cc "$desc"); cxx=$(value cxx "$desc"); bootlin_root=$(value root "$desc")
   [[ -x "$cc" && -x "$cxx" && -f "$bootlin_root/include/gmp.h" ]] || die 'Bootlin GCC plugin headers are incomplete'
-  if ! [[ -f "$archive" ]] || ! printf '%s  %s\n' "$archive_sha256" "$archive" | sha256sum -c - >/dev/null 2>&1; then
+  cpkt_restore_cached_archive "$archive" "$archive_sha256"
+  if [[ ! -f "$archive" ]]; then
     rm -f "$archive"; dl="$archive.tmp.$$"
     if command -v curl >/dev/null; then
       curl -fL --retry 3 --connect-timeout 20 -o "$dl" "https://github.com/AFLplusplus/AFLplusplus/archive/refs/tags/v${version}.tar.gz" || { rm -f "$dl"; die 'AFL++ download failed'; }

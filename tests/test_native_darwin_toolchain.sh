@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_native_darwin_toolchain.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 fixture="$tmp_dir/repo"
-mkdir -p "$fixture/scripts" "$fixture/cmake/toolchains" "$tmp_dir/bin" "$tmp_dir/SDK"
-for name in cpkt-toolchains build_lua_rock detect_c_pkt_systems_bundle detect_native_target; do
+mkdir -p "$tmp_dir/lib" "$tmp_dir/include" "$fixture/scripts" "$fixture/cmake/toolchains" "$tmp_dir/bin" "$tmp_dir/SDK"
+for name in cpkt-toolchains cpkt-archive-cache cpkt-native-apple build_lua_rock detect_c_pkt_systems_bundle detect_native_target; do
   cp "$repo_root/scripts/$name.sh" "$fixture/scripts/"
 done
 cp "$repo_root/cmake/toolchains/"{native,lonejson_native_darwin,arm64-apple-darwin}.cmake "$fixture/cmake/toolchains/"
-cp "$repo_root/cmake/LonejsonCompiler.cmake" "$fixture/cmake/"
+cp "$repo_root/cmake/LonejsonCompiler.cmake" "$repo_root/cmake/lonejson_lua.exports" "$repo_root/cmake/lonejson.exports" "$fixture/cmake/"
+cp "$repo_root/include/lonejson.h" "$tmp_dir/include/"
+: >"$tmp_dir/lib/liblonejson.dylib"
+cp "$repo_root/scripts/check_library_exports.sh" "$fixture/scripts/"
 cat >"$tmp_dir/bin/uname" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
@@ -46,9 +52,17 @@ EOF
 for tool in clang++ ld ar ranlib strip nm otool install_name_tool; do
   cp "$tmp_dir/bin/clang" "$tmp_dir/bin/$tool"
 done
+cat >"$tmp_dir/bin/nm" <<'EOF_NM'
+#!/usr/bin/env bash
+[[ "$1" != -gu ]] || exit 0
+while read -r symbol; do printf '_%s T 0 1\n' "$symbol"; done <"$TEST_ROOT/repo/cmake/lonejson_lua.exports"
+EOF_NM
 cat >"$tmp_dir/bin/pkg-config" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
+  '--exists lonejson') [[ "${TEST_PKG_CORE:-0}" == 1 ]] ;;
+  '--variable=libdir lonejson') printf '%s/lib\n' "$TEST_ROOT" ;;
+  '--variable=includedir lonejson') printf '%s/include\n' "$TEST_ROOT" ;;
   *--cflags*) printf '%s\n' '-DTEST_CURL' ;;
   *--libs*) printf '%s\n' '-lcurl' ;;
 esac
@@ -57,11 +71,28 @@ chmod +x "$tmp_dir/bin/"*
 export TEST_ROOT="$tmp_dir" UNAME="$tmp_dir/bin/uname"
 export PATH="$tmp_dir/bin:$PATH" OSXCROSS_ROOT="$tmp_dir/missing-osxcross" CC=/bin/false
 export CPKT_OSXCROSS_HOST=arm64-apple-darwin25 PKG_CONFIG="$tmp_dir/bin/pkg-config"
+export CPKT_TOOLCHAIN_CACHE="$tmp_dir/toolchain-cache"
 unset LONEJSON_C_PKT_SYSTEMS_TARGET_ID CPKT_SYSROOT
 description=$("$fixture/scripts/cpkt-toolchains.sh" ensure arm64-apple-darwin)
 grep -Fx 'source=apple' <<<"$description"
 grep -Fx "cc=$tmp_dir/bin/clang" <<<"$description"
 grep -Fx "sysroot=$tmp_dir/SDK" <<<"$description"
+environment=$("$fixture/scripts/cpkt-toolchains.sh" env arm64-apple-darwin)
+grep -Fx 'export CPKT_TARGET=arm64-apple-darwin' <<<"$environment"
+grep -Fx 'export CPKT_TOOLCHAIN_SOURCE=apple' <<<"$environment"
+grep -Fx "export CC=$tmp_dir/bin/clang" <<<"$environment"
+for target in x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu \
+    aarch64-linux-musl armhf-linux-gnu armhf-linux-musl unsupported-target; do
+  if "$fixture/scripts/cpkt-toolchains.sh" env "$target" >"$tmp_dir/env" 2>"$tmp_dir/error"; then
+    echo "Apple tools accepted for unavailable target: $target" >&2; exit 1
+  fi
+  [[ ! -s "$tmp_dir/env" ]]
+  if [[ "$target" == unsupported-target ]]; then
+    grep -F 'unsupported target' "$tmp_dir/error" >/dev/null
+  else
+    grep -F 'target is missing' "$tmp_dir/error" >/dev/null
+  fi
+done
 [[ "$("$fixture/scripts/detect_native_target.sh")" == arm64-apple-darwin ]]
 # Curl examples use CMake targets, so the native Darwin toolchain is selected
 # by the same entry point that configures every other development executable.
@@ -71,6 +102,11 @@ grep -F 'example_curl_get example_curl_put' "$repo_root/scripts/build_curl_examp
 sh "$fixture/scripts/build_lua_rock.sh" /bin/false '-O2 -fPIC' -shared o so "$tmp_dir/headers" "$tmp_dir/lib"
 [[ $(wc -l <"$tmp_dir/compiler.log") -eq 3 ]]
 grep -F 'clang -arch arm64 -isysroot' "$tmp_dir/compiler.log" >/dev/null
+
+# With no explicit prefix, pkg-config discovers the installed public SDK.
+TEST_PKG_CORE=1 sh "$fixture/scripts/build_lua_rock.sh" /bin/false '-O2 -fPIC' -shared o so "$tmp_dir/headers" "$tmp_dir/missing-lib"
+grep -F -- "-I$tmp_dir/include" "$tmp_dir/compiler.log" >/dev/null
+grep -F -- '-Wl,-fatal_warnings' "$tmp_dir/compiler.log" >/dev/null
 
 # The PKCE fixture compiles and executes through native Apple discovery.
 : >"$tmp_dir/compiler.log"
@@ -126,3 +162,18 @@ bash "$repo_root/tests/test_oidc_pkce_provider_no_openssl.sh" "$fixture"
 grep -F 'bootlin-gcc -std=c89' "$tmp_dir/compiler.log" >/dev/null
 grep -Fx 'PKCE executed' "$tmp_dir/compiler.log"
 if grep -E -- '-arch|-isysroot|/not-an-apple-sdk' "$tmp_dir/compiler.log"; then exit 1; fi
+
+# Native Lua validation must execute every requested file in order and keep
+# each file's temporary data inside the repository workspace.
+cat >"$tmp_dir/bin/lua" <<'EOF_LUA'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -d "$LONEJSON_TEST_TEMP_DIR" ]]
+[[ "$LONEJSON_TEST_TEMP_DIR" == "$TEST_REPO_ROOT/build/"* ]]
+printf '%s\n' "$1" >>"$TEST_ROOT/lua.log"
+EOF_LUA
+chmod +x "$tmp_dir/bin/lua"
+TEST_SYSTEM=Darwin TEST_REPO_ROOT="$repo_root" "$repo_root/scripts/run_installed_lua.sh" \
+  "$tmp_dir/tree" "$tmp_dir/lib" "$tmp_dir/bin/lua" first.lua second.lua
+printf '%s\n' first.lua second.lua >"$tmp_dir/lua.expected"
+diff -u "$tmp_dir/lua.expected" "$tmp_dir/lua.log"

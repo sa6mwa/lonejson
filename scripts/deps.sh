@@ -2,7 +2,8 @@
 set -euo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-target_id=${1:-}
+[[ $# -eq 1 ]] || { printf 'usage: %s <lifecycle-target-id>\n' "$0" >&2; exit 2; }
+target_id=$1
 
 case "$target_id" in
   x86_64-linux-gnu|x86_64-linux-musl|aarch64-linux-gnu|aarch64-linux-musl|armhf-linux-gnu|armhf-linux-musl)

@@ -220,8 +220,10 @@ static void test_array_rewrite_parent_context_filters_nested_array(void) {
       "{\"boards\":[{\"id\":7,\"items\":[{\"id\":20,\"label\":\"twenty\"},"
       "{\"id\":99,\"label\":\"tail\"}]},{\"id\":8,\"items\":[{\"id\":1,"
       "\"label\":\"other\"}]}]}";
-  char input_path[] = "/tmp/lonejson-array-rewrite-parent-in-XXXXXX";
-  char output_path[] = "/tmp/lonejson-array-rewrite-parent-out-XXXXXX";
+  char input_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-array-rewrite-parent-in-XXXXXX";
+  char output_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-array-rewrite-parent-out-XXXXXX";
   test_reader_state reader = {json, 0u, 9u};
   test_array_rewrite_seen seen;
   test_item item;
@@ -876,8 +878,10 @@ static void test_array_rewrite_parse_type_and_reader_failures(void) {
 static void test_array_rewrite_string_capture_allocation_failures(void) {
   static const char json[] =
       "[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]";
-  char input_path[] = "/tmp/lonejson-array-rewrite-string-in-XXXXXX";
-  char output_path[] = "/tmp/lonejson-array-rewrite-string-out-XXXXXX";
+  char input_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-array-rewrite-string-in-XXXXXX";
+  char output_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-array-rewrite-string-out-XXXXXX";
   test_realloc_limit_state limit = {64u, 0u};
   test_reader_state reader = {json, 0u, 64u};
   lonejson_json_value item_value;
@@ -1713,9 +1717,12 @@ static void test_array_rewrite_owned_parent_cleanup_on_failures(void) {
 }
 
 static void test_array_rewrite_path_helper(void) {
-  char input_path[] = "/tmp/lonejson-array-rewrite-in-XXXXXX";
-  char output_path[] = "/tmp/lonejson-array-rewrite-out-XXXXXX";
-  char same_path[] = "/tmp/lonejson-array-rewrite-same-XXXXXX";
+  char input_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-array-rewrite-in-XXXXXX";
+  char output_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-array-rewrite-out-XXXXXX";
+  char same_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-array-rewrite-same-XXXXXX";
   const char *json = "[{\"id\":1,\"label\":\"one\"}]";
   test_array_rewrite_seen seen;
   test_item item;
@@ -1780,7 +1787,8 @@ static void test_array_rewrite_path_helper(void) {
 
 static void test_array_rewrite_helper_failures(void) {
   static const char json[] = "[]";
-  char output_path[] = "/tmp/lonejson-array-rewrite-helper-out-XXXXXX";
+  char output_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-array-rewrite-helper-out-XXXXXX";
   test_reader_state reader = {json, 0u, 64u};
   test_array_rewrite_seen seen;
   lonejson_array_rewrite_options options;
@@ -1813,8 +1821,10 @@ static void test_array_rewrite_helper_failures(void) {
   EXPECT(test_array_rewrite_fd_to_fd("", -1, -1, NULL, &options, &error) ==
          LONEJSON_STATUS_INVALID_ARGUMENT);
   EXPECT(test_array_rewrite_path(
-             "", "/tmp/does-not-exist-lonejson-array-rewrite", output_path,
-             NULL, &options, &error) == LONEJSON_STATUS_IO_ERROR);
+             "",
+             LONEJSON_SOURCE_DIR
+             "/build/test-tmp/does-not-exist-lonejson-array-rewrite",
+             output_path, NULL, &options, &error) == LONEJSON_STATUS_IO_ERROR);
   EXPECT(test_array_rewrite_path("", NULL, output_path, NULL, &options,
                                  &error) == LONEJSON_STATUS_INVALID_ARGUMENT);
 
@@ -1842,8 +1852,10 @@ static void test_array_rewrite_helper_failures(void) {
 
 static void
 test_array_rewrite_path_rejects_invalid_runtime_without_truncating(void) {
-  char input_path[] = "/tmp/lonejson-array-rewrite-invalid-in-XXXXXX";
-  char output_path[] = "/tmp/lonejson-array-rewrite-invalid-out-XXXXXX";
+  char input_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-array-rewrite-invalid-in-XXXXXX";
+  char output_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-array-rewrite-invalid-out-XXXXXX";
   const char *input_json = "[1,2,3]";
   const char *sentinel = "keep me";
   test_array_rewrite_seen seen;
@@ -1891,8 +1903,10 @@ test_array_rewrite_path_rejects_invalid_runtime_without_truncating(void) {
 }
 
 static void test_array_rewrite_fd_to_fd_helper(void) {
-  char input_path[] = "/tmp/lonejson-array-rewrite-fd-in-XXXXXX";
-  char output_path[] = "/tmp/lonejson-array-rewrite-fd-out-XXXXXX";
+  char input_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-array-rewrite-fd-in-XXXXXX";
+  char output_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-array-rewrite-fd-out-XXXXXX";
   const char *json = "[{\"id\":1,\"label\":\"one\"}]";
   test_array_rewrite_seen seen;
   lonejson_array_rewrite_options options;

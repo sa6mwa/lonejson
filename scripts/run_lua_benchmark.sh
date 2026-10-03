@@ -29,6 +29,5 @@ lua_tree=${LUA_ROCK_TREE:?set LUA_ROCK_TREE for the native Lua rock tree}
 lua_library_dir=${LONEJSON_LUA_BENCH_LIBDIR:?set LONEJSON_LUA_BENCH_LIBDIR}
 
 eval "$("$luarocks_bin" path --tree "$lua_tree")"
-exec env LD_LIBRARY_PATH="$lua_library_dir:${LD_LIBRARY_PATH-}" \
-  DYLD_LIBRARY_PATH="$lua_library_dir:${DYLD_LIBRARY_PATH-}" \
+exec env DYLD_LIBRARY_PATH="$lua_library_dir:${DYLD_LIBRARY_PATH-}" \
   "$lua_bin" "$script_path" "$@"

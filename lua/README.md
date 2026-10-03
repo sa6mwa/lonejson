@@ -74,9 +74,11 @@ To use the locally built rock in a shell session:
 eval "$(luarocks path --tree build/luarocks)"
 ```
 
-Release packaging ships one Lua source package:
+Release packaging ships the Lua binding sources in these artifacts:
 
-- `lonejson-<version>-1.rockspec` and `lonejson-<version>-1.src.rock`
+- `lonejson-lua-<version>.tar.gz`, the standalone Lua source archive
+- `lonejson-<version>-1.rockspec`, the release rockspec
+- `lonejson-<version>-1.src.rock`, the source rock containing the Lua archive
 
 That source package prefers a curl-enabled native build when the build
 environment provides curl headers and libraries. If the curl probe fails, it
@@ -445,6 +447,11 @@ Use `lj.encode_json(value)` / `lj.encode_value(value)` and
 values. Each decode consumes one complete value rather than iterating a
 multi-value input. `lj.json_null` represents JSON null when nil would be
 ambiguous.
+
+The string-returning encoders grow their output buffer as needed, including
+for long strings and escaped content. Runtime-bound encoders enforce
+`write_max_output_bytes`; allocation and output-limit failures raise Lua
+errors, and the runtime remains reusable after a failed encode.
 
 For callback-driven output, `lj.encode_json_to_sink(value, sink)` and
 `lj.encode_value_to_sink(value, sink)` stream encoded chunks to `sink(chunk)`

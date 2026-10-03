@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: checksum-listed release artifacts are the upload set and must fail
 # on sanitizer markers, repository paths, and other non-releasable payloads.
 
 repo_root=$1
 
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d "$workspace_root/build/test_release_artifact_verify.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 write_checksums() {
@@ -142,3 +145,57 @@ EOF
   grep -q 'pinned Bootlin ELF interpreter or RPATH leaked' \
     "$tmp_dir/bad-bootlin-loader.err"
 fi
+
+# Real Mach-O output includes the absolute inspected filename. That diagnostic
+# is not loader metadata; actual non-relocatable load commands still fail.
+if descriptor=$("$repo_root/scripts/cpkt-toolchains.sh" discover arm64-apple-darwin 2>/dev/null) &&
+    grep -q '^status=ready$' <<<"$descriptor"; then
+  cc=$(sed -n 's/^cc=//p' <<<"$descriptor")
+  ld=$(sed -n 's/^ld=//p' <<<"$descriptor")
+  darwin_dist="$tmp_dir/darwin/dist"
+  darwin_root="$tmp_dir/darwin/liblonejson-1.2.3-arm64-apple-darwin"
+  mkdir -p "$darwin_dist" "$darwin_root/bin"
+  printf 'int main(void) { return 0; }\n' >"$tmp_dir/darwin-probe.c"
+  for mode in good bad; do
+    flags=()
+    [[ "$mode" != bad ]] || flags=(-Wl,-rpath,/build/nonrelocatable)
+    PATH="$(dirname -- "$ld"):$PATH" "$cc" --ld-path="$ld" \
+      -Wall -Wextra -Werror -Wl,-fatal_warnings "${flags[@]}" \
+      "$tmp_dir/darwin-probe.c" -o "$darwin_root/bin/probe"
+    tar -czf "$darwin_dist/liblonejson-1.2.3-arm64-apple-darwin.tar.gz" \
+      -C "$tmp_dir/darwin" liblonejson-1.2.3-arm64-apple-darwin
+    write_checksums "$darwin_dist" "$darwin_dist/CHECKSUMS" \
+      liblonejson-1.2.3-arm64-apple-darwin.tar.gz
+    status=0
+    "$repo_root/scripts/verify_release_artifacts.sh" "$repo_root" \
+      "$darwin_dist/CHECKSUMS" >"$tmp_dir/darwin-$mode.log" 2>&1 || status=$?
+    if [[ "$mode" == good ]]; then
+      [[ "$status" == 0 ]] || { cat "$tmp_dir/darwin-$mode.log" >&2; exit 1; }
+    else
+      [[ "$status" != 0 ]]
+      grep -q 'non-relocatable.*Mach-O loader metadata' "$tmp_dir/darwin-$mode.log"
+    fi
+  done
+else
+  echo 'SKIP: Mach-O loader regression requires installed osxcross'
+fi
+
+# The shipped Darwin smoke archive is a separate licensed artifact.
+smoke_name=liblonejson-1.2.3-arm64-apple-darwin-smoke-test
+mkdir -p "$tmp_dir/smoke/$smoke_name" "$tmp_dir/smoke/dist"
+for mode in missing present; do
+  if [[ "$mode" == present ]]; then
+    cp "$repo_root/LICENSE" "$tmp_dir/smoke/$smoke_name/LICENSE"
+  fi
+  (cd "$tmp_dir/smoke" && zip -qr "dist/$smoke_name.zip" "$smoke_name")
+  write_checksums "$tmp_dir/smoke/dist" "$tmp_dir/smoke/dist/CHECKSUMS" "$smoke_name.zip"
+  status=0
+  "$repo_root/scripts/verify_release_artifacts.sh" "$repo_root" \
+    "$tmp_dir/smoke/dist/CHECKSUMS" >"$tmp_dir/smoke-$mode.log" 2>&1 || status=$?
+  if [[ "$mode" == present ]]; then
+    [[ "$status" == 0 ]] || { cat "$tmp_dir/smoke-$mode.log" >&2; exit 1; }
+  else
+    [[ "$status" != 0 ]]
+    grep -q 'missing Darwin smoke bundle project license' "$tmp_dir/smoke-$mode.log"
+  fi
+ done

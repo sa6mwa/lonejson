@@ -13,6 +13,8 @@ endif()
 
 get_filename_component(LONEJSON_BINARY_DIR "${LONEJSON_BINARY_DIR}" ABSOLUTE)
 get_filename_component(LONEJSON_ROOT "${LONEJSON_ROOT}" ABSOLUTE)
+include("${LONEJSON_ROOT}/cmake/lonejson_build_workspace.cmake")
+lonejson_require_build_workspace("${LONEJSON_BINARY_DIR}/darwin-smoke-bundle")
 include("${LONEJSON_ROOT}/cmake/lonejson_dist_dir.cmake")
 lonejson_prepare_dist_dir()
 
@@ -28,9 +30,8 @@ function(lonejson_import_cache_path var_name)
   endif()
 endfunction()
 
-lonejson_import_cache_path(CMAKE_C_COMPILER)
-lonejson_import_cache_path(CMAKE_LINKER)
-lonejson_import_cache_path(CMAKE_OTOOL)
+include("${LONEJSON_ROOT}/cmake/lonejson_target_tools.cmake")
+lonejson_discover_target_tools()
 lonejson_import_cache_path(CMAKE_BUILD_TYPE)
 lonejson_import_cache_path(LONEJSON_ABI_VERSION)
 lonejson_import_cache_path(LONEJSON_MACOS_DEPLOYMENT_TARGET)
@@ -53,28 +54,13 @@ if(NOT LONEJSON_ABI_VERSION)
   message(FATAL_ERROR "LONEJSON_ABI_VERSION is required for Darwin smoke bundle")
 endif()
 
-get_filename_component(_lonejson_compiler_dir "${CMAKE_C_COMPILER}" DIRECTORY)
 if(NOT CMAKE_LINKER OR NOT EXISTS "${CMAKE_LINKER}")
-  if(NOT LONEJSON_OSXCROSS_HOST)
-    set(LONEJSON_OSXCROSS_HOST "arm64-apple-darwin25")
-  endif()
-  set(CMAKE_LINKER
-      "${_lonejson_compiler_dir}/${LONEJSON_OSXCROSS_HOST}-ld")
-endif()
-if(NOT EXISTS "${CMAKE_LINKER}")
-  message(FATAL_ERROR "CMAKE_LINKER is required for Darwin smoke bundle")
+  message(FATAL_ERROR "Selected target CMAKE_LINKER is required for Darwin smoke bundle")
 endif()
 get_filename_component(_lonejson_linker_dir "${CMAKE_LINKER}" DIRECTORY)
 set(ENV{PATH} "${_lonejson_linker_dir}:$ENV{PATH}")
 if(NOT CMAKE_OTOOL OR NOT EXISTS "${CMAKE_OTOOL}")
-  if(NOT LONEJSON_OSXCROSS_HOST)
-    set(LONEJSON_OSXCROSS_HOST "arm64-apple-darwin25")
-  endif()
-  set(CMAKE_OTOOL
-      "${_lonejson_linker_dir}/${LONEJSON_OSXCROSS_HOST}-otool")
-endif()
-if(NOT EXISTS "${CMAKE_OTOOL}")
-  message(FATAL_ERROR "CMAKE_OTOOL is required for Darwin smoke bundle")
+  message(FATAL_ERROR "Selected target CMAKE_OTOOL is required for Darwin smoke bundle")
 endif()
 set(bundle_root "${LONEJSON_BINARY_DIR}/darwin-smoke-bundle")
 set(extract_root "${bundle_root}/release")
@@ -118,6 +104,7 @@ set(common_compile_args
   -Wall
   -Wextra
   -Werror
+  -Wl,-fatal_warnings
   "-mmacosx-version-min=${LONEJSON_MACOS_DEPLOYMENT_TARGET}"
   "--ld-path=${CMAKE_LINKER}"
   -I "${release_prefix}/include"
@@ -166,6 +153,8 @@ if(NOT shared_result EQUAL 0)
     "stdout:\n${shared_stdout}\n"
     "stderr:\n${shared_stderr}")
 endif()
+
+file(COPY "${LONEJSON_ROOT}/LICENSE" DESTINATION "${stage_root}")
 
 set(example_names
   array_stream
@@ -266,9 +255,9 @@ foreach(smoke_binary
   endif()
 endforeach()
 
-file(REMOVE "${smoke_archive}")
+set(staged_smoke_archive "${bundle_root}/${stage_name}.zip")
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -E tar cf "${smoke_archive}" --format=zip
+  COMMAND "${CMAKE_COMMAND}" -E tar cf "${staged_smoke_archive}" --format=zip
           "${stage_name}"
   WORKING_DIRECTORY "${bundle_root}"
   RESULT_VARIABLE zip_result
@@ -281,4 +270,5 @@ if(NOT zip_result EQUAL 0)
     "stderr:\n${zip_stderr}")
 endif()
 
+lonejson_publish_artifact("${staged_smoke_archive}" "${smoke_archive}")
 message(STATUS "Wrote ${smoke_archive}")

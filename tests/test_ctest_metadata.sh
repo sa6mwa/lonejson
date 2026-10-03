@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: registered tests need labels/timeouts so local gates can select
 # meaningful subsets and long-running failures remain bounded.
 
@@ -11,7 +14,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 0
 fi
 
-json_path="$(mktemp)"
+json_path="$(mktemp "$workspace_root/build/test_ctest_metadata.XXXXXX")"
 trap 'rm -f "$json_path"' EXIT
 
 ctest --test-dir "$build_dir" --show-only=json-v1 >"$json_path"

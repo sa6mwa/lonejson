@@ -8,6 +8,8 @@ fi
 
 repo_root=$1
 stage_dir=$2
+workspace_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+"$workspace_root/scripts/require_build_workspace.sh" "$stage_dir"
 release_version=${3:-}
 manifest_path="$repo_root/RELEASE_MANIFEST"
 tmp_manifest=""
@@ -20,48 +22,32 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+repo_root=$(CDPATH= cd -- "$repo_root" && pwd -P)
+git_root=$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null || true)
+if [[ ! -f "$manifest_path" && "$git_root" != "$repo_root" ]]; then
+  printf 'source staging requires a git worktree or RELEASE_MANIFEST: %s\n' "$repo_root" >&2
+  exit 1
+fi
+
 rm -rf "$stage_dir"
 mkdir -p "$stage_dir"
 
 if [[ -f "$manifest_path" ]]; then
   cp "$manifest_path" "$stage_dir/RELEASE_MANIFEST"
   tar -C "$repo_root" -cf - -T "$manifest_path" | tar -xf - -C "$stage_dir"
-elif git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  tmp_manifest="$(mktemp)"
+elif [[ "$git_root" == "$repo_root" ]]; then
+  mkdir -p "$workspace_root/build"
+  tmp_manifest="$(mktemp "$workspace_root/build/source-manifest.XXXXXX")"
   while IFS= read -r -d '' path; do
     [[ -e "$repo_root/$path" ]] || continue
+    git -C "$repo_root" check-ignore --no-index -q "$path" && continue
     printf '%s\n' "$path" >>"$tmp_manifest"
   done < <(git -C "$repo_root" ls-files -z)
   cp "$tmp_manifest" "$stage_dir/RELEASE_MANIFEST"
   tar -C "$repo_root" -cf - -T "$tmp_manifest" | tar -xf - -C "$stage_dir"
 else
-  tar -C "$repo_root" \
-    --exclude='./.git' \
-    --exclude='./stash' \
-    --exclude='./build' \
-    --exclude='./dist' \
-    --exclude='./.cache' \
-    --exclude='./.deps' \
-    --exclude='./.luarocks-build' \
-    --exclude='./devenv/volumes' \
-    --exclude='./lonejson' \
-    --exclude='./examples/bin' \
-    --exclude='./examples/lua_binding.out' \
-    --exclude='./docker/nginx/certs/server.crt' \
-    --exclude='./docker/nginx/certs/server.key' \
-    --exclude='./docker/nginx/certs/openssl.cnf' \
-    --exclude='./docker/nginx/generated' \
-    --exclude='./perflogs/hosts/*/history.jsonl' \
-    --exclude='./perflogs/hosts/*/latest.json' \
-    --exclude='./perflogs/hosts/*/runs' \
-    --exclude='./perflogs/hosts/*/lua/history.jsonl' \
-    --exclude='./perflogs/hosts/*/lua/latest.json' \
-    --exclude='./perflogs/hosts/*/lua/runs' \
-    --exclude='./compile_commands.json' \
-    --exclude='./fuzz/generated' \
-    --exclude='./src/lua/*.o' \
-    -cf - . \
-    | tar -xf - -C "$stage_dir"
+  printf 'source staging requires a git worktree or RELEASE_MANIFEST: %s\n' "$repo_root" >&2
+  exit 1
 fi
 
 if [[ -n "$release_version" ]]; then

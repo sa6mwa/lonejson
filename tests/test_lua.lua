@@ -1,14 +1,15 @@
+local test_temp_dir = assert(rawget(_G, "LONEJSON_TEST_TEMP_DIR") or os.getenv("LONEJSON_TEST_TEMP_DIR"), "run Lua tests through make lua-test")
 local lonejson = require("lonejson")
 
 local function new_runtime(extra)
   local config = {
     spool_default = {
       memory_limit = 32,
-      temp_dir = "/tmp",
+      temp_dir = test_temp_dir,
     },
     spool_blob = {
       memory_limit = 32,
-      temp_dir = "/tmp",
+      temp_dir = test_temp_dir,
     },
   }
   local key
@@ -962,7 +963,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-path-visitor.json"
+  local path = test_temp_dir .. "/lonejson-lua-path-visitor.json"
   local f = assert(io.open(path, "wb"))
   local seen = {}
 
@@ -1270,6 +1271,107 @@ do
 end
 
 do
+  local description = string.rep("Synthetic context. ", 12)
+  assert_eq(#description, 228)
+  for _, encoder in ipairs({
+    lonejson.encode_json, lonejson.encode_value,
+    lonejson.core.encode_json, lonejson.core.encode_value,
+    lj.encode_json, lj.encode_value,
+    pretty_lj.encode_json, pretty_lj.encode_value,
+  }) do
+    for _, n in ipairs({125, 126, 127, 128, 253, 254, 255, 256, 512, 1024}) do
+      local text = string.rep("x", n)
+      assert_eq(encoder(text), '"' .. text .. '"')
+      for _, escaped in ipairs({
+        text .. '"\\\n', '"\\\n' .. text, string.rep('x"\\\n', n),
+        text .. '\0\b\f\r\t', string.rep('\0\b\f\r\t', n),
+      }) do
+        assert_eq(lj.decode_json(encoder(escaped)), escaped)
+      end
+      local object = { [text] = text }
+      assert_eq(lj.decode_json(encoder(object))[text], text)
+    end
+    for _, count in ipairs({0, 8, 9, 16, 17, 64}) do
+      local object = {}
+      for i = 1, count do
+        object["field" .. i .. string.rep("x", i * 8)] = i
+      end
+      local decoded = lj.decode_json(encoder(object))
+      local seen = 0
+      for key, value in pairs(decoded) do
+        assert_eq(value, object[key])
+        seen = seen + 1
+      end
+      assert_eq(seen, count)
+    end
+    for _, depth in ipairs({16, 32, 64, 128}) do
+      local value = "leaf"
+      for _ = 1, depth do value = {value} end
+      local encoded = encoder(value)
+      assert_eq(encoded:gsub('%s', ''),
+                string.rep("[", depth) .. '"leaf"' .. string.rep("]", depth))
+      value = {value}
+      if depth == 128 then
+        local ok, err = pcall(encoder, value)
+        assert_true(not ok)
+        assert_true(err:find("nesting exceeds", 1, true) ~= nil, err)
+      end
+    end
+    for _, count in ipairs({1, 10, 50, 100, 200, 400, 600}) do
+      local records = {}
+      for i = 1, count do
+        records[i] = {
+          id = i,
+          name = "Synthetic opportunity " .. i,
+          stage_id = (i % 5) + 1,
+          owner_id = (i % 3) + 1,
+          expected_revenue = i * 1000,
+          contact_ids = {i + 1000},
+          description = description,
+        }
+      end
+      local decoded = lj.decode_json(encoder({
+        backend = "synthetic-probe", total = count, opportunities = records,
+      }))
+      assert_eq(decoded.backend, "synthetic-probe")
+      assert_eq(decoded.total, count)
+      assert_eq(#decoded.opportunities, count)
+      for i, row in ipairs(decoded.opportunities) do
+        assert_eq(row.id, i)
+        assert_eq(row.name, "Synthetic opportunity " .. i)
+        assert_eq(row.stage_id, (i % 5) + 1)
+        assert_eq(row.owner_id, (i % 3) + 1)
+        assert_eq(row.expected_revenue, i * 1000)
+        assert_eq(#row.contact_ids, 1)
+        assert_eq(row.contact_ids[1], i + 1000)
+        assert_eq(row.description, description)
+      end
+    end
+  end
+  for _, pretty in ipairs({false, true}) do
+    for _, n in ipairs({253, 254, 255, 256, 512, 1024}) do
+      for _, text in ipairs({string.rep("x", n), string.rep('x"\\\n', n)}) do
+        local expected = lj.encode_json(text)
+        local exact = new_runtime({
+          write_pretty = pretty, write_max_output_bytes = #expected,
+        })
+        local short = new_runtime({
+          write_pretty = pretty, write_max_output_bytes = #expected - 1,
+        })
+        for _, method in ipairs({"encode_json", "encode_value"}) do
+          assert_eq(exact[method](text), expected)
+          local ok, err = pcall(short[method], text)
+          assert_true(not ok)
+          assert_true(err:find("max_output_bytes", 1, true) ~= nil, err)
+          assert_true(err:match("^[%g%s]+$") ~= nil, err)
+          assert_eq(short[method]("ok"), '"ok"')
+        end
+      end
+    end
+  end
+end
+
+do
   local pretty_expected
   local huge
   assert_eq(lj.encode_json("a\nb"), [["a\nb"]])
@@ -1467,8 +1569,8 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-test.json"
-  local file_path = "/tmp/lonejson-lua-file.json"
+  local path = test_temp_dir .. "/lonejson-lua-test.json"
+  local file_path = test_temp_dir .. "/lonejson-lua-file.json"
   local rec = Test:new_record()
   local f
   local pretty
@@ -1497,7 +1599,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-fd.json"
+  local path = test_temp_dir .. "/lonejson-lua-fd.json"
   local f
   local obj
 
@@ -1520,9 +1622,9 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-stream.jsonl"
-  local file_path = "/tmp/lonejson-lua-stream-file.jsonl"
-  local fd_path = "/tmp/lonejson-lua-stream-fd.jsonl"
+  local path = test_temp_dir .. "/lonejson-lua-stream.jsonl"
+  local file_path = test_temp_dir .. "/lonejson-lua-stream-file.jsonl"
+  local fd_path = test_temp_dir .. "/lonejson-lua-stream-fd.jsonl"
   local f
   local stream
   local rec = Test:new_record()
@@ -1707,7 +1809,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-query-stream.json"
+  local path = test_temp_dir .. "/lonejson-lua-query-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
   local obj, err, status
@@ -1733,7 +1835,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-nested-stream.json"
+  local path = test_temp_dir .. "/lonejson-lua-nested-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
   local obj, err, status
@@ -1756,7 +1858,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-batch-stream.json"
+  local path = test_temp_dir .. "/lonejson-lua-batch-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
   local obj, err, status
@@ -1897,7 +1999,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-merge-stream.json"
+  local path = test_temp_dir .. "/lonejson-lua-merge-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
   local rec = MergeNoClear:new_record()
@@ -1932,7 +2034,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-nested-merge-stream.json"
+  local path = test_temp_dir .. "/lonejson-lua-nested-merge-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
   local rec = NestedQueryNoClear:new_record()
@@ -2186,7 +2288,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-array-stream.json"
+  local path = test_temp_dir .. "/lonejson-lua-array-stream.json"
   local f = assert(io.open(path, "wb"))
   local stream
   local obj, err, status
@@ -2206,7 +2308,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-array-stream-fd.json"
+  local path = test_temp_dir .. "/lonejson-lua-array-stream-fd.json"
   local f = assert(io.open(path, "wb"))
   local stream
   local obj, err, status
@@ -2226,7 +2328,7 @@ do
 end
 
 do
-  local path = "/tmp/lonejson-lua-array-stream-file.json"
+  local path = test_temp_dir .. "/lonejson-lua-array-stream-file.json"
   local f = assert(io.open(path, "wb"))
   local stream
   local obj, err, status
@@ -2333,8 +2435,8 @@ do
 end
 
 do
-  local input_path = "/tmp/lonejson-lua-array-rewrite-in.json"
-  local output_path = "/tmp/lonejson-lua-array-rewrite-out.json"
+  local input_path = test_temp_dir .. "/lonejson-lua-array-rewrite-in.json"
+  local output_path = test_temp_dir .. "/lonejson-lua-array-rewrite-out.json"
   local f = assert(io.open(input_path, "wb"))
   f:write('{"items":[{"id":1},{"id":2}]}')
   f:close()

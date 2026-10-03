@@ -638,9 +638,6 @@ static unsigned ljlua_auth_read_modes(lua_State *L, int index,
 
 static void ljlua_auth_encode_claim(lua_State *L, int index, const char **json,
                                     size_t *len, ljlua_json_buf *buf) {
-  const void *visited[128];
-  ljlua_json_out out;
-
   *json = NULL;
   *len = 0u;
   memset(buf, 0, sizeof(*buf));
@@ -658,13 +655,8 @@ static void ljlua_auth_encode_claim(lua_State *L, int index, const char **json,
     lua_pop(L, 1);
     return;
   }
-  memset(visited, 0, sizeof(visited));
-  out.sink = ljlua_json_buf_sink;
-  out.user = buf;
-  if (ljlua_encode_json_value(L, lua_gettop(L), &out, visited, 0u) == 0) {
-    free(buf->data);
-    buf->data = NULL;
-    luaL_error(L, "failed to encode M2M claim JSON");
+  if (ljlua_encode_json_buffer(L, -1, buf) != LUA_OK) {
+    lua_error(L);
   }
   lua_pop(L, 1);
   *json = buf->data != NULL ? buf->data : "null";

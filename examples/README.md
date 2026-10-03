@@ -90,10 +90,10 @@ materializing or pre-counting the body.
 Start the local test rig first:
 
 ```sh
-make compose-up
+make dev-up
 ```
 
-The same compose rig also starts a mock OIDC/OAuth2 provider and a lightweight
+The same rootless Podman Kube pod also starts a mock OIDC/OAuth2 provider and a lightweight
 API fixture. Run the live OIDC/JWKS bearer-flow check with:
 
 ```sh

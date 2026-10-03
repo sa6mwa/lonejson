@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 repo_root=$1
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}
-libdir=${4:-"$repo_root/build/debug"}
-tmp_dir=$(mktemp -d)
+libdir=${4:-"$repo_root/build/lua-sdk/lib"}
+tmp_dir=$(mktemp -d "$workspace_root/build/test_lua_external_liblonejson.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
+export TMPDIR="$tmp_dir"
 
 rock_tree="$tmp_dir/luarocks"
 rockspec="$tmp_dir/lonejson-0.0.0-1.rockspec"
@@ -30,35 +34,19 @@ if [[ -z "$module_path" || ! -f "$module_path" ]]; then
   exit 1
 fi
 
-if command -v nm >/dev/null 2>&1; then
-  leaked_symbols=$(
-    nm -D --defined-only "$module_path" 2>/dev/null |
-      awk '{print $NF}' |
-      grep -E '^lonejson_' |
-      grep -Ev '^lonejson_lua_' || true
-  )
-  if [[ -n "$leaked_symbols" ]]; then
-    printf 'Lua module exports lonejson core API symbols:\n' >&2
-    printf '%s\n' "$leaked_symbols" >&2
-    exit 1
-  fi
-fi
-
-if command -v readelf >/dev/null 2>&1; then
-  if ! readelf -d "$module_path" | grep -E 'Shared library: \[liblonejson\.so' >/dev/null; then
-    printf 'Lua module does not declare a liblonejson.so dynamic dependency\n' >&2
-    readelf -d "$module_path" >&2
-    exit 1
-  fi
-elif command -v otool >/dev/null 2>&1; then
-  if ! otool -L "$module_path" | grep -E 'liblonejson\.(dylib|[0-9]+\.dylib)' >/dev/null; then
-    printf 'Lua module does not declare a liblonejson dynamic dependency\n' >&2
-    otool -L "$module_path" >&2
-    exit 1
-  fi
+target_id=$("$repo_root/scripts/detect_native_target.sh")
+target_tools=$("$repo_root/scripts/discover_target_tools.sh" \
+  --build-dir "$repo_root/build/$target_id-release" --target-id "$target_id")
+eval "$target_tools"
+system=$(uname -s)
+bash "$repo_root/scripts/check_library_exports.sh" "$NM" "$system" "$module_path" \
+  "$repo_root/cmake/lonejson_lua.exports"
+if [[ "$system" == Linux ]]; then
+  "$READELF" -d "$module_path" | grep -E 'Shared library: \[liblonejson\.so' >/dev/null
+else
+  "$OTOOL" -L "$module_path" | grep -E 'liblonejson\.(dylib|[0-9]+\.dylib)' >/dev/null
 fi
 
 eval "$("$luarocks_exec" path --tree "$rock_tree")"
-export LD_LIBRARY_PATH="$libdir:${LD_LIBRARY_PATH:-}"
-export DYLD_LIBRARY_PATH="$libdir:${DYLD_LIBRARY_PATH:-}"
-"$lua_exec" -e 'assert(require("lonejson"))'
+printf '%s\n' 'assert(require("lonejson"))' >"$tmp_dir/smoke.lua"
+"$repo_root/scripts/run_installed_lua.sh" "$rock_tree" "$libdir" "$lua_exec" "$tmp_dir/smoke.lua"

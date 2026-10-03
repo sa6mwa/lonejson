@@ -1746,7 +1746,7 @@ static void test_oidc_jwks_cache_curl_adapter(void) {
   static const char chunk1[] =
       "\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"AQIDBA\",\"e\":\"AQAB\"}]}";
   lonejson_oidc_jwks_cache cache;
-  lonejson_oidc_jwks_cache_parse parse;
+  lonejson_oidc_jwks_cache_parse parse = {0};
   lonejson_oidc_jwks_cache_policy policy;
   lonejson_jwk_select_options options;
   const lonejson_jwk *selected;

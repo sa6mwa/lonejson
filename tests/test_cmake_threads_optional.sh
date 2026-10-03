@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: thread support is optional for consumers; disabling Threads must
 # not break the core C build graph.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_cmake_threads_optional.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 cmake -S "$repo_root" -B "$tmp_dir/build" \

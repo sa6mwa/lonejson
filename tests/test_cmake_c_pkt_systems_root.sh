@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: c.pkt.systems integration must resolve dependencies from the
 # selected SDK root and reject invalid feature/root combinations before build.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_cmake_c_pkt_systems_root.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 fake_root="$tmp_dir/c.pkt.systems/root"

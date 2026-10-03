@@ -8,22 +8,28 @@ static int ljlua_schema_new(lua_State *L) {
 
   luaL_checktype(L, 3, LUA_TTABLE);
   count = (size_t)lua_rawlen(L, 3);
+  ud = (ljlua_schema_ud *)ljlua_newuserdata_slots(L, sizeof(*ud), 0);
+  memset(ud, 0, sizeof(*ud));
+  ud->magic = LJLUA_SCHEMA_MAGIC;
+  ud->runtime_ref = LUA_NOREF;
+  luaL_setmetatable(L, LJLUA_SCHEMA_MT);
+  lua_pushvalue(L, 1);
+  ud->runtime_ref = luaL_ref(L, LUA_REGISTRYINDEX);
   schema = (ljlua_schema *)calloc(1u, sizeof(*schema));
   if (schema == NULL) {
     return luaL_error(L, "failed to allocate schema");
   }
+  ud->schema = schema;
   schema->runtime = runtime_ud->runtime;
   schema->runtime_ud = runtime_ud;
   schema->name = ljlua_strdup(name);
   schema->field_count = count;
   schema->metas = (ljlua_field_meta *)calloc(count, sizeof(schema->metas[0]));
   if (schema->metas == NULL) {
-    ljlua_schema_destroy(schema);
     return luaL_error(L, "failed to allocate schema fields");
   }
   schema->fields = (lonejson_field *)calloc(count, sizeof(schema->fields[0]));
   if (schema->fields == NULL) {
-    ljlua_schema_destroy(schema);
     return luaL_error(L, "failed to allocate runtime map fields");
   }
   for (i = 0u; i < count; ++i) {
@@ -35,17 +41,9 @@ static int ljlua_schema_new(lua_State *L) {
   if (schema->record_size != 0u) {
     schema->scratch_record = (unsigned char *)malloc(schema->record_size);
     if (schema->scratch_record == NULL) {
-      ljlua_schema_destroy(schema);
       return luaL_error(L, "failed to allocate schema scratch record");
     }
   }
-  ud = (ljlua_schema_ud *)ljlua_newuserdata_slots(L, sizeof(*ud), 0);
-  memset(ud, 0, sizeof(*ud));
-  ud->magic = LJLUA_SCHEMA_MAGIC;
-  ud->schema = schema;
-  lua_pushvalue(L, 1);
-  ud->runtime_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-  luaL_setmetatable(L, LJLUA_SCHEMA_MT);
   return 1;
 }
 
@@ -647,32 +645,103 @@ static char *ljlua_serialize_value(lua_State *L, ljlua_schema *schema,
   return schema->encode_buffer;
 }
 
+typedef struct ljlua_scratch_call {
+  ljlua_schema *schema;
+  unsigned char *record;
+  char *json;
+  size_t out_len;
+} ljlua_scratch_call;
+
+static int ljlua_scratch_assign_pcall(lua_State *L) {
+  ljlua_scratch_call *call = (ljlua_scratch_call *)lua_touserdata(L, 1);
+  ljlua_assign_table_to_record(L, call->schema, call->record, 2);
+  return 0;
+}
+
+static int ljlua_scratch_encode_pcall(lua_State *L) {
+  ljlua_scratch_call *call = (ljlua_scratch_call *)lua_touserdata(L, 1);
+  ljlua_scratch_assign_pcall(L);
+  call->json =
+      ljlua_serialize_value(L, call->schema, call->record, &call->out_len);
+  return 0;
+}
+
+static int ljlua_scratch_protected(lua_State *L, lua_CFunction operation,
+                                   ljlua_scratch_call *call, int index) {
+  index = lua_absindex(L, index);
+  lua_pushcfunction(L, operation);
+  lua_pushlightuserdata(L, call);
+  lua_pushvalue(L, index);
+  return lua_pcall(L, 2, 0, 0);
+}
+
+static int ljlua_assign_scratch(lua_State *L, ljlua_schema *schema,
+                                unsigned char *record, int owned, int index) {
+  ljlua_scratch_call call;
+  int status;
+
+  memset(&call, 0, sizeof(call));
+  call.schema = schema;
+  call.record = record;
+  ljlua_prepare_record_storage(schema, record);
+  status = ljlua_scratch_protected(L, ljlua_scratch_assign_pcall, &call, index);
+  if (status != LUA_OK) {
+    ljlua_cleanup_record_storage(schema, record);
+    ljlua_schema_release_scratch(schema, record, owned);
+  }
+  return status;
+}
+
 static int ljlua_schema_encode(lua_State *L) {
   ljlua_schema_ud *schema_ud = ljlua_check_schema(L, 1);
+  ljlua_record_ud *record_ud = ljlua_test_record(L, 2);
   size_t out_len = 0u;
   char *json;
 
-  if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
-    ljlua_reject_legacy_options(L, 3, "schema:encode");
-    ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
+  ljlua_reject_legacy_options(L, 3, "schema:encode");
+  if (record_ud != NULL) {
     if (record_ud->schema != schema_ud->schema) {
       return luaL_error(L, "record belongs to a different schema");
     }
     json = ljlua_serialize_value(L, schema_ud->schema,
                                  ljlua_record_data(record_ud), &out_len);
+  } else if (schema_ud->schema->stack_record_safe &&
+             schema_ud->schema->record_size <= 256u) {
+    union {
+      lonejson_uint64 integer_align;
+      double number_align;
+      void *pointer_align;
+      unsigned char bytes[256];
+    } record;
+
+    /* Inline-only records need no native cleanup across Lua errors and remain
+     * independent during reentrant table access. */
+    ljlua_prepare_record_storage(schema_ud->schema, record.bytes);
+    ljlua_assign_table_to_record(L, schema_ud->schema, record.bytes, 2);
+    json = ljlua_serialize_value(L, schema_ud->schema, record.bytes, &out_len);
   } else {
     int owned_record;
-    unsigned char *record =
-        ljlua_schema_borrow_scratch(schema_ud->schema, &owned_record);
+    int call_status;
+    ljlua_scratch_call call;
+    unsigned char *record;
+    luaL_checkstack(L, 3, "schema encoding");
+    record = ljlua_schema_borrow_scratch(schema_ud->schema, &owned_record);
     if (record == NULL) {
       return luaL_error(L, "failed to allocate encode buffer");
     }
+    memset(&call, 0, sizeof(call));
+    call.schema = schema_ud->schema;
+    call.record = record;
     ljlua_prepare_record_storage(schema_ud->schema, record);
-    ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
-    ljlua_reject_legacy_options(L, 3, "schema:encode");
-    json = ljlua_serialize_value(L, schema_ud->schema, record, &out_len);
+    call_status =
+        ljlua_scratch_protected(L, ljlua_scratch_encode_pcall, &call, 2);
     ljlua_cleanup_record_storage(schema_ud->schema, record);
     ljlua_schema_release_scratch(schema_ud->schema, record, owned_record);
+    if (call_status != LUA_OK) {
+      return lua_error(L);
+    }
+    json = call.json;
+    out_len = call.out_len;
   }
   lua_pushlstring(L, json, out_len);
   return 1;
@@ -685,6 +754,7 @@ static int ljlua_schema_write_path(lua_State *L) {
   lonejson_status status;
 
   ljlua_reject_legacy_options(L, 4, "schema:write_path");
+  luaL_checkstack(L, 3, "schema writing");
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
     status = lonejson_serialize_path(
@@ -697,8 +767,10 @@ static int ljlua_schema_write_path(lua_State *L) {
     if (record == NULL) {
       return luaL_error(L, "failed to allocate encode buffer");
     }
-    ljlua_prepare_record_storage(schema_ud->schema, record);
-    ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
+    if (ljlua_assign_scratch(L, schema_ud->schema, record, owned_record, 2) !=
+        LUA_OK) {
+      return lua_error(L);
+    }
     status =
         lonejson_serialize_path(schema_ud->schema->runtime,
                                 &schema_ud->schema->map, record, path, &error);
@@ -719,6 +791,7 @@ static int ljlua_schema_write_file(lua_State *L) {
   lonejson_status status;
 
   ljlua_reject_legacy_options(L, 4, "schema:write_file");
+  luaL_checkstack(L, 3, "schema writing");
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
     status = lonejson_serialize_filep(schema_ud->schema->runtime,
@@ -731,8 +804,10 @@ static int ljlua_schema_write_file(lua_State *L) {
     if (record == NULL) {
       return luaL_error(L, "failed to allocate encode buffer");
     }
-    ljlua_prepare_record_storage(schema_ud->schema, record);
-    ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
+    if (ljlua_assign_scratch(L, schema_ud->schema, record, owned_record, 2) !=
+        LUA_OK) {
+      return lua_error(L);
+    }
     status =
         lonejson_serialize_filep(schema_ud->schema->runtime,
                                  &schema_ud->schema->map, record, fp, &error);
@@ -754,6 +829,7 @@ static int ljlua_schema_write_fd(lua_State *L) {
   lonejson_status status;
 
   ljlua_reject_legacy_options(L, 4, "schema:write_fd");
+  luaL_checkstack(L, 3, "schema writing");
   fp = ljlua_dup_fd_to_file(L, fd, "wb");
   if (luaL_testudata(L, 2, LJLUA_RECORD_MT) != NULL) {
     ljlua_record_ud *record_ud = ljlua_check_record(L, 2);
@@ -765,10 +841,14 @@ static int ljlua_schema_write_fd(lua_State *L) {
     unsigned char *record =
         ljlua_schema_borrow_scratch(schema_ud->schema, &owned_record);
     if (record == NULL) {
+      fclose(fp);
       return luaL_error(L, "failed to allocate encode buffer");
     }
-    ljlua_prepare_record_storage(schema_ud->schema, record);
-    ljlua_assign_table_to_record(L, schema_ud->schema, record, 2);
+    if (ljlua_assign_scratch(L, schema_ud->schema, record, owned_record, 2) !=
+        LUA_OK) {
+      fclose(fp);
+      return lua_error(L);
+    }
     status =
         lonejson_serialize_filep(schema_ud->schema->runtime,
                                  &schema_ud->schema->map, record, fp, &error);

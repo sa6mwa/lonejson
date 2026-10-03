@@ -1,3 +1,5 @@
+import signal
+import sys
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -41,4 +43,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
     HTTPServer(("0.0.0.0", 9001), Handler).serve_forever()

@@ -1,23 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # The lifecycle resolver is both the inventory and provisioning authority. Its
 # status output must stay useful before a target is installed so callers can
 # distinguish a downloadable Bootlin collection from optional osxcross.
 
 repo_root=$1
 resolver="$repo_root/scripts/cpkt-toolchains.sh"
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_cpkt_toolchain_resolver.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
-# The shared immutable root must be serialized per pinned collection: a
-# process that waited for publication re-checks readiness before it could ever
-# replace a root another checkout has started using.
-grep -F 'lock_file="$lock_dir/$name.lock"' "$resolver" >/dev/null
+grep -F 'with_cache_lock "$(cache_root)/locks/bootlin-$name.lock"' "$resolver" >/dev/null
 grep -F 'CPKT_TOOLCHAIN_LOCK_TIMEOUT' "$resolver" >/dev/null
-grep -F 'flock -w "$lock_wait_seconds" "$lock_fd"' "$resolver" >/dev/null
-grep -F 'while this process waited for the per-target shared-cache lock' "$resolver" >/dev/null
-grep -F 'flock -u "$lock_fd"' "$resolver" >/dev/null
 
 # Simulate another checkout publishing the immutable root while this process
 # waits for its lock. The provisioner must re-check readiness and leave that
@@ -43,17 +40,17 @@ bash -s "$resolver" <<'EOF'
 set -euo pipefail
 resolver=$1
 source "$resolver"
-toolchain_values() {
+bootlin_values() {
   printf '%s\n' "fixture|fixture|unused|fixture|sysroot|$CPKT_TOOLCHAIN_CACHE/roots/fixture"
 }
-toolchain_ready() {
+bootlin_ready() {
   [[ -f "$1/.ready" ]]
 }
 download_file() {
   printf '%s\n' 'provisioner did not re-check the shared root after locking' >&2
   return 1
 }
-ensure_target fixture
+install_bootlin fixture
 [[ -f "$CPKT_TOOLCHAIN_CACHE/roots/fixture/.ready" ]]
 EOF
 
@@ -64,9 +61,9 @@ CPKT_TOOLCHAIN_LOCK_TIMEOUT=invalid bash -s "$resolver" \
 set -euo pipefail
 resolver=$1
 source "$resolver"
-toolchain_values() { printf '%s\n' 'fixture|fixture|unused|fixture|sysroot|/tmp/fixture'; }
-toolchain_ready() { return 1; }
-ensure_target fixture
+bootlin_values() { printf '%s\n' 'fixture|fixture|unused|fixture|sysroot|/tmp/fixture'; }
+bootlin_ready() { return 1; }
+install_bootlin fixture
 EOF
 invalid_timeout_status=$?
 set -e
@@ -99,16 +96,16 @@ bash -s "$resolver" >"$recovery_log" 2>&1 <<'EOF'
 set -euo pipefail
 resolver=$1
 source "$resolver"
-toolchain_values() {
+bootlin_values() {
   printf '%s\n' "fixture|fixture|$CPKT_TOOLCHAIN_TEST_EXPECTED_SHA256|fixture|sysroot|$CPKT_TOOLCHAIN_CACHE/roots/fixture"
 }
-toolchain_ready() {
+bootlin_ready() {
   [[ -f "$1/.ready" ]]
 }
 download_file() {
   cp "$CPKT_TOOLCHAIN_TEST_GOOD_ARCHIVE" "$2"
 }
-ensure_target fixture
+install_bootlin fixture
 EOF
 
 grep -F 'discarding corrupt cached archive' "$recovery_log" >/dev/null
@@ -141,3 +138,48 @@ status=$?
 set -e
 [[ "$status" -ne 0 ]]
 grep -F 'target is missing; run:' "$tmp_dir/env.err" >/dev/null
+
+# Downstream SDK consumers do not generate Mach interfaces or provision MIG.
+# Select the newest complete 25.x prefix; an exact pin is authoritative.
+osxcross="$tmp_dir/osxcross-prefixes"
+mkdir -p "$osxcross/bin" "$osxcross/SDK"
+for prefix in arm64-apple-darwin25.4 arm64-apple-darwin25.10 arm64-apple-darwin25.11; do
+  for tool in clang clang++ ld ar ranlib strip nm otool; do
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$osxcross/bin/$prefix-$tool"
+    chmod +x "$osxcross/bin/$prefix-$tool"
+  done
+done
+rm "$osxcross/bin/arm64-apple-darwin25.11-otool"
+OSXCROSS_ROOT="$osxcross" CPKT_TOOLCHAIN_CACHE="$tmp_dir/no-mig-cache" \
+  "$resolver" ensure arm64-apple-darwin >"$tmp_dir/darwin-description"
+grep -Fx 'prefix=arm64-apple-darwin25.10' "$tmp_dir/darwin-description" >/dev/null
+grep -Fx 'status=ready' "$tmp_dir/darwin-description" >/dev/null
+[[ ! -e "$tmp_dir/no-mig-cache" ]]
+OSXCROSS_ROOT="$osxcross" CPKT_OSXCROSS_HOST=arm64-apple-darwin25.4 \
+  "$resolver" discover arm64-apple-darwin >"$tmp_dir/darwin-description"
+grep -Fx 'prefix=arm64-apple-darwin25.4' "$tmp_dir/darwin-description" >/dev/null
+OSXCROSS_ROOT="$osxcross" CPKT_OSXCROSS_HOST=arm64-apple-darwin25.11 \
+  "$resolver" discover arm64-apple-darwin >"$tmp_dir/darwin-description"
+grep -Fx 'status=missing' "$tmp_dir/darwin-description" >/dev/null
+if OSXCROSS_ROOT="$osxcross" CPKT_OSXCROSS_HOST=arm64-apple-darwin25.11 \
+  "$resolver" ensure arm64-apple-darwin >"$tmp_dir/out" 2>"$tmp_dir/err"; then
+  printf 'incomplete pinned osxcross prefix accepted\n' >&2; exit 1
+fi
+
+# A renamed verified toolchain archive must repopulate an empty install root
+# without calling the network acquisition function.
+mv "$recovery_cache/archives/fixture.tar.xz" "$recovery_cache/archives/renamed.tar.xz"
+rm -rf "$recovery_cache/roots/fixture"
+CPKT_TOOLCHAIN_CACHE="$recovery_cache" \
+CPKT_TOOLCHAIN_TEST_EXPECTED_SHA256="$recovery_sha256" \
+bash -s "$resolver" <<'EOF'
+set -euo pipefail
+source "$1"
+bootlin_values() {
+  printf '%s\n' "fixture|fixture|$CPKT_TOOLCHAIN_TEST_EXPECTED_SHA256|fixture|sysroot|$CPKT_TOOLCHAIN_CACHE/roots/fixture"
+}
+bootlin_ready() { [[ -f "$1/.ready" ]]; }
+download_file() { printf 'network called on digest hit\n' >&2; exit 1; }
+install_bootlin fixture
+EOF
+[[ -f "$recovery_cache/roots/fixture/.ready" ]]

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: benchmark retries should confirm material regressions without
 # hiding real slowdowns behind a single noisy measurement.
 
@@ -8,10 +11,10 @@ repo_root=$1
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}
 runner_build=${4:-}
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_bench_retry_confirm.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
-if [[ -n "$runner_build" && "$(uname -s)" == Linux &&
+if [[ "$(uname -s)" == Linux &&
       ! -x "$runner_build/lonejson_lua_target_runner" ]]; then
   printf 'skipping Lua benchmark fixture: missing Bootlin target runner\n'
   exit 77
@@ -30,7 +33,6 @@ if [[ ! -x "$runner_build/lonejson_lua_target_runner" ]]; then
   make --no-print-directory -C "$repo_root" lua-rock \
     LUA="$lua_exec" LUAROCKS="$luarocks_exec" >/dev/null
   eval "$("$luarocks_exec" path --tree "$repo_root/build/luarocks")"
-  export LD_LIBRARY_PATH="$repo_root/build/debug:${LD_LIBRARY_PATH:-}"
   export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
 fi
 

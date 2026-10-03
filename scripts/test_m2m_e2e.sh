@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 server_port=${LONEJSON_M2M_E2E_SERVER_PORT:-18082}
-secrets_file="$repo_root/build/host-curl/m2m-fixture-secrets.json"
+secrets_file="$repo_root/build/devenv/credentials/m2m-fixture-secrets.json"
 server_pid=
 
 cleanup() {
@@ -42,9 +42,11 @@ if [[ ! -x "$repo_root/build/host-curl/lonejson_m2m_fixture_server" ]]; then
   exit 1
 fi
 
+umask 077
+mkdir -p "$repo_root/build/devenv/credentials" "$repo_root/build/devenv/logs"
 rm -f "$secrets_file"
 "$repo_root/build/host-curl/lonejson_m2m_fixture_server" \
-  "$server_port" "$secrets_file" 11 >"$repo_root/build/host-curl/m2m-fixture-server.log" 2>&1 &
+  "$server_port" "$secrets_file" 11 >"$repo_root/build/devenv/logs/m2m-fixture-server.log" 2>&1 &
 server_pid=$!
 
 for _ in $(seq 1 90); do

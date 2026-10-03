@@ -92,7 +92,8 @@ static void test_array_stream_raw_values_from_root_array(void) {
 }
 
 static void test_array_stream_open_path_and_fd_sources(void) {
-  char path[] = "/tmp/lonejson-array-stream-XXXXXX";
+  char path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-array-stream-XXXXXX";
   const char *json = "{\"items\":[{\"id\":7,\"label\":\"path\"}]}";
   lonejson_array_stream *stream;
   lonejson_array_stream_result result;
@@ -3259,7 +3260,7 @@ static void test_array_stream_mapped_field_curl_facade(void) {
   test_mapped_stream_seen seen;
   lonejson_mapped_array_stream_handler board_handler;
   lonejson_mapped_array_stream_handler item_handler;
-  lonejson_curl_parse parse;
+  lonejson_curl_parse parse = {0};
   lonejson_error error;
   size_t i;
 
@@ -3318,7 +3319,7 @@ static void test_array_stream_mapped_string_field_curl_facade(void) {
   test_mapped_string_array_stream_doc doc;
   test_array_stream_string_seen seen;
   lonejson_array_stream_string_handler handler;
-  lonejson_curl_parse parse;
+  lonejson_curl_parse parse = {0};
   lonejson_error error;
   size_t i;
 

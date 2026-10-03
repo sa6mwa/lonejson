@@ -45,9 +45,8 @@ int main(void) {
     lj_free(runtime);
     return 1;
   }
-  status =
-      lj_json_value_set_buffer(&req.fields, fields_json, strlen(fields_json),
-                               &error);
+  status = lj_json_value_set_buffer(&req.fields, fields_json,
+                                    strlen(fields_json), &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "fields setup failed: %s\n", error.message);
     lj_cleanup(&query_request_map, &req);

@@ -18,7 +18,7 @@ static void test_file_and_buffer_helpers(void) {
                                         "  \"items\": []\n"
                                         "}";
   test_person person;
-  char path[] = "/tmp/lonejson-test-XXXXXX";
+  char path[] = LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-test-XXXXXX";
   int fd;
   FILE *fp;
   char out[64];
@@ -110,7 +110,7 @@ static void test_jsonl_helpers(void) {
   char pretty[256];
   char *jsonl;
   lonejson_status status;
-  char path[] = "/tmp/lonejson-jsonl-XXXXXX";
+  char path[] = LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-jsonl-XXXXXX";
   int fd;
   FILE *fp;
   char filebuf[128];
@@ -1089,7 +1089,7 @@ static void test_receiver_methods_dispatch_on_public_handles(void) {
   unsigned char read_buffer[32];
   lonejson_read_result read_result;
   test_event event;
-  char path[] = "/tmp/lonejson-methods-XXXXXX";
+  char path[] = LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-methods-XXXXXX";
   int fd;
   const char *framed =
       "{\"id\":\"evt-1\",\"ok\":true}{\"id\":\"evt-2\",\"ok\":false}";
@@ -1468,8 +1468,8 @@ static void test_receiver_methods_dispatch_on_public_handles(void) {
 #ifdef LONEJSON_WITH_CURL
   {
     static const char curl_json[] = "{\"id\":\"evt-3\",\"ok\":true}";
-    lonejson_curl_parse parse;
-    lonejson_curl_upload upload;
+    lonejson_curl_parse parse = {0};
+    lonejson_curl_upload upload = {0};
     size_t wrote;
 
     memset(&parse, 0, sizeof(parse));
@@ -1535,13 +1535,20 @@ static void test_remaining_public_api_entrypoints_are_directly_covered(void) {
   unsigned char sink_buffer[512];
   FILE *fp;
   FILE *out_fp;
-  char fd_in_path[] = "/tmp/lonejson-public-api-fd-in-XXXXXX";
-  char fd_out_path[] = "/tmp/lonejson-public-api-fd-out-XXXXXX";
-  char reader_fd_out_path[] = "/tmp/lonejson-public-api-rfd-out-XXXXXX";
-  char value_fd_in_path[] = "/tmp/lonejson-public-api-value-in-XXXXXX";
-  char selector_fd_in_path[] = "/tmp/lonejson-public-api-sel-in-XXXXXX";
-  char selector_path_in[] = "/tmp/lonejson-public-api-sel-path-in-XXXXXX";
-  char selector_path_out[] = "/tmp/lonejson-public-api-sel-path-out-XXXXXX";
+  char fd_in_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-public-api-fd-in-XXXXXX";
+  char fd_out_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-public-api-fd-out-XXXXXX";
+  char reader_fd_out_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-public-api-rfd-out-XXXXXX";
+  char value_fd_in_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-public-api-value-in-XXXXXX";
+  char selector_fd_in_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-public-api-sel-in-XXXXXX";
+  char selector_path_in[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-public-api-sel-path-in-XXXXXX";
+  char selector_path_out[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-public-api-sel-path-out-XXXXXX";
   int in_fd;
   int out_fd;
   ssize_t wrote;
@@ -1851,7 +1858,7 @@ static void test_remaining_public_api_entrypoints_are_directly_covered(void) {
 
 #ifdef LONEJSON_WITH_CURL
   {
-    lonejson_curl_upload upload;
+    lonejson_curl_upload upload = {0};
     strcpy(event.id, "evt-up");
     event.ok = true;
     EXPECT(lonejson_curl_upload_init(&upload, lj, &test_event_map, &event) ==
@@ -3075,7 +3082,7 @@ static void test_runtime_owner_spooled_init_waits_for_owner_free(void) {
   test_runtime_free_thread_args free_args;
 
   config = lonejson_default_config();
-  config.spool_blob.temp_dir = "/tmp";
+  config.spool_blob.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   lj = lonejson_new(&config, &error);
   EXPECT(lj != NULL);
   if (lj == NULL) {
@@ -3138,7 +3145,7 @@ static void test_runtime_copy_spooled_init_waits_for_owner_free(void) {
   test_runtime_free_thread_args free_args;
 
   config = lonejson_default_config();
-  config.spool_blob.temp_dir = "/tmp";
+  config.spool_blob.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   lj = lonejson_new(&config, &error);
   EXPECT(lj != NULL);
   if (lj == NULL) {
@@ -3206,9 +3213,11 @@ static lonejson *test_new_runtime_from_stack_config(
     const char **large_text_temp_dir_addr_out, lonejson_error *error) {
   lonejson_config config;
   lonejson_allocator allocator;
-  char default_temp_dir[] = "/tmp/lj-stack-default";
-  char blob_temp_dir[] = "/tmp/lj-stack-blob";
-  char large_text_temp_dir[] = "/tmp/lj-stack-large";
+  char default_temp_dir[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lj-stack-default";
+  char blob_temp_dir[] = LONEJSON_SOURCE_DIR "/build/test-tmp/lj-stack-blob";
+  char large_text_temp_dir[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lj-stack-large";
 
   allocator = lonejson_default_allocator();
   config = lonejson_default_config();
@@ -3279,11 +3288,11 @@ static void test_runtime_owns_config_backing_storage(void) {
   EXPECT(runtime_state->config.spool_large_text.temp_dir !=
          borrowed_large_text_temp_dir);
   EXPECT(strcmp(runtime_state->config.spool_default.temp_dir,
-                "/tmp/lj-stack-default") == 0);
+                LONEJSON_SOURCE_DIR "/build/test-tmp/lj-stack-default") == 0);
   EXPECT(strcmp(runtime_state->config.spool_blob.temp_dir,
-                "/tmp/lj-stack-blob") == 0);
+                LONEJSON_SOURCE_DIR "/build/test-tmp/lj-stack-blob") == 0);
   EXPECT(strcmp(runtime_state->config.spool_large_text.temp_dir,
-                "/tmp/lj-stack-large") == 0);
+                LONEJSON_SOURCE_DIR "/build/test-tmp/lj-stack-large") == 0);
   EXPECT(runtime_state->spool_options[LONEJSON_SPOOL_CLASS_DEFAULT].temp_dir ==
          runtime_state->config.spool_default.temp_dir);
   EXPECT(runtime_state->spool_options[LONEJSON_SPOOL_CLASS_BLOB].temp_dir ==
@@ -3810,7 +3819,7 @@ static void test_spooled_handle_owns_temp_dir_after_runtime_free(void) {
 
   config = lonejson_default_config();
   config.spool_default.memory_limit = 1u;
-  config.spool_default.temp_dir = "/tmp";
+  config.spool_default.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   lj = lonejson_new(&config, &error);
   EXPECT(lj != NULL);
   if (lj == NULL) {
@@ -3821,7 +3830,7 @@ static void test_spooled_handle_owns_temp_dir_after_runtime_free(void) {
   lonejson_spooled_init(lj, &value);
   EXPECT(value.temp_dir != NULL);
   EXPECT(value.temp_dir != runtime_state->config.spool_default.temp_dir);
-  EXPECT(strcmp(value.temp_dir, "/tmp") == 0);
+  EXPECT(strcmp(value.temp_dir, LONEJSON_SOURCE_DIR "/build/test-tmp") == 0);
 
   lonejson_free(lj);
   status = lonejson_spooled_append(&value, "xx", 2u, &error);
@@ -3836,7 +3845,7 @@ static void test_spooled_handle_owns_temp_dir_after_runtime_free(void) {
 static void test_spooled_reset_preserves_long_temp_dir(void) {
   lonejson__spool_options options;
   lonejson_spooled value;
-  size_t prefix_len = strlen("/tmp/");
+  size_t prefix_len = strlen(LONEJSON_SOURCE_DIR "/build/test-tmp/");
   size_t long_len = LONEJSON_SPOOL_TEMP_PATH_CAPACITY + 32u;
   char *long_temp_dir = (char *)malloc(long_len + 1u);
 
@@ -3845,7 +3854,7 @@ static void test_spooled_reset_preserves_long_temp_dir(void) {
     return;
   }
 
-  memcpy(long_temp_dir, "/tmp/", prefix_len);
+  memcpy(long_temp_dir, LONEJSON_SOURCE_DIR "/build/test-tmp/", prefix_len);
   memset(long_temp_dir + prefix_len, 'x', long_len - prefix_len);
   long_temp_dir[long_len] = '\0';
 
@@ -3879,7 +3888,7 @@ test_runtime_init_spooled_field_owns_temp_dir_after_runtime_free(void) {
 
   config = lonejson_default_config();
   config.spool_default.memory_limit = 1u;
-  config.spool_default.temp_dir = "/tmp";
+  config.spool_default.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   lj = lonejson_new(&config, &error);
   EXPECT(lj != NULL);
   if (lj == NULL) {
@@ -3899,7 +3908,7 @@ test_runtime_init_spooled_field_owns_temp_dir_after_runtime_free(void) {
   lonejson_init(lj, &runtime_spool_map, &doc);
   EXPECT(doc.text.temp_dir != NULL);
   EXPECT(doc.text.temp_dir != runtime_state->config.spool_default.temp_dir);
-  EXPECT(strcmp(doc.text.temp_dir, "/tmp") == 0);
+  EXPECT(strcmp(doc.text.temp_dir, LONEJSON_SOURCE_DIR "/build/test-tmp") == 0);
 
   lonejson_free(lj);
   status = lonejson_spooled_append(&doc.text, "xx", 2u, &error);
@@ -3936,7 +3945,7 @@ test_runtime_parse_counts_stream_temp_dir_against_alloc_budget(void) {
 
   config = lonejson_default_config();
   config.max_alloc_bytes = 1u;
-  config.spool_default.temp_dir = "/tmp";
+  config.spool_default.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   lj = lonejson_new(&config, &error);
   EXPECT(lj != NULL);
   if (lj == NULL) {
@@ -3965,7 +3974,7 @@ test_runtime_stream_counts_stream_temp_dir_against_alloc_budget(void) {
 
   config = lonejson_default_config();
   config.max_alloc_bytes = 1u;
-  config.spool_default.temp_dir = "/tmp";
+  config.spool_default.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   lj = lonejson_new(&config, &error);
   EXPECT(lj != NULL);
   if (lj == NULL) {
@@ -4007,7 +4016,7 @@ test_runtime_array_stream_counts_stream_temp_dir_against_alloc_budget(void) {
 
   config = lonejson_default_config();
   config.max_alloc_bytes = 1u;
-  config.spool_default.temp_dir = "/tmp";
+  config.spool_default.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   lj = lonejson_new(&config, &error);
   EXPECT(lj != NULL);
   if (lj == NULL) {
@@ -4044,7 +4053,7 @@ static void test_spooled_temp_dir_oom_falls_back_to_anonymous_spill(void) {
   lonejson_status status;
 
   options.memory_limit = 0u;
-  options.temp_dir = "/tmp";
+  options.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   test_fail_after_allocator_init(&alloc_state, 0u);
   lonejson_spooled_init_with_allocator(&value, &options,
                                        &alloc_state.allocator);
@@ -4140,8 +4149,10 @@ static void test_runtime_streams_survive_runtime_free(void) {
   lonejson_array_stream *array_stream;
   lonejson_array_stream_result array_result;
   test_item item;
-  char object_path[] = "/tmp/lonejson-runtime-stream-XXXXXX";
-  char array_path[] = "/tmp/lonejson-runtime-array-stream-XXXXXX";
+  char object_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-runtime-stream-XXXXXX";
+  char array_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-runtime-array-stream-XXXXXX";
   int fd;
 
   config = lonejson_default_config();
@@ -4243,7 +4254,8 @@ static void test_runtime_instances_operate_independently_interleaved(void) {
   lonejson_map runtime_spool_map;
   test_spool_limits_doc strict_spool_doc;
   test_spool_limits_doc relaxed_spool_doc;
-  char stream_path[] = "/tmp/lonejson-runtime-interleaved-XXXXXX";
+  char stream_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-runtime-interleaved-XXXXXX";
   int fd;
   lonejson_stream *strict_stream;
   lonejson_stream *relaxed_stream;

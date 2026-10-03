@@ -2,7 +2,8 @@
 set -euo pipefail
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+mkdir -p "$repo_root/build"
+tmp_dir=$(mktemp -d "$repo_root/build/clean-safety.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 set +e
@@ -22,8 +23,7 @@ for generated_path in \
   '.cache' \
   '.luarocks-build' \
   'examples/bin' \
-  'lonejson' \
-  'devenv/volumes'; do
+  'lonejson'; do
   grep -F "\"\$root_dir\"/$generated_path" <<<"$script_text" >/dev/null
 done
 
@@ -51,7 +51,11 @@ grep -F 'refusing to clean unsafe dist directory' "$tmp_dir/dist-root-stderr" >/
 
 custom_dist_dir="$tmp_dir/custom-dist"
 custom_build_dir="$tmp_dir/custom-build"
-cmake -S "$repo_root" -B "$custom_build_dir" -G Ninja \
+# Keep the external-dist contract inside build/: it is outside this staged
+# source tree, while all test work remains inside the real repository.
+custom_source_dir="$tmp_dir/source"
+"$repo_root/scripts/stage_release_sources.sh" "$repo_root" "$custom_source_dir" 9.8.7
+cmake -S "$custom_source_dir" -B "$custom_build_dir" -G Ninja \
   -D LONEJSON_DIST_DIR="$custom_dist_dir" \
   -D LONEJSON_BUILD_TESTS=OFF \
   -D LONEJSON_BUILD_EXAMPLES=OFF >/dev/null
@@ -70,7 +74,7 @@ fi
 unsafe_dist_dir="$tmp_dir/unmarked-dist"
 mkdir -p "$unsafe_dist_dir"
 printf '%s\n' unrelated >"$unsafe_dist_dir/artifact"
-if "$repo_root/scripts/clean.sh" --dist-only --root "$repo_root" \
+if "$custom_source_dir/scripts/clean.sh" --dist-only --root "$custom_source_dir" \
     --dist-dir "$unsafe_dist_dir" >"$tmp_dir/unmarked-stdout" 2>"$tmp_dir/unmarked-stderr"; then
   printf 'clean.sh accepted an unmarked external custom dist directory\n' >&2
   exit 1

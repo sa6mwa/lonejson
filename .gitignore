@@ -9,7 +9,6 @@
 /src/lua/*.o
 /examples/bin/
 /examples/lua_binding.out
-/devenv/volumes/
 /perflogs/hosts/*/history.jsonl
 /perflogs/hosts/*/latest.json
 /perflogs/hosts/*/runs/

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eu
+set -euo pipefail
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 root_dir="$(CDPATH= cd -- "$script_dir/.." && pwd)"
@@ -11,13 +11,16 @@ if [ -n "$git_top" ]; then
 fi
 
 if [ "$git_top" = "$root_dir" ]; then
-    tag="$(git -C "$root_dir" describe --tags --exact-match 2>/dev/null || true)"
-    case "$tag" in
-      v[0-9]*.[0-9]*.[0-9]*)
-        printf '%s\n' "${tag#v}"
-        exit 0
-        ;;
-    esac
+    exact_tags="$(git -C "$root_dir" tag --points-at HEAD --sort=-version:refname)"
+    while IFS= read -r tag; do
+        if [[ "$tag" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            tag_type="$(git -C "$root_dir" cat-file -t "refs/tags/$tag")"
+            if [ "$tag_type" = commit ]; then
+                printf '%s\n' "${tag#v}"
+                exit 0
+            fi
+        fi
+    done <<<"$exact_tags"
     if [ -n "${LONEJSON_VERSION_OVERRIDE:-}" ]; then
         case "$LONEJSON_VERSION_OVERRIDE" in
           [0-9]*.[0-9]*.[0-9]*)

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: fuzz builds must remain available when optional auth integration
 # dependencies are absent, so parser hardening is not tied to provider setup.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_cmake_fuzz_auth_optional.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 afl_description=$("$repo_root/scripts/cpkt-aflpp.sh" discover)

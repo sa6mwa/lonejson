@@ -13,6 +13,21 @@ executable=$4
 shift 4
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 work_dir="$repo_root/build/fuzz/afl/$name"
+[[ "$seconds" =~ ^[1-9][0-9]*$ ]] || { echo 'SECONDS must be a positive integer' >&2; exit 1; }
+[[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo 'NAME must be a simple identifier' >&2; exit 1; }
+[[ -x "$afl_fuzz" && -x "$executable" ]] || { echo 'AFL and target executables are required' >&2; exit 1; }
+for source_dir in "$@"; do
+  [[ -d "$source_dir" ]] || { echo "missing seed directory: $source_dir" >&2; exit 1; }
+done
+"$repo_root/scripts/require_build_workspace.sh" "$work_dir"
+budget=(-V "$seconds")
+if [[ -n "${LONEJSON_FUZZ_EXECUTIONS:-}" ]]; then
+  [[ "$LONEJSON_FUZZ_EXECUTIONS" =~ ^[1-9][0-9]*$ ]] || {
+    printf 'LONEJSON_FUZZ_EXECUTIONS must be a positive integer\n' >&2
+    exit 1
+  }
+  budget=(-E "$LONEJSON_FUZZ_EXECUTIONS")
+fi
 seed_dir="$work_dir/seeds"
 output_dir="$work_dir/output"
 
@@ -46,14 +61,6 @@ if [[ -z "${AFL_NO_AFFINITY+x}" && -z "${AFL_TRY_AFFINITY+x}" ]]; then
   export AFL_TRY_AFFINITY=1
 fi
 
-budget=(-V "$seconds")
-if [[ -n "${LONEJSON_FUZZ_EXECUTIONS:-}" ]]; then
-  [[ "$LONEJSON_FUZZ_EXECUTIONS" =~ ^[1-9][0-9]*$ ]] || {
-    printf 'LONEJSON_FUZZ_EXECUTIONS must be a positive integer\n' >&2
-    exit 1
-  }
-  budget=(-E "$LONEJSON_FUZZ_EXECUTIONS")
-fi
 "$afl_fuzz" "${budget[@]}" -s 1 -t 1000 -i "$seed_dir" -o "$output_dir" -- "$executable" @@
 # AFL++ can finish successfully after saving failures; a verification gate must
 # fail and retain those inputs for reproduction.

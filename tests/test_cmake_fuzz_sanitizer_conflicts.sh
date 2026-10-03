@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: fuzzing owns its sanitizer/instrumentation mode, and incompatible
 # sanitizer presets must fail at configure time with an intentional diagnostic.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_cmake_fuzz_sanitizer_conflicts.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 run_expect_fail() {

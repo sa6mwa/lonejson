@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # CMake canonicalizes the dynamic loader before linking a native executable.
 # The checker must therefore accept a CMAKE_SYSROOT below a cache symlink.
 
 repo_root=${1:?usage: test_bootlin_runtime_symlink_cache.sh REPO_ROOT}
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_bootlin_runtime_symlink_cache.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 real_cache="$tmp_dir/real-cache"

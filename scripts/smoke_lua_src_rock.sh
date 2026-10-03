@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 if [[ $# -lt 1 || $# -gt 4 ]]; then
   printf 'usage: %s <src-rock> [lonejson-libdir] [lua] [luarocks]\n' "$0" >&2
   exit 1
@@ -49,7 +52,7 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/smoke_lua_src_rock.XXXXXX")
 rock_unpack_dir="$tmp_dir/src-rock"
 nested_unpack_dir="$tmp_dir/nested-source"
 
@@ -86,8 +89,9 @@ if [[ ! -d "$lonejson_libdir" ]]; then
   exit 1
 fi
 
-LONEJSON_LIBDIR="$lonejson_libdir" "$luarocks_exec" install --tree "$tmp_dir/tree" "$rock_path"
+mkdir -p "$tmp_dir/tool-tmp"
+TMPDIR="$tmp_dir/tool-tmp" LONEJSON_LIBDIR="$lonejson_libdir" "$luarocks_exec" install --tree "$tmp_dir/tree" "$rock_path"
 eval "$("$luarocks_exec" path --tree "$tmp_dir/tree")"
-export LD_LIBRARY_PATH="$lonejson_libdir:${LD_LIBRARY_PATH:-}"
-export DYLD_LIBRARY_PATH="$lonejson_libdir:${DYLD_LIBRARY_PATH:-}"
-"$lua_exec" -e 'assert(require("lonejson.init"))'
+printf '%s\n' 'assert(require("lonejson.init"))' >"$tmp_dir/smoke.lua"
+"$repo_root/scripts/run_installed_lua.sh" "$tmp_dir/tree" "$lonejson_libdir" "$lua_exec" \
+  "$tmp_dir/smoke.lua" "$repo_root/tests/test_lua.lua" "$repo_root/tests/test_lua_fuzz.lua"

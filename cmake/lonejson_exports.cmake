@@ -1,0 +1,26 @@
+function(lonejson_limit_exports target allowlist)
+  file(STRINGS "${allowlist}" symbols)
+  set(policy "${CMAKE_CURRENT_BINARY_DIR}/${target}.exports")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(contents "")
+    foreach(symbol IN LISTS symbols)
+      string(APPEND contents "_${symbol}\n")
+    endforeach()
+    file(CONFIGURE OUTPUT "${policy}" CONTENT "${contents}" @ONLY)
+    target_link_options(${target} PRIVATE "LINKER:-exported_symbols_list,${policy}")
+  else()
+    set(contents "{ global:\n")
+    foreach(symbol IN LISTS symbols)
+      string(APPEND contents "  ${symbol};\n")
+    endforeach()
+    string(APPEND contents "local: *; };\n")
+    file(CONFIGURE OUTPUT "${policy}" CONTENT "${contents}" @ONLY)
+    target_link_options(${target} PRIVATE "LINKER:--version-script,${policy}")
+  endif()
+  set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${allowlist};${policy}")
+  add_custom_command(TARGET ${target} POST_BUILD
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_library_exports.sh"
+      "${CMAKE_NM}" "${CMAKE_SYSTEM_NAME}" "$<TARGET_FILE:${target}>"
+      "${allowlist}"
+    VERBATIM)
+endfunction()

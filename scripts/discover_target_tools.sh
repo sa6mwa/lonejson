@@ -54,10 +54,6 @@ cache_value() {
 
 target_default_compiler() {
   case "$target_id" in
-    x86_64-linux-gnu|x86_64-linux-musl|aarch64-linux-gnu|aarch64-linux-musl|armhf-linux-gnu|armhf-linux-musl)
-      "$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" |
-        sed -n 's/^cc=//p'
-      ;;
     arm64-apple-darwin)
       "$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" |
         sed -n 's/^cc=//p'
@@ -88,13 +84,13 @@ first_executable() {
 
 tool_prefix() {
   case "$target_id" in
-    x86_64-linux-gnu) printf '%s\n' "" ;;
-    x86_64-linux-musl) printf '%s\n' "" ;;
-    aarch64-linux-gnu) printf '%s\n' "aarch64-linux-gnu-" ;;
-    aarch64-linux-musl) printf '%s\n' "aarch64-linux-musl-" ;;
-    armhf-linux-gnu) printf '%s\n' "arm-linux-gnueabihf-" ;;
-    armhf-linux-musl) printf '%s\n' "arm-linux-musleabihf-" ;;
-    arm64-apple-darwin) printf '%s\n' "${CPKT_OSXCROSS_HOST:-arm64-apple-darwin25}-" ;;
+    arm64-apple-darwin)
+      local compiler_name=${cc##*/}
+      case "$compiler_name" in
+        *-clang|*-cc) printf '%s-\n' "${compiler_name%-*}" ;;
+        *) printf '%s\n' "" ;;
+      esac
+      ;;
   esac
 }
 
@@ -104,18 +100,56 @@ target_host_prefix() {
   printf '%s\n' "${prefix_value%-}"
 }
 
-target_allows_unprefixed_path_tool() {
-  case "$target_id" in
-    *apple-darwin) return 1 ;;
-    *) return 0 ;;
-  esac
-}
+# Linux verification must stay within the complete pinned collection. A
+# configured host compiler or binutils override is an error, never a fallback.
+case "$target_id" in
+  *linux*)
+    description=$("$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id")
+    [[ "$description" == *$'status=ready'* ]] || {
+      printf 'selected toolchain unavailable for %s; run scripts/cpkt-toolchains.sh ensure %s\n' "$target_id" "$target_id" >&2
+      exit 1
+    }
+    resolved_value() { printf '%s\n' "$description" | sed -n "s/^$1=//p"; }
+    selected_tool() {
+      local key=$1 cache_key=$2 override=$3 selected configured
+      selected=$(resolved_value "$key")
+      configured=$(cache_value "$cache_key")
+      for candidate in "$configured" "$override"; do
+        [[ -z "$candidate" || "$candidate" == "$selected" ]] || {
+          printf 'tool outside selected Bootlin collection: %s=%s (expected %s)\n' "$cache_key" "$candidate" "$selected" >&2
+          exit 1
+        }
+      done
+      [[ -x "$selected" ]] || { printf 'selected tool unavailable: %s\n' "$selected" >&2; exit 1; }
+      printf '%s\n' "$selected"
+    }
+    linux_assignment() { printf '%s=%q\n' "$1" "$2"; }
+    cc=$(selected_tool cc CMAKE_C_COMPILER '')
+    linker=$(selected_tool ld CMAKE_LINKER "${LONEJSON_LINKER:-}")
+    ar=$(selected_tool ar CMAKE_AR "${LONEJSON_AR:-}")
+    strip=$(selected_tool strip CMAKE_STRIP "${LONEJSON_STRIP:-}")
+    nm=$(selected_tool nm CMAKE_NM "${LONEJSON_NM:-}")
+    readelf=$(selected_tool readelf CMAKE_READELF "${LONEJSON_READELF:-}")
+    prefix=$(resolved_value prefix)
+    linux_assignment TARGET_ID "$target_id"
+    linux_assignment TARGET_HOST_PREFIX "$prefix"
+    linux_assignment TARGET_TOOL_PREFIX "$prefix-"
+    linux_assignment CC "$cc"
+    linux_assignment LINKER "$linker"
+    linux_assignment AR "$ar"
+    linux_assignment STRIP "$strip"
+    linux_assignment NM "$nm"
+    linux_assignment READELF "$readelf"
+    linux_assignment OTOOL ''
+    linux_assignment INSTALL_NAME_TOOL ''
+    linux_assignment TARGET_CFLAGS ''
+    exit 0
+    ;;
+esac
 
 cc="$(cache_value CMAKE_C_COMPILER)"
-used_default_compiler=0
 if [[ -z "$cc" ]]; then
   cc="$(target_default_compiler)"
-  used_default_compiler=1
 fi
 cc="$(first_executable "$cc" || true)"
 if [[ -z "$cc" ]]; then
@@ -137,14 +171,6 @@ configured_nm="$(cache_value CMAKE_NM)"
 configured_install_name_tool="$(cache_value CMAKE_INSTALL_NAME_TOOL)"
 configured_otool="$(cache_value CMAKE_OTOOL)"
 configured_readelf="$(cache_value CMAKE_READELF)"
-configured_target="$(cache_value CMAKE_C_COMPILER_TARGET)"
-configured_external_toolchain="$(cache_value CMAKE_C_COMPILER_EXTERNAL_TOOLCHAIN)"
-configured_sysroot="$(cache_value CMAKE_SYSROOT)"
-if [[ "$used_default_compiler" -eq 1 && "$target_id" == *linux* ]]; then
-  configured_ar="$("$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" | sed -n 's/^ar=//p')"
-  configured_strip="$("$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" | sed -n 's/^strip=//p')"
-  configured_readelf="$("$repo_root/scripts/cpkt-toolchains.sh" discover "$target_id" | sed -n 's/^readelf=//p')"
-fi
 if [[ -z "$configured_otool" ]]; then
   configured_otool="${CPKT_OTOOL:-}"
 fi
@@ -155,43 +181,29 @@ strip_tool="$(first_executable \
   "${cc_dir:+$cc_dir/${prefix}strip}" \
   "${cc_dir:+$cc_dir/strip}" \
   "${prefix}strip" || true)"
-if [[ -z "$strip_tool" ]] && target_allows_unprefixed_path_tool; then
-  strip_tool="$(first_executable strip || true)"
-fi
+
 linker_tool="$(first_executable \
   "${LONEJSON_LINKER:-}" \
   "$configured_linker" \
   "${cc_dir:+$cc_dir/${prefix}ld}" \
   "${cc_dir:+$cc_dir/ld}" \
   "${prefix}ld" || true)"
-if [[ -z "$linker_tool" ]] && target_allows_unprefixed_path_tool; then
-  linker_tool="$(first_executable ld || true)"
-fi
+
 ar_tool="$(first_executable \
   "${LONEJSON_AR:-}" \
   "$configured_ar" \
   "${cc_dir:+$cc_dir/${prefix}ar}" \
   "${cc_dir:+$cc_dir/ar}" \
   "${prefix}ar" || true)"
-if [[ -z "$ar_tool" ]] && target_allows_unprefixed_path_tool; then
-  ar_tool="$(first_executable ar || true)"
-fi
+
 nm_tool="$(first_executable \
   "${LONEJSON_NM:-}" \
   "$configured_nm" \
   "${cc_dir:+$cc_dir/${prefix}nm}" \
   "${cc_dir:+$cc_dir/nm}" \
   "${prefix}nm" || true)"
-if [[ -z "$nm_tool" ]] && target_allows_unprefixed_path_tool; then
-  nm_tool="$(first_executable nm || true)"
-fi
-readelf_tool="$(first_executable \
-  "${LONEJSON_READELF:-}" \
-  "$configured_readelf" \
-  "${cc_dir:+$cc_dir/${prefix}readelf}" \
-  "${cc_dir:+$cc_dir/readelf}" \
-  "${prefix}readelf" \
-  readelf || true)"
+
+readelf_tool=
 
 otool_tool=
 install_name_tool=
@@ -228,10 +240,4 @@ quote_assignment READELF "$readelf_tool"
 quote_assignment OTOOL "$otool_tool"
 quote_assignment INSTALL_NAME_TOOL "$install_name_tool"
 
-target_compiler_flags=
-if [[ "$cc" == *clang* && -n "$configured_target" &&
-    -n "$configured_external_toolchain" && -n "$configured_sysroot" ]]; then
-  target_bin="${configured_sysroot%/sysroot}/bin"
-  target_compiler_flags="--target=$configured_target --gcc-toolchain=$configured_external_toolchain --sysroot=$configured_sysroot -B$target_bin"
-fi
-quote_assignment TARGET_CFLAGS "$target_compiler_flags"
+quote_assignment TARGET_CFLAGS ''

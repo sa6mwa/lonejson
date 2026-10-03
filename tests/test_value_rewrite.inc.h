@@ -279,8 +279,10 @@ static void test_value_rewrite_callbacks_use_runtime_writer_policy(void) {
 
 static void
 test_value_rewrite_path_rejects_invalid_runtime_without_truncating(void) {
-  char input_path[] = "/tmp/lonejson-value-rewrite-in-XXXXXX";
-  char output_path[] = "/tmp/lonejson-value-rewrite-out-XXXXXX";
+  char input_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-value-rewrite-in-XXXXXX";
+  char output_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-value-rewrite-out-XXXXXX";
   const char *input_json = "{\"keep\":1}";
   const char *sentinel = "keep me";
   lonejson_value_rewrite_options options;
@@ -1135,6 +1137,7 @@ static void test_value_rewrite_adapter_and_sink_failures(void) {
       "{\"items\":[1]}", strlen("{\"items\":[1]}"), lonejson_owned_buffer_sink,
       &owned, &options, &error);
   EXPECT(status == LONEJSON_STATUS_TYPE_MISMATCH);
+  lonejson_owned_buffer_free(&owned);
 }
 
 static void test_value_rewrite_selector_and_source_base64(void) {
@@ -1144,7 +1147,8 @@ static void test_value_rewrite_selector_and_source_base64(void) {
   lonejson_value_rewrite_selector_options options;
   lonejson_source source;
   lonejson_error error;
-  char bytes_path[] = "/tmp/lonejson-value-rewrite-bytes-XXXXXX";
+  char bytes_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-value-rewrite-bytes-XXXXXX";
   int bytes_fd;
   static const unsigned char bytes_payload[] = {0x00u, 0x01u, 0x7fu};
   lonejson_status status;

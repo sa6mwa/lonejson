@@ -7,9 +7,11 @@ api_fixture_port=${LONEJSON_API_FIXTURE_E2E_PORT:-18080}
 issuer=${LONEJSON_OIDC_E2E_ISSUER:-https://localhost:${oidc_port}/default}
 audience=${LONEJSON_OIDC_E2E_AUDIENCE:-lonejson-api}
 server_port=${LONEJSON_OIDC_E2E_SERVER_PORT:-18081}
-ca_file=${LONEJSON_OIDC_E2E_CAINFO:-$repo_root/devenv/volumes/nginx/certs/server.crt}
+ca_file=${LONEJSON_OIDC_E2E_CAINFO:-$repo_root/build/devenv/credentials/server.crt}
 discovery_url=${LONEJSON_OIDC_E2E_DISCOVERY_URL:-https://localhost:${oidc_port}/.well-known/openid-configuration/default}
 server_pid=
+umask 077
+mkdir -p "$repo_root/build/devenv/logs"
 
 cleanup() {
   if [[ -n "${server_pid}" ]] && kill -0 "$server_pid" >/dev/null 2>&1; then
@@ -245,7 +247,7 @@ LONEJSON_OIDC_E2E_CAINFO="$ca_file" \
   "$repo_root/build/host-curl/lonejson_oidc_fixture_server" \
   "$issuer" "$audience" "$server_port" 10 \
   "$authorization_access_token" "$rotated_refresh_token" \
-  >"$repo_root/build/host-curl/oidc-fixture-server.log" 2>&1 &
+  >"$repo_root/build/devenv/logs/oidc-fixture-server.log" 2>&1 &
 server_pid=$!
 
 ready=0

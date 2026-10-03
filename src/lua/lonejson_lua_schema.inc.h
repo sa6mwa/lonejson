@@ -252,6 +252,7 @@ static int ljlua_compile_nested_schema(lua_State *L,
   if (schema == NULL) {
     return luaL_error(L, "failed to allocate schema");
   }
+  *out_schema = schema;
   schema->runtime = runtime_ud->runtime;
   schema->runtime_ud = runtime_ud;
   schema->name = ljlua_strdup("nested");
@@ -259,12 +260,10 @@ static int ljlua_compile_nested_schema(lua_State *L,
   schema->field_count = count;
   schema->metas = (ljlua_field_meta *)calloc(count, sizeof(schema->metas[0]));
   if (schema->metas == NULL) {
-    ljlua_schema_destroy(schema);
     return luaL_error(L, "failed to allocate schema fields");
   }
   schema->fields = (lonejson_field *)calloc(count, sizeof(schema->fields[0]));
   if (schema->fields == NULL) {
-    ljlua_schema_destroy(schema);
     return luaL_error(L, "failed to allocate runtime map fields");
   }
   for (i = 0u; i < count; ++i) {
@@ -272,13 +271,11 @@ static int ljlua_compile_nested_schema(lua_State *L,
     if (ljlua_compile_field(L, runtime_ud, lua_gettop(L), &schema->metas[i]) !=
         0) {
       lua_pop(L, 1);
-      ljlua_schema_destroy(schema);
       return lua_error(L);
     }
     lua_pop(L, 1);
   }
   ljlua_finalize_schema(schema);
-  *out_schema = schema;
   return 0;
 }
 
@@ -504,11 +501,20 @@ static int ljlua_finalize_schema(ljlua_schema *schema) {
 
   schema->has_json_value = 0;
   schema->needs_record_init = 0;
+  schema->stack_record_safe = 1;
   schema->record_align = 1u;
   offset = 0u;
   for (i = 0u; i < schema->field_count; ++i) {
     ljlua_field_meta *meta = &schema->metas[i];
     size_t align = ljlua_member_align_for_kind(meta);
+
+    /* Only flat scalar fields with inline storage can survive Lua errors
+     * without native cleanup. Other layouts use protected scratch storage. */
+    if (!ljlua_field_kind_is_nullable_primitive(meta->lua_kind) &&
+        !(meta->lua_kind == LJLUA_FIELD_STRING &&
+          meta->field.storage == LONEJSON_STORAGE_FIXED)) {
+      schema->stack_record_safe = 0;
+    }
 
     if (meta->lua_kind == LJLUA_FIELD_JSON_VALUE ||
         ((meta->lua_kind == LJLUA_FIELD_OBJECT ||
@@ -570,7 +576,7 @@ static void ljlua_schema_destroy(ljlua_schema *schema) {
   if (schema == NULL) {
     return;
   }
-  for (i = 0u; i < schema->field_count; ++i) {
+  for (i = 0u; schema->metas != NULL && i < schema->field_count; ++i) {
     free(schema->metas[i].name);
     if (schema->metas[i].subschema != NULL) {
       ljlua_schema_destroy(schema->metas[i].subschema);

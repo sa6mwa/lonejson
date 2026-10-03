@@ -1471,7 +1471,7 @@ static void test_zero_alloc_fixed_storage_serialize(void) {
   lonejson_int64 codes_storage[4];
   test_counting_sink sink;
   char buffer[128];
-  char path[] = "/tmp/lonejson-serialize-XXXXXX";
+  char path[] = LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-serialize-XXXXXX";
   lonejson_error error;
   lonejson_status status;
   int fd;
@@ -1540,7 +1540,8 @@ static void test_zero_alloc_jsonl_serialize(void) {
   test_event events[2];
   test_counting_sink sink;
   char buffer[128];
-  char path[] = "/tmp/lonejson-jsonl-serialize-XXXXXX";
+  char path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-jsonl-serialize-XXXXXX";
   lonejson_error error;
   lonejson_status status;
   int fd;

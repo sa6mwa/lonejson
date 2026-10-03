@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: Lua native test targets must stay selectable without accidentally
 # expanding into cross-target or non-native release work.
 
@@ -15,7 +18,7 @@ if [ -z "$lua_exec" ] || [ -z "$luarocks_exec" ]; then
   exit 0
 fi
 
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/lonejson-lua-native-filter.XXXXXX")"
+tmp_dir="$(mktemp -d "$workspace_root/build/test_lua_native_test_target_filter.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 configure_target() {

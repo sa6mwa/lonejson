@@ -7942,7 +7942,10 @@ lonejson_status lonejson_m2m_signup_complete(
 #include <curl/curl.h>
 
 /** Curl response parse adapter state for incremental `CURLOPT_WRITEFUNCTION`
- * parsing. */
+ * parsing. Initialize all curl adapter storage to zero before its first use
+ * (for example, `lonejson_curl_parse ctx = {0}`). Init may then be called again
+ * on a live adapter; it releases the previous state before replacing it.
+ */
 struct lonejson_curl_parse {
   /** Opaque push-parser state owned by the curl parse adapter. */
   void *parser;
@@ -11166,7 +11169,10 @@ LONEJSON_SHORT_ALIAS_INLINE lj_status lj_m2m_signup_complete(
 #endif
 #ifdef LONEJSON_WITH_CURL
 /** Curl response parse adapter state for incremental `CURLOPT_WRITEFUNCTION`
- * parsing. */
+ * parsing. Initialize all curl adapter storage to zero before its first use
+ * (for example, `lonejson_curl_parse ctx = {0}`). Init may then be called again
+ * on a live adapter; it releases the previous state before replacing it.
+ */
 typedef lonejson_curl_parse lj_curl_parse;
 /** Curl response adapter state for streaming selected array items from
  * `CURLOPT_WRITEFUNCTION` chunks.

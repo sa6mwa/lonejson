@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: release uploads are selected from the checksum manifest, so stale
 # or omitted release-looking artifacts must fail before publishing.
 
 repo_root=$1
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d "$workspace_root/build/test_release_checksum_manifest.XXXXXX")"
 # Tag mutation belongs only to make lifecycle-version-contract. This test also
 # runs from source archives nested inside a checkout and must not touch its refs.
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
@@ -52,11 +55,12 @@ custom_dist_dir="$tmp_dir/custom-dist"
 custom_build_dir="$tmp_dir/custom-build"
 default_version=$(env -u LONEJSON_VERSION_OVERRIDE \
   "$repo_root/scripts/release_version.sh")
+"$repo_root/scripts/stage_release_sources.sh" "$repo_root" "$tmp_dir/source" "$default_version"
 mkdir -p "$custom_dist_dir"
 printf '%s\n' 'lonejson lifecycle artifact directory' >"$custom_dist_dir/.lonejson-dist"
 printf '%s\n' custom >"$custom_dist_dir/lonejson-${default_version}.tar.gz"
 env -u LONEJSON_VERSION_OVERRIDE cmake \
-  -S "$repo_root" -B "$custom_build_dir" -G Ninja \
+  -S "$tmp_dir/source" -B "$custom_build_dir" -G Ninja \
   -D LONEJSON_DIST_DIR="$custom_dist_dir" \
   -D LONEJSON_BUILD_TESTS=OFF \
   -D LONEJSON_BUILD_EXAMPLES=OFF >/dev/null

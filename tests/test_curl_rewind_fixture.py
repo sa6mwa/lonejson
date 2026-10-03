@@ -7,7 +7,7 @@ import unittest
 from http.server import HTTPServer
 
 sys.dont_write_bytecode = True
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "docker" / "sink"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "devenv" / "sink"))
 from app import Handler  # noqa: E402
 from rewind import RewindFixture  # noqa: E402
 

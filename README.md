@@ -421,18 +421,18 @@ callback and an examples-level Kore/Vectis adapter. Those should preserve the
 current binary dependency boundary; putting `curl_easy_*` calls directly in
 `liblonejson.so` would not.
 
-The local Docker/nerdctl development rig includes a mock OIDC/OAuth2 provider
-and API fixture. `make test-oidc-e2e` starts the compose stack, obtains a token
+The local rootless Podman Kube development rig includes a mock OIDC/OAuth2
+provider and API fixture. `make test-oidc-e2e` starts the Podman pod, obtains a token
 from the mock provider using `curl` rather than lonejson, starts the
 lonejson-backed fixture server, and verifies discovery, JWKS refresh, token
 introspection, UserInfo, revocation, bearer rejection, and bearer acceptance
 against the live endpoints. The same e2e checks fail-closed bearer behavior for
 missing credentials, wrong audience, missing scope, wrong/missing `azp`, and
-acceptance for strict multi-audience tokens and `scp` array scopes. Compose
-commands run through `scripts/compose.sh`, which prefers `nerdctl compose` and
-falls back to `docker compose`. The e2e also exercises refresh-token grant
-exchange against the mock provider and
-requires a returned access token.
+acceptance for strict multi-audience tokens and `scp` array scopes. Podman
+commands run through `scripts/devenv.sh` using the checked-in Kube manifest
+template, with pod-local connections between services. The e2e also exercises
+refresh-token grant exchange against the mock provider and requires a returned
+access token.
 
 `make test-m2m-e2e` starts a tiny lonejson-backed API fixture and uses `curl`
 as the non-lonejson client to verify Basic client credentials, Bearer API keys,
@@ -1314,11 +1314,14 @@ make release
 
 That command produces:
 
+- per-target C SDK archives, `lonejson-<version>-<target-id>.tar.gz`
 - a source-only archive, `lonejson-<version>.tar.gz`
 - a compressed standalone single-header artifact,
   `lonejson-<version>.h.gz`
-- a versioned Lua rockspec and packed Lua source rock
-- a SHA-256 manifest under `dist/`
+- a standalone Lua source archive, `lonejson-lua-<version>.tar.gz`
+- a versioned Lua rockspec, `lonejson-<version>-1.rockspec`, and packed source
+  rock, `lonejson-<version>-1.src.rock`
+- a SHA-256 manifest, `dist/lonejson-<version>-CHECKSUMS`
 
 The compressed header artifact is the standalone embedded form for
 single-header integration. Its version macros are regenerated to match the
@@ -1326,8 +1329,8 @@ resolved release version, from `VERSION` when present in a source package,
 otherwise from an exact lightweight `vX.Y.Z` tag on `HEAD`, and otherwise
 `0.0.0`. Before `make release` cleans generated state or builds artifacts, it
 runs `make lifecycle-version-contract` to verify that git-worktree version
-detection, Make, and CMake agree on exact lightweight tags and explicit
-release-candidate overrides. The project-prefixed
+detection and Make agree on exact lightweight tags and explicit overrides.
+Ordinary CTest checks CMake overrides separately without mutating tags. The project-prefixed
 `LONEJSON_VERSION_OVERRIDE=X.Y.Z` escape hatch is for release-candidate
 rehearsals only; Make exports an explicit command-line override, and CMake
 honors an environment override for the current configure without caching it for
@@ -1385,21 +1388,33 @@ Each archive is verified by SHA-256 before reuse and is keyed by that digest;
 only the extracted SDK root belongs to this checkout under `.cache/`. `make
 clean` preserves both shared caches.
 
-## Local compose e2e
+## Local Podman Kube e2e
 
-`make test-e2e` starts a deterministic local compose project whose default name
-is derived from the checkout path, waits for HTTPS, OIDC, and API-fixture
-readiness, then runs the curl, OIDC, and M2M workflows. Set
-`LONEJSON_COMPOSE_PROJECT_NAME` to select an explicit project name. Mutable
-service state, including the generated TLS certificate and nginx fixture data,
-is under `devenv/volumes/` and is removed by `make dev-reset` or `make clean`.
+Install rootless Podman with its `pasta` network helper on the host.
+`make test-e2e` starts one checkout-specific pod, waits for HTTPS, OIDC, API-fixture,
+and upload-sink readiness, then runs the curl, OIDC, and M2M workflows. The
+five containers are declared in `devenv.yaml.in`; static configuration lives
+under `devenv/`. Services communicate through pod-local loopback connections.
+All published ports bind to host loopback.
 
-Every published service port is overrideable for parallel checkouts:
-`LONEJSON_OAUTH2_E2E_PORT`, `LONEJSON_OIDC_E2E_PORT`,
-`LONEJSON_API_FIXTURE_E2E_PORT`, `LONEJSON_NGINX_HTTP_E2E_PORT`, and
-`LONEJSON_NGINX_HTTPS_E2E_PORT`. Set
-`LONEJSON_E2E_KEEP_DEVSERVICES=1` to retain the compose stack after an e2e
-run for debugging.
+`make dev-up`, `dev-ps`, `dev-logs`, `dev-down`, and `dev-reset` use
+`scripts/devenv.sh`. The generated manifest is `build/devenv/devenv.yaml`;
+state, temporary files, logs, and local credentials are under that same
+`build/devenv/` root. The TLS CA is
+`build/devenv/credentials/server.crt`. Each image's writer maps to the invoking
+host user, and the e2e gate checks actual container-written file ownership.
+`dev-reset` stops the pod with the saved manifest before deleting generated
+state as that user. `make clean` also stops this pod before removing `build/`.
+
+Published service ports can be overridden for parallel checkouts:
+`LONEJSON_OAUTH2_E2E_PORT` (8090), `LONEJSON_OIDC_E2E_PORT` (18443),
+`LONEJSON_API_FIXTURE_E2E_PORT` (18080), `LONEJSON_NGINX_HTTP_E2E_PORT` (8080),
+and `LONEJSON_NGINX_HTTPS_E2E_PORT` (8443). Overrides must be distinct ports
+between 1024 and 65535. Reset the pod before changing ports. On success,
+`test-e2e` removes its pod and generated service state. On failure it stops
+the pod and retains state for diagnosis. Set
+`LONEJSON_E2E_KEEP_DEVSERVICES=1` to retain the pod and state for debugging.
+Run `make dev-reset` when finished.
 
 ## Verification
 
@@ -1424,21 +1439,24 @@ diagnostic after a matching configure/build step. See
 
 `make test-all` is the broader deterministic local confidence gate: debug,
 host, curl/auth host, cross presets, host sanitizers, Valgrind, deterministic
-local e2e, and fuzz smoke. It deliberately does not run benchmark gates.
+local e2e, fuzz smoke, and C/Lua benchmark gates when frozen baselines exist
+for the current host.
 `make cross-sanitizers` is an extra hardening check for the currently supported
 QEMU sanitizer route, `armhf-linux-gnu` ASan/UBSan; it is intentionally outside
-the normal release gate because the other pkt.systems C projects run sanitizer
-coverage on host debug targets. `make prerelease` runs the complete release
-pipeline without cleaning generated state first: `test-all`, then the release
-matrix that builds, checksums, and verifies every release artifact. `make
-release` is the final clean release gate; it first runs the lightweight-tag
+the normal release gate because native ASan/UBSan and TSan provide the
+mandatory sanitizer coverage. `make prerelease` runs the complete release
+pipeline without cleaning generated state first: native debug/Lua tests,
+sanitizers, Valgrind, deterministic e2e, fuzz smoke and benchmark checks, then
+the release matrix that builds, checksums, and verifies binary SDKs and Lua
+artifacts. `make release` is the final clean release gate; it first runs the lightweight-tag
 version contract, then cleans generated state, then runs the same release
-pipeline. No release-relevant check should exist only in one of those targets.
+pipeline, followed by source-archive reconstruction and full artifact
+verification. Source reconstruction is reserved for the final release path.
 `make test-all-bindings` is a compatibility alias for the Lua
-binding suite; it no longer expands to the full world gate. Benchmark
-enforcement is explicit through `bench-check`, `bench-gate`, Lua benchmark
-targets, and `prerelease-hardening` so noisy host performance runs can be
-investigated separately from lifecycle alignment.
+binding suite; it no longer expands to the full world gate. Use `bench-check`,
+`bench-gate`, and Lua benchmark targets for focused performance verification.
+Hosts without frozen baselines report an explicit benchmark skip; establish
+baselines deliberately with the documented freeze targets.
 
 ## License
 

@@ -21,7 +21,8 @@ LJ_MAP_DEFINE(parsed_envelope_map, parsed_envelope, parsed_envelope_fields);
 int main(void) {
   static const char inbound_json[] =
       "{\"id\":\"evt-1\","
-      "\"selector\":{\"and\":[{\"eq\":{\"field\":\"/status\",\"value\":\"open\"}},"
+      "\"selector\":{\"and\":[{\"eq\":{\"field\":\"/"
+      "status\",\"value\":\"open\"}},"
       "{\"exists\":{\"field\":\"/meta/etag\"}}]},"
       "\"fields\":{\"include\":[\"/id\",\"/meta/etag\"],\"strict\":true},"
       "\"last_error\":{\"code\":\"bad_selector\",\"detail\":{\"offset\":17}}}";
@@ -63,21 +64,22 @@ int main(void) {
     return 1;
   }
 
-  status = lj_parse_cstr(runtime, &parsed_envelope_map, &doc, inbound_json,
-                         &error);
+  status =
+      lj_parse_cstr(runtime, &parsed_envelope_map, &doc, inbound_json, &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
     lj_free(runtime);
     return 1;
   }
 
-  printf("selector compact=%s\n", doc.selector.json ? doc.selector.json : "null");
+  printf("selector compact=%s\n",
+         doc.selector.json ? doc.selector.json : "null");
   printf("fields compact=%s\n", doc.fields.json ? doc.fields.json : "null");
   printf("last_error compact=%s\n",
          doc.last_error.json ? doc.last_error.json : "null");
 
-  pretty = lj_serialize_alloc(runtime, &parsed_envelope_map, &doc, NULL,
-                              &error);
+  pretty =
+      lj_serialize_alloc(runtime, &parsed_envelope_map, &doc, NULL, &error);
   if (pretty == NULL) {
     fprintf(stderr, "pretty serialize failed: %s\n", error.message);
     lj_cleanup(&parsed_envelope_map, &doc);

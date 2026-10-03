@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: Darwin artifacts are only releasable when Mach-O install names,
 # dependency paths, and rpaths are target-correct and free of local paths.
 
 repo_root=$1
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d "$workspace_root/build/test_darwin_macho_metadata.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 fake_bin="$tmp_dir/toolchain/bin"

@@ -19,8 +19,14 @@ if(NOT LONEJSON_BUILD_WITH_OIDC)
     "must include the lonejson_oidc_* ABI")
 endif()
 
-set(archive_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}")
+include("${LONEJSON_ROOT}/cmake/lonejson_build_workspace.cmake")
 set(package_stage_root "${LONEJSON_BINARY_DIR}/package/archive")
+lonejson_require_build_workspace("${package_stage_root}")
+
+include("${LONEJSON_ROOT}/cmake/lonejson_target_tools.cmake")
+lonejson_discover_target_tools()
+
+set(archive_name "liblonejson-${LONEJSON_VERSION}-${LONEJSON_TARGET_ID}")
 set(package_root "${package_stage_root}/${archive_name}")
 file(REMOVE_RECURSE "${package_stage_root}")
 include("${LONEJSON_ROOT}/cmake/c_pkt_systems_metadata.cmake")
@@ -34,9 +40,14 @@ file(MAKE_DIRECTORY "${package_root}/lib/pkgconfig")
 file(MAKE_DIRECTORY "${package_root}/share/lonejson")
 file(MAKE_DIRECTORY "${package_root}/share/doc/liblonejson")
 
-file(COPY "${LONEJSON_PUBLIC_HEADER}" DESTINATION "${package_root}/include")
-file(COPY "${LONEJSON_SHARED_LIB}" DESTINATION "${package_root}/lib")
-file(COPY "${LONEJSON_STATIC_LIB}" DESTINATION "${package_root}/lib")
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" --install "${LONEJSON_BINARY_DIR}"
+    --prefix "${package_root}" --config Release
+  RESULT_VARIABLE install_result
+)
+if(NOT install_result EQUAL 0)
+  message(FATAL_ERROR "failed to stage SDK install tree")
+endif()
 
 set(packaged_shared_lib "${package_root}/lib/${LONEJSON_SHARED_LIB_NAME}")
 set(packaged_static_lib "${package_root}/lib/${LONEJSON_STATIC_LIB_NAME}")
@@ -82,6 +93,30 @@ file(COPY "${LONEJSON_ROOT}/LICENSE" DESTINATION "${package_root}/share/doc/libl
 file(COPY "${LONEJSON_ROOT}/README.md" DESTINATION "${package_root}/share/doc/liblonejson")
 
 set(dependencies_file "${package_root}/share/lonejson/dependencies.json")
+set(dependency_entries "")
+foreach(component IN ITEMS curl openssl)
+  if(component STREQUAL "curl")
+    set(component_version "${LONEJSON_C_PKT_SYSTEMS_CURL_VERSION}")
+    set(component_license "curl")
+  else()
+    set(component_version "${LONEJSON_C_PKT_SYSTEMS_OPENSSL_VERSION}")
+    set(component_license "Apache-2.0")
+  endif()
+  string(APPEND dependency_entries ",
+    {
+      \"name\": \"${component}\",
+      \"version\": \"${component_version}\",
+      \"target_id\": \"${LONEJSON_TARGET_ID}\",
+      \"source_system\": \"c.pkt.systems\",
+      \"source_url\": \"${c_pkt_systems_url}\",
+      \"sha256\": \"${c_pkt_systems_sha256}\",
+      \"archive_name\": \"c.pkt.systems-${LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION}-${LONEJSON_TARGET_ID}.tar.gz\",
+      \"license\": \"${component_license}\",
+      \"bundled\": false,
+      \"external\": true,
+      \"role\": \"optional-facade-consumer-requirement\"
+    }")
+endforeach()
 file(WRITE "${dependencies_file}"
 "{
   \"schema\": \"pkt.systems.dependencies.v1\",
@@ -93,18 +128,18 @@ file(WRITE "${dependencies_file}"
       \"name\": \"c.pkt.systems\",
       \"version\": \"${LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION}\",
       \"target_id\": \"${LONEJSON_TARGET_ID}\",
+      \"source_system\": \"GitHub release\",
       \"source_url\": \"${c_pkt_systems_url}\",
       \"sha256\": \"${c_pkt_systems_sha256}\",
+      \"archive_name\": \"c.pkt.systems-${LONEJSON_C_PKT_SYSTEMS_PINNED_VERSION}-${LONEJSON_TARGET_ID}.tar.gz\",
+      \"license\": \"MIT\",
       \"bundled\": false,
       \"external\": false,
       \"role\": \"release-sdk-build-input\",
-      \"provides\": [
-        \"curl\"
-      ]
-    }
+      \"provides\": [\"curl\", \"openssl\"]
+    }${dependency_entries}
   ]
-}
-")
+}")
 
 set(pkgconfig_file "${package_root}/lib/pkgconfig/lonejson.pc")
 file(WRITE "${pkgconfig_file}"
@@ -275,8 +310,8 @@ endif()
 
 include("${LONEJSON_ROOT}/cmake/lonejson_dist_dir.cmake")
 lonejson_prepare_dist_dir()
-set(archive_base "${LONEJSON_DIST_DIR}/${archive_name}.tar")
-set(archive "${archive_base}.gz")
+set(archive_base "${package_stage_root}/${archive_name}.tar")
+set(archive "${LONEJSON_DIST_DIR}/${archive_name}.tar.gz")
 
 find_program(LONEJSON_TAR_BIN NAMES tar)
 find_program(LONEJSON_GZIP_BIN NAMES gzip)
@@ -287,7 +322,7 @@ if(NOT LONEJSON_GZIP_BIN)
   message(FATAL_ERROR "failed to find gzip for archive creation")
 endif()
 
-file(REMOVE "${archive_base}" "${archive}")
+file(REMOVE "${archive_base}" "${archive_base}.gz")
 execute_process(
   COMMAND "${LONEJSON_TAR_BIN}" -cf "${archive_base}" --format=gnu --owner=0 --group=0 "${archive_name}"
   WORKING_DIRECTORY "${package_stage_root}"
@@ -298,9 +333,11 @@ if(NOT tar_result EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND "${LONEJSON_GZIP_BIN}" -9 -f "${archive_base}"
+  COMMAND "${LONEJSON_GZIP_BIN}" -n -9 -f "${archive_base}"
   RESULT_VARIABLE gzip_result
 )
 if(NOT gzip_result EQUAL 0)
   message(FATAL_ERROR "failed to gzip package archive")
 endif()
+
+lonejson_publish_artifact("${archive_base}.gz" "${archive}")

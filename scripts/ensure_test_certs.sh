@@ -2,11 +2,12 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cert_dir="${repo_root}/devenv/volumes/nginx/certs"
+cert_dir="${repo_root}/build/devenv/credentials"
 crt="${cert_dir}/server.crt"
 key="${cert_dir}/server.key"
 cfg="${cert_dir}/openssl.cnf"
 
+umask 077
 mkdir -p "${cert_dir}"
 
 if [[ -s "${crt}" && -s "${key}" ]]; then

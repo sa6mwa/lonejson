@@ -12,7 +12,8 @@ static void test_value_visitor_success_and_limits(void) {
   lonejson_status status;
   test_visit_state state;
   test_reader_state reader;
-  char path[] = "/tmp/lonejson-value-visitor-XXXXXX";
+  char path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-value-visitor-XXXXXX";
   int fd;
   FILE *fp;
 
@@ -40,7 +41,8 @@ static void test_value_visitor_success_and_limits(void) {
              "{K(name)S(a\n\xE2\x82\xAC)K(items)[N(1)N(-2.5e3)TFZ{K(x)[]}]}") ==
       0);
 
-  strcpy(path, "/tmp/lonejson-value-visitor-XXXXXX");
+  strcpy(path,
+         LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-value-visitor-XXXXXX");
   fd = write_temp_text_file(path, json);
   EXPECT(fd >= 0);
   if (fd >= 0) {
@@ -84,7 +86,8 @@ static void test_value_visitor_success_and_limits(void) {
   status = test_visit_value_cstr("{\"k\":tru}", &visitor, &state, NULL, &error);
   EXPECT(status == LONEJSON_STATUS_INVALID_JSON);
 
-  strcpy(path, "/tmp/lonejson-value-visitor-XXXXXX");
+  strcpy(path,
+         LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-value-visitor-XXXXXX");
   fd = write_temp_text_file(path, json);
   EXPECT(fd >= 0);
   if (fd >= 0) {
@@ -102,7 +105,8 @@ static void test_value_visitor_success_and_limits(void) {
     unlink(path);
   }
 
-  strcpy(path, "/tmp/lonejson-value-visitor-XXXXXX");
+  strcpy(path,
+         LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-value-visitor-XXXXXX");
   fd = write_temp_text_file(path, json);
   EXPECT(fd >= 0);
   if (fd >= 0) {
@@ -661,7 +665,8 @@ static void test_visit_value_success_clears_error(void) {
   test_visit_state state;
   test_reader_state reader;
   lonejson *runtime = test_default_runtime();
-  char path[] = "/tmp/lonejson-visit-clear-XXXXXX";
+  char path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-visit-clear-XXXXXX";
   int fd;
   FILE *fp;
 
@@ -1076,7 +1081,8 @@ static void test_path_value_visitor_source_entry_points_and_args(void) {
   lonejson *runtime;
   lonejson_error error;
   lonejson_status status;
-  char path[] = "/tmp/lonejson-path-value-visitor-XXXXXX";
+  char path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-path-value-visitor-XXXXXX";
   int fd;
   FILE *fp;
 
@@ -1108,7 +1114,8 @@ static void test_path_value_visitor_source_entry_points_and_args(void) {
   EXPECT(status == LONEJSON_STATUS_OK);
   EXPECT(strstr(state.log, "T($/1:a/1:0)") != NULL);
 
-  strcpy(path, "/tmp/lonejson-path-value-visitor-XXXXXX");
+  strcpy(path, LONEJSON_SOURCE_DIR
+         "/build/test-tmp/lonejson-path-value-visitor-XXXXXX");
   fd = write_temp_text_file(path, json);
   EXPECT(fd >= 0);
   if (fd >= 0) {
@@ -1134,7 +1141,8 @@ static void test_path_value_visitor_source_entry_points_and_args(void) {
     unlink(path);
   }
 
-  strcpy(path, "/tmp/lonejson-path-value-visitor-XXXXXX");
+  strcpy(path, LONEJSON_SOURCE_DIR
+         "/build/test-tmp/lonejson-path-value-visitor-XXXXXX");
   fd = write_temp_text_file(path, json);
   EXPECT(fd >= 0);
   if (fd >= 0) {
@@ -1152,7 +1160,8 @@ static void test_path_value_visitor_source_entry_points_and_args(void) {
     unlink(path);
   }
 
-  strcpy(path, "/tmp/lonejson-path-value-visitor-XXXXXX");
+  strcpy(path, LONEJSON_SOURCE_DIR
+         "/build/test-tmp/lonejson-path-value-visitor-XXXXXX");
   fd = write_temp_text_file(path, json);
   EXPECT(fd >= 0);
   if (fd >= 0) {

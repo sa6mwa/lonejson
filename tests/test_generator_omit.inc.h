@@ -33,7 +33,7 @@ static void test_generator_pretty_streams_source_field(void) {
   test_source_doc doc;
   lonejson_generator generator;
   lonejson__write_options options = lonejson__default_write_options();
-  char path[] = "/tmp/lonejson-generator-XXXXXX";
+  char path[] = LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-generator-XXXXXX";
   unsigned char chunk[64];
   char output[512];
   size_t out_len;
@@ -680,9 +680,12 @@ static void test_rewindability_edges_and_measure_preserves_sources(void) {
   test_json_value_doc json_doc;
   lonejson_error error;
   lonejson_status status;
-  char text_path[] = "/tmp/lonejson-rewind-source-text-XXXXXX";
-  char bytes_path[] = "/tmp/lonejson-rewind-source-bytes-XXXXXX";
-  char json_path[] = "/tmp/lonejson-rewind-json-XXXXXX";
+  char text_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-rewind-source-text-XXXXXX";
+  char bytes_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-rewind-source-bytes-XXXXXX";
+  char json_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-rewind-json-XXXXXX";
   int text_fd = -1;
   int bytes_fd = -1;
   int json_fd = -1;

@@ -16,6 +16,12 @@ endif()
 if(NOT DEFINED LONEJSON_SINGLE_HEADER_DIST_GZ)
   message(FATAL_ERROR "LONEJSON_SINGLE_HEADER_DIST_GZ is required")
 endif()
+include("${LONEJSON_ROOT}/cmake/lonejson_build_workspace.cmake")
+get_filename_component(build_dir "${LONEJSON_SINGLE_HEADER_BUILD}" DIRECTORY)
+get_filename_component(build_alias_dir "${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}" DIRECTORY)
+lonejson_require_build_workspace("${build_dir}")
+lonejson_require_build_workspace("${build_alias_dir}")
+lonejson_require_build_workspace("${LONEJSON_ROOT}/build/packaging")
 include("${LONEJSON_ROOT}/cmake/lonejson_dist_dir.cmake")
 lonejson_prepare_dist_dir()
 if(NOT DEFINED LONEJSON_LOCK_TIMEOUT_SECONDS OR
@@ -33,7 +39,8 @@ if(NOT LONEJSON_LOCK_TIMEOUT_SECONDS MATCHES "^[1-9][0-9]*$")
 endif()
 get_filename_component(lonejson_dist_dir "${LONEJSON_SINGLE_HEADER_DIST_GZ}" DIRECTORY)
 set(lonejson_single_header_lock
-  "${lonejson_dist_dir}/.lonejson-single-header.lock")
+  "${LONEJSON_ROOT}/build/packaging/.lonejson-single-header.lock")
+file(MAKE_DIRECTORY "${LONEJSON_ROOT}/build/packaging")
 file(LOCK "${lonejson_single_header_lock}" GUARD PROCESS
   TIMEOUT "${LONEJSON_LOCK_TIMEOUT_SECONDS}"
   RESULT_VARIABLE lonejson_single_header_lock_result)
@@ -105,10 +112,10 @@ endforeach()
 get_filename_component(build_dir "${LONEJSON_SINGLE_HEADER_BUILD}" DIRECTORY)
 get_filename_component(build_alias_dir "${LONEJSON_SINGLE_HEADER_BUILD_ALIAS}" DIRECTORY)
 get_filename_component(dist_dir "${LONEJSON_SINGLE_HEADER_DIST_GZ}" DIRECTORY)
-set(dist_header "${dist_dir}/lonejson.h")
+set(dist_header "${build_dir}/lonejson-release.h")
 set(build_tmp "${build_dir}/lonejson_single_header.h.tmp")
 set(build_alias_tmp "${build_alias_dir}/lonejson.h.tmp")
-set(dist_header_tmp "${dist_dir}/lonejson.h.tmp")
+set(dist_header_tmp "${build_dir}/lonejson-release.h.tmp")
 file(MAKE_DIRECTORY "${build_dir}" "${build_alias_dir}" "${dist_dir}")
 file(WRITE "${build_tmp}" "${single_header}")
 file(WRITE "${build_alias_tmp}" "${single_header}")
@@ -186,13 +193,13 @@ if(NOT LONEJSON_GZIP_BIN)
   message(FATAL_ERROR "failed to find gzip for single-header artifact creation")
 endif()
 
-file(REMOVE "${LONEJSON_SINGLE_HEADER_DIST_GZ}")
 execute_process(
-  COMMAND "${LONEJSON_GZIP_BIN}" -9 -c "${dist_header}"
-  OUTPUT_FILE "${LONEJSON_SINGLE_HEADER_DIST_GZ}"
+  COMMAND "${LONEJSON_GZIP_BIN}" -n -9 -c "${dist_header}"
+  OUTPUT_FILE "${build_dir}/lonejson-release.h.gz"
   RESULT_VARIABLE gzip_result
 )
 if(NOT gzip_result EQUAL 0)
   message(FATAL_ERROR "failed to gzip single-header artifact")
 endif()
+lonejson_publish_artifact("${build_dir}/lonejson-release.h.gz" "${LONEJSON_SINGLE_HEADER_DIST_GZ}")
 file(REMOVE "${dist_header}")

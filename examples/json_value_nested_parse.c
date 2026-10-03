@@ -14,14 +14,14 @@ typedef struct event_doc {
 } event_doc;
 
 static const lj_field response_payload_fields[] = {
-    LJ_FIELD_STRING_FIXED(response_payload, status, "status",
-                          LJ_OVERFLOW_FAIL),
+    LJ_FIELD_STRING_FIXED(response_payload, status, "status", LJ_OVERFLOW_FAIL),
     LJ_FIELD_JSON_VALUE_REQ(response_payload, payload, "payload")};
 LJ_MAP_DEFINE(response_payload_map, response_payload, response_payload_fields);
 
 static const lj_field event_doc_fields[] = {
     LJ_FIELD_STRING_FIXED_REQ(event_doc, type, "type", LJ_OVERFLOW_FAIL),
-    LJ_FIELD_OBJECT_REQ(event_doc, response, "response", &response_payload_map)};
+    LJ_FIELD_OBJECT_REQ(event_doc, response, "response",
+                        &response_payload_map)};
 LJ_MAP_DEFINE(event_doc_map, event_doc, event_doc_fields);
 
 typedef struct buffer_sink {
@@ -78,9 +78,8 @@ int main(void) {
   sink.capacity = sizeof(payload_bytes);
 
   lj_init(runtime, &event_doc_map, &doc);
-  status =
-      lj_json_value_set_parse_sink(&doc.response.payload, buffer_sink_write,
-                                   &sink, &error);
+  status = lj_json_value_set_parse_sink(&doc.response.payload,
+                                        buffer_sink_write, &sink, &error);
   if (status != LJ_STATUS_OK) {
     fprintf(stderr, "payload sink setup failed: %s\n", error.message);
     lj_free(runtime);

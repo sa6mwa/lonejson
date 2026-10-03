@@ -13,7 +13,7 @@ mkdir -p "$repo_root/build/fuzz"
 test_root=$(mktemp -d "$repo_root/build/fuzz/crash-contract.XXXXXX")
 trap 'rm -rf "$test_root"' EXIT
 mkdir -p "$test_root/scripts" "$test_root/seeds"
-cp "$repo_root/scripts/fuzz.sh" "$test_root/scripts/"
+cp "$repo_root/scripts/fuzz.sh" "$repo_root/scripts/require_build_workspace.sh" "$test_root/scripts/"
 cat >"$test_root/fixture.c" <<'EOF'
 #include <signal.h>
 #include <stddef.h>
@@ -28,15 +28,32 @@ int lonejson_fuzz_one_input(const uint8_t *data, size_t size) {
   return 0;
 }
 EOF
-"$cc" -Wall -Wextra -Werror -Wl,--fatal-warnings "$repo_root/fuzz/afl_driver.c" \
-  "$test_root/fixture.c" -o "$test_root/fixture"
-[[ "$("$test_root/fixture" --check-fuzz-isolation)" == lonejson-fuzz-no-core-v1 ]]
+cat >"$test_root/CMakeLists.txt" <<EOF
+cmake_minimum_required(VERSION 3.21)
+project(fuzz_crash_contract LANGUAGES C)
+include("$repo_root/cmake/LonejsonDevelopmentRuntime.cmake")
+include("$repo_root/cmake/LonejsonLinkWarnings.cmake")
+add_executable(fixture "$repo_root/fuzz/afl_driver.c" fixture.c)
+target_compile_options(fixture PRIVATE -Wall -Wextra -Werror)
+lonejson_configure_link_warnings(fixture)
+lonejson_configure_development_runtime(fixture)
+lonejson_verify_development_runtime_coverage()
+EOF
+cmake -S "$test_root" -B "$test_root/build/fixture" -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE="$repo_root/cmake/toolchains/linux-x86_64-aflpp.cmake" \
+  >"$test_root/configure.log" 2>&1 || { cat "$test_root/configure.log" >&2; exit 1; }
+cmake --build "$test_root/build/fixture" >"$test_root/build.log" 2>&1 || {
+  cat "$test_root/build.log" >&2; exit 1;
+}
+fixture="$test_root/build/fixture/fixture"
+"$repo_root/tests/test_bootlin_runtime.sh" "$test_root/build/fixture" "$fixture"
+[[ "$("$fixture" --check-fuzz-isolation)" == lonejson-fuzz-no-core-v1 ]]
 
 check_input() {
   local input=$1 expected=$2 status=0
   printf '%s' "$input" >"$test_root/input"
   AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 "$showmap" -q -t 1000 \
-    -o "$test_root/trace" -- "$test_root/fixture" "$test_root/input" \
+    -o "$test_root/trace" -- "$fixture" "$test_root/input" \
     >"$test_root/showmap.log" 2>&1 || status=$?
   if [[ "$status" != "$expected" ]]; then
     cat "$test_root/showmap.log" >&2
@@ -72,7 +89,7 @@ EOF
 status=0
 AFL_CUSTOM_MUTATOR_LIBRARY="$test_root/mutator.so" AFL_CUSTOM_MUTATOR_ONLY=1 \
   LONEJSON_FUZZ_EXECUTIONS=100 "$test_root/scripts/fuzz.sh" "$afl" 1 fixture \
-  "$test_root/fixture" "$test_root/seeds" >"$test_root/runner.log" 2>&1 || status=$?
+  "$fixture" "$test_root/seeds" >"$test_root/runner.log" 2>&1 || status=$?
 [[ "$status" != 0 ]] || { echo 'crash did not fail the gate' >&2; exit 1; }
 grep -q 'Fuzz failure retained for reproduction:' "$test_root/runner.log" || {
   cat "$test_root/runner.log" >&2; exit 1;
@@ -88,7 +105,7 @@ for input in C H; do
   printf '%s' "$input" >"$test_root/seeds/bad"
   status=0
   LONEJSON_FUZZ_EXECUTIONS=100 "$test_root/scripts/fuzz.sh" "$afl" 1 "seed-$input" \
-    "$test_root/fixture" "$test_root/seeds" >"$test_root/seed.log" 2>&1 || status=$?
+    "$fixture" "$test_root/seeds" >"$test_root/seed.log" 2>&1 || status=$?
   [[ "$status" != 0 ]] || { cat "$test_root/seed.log" >&2; exit 1; }
   cmp "$test_root/seeds/bad" "$test_root/build/fuzz/afl/seed-$input/seeds/seeds-bad"
 done

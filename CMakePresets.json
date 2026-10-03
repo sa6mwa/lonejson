@@ -37,7 +37,14 @@
     },
     {
       "name": "valgrind",
-      "inherits": "debug"
+      "inherits": "debug",
+      "cacheVariables": {
+        "LONEJSON_BUILD_WITH_CURL": "ON",
+        "LONEJSON_BUILD_WITH_OPENSSL": "ON",
+        "LONEJSON_BUILD_WITH_JWT": "ON",
+        "LONEJSON_BUILD_WITH_OIDC": "ON",
+        "LONEJSON_TEST_TIMEOUT": "1800"
+      }
     },
     {
       "name": "host",

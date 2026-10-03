@@ -8,6 +8,8 @@ fi
 
 repo_root=$1
 stage_dir=$2
+workspace_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+"$workspace_root/scripts/require_build_workspace.sh" "$stage_dir"
 release_version=$3
 
 static_files=(
@@ -16,6 +18,15 @@ static_files=(
   lonejson.rockspec.in
   scripts/build_lua_rock.sh
   scripts/cpkt-toolchains.sh
+  scripts/cpkt-archive-cache.sh
+  scripts/cpkt-native-apple.sh
+  scripts/deps.sh
+  cmake/fetch_c_pkt_systems.cmake
+  cmake/CpktDependencyCache.cmake
+  cmake/c_pkt_systems_metadata.cmake
+  cmake/lonejson_lua.exports
+  cmake/lonejson.exports
+  scripts/check_library_exports.sh
   scripts/detect_native_bootlin_target.sh
   cmake/toolchains/print_native_bootlin_target.cmake
   cmake/toolchains/lonejson_native_bootlin_target.cmake

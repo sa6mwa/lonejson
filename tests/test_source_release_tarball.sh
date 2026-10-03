@@ -77,6 +77,12 @@ require_file RELEASE_MANIFEST
 require_file CMakeLists.txt
 require_file CMakePresets.json
 require_file Makefile
+require_file devenv.yaml.in
+require_file devenv/nginx/nginx.conf
+require_file scripts/devenv.sh
+require_file scripts/render_devenv.py
+require_file tests/test_devenv.sh
+require_file tests/test_devenv_ownership.sh
 require_file include/lonejson.h
 require_file scripts/bench_host_id.sh
 require_file scripts/run_lua_benchmark.sh
@@ -95,18 +101,24 @@ reject_path .git
 reject_path build/source-release-ignore-sentinel
 reject_path dist/source-release-ignore-sentinel
 
-# A source archive made from a non-git source tree has no manifest to guide
-# staging, so its fallback must still omit all generated compose state.
+# Non-git source trees must provide a manifest; never infer a payload from
+# an unfiltered directory copy. Generated Podman state remains excluded.
 fallback_root="$test_root/non-git-source"
 fallback_stage="$test_root/non-git-stage"
-mkdir -p "$fallback_root/devenv/volumes/nginx/certs"
+mkdir -p "$fallback_root/build/devenv/credentials"
 printf '%s\n' public >"$fallback_root/README.md"
-printf '%s\n' private >"$fallback_root/devenv/volumes/nginx/certs/server.key"
+printf '%s\n' private >"$fallback_root/build/devenv/credentials/server.key"
+if GIT_DIR="$test_root/not-a-git" "$repo_root/scripts/stage_release_sources.sh" \
+  "$fallback_root" "$fallback_stage" 9.8.7 >"$test_root/manifest-error" 2>&1; then
+  printf 'non-git source without manifest accepted\n' >&2; exit 1
+fi
+grep -F 'requires a git worktree or RELEASE_MANIFEST' "$test_root/manifest-error" >/dev/null
+printf '%s\n' README.md RELEASE_MANIFEST >"$fallback_root/RELEASE_MANIFEST"
 GIT_DIR="$test_root/not-a-git" "$repo_root/scripts/stage_release_sources.sh" \
   "$fallback_root" "$fallback_stage" 9.8.7
 [[ -f "$fallback_stage/README.md" ]]
-if [[ -e "$fallback_stage/devenv/volumes" ]]; then
-  printf 'non-git source staging leaked generated compose state\n' >&2
+if [[ -e "$fallback_stage/build/devenv" ]]; then
+  printf 'non-git source staging leaked generated Podman state\n' >&2
   exit 1
 fi
 
@@ -140,7 +152,13 @@ exec "$LONEJSON_TEST_REAL_GIT" "$@"
 EOF
 chmod +x "$test_root/bin/git"
 lua_exec=$("$repo_root/scripts/resolve_lua55.sh")
-PATH="$test_root/bin:$PATH" bash "$stage_dir/tests/test_bench_baseline_history.sh" "$stage_dir" "$lua_exec"
+if [[ "$(uname -s)" == Linux ]]; then
+  make --no-print-directory -C "$stage_dir" lua-target-runner >/dev/null
+  PATH="$test_root/bin:$PATH" bash "$stage_dir/tests/test_bench_baseline_history.sh" \
+    "$stage_dir" "$lua_exec" luarocks "$stage_dir/build/host-curl"
+else
+  PATH="$test_root/bin:$PATH" bash "$stage_dir/tests/test_bench_baseline_history.sh" "$stage_dir" "$lua_exec"
+fi
 PATH="$test_root/bin:$PATH" bash "$stage_dir/tests/test_release_checksum_manifest.sh" "$stage_dir"
 if [[ -f "$LONEJSON_TEST_TAG_ATTEMPT" ]]; then
   cat "$LONEJSON_TEST_TAG_ATTEMPT" >&2

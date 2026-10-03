@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # A target is native only when its normalized processor and Linux loader ABI
 # match CMake's actual host runtime; an x86_64 target on ARM and x86_64 musl
 # on a glibc host must both use the QEMU route.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_bootlin_host_arch.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 mkdir -p "$tmp_dir/bin"

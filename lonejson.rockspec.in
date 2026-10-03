@@ -25,7 +25,7 @@ build = {
       ["lonejson.init"] = "lua/lonejson/init.lua",
     },
     lib = {
-      ["lonejson.core"] = ".luarocks-build/lonejson/core.@LIB_EXTENSION@",
+      ["lonejson.core"] = "build/luarocks-native/lonejson/core.@LIB_EXTENSION@",
     },
   },
 }

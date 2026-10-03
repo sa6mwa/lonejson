@@ -19,6 +19,7 @@ if [[ $# -ne 0 ]]; then
   exit 2
 fi
 
+cd "$repo_root"
 cmake --preset "$preset" -S "$repo_root"
 cmake --build --preset "$preset"
 if [[ "$stage_examples" -eq 1 ]]; then

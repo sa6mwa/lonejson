@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 repo_root=$1
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}
-libdir=${4:-"$repo_root/build/debug"}
-tmp_dir=$(mktemp -d)
+libdir=${4:-"$repo_root/build/lua-sdk/lib"}
+tmp_dir=$(mktemp -d "$workspace_root/build/test_lua_encode_stats.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
+export TMPDIR="$tmp_dir"
 
 rock_tree="$tmp_dir/luarocks"
 rockspec="$tmp_dir/lonejson-0.0.0-1.rockspec"
@@ -24,6 +28,4 @@ mkdir -p "$rock_tree"
 )
 
 eval "$("$luarocks_exec" path --tree "$rock_tree")"
-export LD_LIBRARY_PATH="$libdir:${LD_LIBRARY_PATH:-}"
-export DYLD_LIBRARY_PATH="$libdir:${DYLD_LIBRARY_PATH:-}"
-"$lua_exec" "$repo_root/tests/test_lua_encode_stats.lua"
+"$repo_root/scripts/run_installed_lua.sh" "$rock_tree" "$libdir" "$lua_exec" "$repo_root/tests/test_lua_encode_stats.lua"

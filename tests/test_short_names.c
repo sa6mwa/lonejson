@@ -90,7 +90,7 @@ int main(void) {
   lj_array_stream_string_handler stream_handler;
   lj_error error;
   lj_status status;
-  char path[] = "/tmp/lonejson-short-XXXXXX";
+  char path[] = LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-short-XXXXXX";
   int fd;
   char buffer[128];
   char short_json[128];

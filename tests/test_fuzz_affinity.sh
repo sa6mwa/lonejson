@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: shared hosts must not make AFL++ release fuzzing fail solely
 # because every CPU is already pinned, while explicit caller affinity policy
 # must still take precedence.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_fuzz_affinity.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 test_root="$tmp_dir/repo"
 mkdir -p "$test_root/scripts" "$tmp_dir/seeds"
-cp "$repo_root/scripts/fuzz.sh" "$test_root/scripts/fuzz.sh"
+cp "$repo_root/scripts/fuzz.sh" "$repo_root/scripts/require_build_workspace.sh" "$test_root/scripts/"
 chmod +x "$test_root/scripts/fuzz.sh"
 printf 'seed\n' >"$tmp_dir/seeds/input"
 

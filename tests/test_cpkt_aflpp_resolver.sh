@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # AFL++ is a shared immutable cache root. A provisioner which waited for the
 # lock must retain a root another checkout published before it could build or
 # replace anything.
 
 repo_root=$1
 resolver="$repo_root/scripts/cpkt-aflpp.sh"
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_cpkt_aflpp_resolver.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 grep -F 'lock_file="$lock_dir/${r##*/}.lock"' "$resolver" >/dev/null

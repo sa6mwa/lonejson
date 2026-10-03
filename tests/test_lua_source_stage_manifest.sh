@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: Lua source archives must be staged from an explicit manifest so
 # generated files, local paths, and private source tree state cannot leak.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_lua_source_stage_manifest.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 stage_dir="$tmp_dir/lonejson-0.0.0"
@@ -69,6 +72,8 @@ resolve_staged_include() {
 
 require_manifest_entry src/lua/lonejson_lua_visitor_facade.inc.h
 require_manifest_entry scripts/cpkt-toolchains.sh
+require_manifest_entry scripts/cpkt-archive-cache.sh
+require_manifest_entry scripts/cpkt-native-apple.sh
 require_manifest_entry scripts/detect_native_bootlin_target.sh
 require_manifest_entry cmake/toolchains/print_native_bootlin_target.cmake
 require_manifest_entry cmake/toolchains/lonejson_native_bootlin_target.cmake

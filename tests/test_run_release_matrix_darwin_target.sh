@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: release-matrix is the only non-clean rehearsal for every shipped
 # binary SDK. This test prevents Darwin packaging, package verification, and
 # optional integration metadata from drifting back into script-local shortcuts
@@ -16,7 +19,7 @@ darwin_smoke_script="$(cat "$darwin_smoke_script_path")"
 darwin_release_smoke_script_path="$repo_root/scripts/smoke_darwin_release.sh"
 darwin_release_smoke_script="$(cat "$darwin_release_smoke_script_path")"
 cmake_lists="$(cat "$repo_root/CMakeLists.txt")"
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d "$workspace_root/build/test_run_release_matrix_darwin_target.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 printf '%s\n' "$verify_script" | grep -F -- 'darwin_deployment_target="$(target_darwin_deployment_target)"' >/dev/null
@@ -26,7 +29,7 @@ printf '%s\n' "$verify_script" | grep -F -- '-D "LONEJSON_C_PKT_SYSTEMS_ROOT=$ad
 grep -F 'list(APPEND _lonejson_find_root_path "${LONEJSON_C_PKT_SYSTEMS_ROOT}")' \
   "$repo_root/cmake/toolchains/arm64-apple-darwin.cmake" >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'target_raw_compile_flags()' >/dev/null
-printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-mmacosx-version-min=$(target_darwin_deployment_target)"' >/dev/null
+printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-std=c89 -Wall -Wextra -Werror -mmacosx-version-min=$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'raw_compile_flags="$(target_raw_compile_flags "$target_id")"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "--ld-path=$LINKER"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'target_toolchain_file()' >/dev/null
@@ -104,8 +107,8 @@ done
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OPENSSL=${LONEJSON_BUILD_WITH_OPENSSL}' >/dev/null
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_JWT=${LONEJSON_BUILD_WITH_JWT}' >/dev/null
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OIDC=${LONEJSON_BUILD_WITH_OIDC}' >/dev/null
-printf '%s\n' "$cmake_lists" | grep -F -- 'LINKER:-exported_symbol,_lonejson_*' >/dev/null
-printf '%s\n' "$cmake_lists" | grep -F -- 'LINKER:-exported_symbol,_lj_*' >/dev/null
+grep -F 'LINKER:-exported_symbols_list,${policy}' "$repo_root/cmake/lonejson_exports.cmake" >/dev/null
+grep -F 'lonejson_limit_exports(lonejson_shared' "$repo_root/CMakeLists.txt" >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"' >/dev/null
 if printf '%s\n' "$matrix_script" | grep -F -- '-D CURL_LIBRARY_RELEASE=' >/dev/null; then
   printf 'run_release_matrix.sh must not inject raw CURL_LIBRARY_RELEASE paths\n' >&2

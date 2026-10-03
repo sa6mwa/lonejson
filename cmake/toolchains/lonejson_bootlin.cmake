@@ -23,13 +23,15 @@ function(lonejson_configure_bootlin_toolchain target_id processor target_arch ta
       "Bootlin resolver did not provision a ready ${target_id} collection.\n${_lonejson_description}")
   endif()
 
-  foreach(_lonejson_key root prefix target_triple sysroot libc cc cxx ld ar ranlib strip nm objcopy objdump addr2line gdb readelf bin)
+  foreach(_lonejson_key root prefix target_triple sysroot libc cc cxx ld ar ranlib strip nm objcopy objdump addr2line gdb readelf)
     string(REGEX MATCH "${_lonejson_key}=([^\r\n]+)" _lonejson_match "${_lonejson_description}")
     if(NOT _lonejson_match)
       message(FATAL_ERROR "Bootlin resolver did not report ${_lonejson_key} for ${target_id}")
     endif()
     set(_lonejson_${_lonejson_key} "${CMAKE_MATCH_1}")
   endforeach()
+
+  get_filename_component(_lonejson_bin "${_lonejson_cc}" DIRECTORY)
 
   # CMake otherwise restarts configuration after a compiler change and drops
   # command-line/preset feature settings. Require a fresh cache explicitly.

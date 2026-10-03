@@ -1,12 +1,37 @@
 # Local Verification
 
-Both `make prerelease` and `make release` run the source-archive smoke gate after
-the release matrix, followed by package verification. The extracted archive runs
-host C and Lua tests and builds its Lua release artifacts. Ordinary source-package
-checks use the archive's `VERSION` and `RELEASE_MANIFEST`, even when extracted
-inside a Git checkout; they must not change the parent checkout's tags. The
-ordinary source-tarball regression test exercises benchmark and checksum checks
-in that nested layout before the full release pipeline runs.
+`make prerelease` runs ordinary proof and the binary release matrix incrementally.
+`make release` first verifies the lightweight-tag contract, cleans generated
+state, and runs that proof graph. It then reconstructs the all-component source
+archive and verifies the complete checksum manifest. Source reconstruction stays
+out of the incremental binary matrix. The extracted archive runs host C and Lua
+tests and builds its Lua release artifacts. Ordinary source-package checks use
+its `VERSION` and `RELEASE_MANIFEST`, even inside a Git checkout, without changing
+the parent checkout's tags.
+
+The release pipeline runs native debug/Lua tests, sanitizers, Valgrind,
+deterministic e2e, fuzz smoke, and benchmark checks before the binary matrix.
+The matrix owns host release and cross-target testing once per configuration;
+it does not repeat a preceding `test-cross` run. `test-all` remains a standalone
+broad confidence gate. `prerelease-hardening` is an alias for `prerelease`, since
+that graph already includes the native hardening and benchmark gates.
+
+For routine edits, `make finalize-slice` formats and builds only the core,
+map-cache, short-name and link-test targets, runs core/header/ABI checks and the
+Lua suite, then checks formatting. It reuses configured builds and does not
+stage examples or run the repository-wide policy fixtures. Run the matching
+lifecycle or packaging fixtures separately when changing those surfaces.
+
+The tag-mutating `make lifecycle-version-contract` checks Make and the version
+resolver on the current checkout, using only a signing-disabled lightweight
+`v99.99.99` fixture. Ordinary CTest separately checks CMake override behavior and
+rejection of annotated/signed tag objects without modifying Git refs.
+
+Temporary test and verifier workspaces live under `build/`, resolved from each
+script's physical repository location. `make format-check` checks all maintained
+C sources and headers without changing them. Shared libraries and Lua modules
+use explicit export allowlists; build and extracted-SDK checks compare exact
+symbol tables with target tools and reject private downstream linkage.
 
 ## Compiler and Cross Toolchains
 
@@ -54,7 +79,7 @@ QEMU-backed test coverage. `make package-single-header` creates the separate
 version-stamped single-header artifact without running a full release.
 
 `make release-matrix` repeats the runnable QEMU-backed cross coverage while
-building and verifying every release artifact; host-only LuaRocks/tooling
+building and verifying binary SDKs and Lua artifacts; host-only LuaRocks/tooling
 checks remain native. A missing required runner is a failure, not a skip.
 
 Pinned c.pkt.systems SDK archives are separate immutable cache entries under
@@ -148,9 +173,9 @@ make test
 ## Broader Confidence
 
 `make test-all` is the deterministic broad local confidence gate. It runs the
-debug gate, host release tests, curl/auth host tests unless explicitly skipped
-by the release pipeline, cross target tests, host sanitizers where supported,
-Valgrind, deterministic local e2e, and fuzz smoke.
+debug gate, host release tests, curl/auth host tests, cross target tests,
+host sanitizers where supported, Valgrind, deterministic local e2e, and fuzz
+smoke.
 
 For release-candidate rehearsals, `LONEJSON_VERSION_OVERRIDE=X.Y.Z` is accepted
 by `scripts/release_version.sh`, Make, and CMake. A CMake environment override
@@ -158,11 +183,10 @@ is intentionally one-shot and is not written into `CMakeCache.txt`; use
 `-D LONEJSON_VERSION_OVERRIDE=X.Y.Z` only when the build directory itself should
 retain that override.
 
-Benchmark gates are intentionally not part of `test-all` or the normal
-`prerelease` graph. Run `make bench-check`, `make bench-gate`,
-`make lua-bench-gate`, or `make prerelease-hardening` when performance is the
-surface under review or when preparing a release decision that explicitly
-requires benchmark evidence.
+`test-all`, `prerelease`, and `release` run `bench-check`
+against frozen C and Lua baselines for the current host. Missing host baselines
+produce an explicit skip rather than an invented comparison. Use `bench-gate`
+or `lua-bench-gate` for focused performance verification.
 
 For a focused test while iterating on a narrow change, build the required
 targets first and state that the result is focused diagnostic coverage, not the
@@ -172,3 +196,39 @@ debug lifecycle gate:
 cmake --build --preset debug --target lonejson_tests
 ctest --test-dir build/debug -R '<test-regex>' --output-on-failure
 ```
+
+Linux source-rock validation installs the just-built public C SDK under
+`build/lua-sdk`, compiles the module against its installed headers, and runs
+its Lua correctness/fuzz tests through a target-built embedding runner. Host
+Lua and LuaRocks provide tooling. Compiler and supported linker warnings are
+errors in Debug and Release configurations.
+
+`make lua-env` prints LuaRocks search paths and the installed SDK's
+`LONEJSON_LIBDIR`; it leaves loader selection to the target runner. To execute
+a Lua script against the installed rock on Linux, use:
+
+```sh
+scripts/run_installed_lua.sh "$PWD/build/luarocks" "$PWD/build/lua-sdk/lib" lua path/to/script.lua
+```
+
+LuaRocks builds keep their tool scratch beneath `build/` too.
+
+
+Darwin cross builds select the newest complete installed `arm64-apple-darwin25.x`
+prefix through the shared resolver. Set `CPKT_OSXCROSS_HOST` to pin an exact
+installed prefix. Configure, packaging, smoke consumers, and verification use
+the selected compiler and sibling tools. lonejson consumes prebuilt SDK bundles
+and generates no Mach interfaces, so it does not provision or require host MIG.
+
+`make package` builds and verifies packages incrementally. `make release` owns
+clean reconstruction and the full final gate. Native `make valgrind` enables
+curl, OpenSSL, JWT and OIDC and runs the main, curl rewind, and Lua tests through
+CTest Memcheck serially with a 30 minute timeout. Binary SDK manifests record
+curl and OpenSSL as external optional facade requirements; core libraries do
+not embed either dependency or require them for ordinary linking.
+
+CMake packaging validates physical ownership of each staging workspace before
+cleanup. The default `dist/` must be a real directory; a symlink is rejected.
+Explicit custom artifact destinations retain their ownership-marker policy.
+Completed artifacts are copied to their final destinations, including those
+on another filesystem; packaging intermediates remain under `build/`.

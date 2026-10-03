@@ -54,7 +54,8 @@ static void test_writer_primitive_string_sources(void) {
   lonejson_error error;
   lonejson_status status;
   lonejson_writer writer;
-  char bytes_path[] = "/tmp/lonejson-writer-source-bytes-XXXXXX";
+  char bytes_path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-writer-source-bytes-XXXXXX";
   int bytes_fd;
   static const unsigned char bytes_payload[] = {0x01u, 0x02u, 0x03u};
 
@@ -74,7 +75,7 @@ static void test_writer_primitive_string_sources(void) {
   sink.capacity = sizeof(out);
   memset(&spool_options, 0, sizeof(spool_options));
   spool_options.memory_limit = 4u;
-  spool_options.temp_dir = "/tmp";
+  spool_options.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   lonejson_spooled_init_with_allocator(&spool, &spool_options, NULL);
   EXPECT(lonejson_spooled_append(&spool, "hello\nworld", 11u, &error) ==
          LONEJSON_STATUS_OK);
@@ -704,8 +705,10 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   EXPECT(test_writer_init_sink(&writer, test_buffer_sink_write, &sink, NULL,
                                &error) == LONEJSON_STATUS_OK);
   EXPECT(test_writer_json_value_path(
-             &writer, "/tmp/lonejson-definitely-missing-json-value", NULL,
-             NULL) == LONEJSON_STATUS_IO_ERROR);
+             &writer,
+             LONEJSON_SOURCE_DIR
+             "/build/test-tmp/lonejson-definitely-missing-json-value",
+             NULL, NULL) == LONEJSON_STATUS_IO_ERROR);
   EXPECT(writer.error.code == LONEJSON_STATUS_IO_ERROR);
   EXPECT(writer.error.system_errno != 0);
   lonejson_writer_cleanup(&writer);
@@ -718,8 +721,10 @@ static void test_writer_value_stream_state_and_sink_failures(void) {
   EXPECT(lonejson_writer_null(&writer, &error) == LONEJSON_STATUS_OK);
   lonejson_error_init(&error);
   EXPECT(test_writer_json_value_path(
-             &writer, "/tmp/lonejson-definitely-missing-json-value", NULL,
-             &error) == LONEJSON_STATUS_INVALID_JSON);
+             &writer,
+             LONEJSON_SOURCE_DIR
+             "/build/test-tmp/lonejson-definitely-missing-json-value",
+             NULL, &error) == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(error.system_errno == 0);
   lonejson_writer_cleanup(&writer);
 
@@ -983,7 +988,8 @@ static void test_writer_json_value_helpers_sources(void) {
   test_short_file_state short_file;
   FILE *short_fp;
 #endif
-  char path[] = "/tmp/lonejson-writer-json-value-source-XXXXXX";
+  char path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-writer-json-value-source-XXXXXX";
   int fd;
   static const char reader_json[] = "{\"r\":[1,true]}";
   static const char buffer_json[] = "\"buffer\"";
@@ -1299,7 +1305,8 @@ static void test_writer_array_items_helpers_sources(void) {
   lonejson_writer writer;
   lonejson_error error;
   FILE *fp;
-  char path[] = "/tmp/lonejson-writer-array-items-source-XXXXXX";
+  char path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-writer-array-items-source-XXXXXX";
   int fd;
   static const char reader_json[] = "[1,{\"r\":true}]";
   static const char selected_json[] = "{\"items\":[\"a\",null]}";
@@ -1459,7 +1466,9 @@ static void test_writer_array_items_helpers_failure_modes(void) {
                                         &error) != LONEJSON_STATUS_OK);
   lonejson_error_init(&error);
   EXPECT(test_writer_array_items_path(
-             &writer, NULL, "/tmp/lonejson-definitely-missing-array-items",
+             &writer, NULL,
+             LONEJSON_SOURCE_DIR
+             "/build/test-tmp/lonejson-definitely-missing-array-items",
              NULL, &error) == LONEJSON_STATUS_INVALID_JSON);
   EXPECT(error.system_errno == 0);
   lonejson_writer_cleanup(&writer);
@@ -1471,7 +1480,9 @@ static void test_writer_array_items_helpers_failure_modes(void) {
                                &error) == LONEJSON_STATUS_OK);
   EXPECT(lonejson_writer_begin_array(&writer, &error) == LONEJSON_STATUS_OK);
   EXPECT(test_writer_array_items_path(
-             &writer, NULL, "/tmp/lonejson-definitely-missing-array-items",
+             &writer, NULL,
+             LONEJSON_SOURCE_DIR
+             "/build/test-tmp/lonejson-definitely-missing-array-items",
              NULL, NULL) == LONEJSON_STATUS_IO_ERROR);
   EXPECT(writer.error.code == LONEJSON_STATUS_IO_ERROR);
   EXPECT(writer.error.system_errno != 0);
@@ -2467,7 +2478,7 @@ static void test_writer_equivalence_ctx_init(void *raw_ctx, void *user) {
   lonejson_source_init(&ctx->b64_source);
   memset(&spool_options, 0, sizeof(spool_options));
   spool_options.memory_limit = 4u;
-  spool_options.temp_dir = "/tmp";
+  spool_options.temp_dir = LONEJSON_SOURCE_DIR "/build/test-tmp";
   lonejson_spooled_init_with_allocator(&ctx->text_spool, &spool_options, NULL);
   lonejson_spooled_init_with_allocator(&ctx->b64_spool, &spool_options, NULL);
   EXPECT(lonejson_source_set_path(&ctx->text_source, init->text_source_path,
@@ -2892,8 +2903,10 @@ static void test_writer_generator_matches_sink_under_backpressure(void) {
   static const char b64_source_payload[] = "xyz";
   test_writer_equivalence_init init;
   test_writer_generator_model model;
-  char text_source_path[] = "/tmp/lonejson-writer-equivalence-text-XXXXXX";
-  char b64_source_path[] = "/tmp/lonejson-writer-equivalence-b64-XXXXXX";
+  char text_source_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-writer-equivalence-text-XXXXXX";
+  char b64_source_path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-writer-equivalence-b64-XXXXXX";
 
   test_writer_equivalence_write_file(text_source_path, text_source_payload,
                                      sizeof(text_source_payload) - 1u);
@@ -2981,7 +2994,8 @@ static void test_writer_generator_backpressure_matrix(void) {
     lonejson_generator generator;
     test_writer_backpressure_ctx ctx;
     unsigned char all[TEST_WRITER_STREAM_PAYLOAD_LEN + 1024u];
-    char path[] = "/tmp/lonejson-writer-matrix-source-XXXXXX";
+    char path[] = LONEJSON_SOURCE_DIR
+        "/build/test-tmp/lonejson-writer-matrix-source-XXXXXX";
     size_t all_len;
     int fd;
 
@@ -3042,7 +3056,8 @@ static void test_writer_generator_streams_source_without_materializing(void) {
   unsigned char all[TEST_WRITER_STREAM_PAYLOAD_LEN + 8u];
   unsigned char expected[TEST_WRITER_STREAM_PAYLOAD_LEN + 8u];
   size_t all_len;
-  char path[] = "/tmp/lonejson-writer-generator-source-XXXXXX";
+  char path[] = LONEJSON_SOURCE_DIR
+      "/build/test-tmp/lonejson-writer-generator-source-XXXXXX";
   int fd;
   size_t i;
 

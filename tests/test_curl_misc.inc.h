@@ -17,7 +17,7 @@ static size_t test_curl_drain(lonejson_curl_upload *upload, char *out,
 
 static void test_curl_upload_rewind(void) {
   test_event event;
-  lonejson_curl_upload upload;
+  lonejson_curl_upload upload = {0};
   lonejson *runtime;
   lonejson_config config;
   char expected[512];
@@ -83,7 +83,7 @@ static void test_curl_upload_rewind(void) {
 
 static void test_curl_upload_rewind_one_shot(void) {
   test_nested_json_value_doc doc;
-  lonejson_curl_upload upload;
+  lonejson_curl_upload upload = {0};
   lonejson_buffer_reader reader;
   char actual[512];
   size_t prefix;
@@ -133,7 +133,7 @@ static void test_curl_upload_rewind_array(void) {
   test_curl_array_doc doc;
   test_nested_json_value_response items[2];
   lonejson_buffer_reader reader;
-  lonejson_curl_upload upload;
+  lonejson_curl_upload upload = {0};
   char expected[512];
   char actual[512];
   size_t length;
@@ -190,7 +190,7 @@ static void test_curl_upload_rewind_allocation_failure(void) {
   test_fail_after_allocator_state alloc;
   lonejson_config config;
   lonejson *runtime;
-  lonejson_curl_upload upload;
+  lonejson_curl_upload upload = {0};
   test_event event;
   char expected[512];
   char actual[512];
@@ -228,7 +228,7 @@ static void test_curl_upload_rewind_allocation_failure(void) {
 
 static int test_child_curl_upload_cleanup_default_allocator(void) {
   test_event event;
-  lonejson_curl_upload upload;
+  lonejson_curl_upload upload = {0};
 
   memset(&event, 0, sizeof(event));
   strcpy(event.id, "evt-1");
@@ -267,7 +267,7 @@ static void test_curl_upload_custom_allocator_balance(void) {
   lonejson_config config;
   test_allocator_state write_alloc;
   lonejson *runtime;
-  lonejson_curl_upload upload;
+  lonejson_curl_upload upload = {0};
   char buffer[128];
   size_t total;
   size_t runtime_bytes_live;
@@ -306,8 +306,9 @@ static void test_curl_upload_streaming_does_not_buffer_payload(void) {
   lonejson_config config;
   test_allocator_state write_alloc;
   lonejson *runtime;
-  lonejson_curl_upload upload;
-  char path[] = "/tmp/lonejson-curl-upload-XXXXXX";
+  lonejson_curl_upload upload = {0};
+  char path[] =
+      LONEJSON_SOURCE_DIR "/build/test-tmp/lonejson-curl-upload-XXXXXX";
   char chunk[4096];
   int fd;
   FILE *fp;
@@ -403,7 +404,7 @@ static void test_curl_parse_survives_runtime_free(void) {
   static const char chunk1[] = "\"payload\":{\"value\":\"abc\"}}}";
   lonejson_config config;
   lonejson *runtime;
-  lonejson_curl_parse parse;
+  lonejson_curl_parse parse = {0};
   test_nested_json_value_doc doc;
   lonejson_error error;
   lonejson_status status;
@@ -456,7 +457,7 @@ static void test_curl_parse_reinit_releases_previous_parser(void) {
                                   test_runtime_allocator_realloc,
                                   test_runtime_allocator_free, NULL, NULL};
   lonejson *runtime;
-  lonejson_curl_parse parse;
+  lonejson_curl_parse parse = {0};
   test_nested_json_value_doc doc0;
   test_nested_json_value_doc doc1;
   lonejson_error error;
@@ -503,7 +504,7 @@ static void test_curl_parse_reinit_releases_previous_parser(void) {
 
 static void test_curl_parse_init_accepts_poisoned_stack_state(void) {
   static const char json[] = "{\"id\":\"evt-1\",\"ok\":true}";
-  lonejson_curl_parse parse;
+  lonejson_curl_parse parse = {0};
   test_event doc;
   size_t wrote;
 
@@ -624,7 +625,7 @@ static void test_curl_array_parse_streams_selected_arrays(void) {
   static const char json[] =
       "{\"meta\":{\"ignored\":true},\"items\":[{\"id\":11,\"label\":\"a\"},"
       "{\"id\":12,\"label\":\"b\"}]}";
-  lonejson_curl_array_parse parse;
+  lonejson_curl_array_parse parse = {0};
   test_curl_array_seen seen;
   test_item item;
   size_t i;
@@ -659,7 +660,7 @@ static void test_curl_array_parse_streams_selected_arrays(void) {
 }
 
 static void test_curl_array_parse_failure_cleanup_and_truncation(void) {
-  lonejson_curl_array_parse parse;
+  lonejson_curl_array_parse parse = {0};
   test_curl_array_seen seen;
   test_item item;
   size_t got;
@@ -719,7 +720,7 @@ static void test_curl_array_parse_reinit_releases_previous_stream(void) {
                                   test_runtime_allocator_realloc,
                                   test_runtime_allocator_free, NULL, NULL};
   lonejson *runtime;
-  lonejson_curl_array_parse parse;
+  lonejson_curl_array_parse parse = {0};
   test_curl_array_seen seen;
   test_item item;
 
@@ -753,7 +754,7 @@ static void test_curl_array_parse_reinit_releases_previous_stream(void) {
 static void test_curl_string_array_parse_streams_keys(void) {
   static const char json[] =
       "{\"cursor\":\"c\",\"keys\":[\"k1\",\"k\\u0032\"],\"index_seq\":9}";
-  lonejson_curl_string_array_parse parse;
+  lonejson_curl_string_array_parse parse = {0};
   lonejson_array_stream_string_handler handler = test_curl_string_handler();
   test_curl_string_seen seen;
   size_t i;
@@ -792,7 +793,7 @@ static void test_curl_string_array_parse_reinit_releases_previous_stream(void) {
                                   test_runtime_allocator_realloc,
                                   test_runtime_allocator_free, NULL, NULL};
   lonejson *runtime;
-  lonejson_curl_string_array_parse parse;
+  lonejson_curl_string_array_parse parse = {0};
   lonejson_array_stream_string_handler handler = test_curl_string_handler();
   test_curl_string_seen seen;
 
@@ -824,7 +825,7 @@ static void test_curl_string_items_parse_streams_keys(void) {
   static const char json[] =
       "{\"cursor\":\"c\",\"keys\":[\"\",\"k1\",\"\",\"k\\u0032\"],"
       "\"index_seq\":9}";
-  lonejson_curl_string_items_parse parse;
+  lonejson_curl_string_items_parse parse = {0};
   test_curl_string_seen seen;
   size_t i;
   size_t got;
@@ -865,7 +866,7 @@ static void test_curl_string_items_parse_reinit_releases_previous_stream(void) {
                                   test_runtime_allocator_realloc,
                                   test_runtime_allocator_free, NULL, NULL};
   lonejson *runtime;
-  lonejson_curl_string_items_parse parse;
+  lonejson_curl_string_items_parse parse = {0};
   test_curl_string_seen seen;
 
   memset(&parse, 0xA5, sizeof(parse));
@@ -901,7 +902,7 @@ static void test_curl_upload_reinit_releases_previous_generator(void) {
                                   test_runtime_allocator_realloc,
                                   test_runtime_allocator_free, NULL, NULL};
   lonejson *runtime;
-  lonejson_curl_upload upload;
+  lonejson_curl_upload upload = {0};
 
   memset(&event, 0, sizeof(event));
   strcpy(event.id, "evt-1");

@@ -5,6 +5,7 @@ include_guard(GLOBAL)
 # built them. Keep this metadata private to executable targets: shipped
 # libraries and exported package metadata must remain relocatable.
 function(lonejson_configure_development_runtime target)
+  set(_lonejson_extra_runtime_dirs "${LONEJSON_DEVELOPMENT_RUNTIME_EXTRA_DIRS}")
   get_target_property(_lonejson_target_type ${target} TYPE)
   if(NOT _lonejson_target_type STREQUAL "EXECUTABLE" OR
      NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_CROSSCOMPILING)
@@ -44,9 +45,9 @@ function(lonejson_configure_development_runtime target)
   if(LONEJSON_C_PKT_SYSTEMS_ROOT)
     list(APPEND _lonejson_runtime_dirs "${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
   endif()
-  if(LONEJSON_DEVELOPMENT_RUNTIME_EXTRA_DIRS)
+  if(_lonejson_extra_runtime_dirs)
     list(APPEND _lonejson_runtime_dirs
-      ${LONEJSON_DEVELOPMENT_RUNTIME_EXTRA_DIRS})
+      ${_lonejson_extra_runtime_dirs})
   endif()
   set(_lonejson_existing_runtime_dirs)
   foreach(_lonejson_runtime_dir IN LISTS _lonejson_runtime_dirs)

@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+owned_workspaces=()
+cleanup() {
+  for workspace in "${owned_workspaces[@]}"; do rm -rf -- "$workspace"; done
+}
+trap cleanup EXIT
+
 repo_root=${1:?usage: verify_release_archives.sh REPO_ROOT [CHECKSUMS] [BUILD_ROOT]}
 checksums=${2:-}
 build_root=${3:-}
@@ -78,9 +86,9 @@ target_raw_compile_flags() {
   local target_id=$1
   case "$target_id" in
     arm64-apple-darwin)
-      printf '%s\n' "-mmacosx-version-min=$(target_darwin_deployment_target)"
+      printf '%s\n' "-std=c89 -Wall -Wextra -Werror -mmacosx-version-min=$(target_darwin_deployment_target)"
       ;;
-    *) printf '%s\n' "" ;;
+    *) printf '%s\n' "-std=c89 -Wall -Wextra -Werror" ;;
   esac
 }
 
@@ -93,8 +101,9 @@ target_raw_link_flags() {
         exit 1
       fi
       printf '%s\n' "--ld-path=$LINKER"
+      printf '%s\n' "-Wl,-fatal_warnings"
       ;;
-    *) printf '%s\n' "" ;;
+    *) printf '%s\n' "-Wl,--fatal-warnings" ;;
   esac
 }
 
@@ -335,7 +344,8 @@ require_archive_contract() {
     esac
   done
 
-  tmp_dir="$(mktemp -d)"
+  tmp_dir="$(mktemp -d "$workspace_root/build/verify_release_archives.XXXXXX")"
+  owned_workspaces+=("$tmp_dir")
   package_root="$(extract_archive "$archive" "$tmp_dir")"
 
   require_no_bootlin_toolchain_paths "$archive" "$package_root"
@@ -374,26 +384,19 @@ require_archive_contract() {
     printf 'forbidden path leak in dependency manifest for %s\n' "$archive" >&2
     exit 1
   fi
-  for required_metadata in \
-      '"schema": "pkt.systems.dependencies.v1"' \
-      '"name": "c.pkt.systems"' \
-      '"version": "0.10.0"' \
-      "\"target_id\": \"$target_id\"" \
-      '"source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.10.0/c.pkt.systems-0.10.0-' \
-      '"sha256": "' \
-      '"bundled": false' \
-      '"external": false' \
-      '"role": "release-sdk-build-input"' \
-      '"curl"'; do
-    if ! grep -F "$required_metadata" "$dependency_manifest" >/dev/null; then
-      printf 'missing dependency manifest metadata in %s: %s\n' "$archive" "$required_metadata" >&2
-      exit 1
-    fi
-  done
-  if grep -F '"openssl"' "$dependency_manifest" >/dev/null; then
-    printf 'unexpected OpenSSL build input in core lonejson SDK metadata: %s\n' "$archive" >&2
+  require_file "$package_root/share/doc/liblonejson/LICENSE"
+  if [[ ! -s "$package_root/share/doc/liblonejson/LICENSE" ]]; then
+    printf 'missing project license text in %s\n' "$archive" >&2
     exit 1
   fi
+  local archive_version
+  archive_version=$(basename -- "$archive")
+  archive_version=${archive_version#liblonejson-}
+  archive_version=${archive_version%-$target_id.tar.gz}
+  cmake -DLONEJSON_MANIFEST="$dependency_manifest" \
+    -DLONEJSON_VERSION="$archive_version" \
+    -DLONEJSON_TARGET_ID="$target_id" \
+    -P "$repo_root/cmake/verify_dependency_manifest.cmake"
 
   if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
     shared_lib="$(find "$package_root/lib" -maxdepth 1 -type f -name 'liblonejson*.dylib' | sort | head -n 1)"
@@ -411,7 +414,7 @@ require_archive_contract() {
       "$target_id" \
       "$shared_lib" \
       "$archive"
-    dynamic_metadata="$("$OTOOL" -L "$shared_lib"; "$OTOOL" -l "$shared_lib")"
+    dynamic_metadata="$("$OTOOL" -l "$shared_lib" | awk '$1 == "name" || $1 == "path" { print }')"
     case "$dynamic_metadata" in
       *libcurl* | *libssl* | *libcrypto* | *OpenSSL* | *c.pkt.systems* | *".cache/"* | *".deps/"* | *"$repo_root"* | *"/home/"* | *"/build/"*)
         printf 'forbidden dependency or path leak in %s\n' "$archive" >&2
@@ -444,6 +447,11 @@ require_archive_contract() {
     require_linux_origin_rpath "$archive" "$dynamic_metadata"
   fi
 
+  system=Linux
+  [[ "$target_id" != *apple-darwin ]] || system=Darwin
+  bash "$repo_root/scripts/check_library_exports.sh" "$NM" "$system" "$shared_lib" \
+    "$repo_root/cmake/lonejson.exports"
+  bash "$repo_root/scripts/check_private_link.sh" "$CC" "$system" "$shared_lib" "$TARGET_CFLAGS"
   rm -rf "$tmp_dir"
 }
 
@@ -460,7 +468,8 @@ require_archive_consumer_metadata() {
 
   load_target_tools "$preset" "$target_id"
 
-  tmp_dir="$(mktemp -d)"
+  tmp_dir="$(mktemp -d "$workspace_root/build/verify_release_archives.XXXXXX")"
+  owned_workspaces+=("$tmp_dir")
   package_root="$(extract_archive "$archive" "$tmp_dir")"
   pkg_config_path="$(target_pkg_config_path "$package_root" "$preset")"
   cmake_prefix_path="$(target_cmake_prefix_path "$package_root" "$preset")"
@@ -508,11 +517,17 @@ EOF
 cmake_minimum_required(VERSION 3.21)
 project(lonejson_archive_consumer C)
 include("${LONEJSON_DEVELOPMENT_RUNTIME_MODULE}")
+get_filename_component(policy_dir "${LONEJSON_DEVELOPMENT_RUNTIME_MODULE}" DIRECTORY)
+include("${policy_dir}/LonejsonLinkWarnings.cmake")
 find_package(lonejson CONFIG REQUIRED)
 add_executable(lonejson_archive_consumer_shared main.c)
 target_link_libraries(lonejson_archive_consumer_shared PRIVATE lonejson::lonejson)
 add_executable(lonejson_archive_consumer_static main.c)
 target_link_libraries(lonejson_archive_consumer_static PRIVATE lonejson::lonejson_static)
+foreach(consumer lonejson_archive_consumer_shared lonejson_archive_consumer_static)
+  target_compile_options(${consumer} PRIVATE -std=c89 -Wall -Wextra -Werror)
+  lonejson_configure_link_warnings(${consumer})
+endforeach()
 lonejson_configure_development_runtime(lonejson_archive_consumer_shared)
 lonejson_configure_development_runtime(lonejson_archive_consumer_static)
 EOF
@@ -611,6 +626,8 @@ EOF
 cmake_minimum_required(VERSION 3.21)
 project(lonejson_archive_adapter_consumer C)
 include("${LONEJSON_DEVELOPMENT_RUNTIME_MODULE}")
+get_filename_component(policy_dir "${LONEJSON_DEVELOPMENT_RUNTIME_MODULE}" DIRECTORY)
+include("${policy_dir}/LonejsonLinkWarnings.cmake")
 find_package(lonejson CONFIG REQUIRED COMPONENTS curl oidc openssl)
 add_executable(lonejson_archive_adapter_consumer main.c)
 target_compile_options(lonejson_archive_adapter_consumer PRIVATE
@@ -624,6 +641,7 @@ target_link_libraries(lonejson_archive_adapter_consumer PRIVATE
   lonejson::curl
   lonejson::oidc
   lonejson::openssl)
+lonejson_configure_link_warnings(lonejson_archive_adapter_consumer)
 lonejson_configure_development_runtime(lonejson_archive_adapter_consumer)
 EOF
 
@@ -671,7 +689,8 @@ require_curl_symbol() {
   local preset=$3
   local tmp_dir package_root shared_lib static_lib
 
-  tmp_dir="$(mktemp -d)"
+  tmp_dir="$(mktemp -d "$workspace_root/build/verify_release_archives.XXXXXX")"
+  owned_workspaces+=("$tmp_dir")
   package_root="$(extract_archive "$archive" "$tmp_dir")"
 
   if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then
@@ -706,7 +725,8 @@ require_jwt_symbol() {
   local preset=$3
   local tmp_dir package_root shared_lib static_lib
 
-  tmp_dir="$(mktemp -d)"
+  tmp_dir="$(mktemp -d "$workspace_root/build/verify_release_archives.XXXXXX")"
+  owned_workspaces+=("$tmp_dir")
   package_root="$(extract_archive "$archive" "$tmp_dir")"
 
   if [[ "${target_id#*apple-darwin}" != "$target_id" ]]; then

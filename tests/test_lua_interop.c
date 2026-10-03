@@ -247,6 +247,94 @@ static void test_interop(lua_State *L) {
   luaL_unref(L, LUA_REGISTRYINDEX, registry_ref);
 }
 
+typedef struct failing_lua_allocator {
+  lua_Alloc delegate;
+  void *delegate_user;
+  size_t remaining;
+} failing_lua_allocator;
+
+static void *fail_lua_allocation(void *user, void *ptr, size_t old_size,
+                                 size_t new_size) {
+  failing_lua_allocator *allocator = (failing_lua_allocator *)user;
+  if (new_size != 0u && (ptr == NULL || new_size > old_size)) {
+    if (allocator->remaining == 0u) {
+      return NULL;
+    }
+    --allocator->remaining;
+  }
+  return allocator->delegate(allocator->delegate_user, ptr, old_size, new_size);
+}
+
+static void test_encoder_lua_allocation_failure(lua_State *L) {
+  failing_lua_allocator allocator;
+  size_t budget;
+  int case_index;
+
+  if (run_lua(L, "local lj = require('lonejson')\n"
+                 "encode_oom_cases = {\n"
+                 "  {lj.encode_json, string.rep('x', 64)},\n"
+                 "  {lj.encode_value, string.rep('x', 1024)},\n"
+                 "  {lj.new({write_pretty = true}).encode_json, "
+                 "string.rep('x', 1024)},\n"
+                 "}\n"
+                 "local wide = {}\n"
+                 "for i = 1, 17 do wide[string.rep('k', 64) .. i] = "
+                 "string.rep('x', 64) end\n"
+                 "table.insert(encode_oom_cases, {lj.encode_json, wide})\n"
+                 "table.insert(encode_oom_cases, {lj.new({write_pretty = "
+                 "true}).encode_json, wide})\n"
+                 "local deep = string.rep('x', 1024)\n"
+                 "for i = 1, 64 do deep = {deep} end\n"
+                 "table.insert(encode_oom_cases, {lj.encode_json, deep})\n") !=
+      0) {
+    ++failures;
+    return;
+  }
+  allocator.delegate = lua_getallocf(L, &allocator.delegate_user);
+  for (case_index = 1; case_index <= 6; ++case_index) {
+    int saw_failure = 0;
+    int saw_success = 0;
+    for (budget = 0u; budget <= 32u; ++budget) {
+      int status;
+      int stack_allocation_failed;
+      int stack_top = lua_gettop(L);
+
+      lua_getglobal(L, "encode_oom_cases");
+      lua_rawgeti(L, -1, case_index);
+      lua_rawgeti(L, -1, 1);
+      lua_rawgeti(L, -2, 2);
+      /* Collect before arming the allocator so result allocation is exercised.
+       */
+      lua_gc(L, LUA_GCCOLLECT, 0);
+      allocator.remaining = budget;
+      lua_setallocf(L, fail_lua_allocation, &allocator);
+      status = lua_pcall(L, 1, 1, 0);
+      lua_setallocf(L, allocator.delegate, allocator.delegate_user);
+      stack_allocation_failed =
+          status == LUA_ERRRUN && allocator.remaining == 0u &&
+          lua_isstring(L, -1) &&
+          strstr(lua_tostring(L, -1), "stack overflow") != NULL;
+      expect_true(status == LUA_OK || status == LUA_ERRMEM ||
+                      stack_allocation_failed,
+                  "encoder returns a result or Lua memory error");
+      if (status == LUA_ERRMEM || stack_allocation_failed) {
+        saw_failure = 1;
+      } else if (status == LUA_OK) {
+        saw_success = 1;
+        expect_true(lua_type(L, -1) == LUA_TSTRING,
+                    "encoder returns JSON after allocation recovery");
+      }
+      lua_settop(L, stack_top);
+    }
+    expect_true(saw_failure,
+                "Lua allocator fault injection reached encoder errors");
+    expect_true(saw_success,
+                "encoder succeeds with sufficient Lua allocations");
+  }
+  lua_pushnil(L);
+  lua_setglobal(L, "encode_oom_cases");
+}
+
 int main(int argc, char **argv) {
   lua_State *L;
 
@@ -261,6 +349,7 @@ int main(int argc, char **argv) {
   }
   require_lonejson(L, argv[1]);
   test_interop(L);
+  test_encoder_lua_allocation_failure(L);
   lua_close(L);
   if (failures != 0) {
     fprintf(stderr, "%d Lua interop test failure(s)\n", failures);

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 repo_root=${1:?usage: test_oidc_pkce_provider_no_openssl.sh REPO_ROOT}
 target_id=$("$repo_root/scripts/detect_native_target.sh")
 toolchain_env=$("$repo_root/scripts/cpkt-toolchains.sh" env "$target_id")
@@ -10,7 +13,7 @@ target_flags=()
 if [[ "$target_id" == arm64-apple-darwin ]]; then
   target_flags=(-arch arm64 -isysroot "$CPKT_SYSROOT")
 fi
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_oidc_pkce_provider_no_openssl.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 cat >"$tmp_dir/pkce_provider_no_openssl.c" <<'C_EOF'

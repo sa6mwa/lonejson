@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: SDK acquisition must be cache-stable, checksum-verified, and
 # retryable without turning transient downloads into corrupted dependency roots.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_fetch_c_pkt_systems.XXXXXX")
 
 bundle_dir_name="c.pkt.systems-0.10.0-x86_64-linux-gnu"
 assets_dir="$tmp_dir/assets"

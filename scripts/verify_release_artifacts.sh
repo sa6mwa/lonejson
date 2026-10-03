@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 repo_root=${1:?usage: verify_release_artifacts.sh REPO_ROOT [CHECKSUMS]}
 checksums=${2:-}
 
@@ -16,7 +19,7 @@ fi
 
 dist_dir="$(CDPATH= cd -- "$(dirname -- "$checksums")" && pwd)"
 checksums_name="$(basename -- "$checksums")"
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d "$workspace_root/build/verify_release_artifacts.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 require_command() {
@@ -168,6 +171,18 @@ scan_loader_metadata() {
   local artifact=$1
   local root=$2
   local bootlin_loader_path_pattern
+  local tools_loaded=0 target_id candidate
+  local READELF OTOOL
+  load_loader_tools() {
+    [[ "$tools_loaded" == 0 ]] || return 0
+    target_id=$("$repo_root/scripts/detect_native_target.sh")
+    for candidate in x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl arm64-apple-darwin; do
+      if [[ "$artifact" == *"-$candidate"* ]]; then target_id=$candidate; break; fi
+    done
+    eval "$("$repo_root/scripts/discover_target_tools.sh" \
+      --build-dir "$repo_root/build/$target_id-release" --target-id "$target_id")"
+    tools_loaded=1
+  }
 
   # Keep this separate from the general path scan: ELF interpreter and
   # RPATH metadata must never point at a pinned Bootlin collection.
@@ -178,8 +193,9 @@ scan_loader_metadata() {
     description="$(file -b "$file_path")"
     case "$description" in
       *ELF*shared\ object* | *ELF*executable*)
-        if command -v readelf >/dev/null 2>&1; then
-          metadata="$(readelf -l -d "$file_path" 2>/dev/null || true)"
+        load_loader_tools
+        if [[ -z "$READELF" ]]; then fail_artifact "$artifact" "$rel_path" "missing target readelf"; fi
+        metadata="$("$READELF" -l -d "$file_path")"
           if printf '%s\n' "$metadata" |
               grep -E '(Requesting program interpreter|RUNPATH|RPATH)' |
               grep -E "$bootlin_loader_path_pattern" >/dev/null; then
@@ -192,18 +208,21 @@ scan_loader_metadata() {
             fail_artifact "$artifact" "$rel_path" \
               "non-relocatable, pinned Bootlin, or sanitizer ELF loader metadata"
           fi
-        fi
         ;;
       *Mach-O* | *Mach-O\ 64-bit*)
-        if command -v otool >/dev/null 2>&1; then
-          metadata="$(otool -L "$file_path" 2>/dev/null || true; otool -l "$file_path" 2>/dev/null || true)"
+        load_loader_tools
+        if [[ -z "$OTOOL" ]]; then fail_artifact "$artifact" "$rel_path" "missing target otool"; fi
+        # otool prints the inspected filename, including our extraction
+        # workspace. Scan load-command values rather than that tool header.
+        metadata="$("$OTOOL" -l "$file_path" | awk '
+          $1 == "name" || $1 == "path" { print }
+        ')"
           if printf '%s\n' "$metadata" | grep -E \
               '(libasan|libtsan|/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/|c\.pkt\.systems/toolchains/|--(glibc|musl)--stable-)' \
               >/dev/null; then
             fail_artifact "$artifact" "$rel_path" \
               "non-relocatable, pinned Bootlin, or sanitizer Mach-O loader metadata"
           fi
-        fi
         ;;
     esac
   done < <(find "$root" -type f | sort)
@@ -251,6 +270,10 @@ extract_artifact() {
        -o -name '*.src.rock' -o -name '*.h.gz' \) |
     sort)
 
+  if [[ "$artifact" == *-arm64-apple-darwin-smoke-test.zip &&
+        ! -s "$artifact_root/${artifact%.zip}/LICENSE" ]]; then
+    fail_artifact "$artifact" LICENSE "missing Darwin smoke bundle project license"
+  fi
   scan_payload_for_local_paths "$artifact" "$artifact_root"
   scan_shipped_payload_for_bootlin_toolchain_paths "$artifact" "$artifact_root"
   case "$artifact" in

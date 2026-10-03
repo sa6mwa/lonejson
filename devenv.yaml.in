@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "@@POD_NAME@@"
+  annotations:
+    io.podman.annotations.userns: "keep-id:uid=0,gid=0"
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+  containers:
+    - name: oauth2
+      image: ghcr.io/navikt/mock-oauth2-server:5.0.1@sha256:116fda4de6326203af780997c4865c2b1d015ea66aa198cc137fea5ad67827f5
+      env:
+        - name: JSON_CONFIG_PATH
+          value: /config/config.json
+        - name: JAVA_TOOL_OPTIONS
+          value: "-Duser.home=/state -Djava.io.tmpdir=/tmp"
+      ports:
+        - containerPort: 8080
+          hostPort: @@OAUTH2_PORT@@
+          hostIP: 127.0.0.1
+      volumeMounts:
+        - {name: static, mountPath: /config, subPath: oauth2, readOnly: true}
+        - {name: state, mountPath: /state, subPath: oauth2}
+        - {name: tmp, mountPath: /tmp, subPath: oauth2}
+    - name: oauth2-tls
+      image: docker.io/library/python:3.12-alpine@sha256:0687a6bc9716edc2a6ee0fbfb0f87e7ee358b262b67c9215de91bc9b2d38ba71
+      workingDir: /app
+      command: [python3, -B, app.py]
+      ports:
+        - containerPort: 9443
+          hostPort: @@OIDC_PORT@@
+          hostIP: 127.0.0.1
+      volumeMounts:
+        - {name: static, mountPath: /app, subPath: oauth2-tls, readOnly: true}
+        - {name: credentials, mountPath: /certs, readOnly: true}
+        - {name: state, mountPath: /state, subPath: oauth2-tls}
+        - {name: tmp, mountPath: /tmp, subPath: oauth2-tls}
+    - name: api-fixture
+      image: docker.io/library/python:3.12-alpine@sha256:0687a6bc9716edc2a6ee0fbfb0f87e7ee358b262b67c9215de91bc9b2d38ba71
+      workingDir: /app
+      command: [python3, -B, app.py]
+      ports:
+        - containerPort: 9001
+          hostPort: @@API_PORT@@
+          hostIP: 127.0.0.1
+      volumeMounts:
+        - {name: static, mountPath: /app, subPath: api-fixture, readOnly: true}
+        - {name: state, mountPath: /state, subPath: api-fixture}
+        - {name: tmp, mountPath: /tmp, subPath: api-fixture}
+    - name: sink
+      image: docker.io/library/python:3.12-alpine@sha256:0687a6bc9716edc2a6ee0fbfb0f87e7ee358b262b67c9215de91bc9b2d38ba71
+      workingDir: /app
+      command: [python3, -B, app.py]
+      volumeMounts:
+        - {name: static, mountPath: /app, subPath: sink, readOnly: true}
+        - {name: state, mountPath: /state, subPath: sink}
+        - {name: tmp, mountPath: /tmp, subPath: sink}
+    - name: nginx
+      image: docker.io/library/nginx:1.27-alpine@sha256:62223d644fa234c3a1cc785ee14242ec47a77364226f1c811d2f669f96dc2ac8
+      command: [nginx, -c, /etc/nginx/nginx.conf, -g, "daemon off;"]
+      ports:
+        - containerPort: 8088
+          hostPort: @@NGINX_HTTP_PORT@@
+          hostIP: 127.0.0.1
+        - containerPort: 8443
+          hostPort: @@NGINX_HTTPS_PORT@@
+          hostIP: 127.0.0.1
+      volumeMounts:
+        - {name: static, mountPath: /etc/nginx/nginx.conf, subPath: nginx/nginx.conf, readOnly: true}
+        - {name: static, mountPath: /etc/nginx/conf.d, subPath: nginx/conf.d, readOnly: true}
+        - {name: static, mountPath: /usr/share/nginx/html, subPath: nginx/html, readOnly: true}
+        - {name: generated, mountPath: /usr/share/nginx/generated, readOnly: true}
+        - {name: credentials, mountPath: /etc/nginx/certs, readOnly: true}
+        - {name: state, mountPath: /state, subPath: nginx}
+        - {name: tmp, mountPath: /tmp, subPath: nginx}
+  volumes:
+    - name: static
+      hostPath: {path: "@@REPO_ROOT@@/devenv", type: Directory}
+    - name: credentials
+      hostPath: {path: "@@DEVENV_ROOT@@/credentials", type: Directory}
+    - name: generated
+      hostPath: {path: "@@DEVENV_ROOT@@/state/nginx/generated", type: Directory}
+    - name: state
+      hostPath: {path: "@@DEVENV_ROOT@@/state", type: Directory}
+    - name: tmp
+      hostPath: {path: "@@DEVENV_ROOT@@/tmp", type: Directory}

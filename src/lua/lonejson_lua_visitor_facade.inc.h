@@ -247,7 +247,7 @@ static int ljlua_visit_path_value_string(lua_State *L) {
   int callbacks_index;
   ljlua_path_visit_state state;
   lonejson_path_value_visitor visitor;
-  lonejson_error error;
+  lonejson_error error = {0};
   lonejson_status status;
 
   if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
@@ -287,7 +287,7 @@ static int ljlua_visit_path_value_path(lua_State *L) {
   int callbacks_index;
   ljlua_path_visit_state state;
   lonejson_path_value_visitor visitor;
-  lonejson_error error;
+  lonejson_error error = {0};
   lonejson_status status;
 
   if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
@@ -327,7 +327,7 @@ static int ljlua_visit_path_value_file(lua_State *L) {
   int callbacks_index;
   ljlua_path_visit_state state;
   lonejson_path_value_visitor visitor;
-  lonejson_error error;
+  lonejson_error error = {0};
   lonejson_status status;
 
   if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {
@@ -367,7 +367,7 @@ static int ljlua_visit_path_value_fd(lua_State *L) {
   int callbacks_index;
   ljlua_path_visit_state state;
   lonejson_path_value_visitor visitor;
-  lonejson_error error;
+  lonejson_error error = {0};
   lonejson_status status;
 
   if (lua_gettop(L) >= 1 && luaL_testudata(L, 1, LJLUA_RUNTIME_MT) != NULL) {

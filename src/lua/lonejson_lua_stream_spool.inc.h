@@ -52,7 +52,7 @@ static int ljlua_schema_array_stream_path(lua_State *L) {
   const char *array_path = luaL_checkstring(L, 2);
   const char *path = luaL_checkstring(L, 3);
   lonejson *runtime;
-  lonejson_error error;
+  lonejson_error error = {0};
   ljlua_array_stream_ud *ud;
 
   ljlua_reject_legacy_options(L, 4, "schema:array_stream_path");
@@ -80,7 +80,7 @@ static int ljlua_schema_array_stream_fd(lua_State *L) {
   const char *array_path = luaL_checkstring(L, 2);
   int fd = ljlua_check_fd_like(L, 3);
   lonejson *runtime;
-  lonejson_error error;
+  lonejson_error error = {0};
   ljlua_array_stream_ud *ud;
 
   ljlua_reject_legacy_options(L, 4, "schema:array_stream_fd");
@@ -107,7 +107,7 @@ static int ljlua_schema_array_stream_file(lua_State *L) {
   const char *array_path = luaL_checkstring(L, 2);
   FILE *fp = ljlua_check_file(L, 3);
   lonejson *runtime;
-  lonejson_error error;
+  lonejson_error error = {0};
   ljlua_array_stream_ud *ud;
 
   ljlua_reject_legacy_options(L, 4, "schema:array_stream_file");
@@ -136,7 +136,7 @@ static int ljlua_schema_array_stream_string(lua_State *L) {
   size_t len;
   const char *json = luaL_checklstring(L, 3, &len);
   lonejson *runtime;
-  lonejson_error error;
+  lonejson_error error = {0};
   ljlua_array_stream_ud *ud;
 
   ljlua_reject_legacy_options(L, 4, "schema:array_stream_string");
@@ -316,6 +316,12 @@ static int ljlua_stream_next(lua_State *L) {
     if (record_ud->schema != ud->schema) {
       return luaL_error(L, "record belongs to a different schema");
     }
+    if (ud->clear_destination &&
+        ud->prepared_record != ljlua_record_data(record_ud)) {
+      lonejson_reset(ud->schema->runtime, &ud->schema->map,
+                     ljlua_record_data(record_ud));
+    }
+    ud->prepared_record = ljlua_record_data(record_ud);
     if (ljlua_schema_has_json_value(ud->schema)) {
       if (ud->clear_destination) {
         lonejson_reset(ud->schema->runtime, &ud->schema->map,
@@ -338,6 +344,7 @@ static int ljlua_stream_next(lua_State *L) {
     unsigned char *record =
         (unsigned char *)calloc(1u, ud->schema->record_size);
     ljlua_decode_context ctx;
+    ud->prepared_record = NULL;
     if (record == NULL) {
       return luaL_error(L, "failed to allocate decode buffer");
     }
@@ -689,20 +696,19 @@ static int ljlua_array_rewrite_encode_source(lua_State *L, int index,
                                              lonejson_json_value *value,
                                              lonejson_error *error) {
   ljlua_json_buf buf;
-  ljlua_json_out out;
   lonejson_status status;
   const void *visited[129];
 
-  memset(&buf, 0, sizeof(buf));
-  out.sink = ljlua_json_buf_sink;
-  out.user = &buf;
   memset(visited, 0, sizeof(visited));
   if (!ljlua_array_rewrite_validate_json_value(L, index, visited, 0u, error)) {
     return 0;
   }
-  memset(visited, 0, sizeof(visited));
-  if (ljlua_encode_json_value(L, index, &out, visited, 0u) == 0) {
-    free(buf.data);
+  if (ljlua_encode_json_buffer(L, index, &buf) != LUA_OK) {
+    const char *message = lua_tostring(L, -1);
+    ljlua_set_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                    "failed to encode array rewrite JSON: %s",
+                    message != NULL ? message : "Lua encoding failed");
+    lua_pop(L, 1);
     return 0;
   }
   status = lonejson_json_value_set_buffer(value, buf.data, buf.len, error);
@@ -928,7 +934,7 @@ static void ljlua_array_rewrite_ctx_cleanup(ljlua_array_rewrite_ctx *ctx) {
   free(ctx->parents);
 }
 
-static int ljlua_array_rewrite_parse_options(
+static int ljlua_array_rewrite_parse_options_impl(
     lua_State *L, lonejson *runtime, int index, const char *selector,
     ljlua_array_rewrite_ctx *ctx,
     lonejson_array_rewrite_options *rewrite_opts) {
@@ -1018,6 +1024,54 @@ static int ljlua_array_rewrite_parse_options(
     rewrite_opts->parent_count = ctx->parent_count;
   }
   lua_pop(L, 1);
+  return 1;
+}
+
+typedef struct ljlua_rewrite_options_call {
+  lonejson *runtime;
+  const char *selector;
+  ljlua_array_rewrite_ctx *ctx;
+  lonejson_array_rewrite_options *options;
+} ljlua_rewrite_options_call;
+
+static int ljlua_rewrite_options_pcall(lua_State *L) {
+  ljlua_rewrite_options_call *call =
+      (ljlua_rewrite_options_call *)lua_touserdata(L, 1);
+  ljlua_array_rewrite_parse_options_impl(L, call->runtime, 2, call->selector,
+                                         call->ctx, call->options);
+  return 0;
+}
+
+static int ljlua_array_rewrite_parse_options(
+    lua_State *L, lonejson *runtime, int index, const char *selector,
+    ljlua_array_rewrite_ctx *ctx,
+    lonejson_array_rewrite_options *rewrite_opts) {
+  ljlua_rewrite_options_call call;
+  int missing = lua_isnone(L, index);
+  int status;
+
+  index = lua_absindex(L, index);
+  luaL_checkstack(L, 3, "array rewrite options");
+  memset(ctx, 0, sizeof(*ctx));
+  ctx->L = L;
+  ctx->item_ref = LUA_NOREF;
+  ctx->append_ref = LUA_NOREF;
+  call.runtime = runtime;
+  call.selector = selector;
+  call.ctx = ctx;
+  call.options = rewrite_opts;
+  lua_pushcfunction(L, ljlua_rewrite_options_pcall);
+  lua_pushlightuserdata(L, &call);
+  if (missing) {
+    lua_pushnil(L);
+  } else {
+    lua_pushvalue(L, index);
+  }
+  status = lua_pcall(L, 2, 0, 0);
+  if (status != LUA_OK) {
+    ljlua_array_rewrite_ctx_cleanup(ctx);
+    return lua_error(L);
+  }
   return 1;
 }
 

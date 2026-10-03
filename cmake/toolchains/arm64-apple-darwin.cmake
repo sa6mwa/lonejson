@@ -15,53 +15,36 @@ else()
   message(FATAL_ERROR "OSXCROSS_ROOT is not set and HOME is unavailable")
 endif()
 
-set(LONEJSON_OSXCROSS_HOST "arm64-apple-darwin25" CACHE STRING
-    "osxcross target host triple")
-set(LONEJSON_MACOS_DEPLOYMENT_TARGET "15.0" CACHE STRING
-    "Minimum macOS deployment target")
-set(CMAKE_OSX_DEPLOYMENT_TARGET "${LONEJSON_MACOS_DEPLOYMENT_TARGET}"
-    CACHE STRING "" FORCE)
-
+set(LONEJSON_OSXCROSS_HOST "" CACHE STRING "Optional exact osxcross target prefix")
+if(LONEJSON_OSXCROSS_HOST)
+  set(ENV{CPKT_OSXCROSS_HOST} "${LONEJSON_OSXCROSS_HOST}")
+endif()
+execute_process(
+  COMMAND "${CMAKE_CURRENT_LIST_DIR}/../../scripts/cpkt-toolchains.sh" ensure arm64-apple-darwin
+  RESULT_VARIABLE _darwin_status OUTPUT_VARIABLE _darwin_description ERROR_VARIABLE _darwin_error)
+if(NOT _darwin_status EQUAL 0 OR NOT _darwin_description MATCHES "status=ready")
+  message(FATAL_ERROR "Darwin lifecycle toolchain provisioning failed: ${_darwin_error}\n${_darwin_description}")
+endif()
+foreach(_pair root:LONEJSON_OSXCROSS_ROOT prefix:LONEJSON_OSXCROSS_HOST
+    cc:CMAKE_C_COMPILER cxx:CMAKE_CXX_COMPILER ld:CMAKE_LINKER ar:CMAKE_AR
+    ranlib:CMAKE_RANLIB strip:CMAKE_STRIP nm:CMAKE_NM otool:CMAKE_OTOOL)
+  string(REPLACE ":" ";" _parts "${_pair}")
+  list(GET _parts 0 _key)
+  list(GET _parts 1 _variable)
+  string(REGEX MATCH "(^|\n)${_key}=([^\r\n]+)" _match "${_darwin_description}")
+  if(NOT _match)
+    message(FATAL_ERROR "Darwin lifecycle resolver did not report ${_key}")
+  endif()
+  set(${_variable} "${CMAKE_MATCH_2}" CACHE STRING "" FORCE)
+endforeach()
 set(LONEJSON_OSXCROSS_BIN_DIR "${LONEJSON_OSXCROSS_ROOT}/bin")
 set(ENV{PATH} "${LONEJSON_OSXCROSS_BIN_DIR}:$ENV{PATH}")
-set(CMAKE_C_COMPILER
-    "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-clang"
-    CACHE FILEPATH "")
-set(CMAKE_AR
-    "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-ar"
-    CACHE FILEPATH "")
-set(CMAKE_RANLIB
-    "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-ranlib"
-    CACHE FILEPATH "")
-set(CMAKE_LINKER
-    "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-ld"
-    CACHE FILEPATH "")
-set(CMAKE_INSTALL_NAME_TOOL
-    "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-install_name_tool"
-    CACHE FILEPATH "")
-set(CMAKE_OTOOL
-    "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-otool"
-    CACHE FILEPATH "")
-set(CMAKE_STRIP
-    "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-strip"
-    CACHE FILEPATH "")
-
-foreach(_lonejson_required_tool
-        CMAKE_C_COMPILER
-        CMAKE_AR
-        CMAKE_RANLIB
-        CMAKE_LINKER
-        CMAKE_INSTALL_NAME_TOOL
-        CMAKE_OTOOL
-        CMAKE_STRIP)
-  if(NOT EXISTS "${${_lonejson_required_tool}}")
-    message(FATAL_ERROR
-      "The arm64 Apple Darwin osxcross toolchain is missing "
-      "${_lonejson_required_tool}: ${${_lonejson_required_tool}}. "
-      "Set OSXCROSS_ROOT or install osxcross under "
-      "$HOME/.local/cross/osxcross.")
-  endif()
-endforeach()
+set(CMAKE_INSTALL_NAME_TOOL "${LONEJSON_OSXCROSS_BIN_DIR}/${LONEJSON_OSXCROSS_HOST}-install_name_tool" CACHE FILEPATH "" FORCE)
+if(NOT EXISTS "${CMAKE_INSTALL_NAME_TOOL}")
+  message(FATAL_ERROR "Missing selected osxcross install_name_tool: ${CMAKE_INSTALL_NAME_TOOL}")
+endif()
+set(LONEJSON_MACOS_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum macOS deployment target")
+set(CMAKE_OSX_DEPLOYMENT_TARGET "${LONEJSON_MACOS_DEPLOYMENT_TARGET}" CACHE STRING "" FORCE)
 
 set(_lonejson_darwin_linker_flag "--ld-path=${CMAKE_LINKER}")
 string(CONCAT _lonejson_legacy_darwin_linker_regex "(^| )-fuse-ld=[^ ]+")
@@ -93,7 +76,7 @@ if(NOT _lonejson_osxcross_sdks)
     "failed to locate a usable osxcross macOS SDK under "
     "${LONEJSON_OSXCROSS_ROOT}/SDK")
 endif()
-list(SORT _lonejson_osxcross_sdks)
+list(SORT _lonejson_osxcross_sdks COMPARE NATURAL)
 list(REVERSE _lonejson_osxcross_sdks)
 list(GET _lonejson_osxcross_sdks 0 LONEJSON_OSXCROSS_SDK)
 if(NOT EXISTS "${LONEJSON_OSXCROSS_SDK}/usr/include")

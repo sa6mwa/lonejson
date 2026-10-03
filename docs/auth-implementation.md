@@ -962,7 +962,7 @@ The implementation is covered by:
 - M2M/signup e2e in `scripts/test_m2m_e2e.sh`.
 
 Current e2e coverage is targeted rather than exhaustive for every JOSE policy
-branch. `make test-oidc-e2e` uses the local compose OIDC/OAuth2 provider,
+branch. `make test-oidc-e2e` uses the local Podman Kube OIDC/OAuth2 provider,
 `curl` as the non-lonejson client, and a lonejson-backed fixture server to
 exercise discovery, JWKS refresh, bearer validation, authorization-code token
 exchange, refresh-token exchange, token-flow refresh, token introspection,

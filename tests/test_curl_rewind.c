@@ -149,7 +149,15 @@ static void run_case(const char *method, int redirect, int kind) {
   lonejson_source_init(&source.text);
   lonejson_json_value_init(NULL, &reader.text);
   if (kind == 1) {
-    file = tmpfile();
+    {
+      char path[] = LONEJSON_SOURCE_DIR "/build/test-tmp/curl-upload-XXXXXX";
+      int descriptor = mkstemp(path);
+      CHECK(descriptor >= 0);
+      CHECK(unlink(path) == 0);
+      file = fdopen(descriptor, "w+");
+      if (file == NULL)
+        close(descriptor);
+    }
     CHECK(file != NULL);
     CHECK(fwrite("abc", 1u, 3u, file) == 3u);
     CHECK(fflush(file) == 0);

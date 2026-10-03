@@ -2,9 +2,9 @@ include("${LONEJSON_ROOT}/cmake/lonejson_dist_dir.cmake")
 lonejson_prepare_dist_dir()
 set(dist_dir "${LONEJSON_DIST_DIR}")
 set(source_root_name "lonejson-${LONEJSON_VERSION}")
-set(archive_base "${dist_dir}/${source_root_name}.tar")
-set(archive_path "${archive_base}.gz")
-set(stage_root "${dist_dir}/.source-pack")
+set(archive_path "${dist_dir}/${source_root_name}.tar.gz")
+set(stage_root "${LONEJSON_ROOT}/build/packaging/source")
+set(archive_base "${stage_root}/${source_root_name}.tar")
 set(stage_dir "${stage_root}/${source_root_name}")
 
 find_program(LONEJSON_GZIP_BIN NAMES gzip)
@@ -12,8 +12,10 @@ if(NOT LONEJSON_GZIP_BIN)
   message(FATAL_ERROR "failed to find gzip for source archive creation")
 endif()
 
+include("${LONEJSON_ROOT}/cmake/lonejson_build_workspace.cmake")
+lonejson_require_build_workspace("${stage_root}")
+
 file(REMOVE_RECURSE "${stage_root}")
-file(REMOVE "${archive_base}" "${archive_path}")
 file(MAKE_DIRECTORY "${stage_root}")
 
 execute_process(
@@ -37,11 +39,12 @@ if(NOT archive_result EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND "${LONEJSON_GZIP_BIN}" -9 -f "${archive_base}"
+  COMMAND "${LONEJSON_GZIP_BIN}" -n -9 -f "${archive_base}"
   RESULT_VARIABLE gzip_result
 )
 if(NOT gzip_result EQUAL 0)
   file(REMOVE_RECURSE "${stage_root}")
   message(FATAL_ERROR "failed to gzip source archive")
 endif()
+lonejson_publish_artifact("${archive_base}.gz" "${archive_path}")
 file(REMOVE_RECURSE "${stage_root}")

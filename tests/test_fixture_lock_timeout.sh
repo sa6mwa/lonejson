@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Fixture generation is checkout-local generated state. A stale lock must not
 # make configure or test commands wait forever.
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_fixture_lock_timeout.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 output_dir="$tmp_dir/fixtures"

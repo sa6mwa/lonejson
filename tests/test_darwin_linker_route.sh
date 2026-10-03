@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: Darwin osxcross builds must prove the compiler driver routes links
 # through the target linker, not the host linker. The route uses PATH plus
 # Clang's absolute-linker option; the exact spelling must follow current Clang
 # diagnostics so release consumers remain warning-clean under -Werror.
 
 repo_root=$1
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d "$workspace_root/build/test_darwin_linker_route.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 require_text() {
@@ -54,15 +57,13 @@ reject_text cmake/package_darwin_smoke_bundle.cmake '-Wno-fuse-ld-path'
 reject_text scripts/smoke_darwin_release.sh '-Wno-fuse-ld-path'
 reject_text scripts/verify_release_archives.sh '-Wno-fuse-ld-path'
 
-osxcross_root=${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}
-target_host=${LONEJSON_OSXCROSS_HOST:-arm64-apple-darwin25}
-cc="$osxcross_root/bin/$target_host-clang"
-ld="$osxcross_root/bin/$target_host-ld"
-
-if [[ ! -x "$cc" || ! -x "$ld" ]]; then
-  printf 'skipping osxcross link-route smoke; missing %s or %s\n' "$cc" "$ld"
+description=$("$repo_root/scripts/cpkt-toolchains.sh" discover arm64-apple-darwin)
+if [[ "$description" != *$'status=ready'* ]]; then
+  printf 'SKIP osxcross link-route smoke: no complete Darwin toolchain\n'
   exit 0
 fi
+cc=$(printf '%s\n' "$description" | sed -n 's/^cc=//p')
+ld=$(printf '%s\n' "$description" | sed -n 's/^ld=//p')
 
 cat >"$tmp_dir/main.c" <<'EOF'
 int main(void) {
@@ -84,3 +85,10 @@ if ! grep -F -- "$ld" "$route_log" >/dev/null; then
   cat "$route_log" >&2
   exit 1
 fi
+
+# Prove the selected route can produce a real target binary warning-clean.
+env PATH="$tool_bin:$PATH" "$cc" -Wall -Wextra -Werror -Wl,-fatal_warnings \
+  "-mmacosx-version-min=${LONEJSON_MACOS_DEPLOYMENT_TARGET:-15.0}" \
+  "--ld-path=$ld" "$tmp_dir/main.c" -o "$tmp_dir/a.out"
+otool=$(printf '%s\n' "$description" | sed -n 's/^otool=//p')
+"$otool" -hv "$tmp_dir/a.out" | grep -E 'ARM64|arm64' >/dev/null

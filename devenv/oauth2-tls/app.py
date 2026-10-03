@@ -1,3 +1,5 @@
+import signal
+import sys
 import http.client
 import ssl
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -28,7 +30,7 @@ class Proxy(BaseHTTPRequestHandler):
         if body is not None:
             headers["Content-Length"] = str(len(body))
 
-        conn = http.client.HTTPConnection("oauth2", 8080, timeout=10)
+        conn = http.client.HTTPConnection("127.0.0.1", 8080, timeout=10)
         conn.request(self.command, path, body=body, headers=headers)
         response = conn.getresponse()
         payload = response.read()
@@ -50,6 +52,7 @@ class Proxy(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain("/certs/server.crt", "/certs/server.key")
     server = HTTPServer(("0.0.0.0", 9443), Proxy)

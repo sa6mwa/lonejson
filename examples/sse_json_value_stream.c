@@ -173,9 +173,8 @@ int main(void) {
     return 1;
   }
 
-  status = lj_sse_push_json_value(lj, sse, &value, sse_bytes,
-                                  strlen(sse_bytes), &options,
-                                  on_sse_json_value, &log, &error);
+  status = lj_sse_push_json_value(lj, sse, &value, sse_bytes, strlen(sse_bytes),
+                                  &options, on_sse_json_value, &log, &error);
   if (status == LJ_STATUS_OK) {
     status = lj_sse_finish_json_value(lj, sse, &value, &options,
                                       on_sse_json_value, &log, &error);

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Every default native configuration and every Linux target toolchain must use
 # one pinned Bootlin collection. The toolchain module independently rejects a
 # compiler whose reported triple differs from the target contract.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_compiler_selection.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 cmake_cmd=$(command -v "${CMAKE_COMMAND:-cmake}")

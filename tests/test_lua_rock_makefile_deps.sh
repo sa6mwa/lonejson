@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: Lua rock installation is part of the build lifecycle and must
 # rebuild only when its source/dependency inputs change.
 
 repo_root=$1
 luarocks_exec=${2:-luarocks}
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_lua_rock_makefile_deps.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 lua_rock_tree="$tmp_dir/luarocks"
@@ -70,3 +73,11 @@ if ! printf '%s\n' "$impl_header_dry_run" |
   printf 'lua-rock stamp did not rebuild when src/impl headers changed\n' >&2
   exit 1
 fi
+
+# The environment surface must not override the host loader's runtime.
+env_commands=$(make_lua_rock -n lua-env)
+if printf '%s\n' "$env_commands" | grep -E 'export (LD_LIBRARY_PATH|DYLD_LIBRARY_PATH)=' >/dev/null; then
+  printf 'lua-env must not export loader overrides\n' >&2; exit 1
+fi
+printf '%s\n' "$env_commands" | grep -F 'export LONEJSON_LIBDIR=' >/dev/null
+printf '%s\n' "$dry_run" | grep -F 'export TMPDIR=' >/dev/null

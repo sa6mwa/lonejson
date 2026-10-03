@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # CMake, Make, and direct scripts must resolve the same Lua 5.5 executable,
 # including hosts that expose it only as lua5.5.
 
 repo_root=$1
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d "$workspace_root/build/test_lua55_resolution.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 fake_bin="$tmp_dir/bin"

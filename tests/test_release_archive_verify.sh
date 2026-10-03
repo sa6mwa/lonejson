@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+workspace_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+mkdir -p "$workspace_root/build"
+
 # Rationale: binary SDK archives must be verified through extracted downstream
 # CMake/pkg-config consumers so metadata drift is caught before upload.
 
@@ -26,7 +29,7 @@ require_command "$CPKT_TOOLCHAIN_READELF"
 require_command sha256sum
 require_command tar
 
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d "$workspace_root/build/test_release_archive_verify.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 dist_dir="$tmp_dir/dist"
@@ -166,9 +169,16 @@ void lonejson_m2m_signup_complete_init(void);
 void lonejson_m2m_signup_complete_cleanup(void);
 void lonejson_m2m_signup_complete(void);
 
-lonejson_status lonejson_auth_provider_init_openssl(
+static __inline__ lonejson_status lonejson_auth_provider_init_openssl(
     lonejson_auth_provider *provider, const void *config,
-    lonejson_error *error);
+    lonejson_error *error) {
+  (void)config;
+  lonejson_error_init(error);
+  if (provider != 0) {
+    provider->user_data = 0;
+  }
+  return LONEJSON_STATUS_OK;
+}
 
 #endif
 EOF
@@ -449,17 +459,21 @@ void lonejson_m2m_signup_complete_cleanup(void) {
 void lonejson_m2m_signup_complete(void) {
 }
 
-lonejson_status lonejson_auth_provider_init_openssl(
-    lonejson_auth_provider *provider, const void *config,
-    lonejson_error *error) {
-  (void)config;
-  lonejson_error_init(error);
-  if (provider != 0) {
-    provider->user_data = 0;
-  }
-  return LONEJSON_STATUS_OK;
-}
+
 EOF
+
+# This metadata fixture implements the same export boundary as the real SDK.
+# Supplement its exercised API stubs with inert definitions for the other
+# approved symbols, then verify every extracted archive against the real list.
+python3 - "$repo_root/cmake/lonejson.exports" "$tmp_dir/lonejson_stub.c" <<'PY_STUB'
+import re, sys
+from pathlib import Path
+source = Path(sys.argv[2])
+text = source.read_text()
+defined = set(re.findall(r'\b(lonejson_\w+)\s*\([^;{}]*\)\s*\{', text))
+text += ''.join(f'void {name}(void) {{}}\n' for name in Path(sys.argv[1]).read_text().splitlines() if name not in defined)
+source.write_text(text)
+PY_STUB
 
 "$CC" -shared -fPIC -I"$package_root/include" "$tmp_dir/lonejson_stub.c" \
   -o "$package_root/lib/liblonejson.so"
@@ -569,21 +583,69 @@ cat >"$package_root/share/lonejson/dependencies.json" <<'EOF'
   "target_id": "x86_64-linux-gnu",
   "dependencies": [
     {
-      "name": "c.pkt.systems",
-      "version": "0.10.0",
       "target_id": "x86_64-linux-gnu",
       "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.10.0/c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
       "sha256": "fb64caa3cad66e01669705412cd88cb4267025ca0a083fa936fe25786011391d",
+      "archive_name": "c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
       "bundled": false,
+      "name": "c.pkt.systems",
+      "version": "0.10.0",
+      "source_system": "GitHub release",
+      "license": "MIT",
       "external": false,
       "role": "release-sdk-build-input",
       "provides": [
-        "curl"
+        "curl",
+        "openssl"
       ]
+    },
+    {
+      "target_id": "x86_64-linux-gnu",
+      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.10.0/c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
+      "sha256": "fb64caa3cad66e01669705412cd88cb4267025ca0a083fa936fe25786011391d",
+      "archive_name": "c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
+      "bundled": false,
+      "name": "curl",
+      "version": "8.22.0",
+      "source_system": "c.pkt.systems",
+      "license": "curl",
+      "external": true,
+      "role": "optional-facade-consumer-requirement"
+    },
+    {
+      "target_id": "x86_64-linux-gnu",
+      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.10.0/c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
+      "sha256": "fb64caa3cad66e01669705412cd88cb4267025ca0a083fa936fe25786011391d",
+      "archive_name": "c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
+      "bundled": false,
+      "name": "openssl",
+      "version": "3.6.4",
+      "source_system": "c.pkt.systems",
+      "license": "Apache-2.0",
+      "external": true,
+      "role": "optional-facade-consumer-requirement"
     }
   ]
 }
 EOF
+
+# Validate malformed provenance before spending time on downstream builds.
+for defect in sha256 license bundled external version malformed; do
+  cp "$package_root/share/lonejson/dependencies.json" "$tmp_dir/manifest-$defect.json"
+  case "$defect" in
+    sha256) perl -pi -e 's/fb64caa3/00000000/g' "$tmp_dir/manifest-$defect.json" ;;
+    license) perl -pi -e 's/Apache-2.0/MIT/' "$tmp_dir/manifest-$defect.json" ;;
+    bundled) perl -pi -e 's/"bundled": false/"bundled": true/g' "$tmp_dir/manifest-$defect.json" ;;
+    external) perl -pi -e 's/"external": true/"external": false/g' "$tmp_dir/manifest-$defect.json" ;;
+    version) perl -pi -e 's/"version": "9.9.9"/"version": "9.9.8"/' "$tmp_dir/manifest-$defect.json" ;;
+    malformed) printf '{invalid' >"$tmp_dir/manifest-$defect.json" ;;
+  esac
+  if cmake -DLONEJSON_MANIFEST="$tmp_dir/manifest-$defect.json" \
+      -DLONEJSON_TARGET_ID=x86_64-linux-gnu -DLONEJSON_VERSION=9.9.9 \
+      -P "$repo_root/cmake/verify_dependency_manifest.cmake" >"$tmp_dir/manifest-$defect.log" 2>&1; then
+    echo "invalid dependency provenance accepted: $defect" >&2; exit 1
+  fi
+done
 
 printf 'license\n' >"$package_root/share/doc/liblonejson/LICENSE"
 printf 'readme\n' >"$package_root/share/doc/liblonejson/README.md"
@@ -644,6 +706,27 @@ tar -C "$tmp_dir/package" -czf \
   "$repo_root" \
   "$dist_dir/lonejson-9.9.9-CHECKSUMS" \
   "$tmp_dir/missing-build-root"
+
+# The extracted SDK gate must reject a real shared object with a private
+# dynamic export, even when the checksum and metadata are otherwise correct.
+export_dist="$tmp_dir/export-leak-dist"
+export_package="$tmp_dir/export-leak-package"
+mkdir -p "$export_dist"
+cp -R "$tmp_dir/package" "$export_package"
+export_root="$export_package/liblonejson-9.9.9-x86_64-linux-gnu"
+cp "$tmp_dir/lonejson_stub.c" "$tmp_dir/export-leak.c"
+printf '\nvoid lonejson__export_leak(void) {}\n' >>"$tmp_dir/export-leak.c"
+"$CC" -shared -fPIC -Wall -Wextra -Werror -I"$export_root/include" \
+  "$tmp_dir/export-leak.c" -o "$export_root/lib/liblonejson.so"
+tar -czf "$export_dist/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  -C "$export_package" liblonejson-9.9.9-x86_64-linux-gnu
+(cd "$export_dist" && sha256sum *.tar.gz >lonejson-9.9.9-CHECKSUMS)
+if "$repo_root/scripts/verify_release_archives.sh" "$repo_root" \
+    "$export_dist/lonejson-9.9.9-CHECKSUMS" "$build_root" >"$tmp_dir/export-leak.log" 2>&1; then
+  printf 'extracted SDK private export was accepted\n' >&2; exit 1
+fi
+grep -F 'lonejson__export_leak' "$tmp_dir/export-leak.log" >/dev/null
+grep -F 'unexpected dynamic exports' "$tmp_dir/export-leak.log" >/dev/null
 
 bootlin_path_dist_dir="$tmp_dir/bootlin-path-dist"
 bootlin_path_package_dir="$tmp_dir/bootlin-path-package"
@@ -773,12 +856,26 @@ if "$repo_root/scripts/verify_release_archives.sh" \
 fi
 grep -F 'unexpected third-party pkg-config dependency in core lonejson SDK' "$openssl_metadata_log" >/dev/null
 
+empty_license_dist="$tmp_dir/empty-license-dist"
+empty_license_package="$tmp_dir/empty-license-package"
+mkdir -p "$empty_license_dist"
+cp -R "$tmp_dir/package" "$empty_license_package"
+: >"$empty_license_package/liblonejson-9.9.9-x86_64-linux-gnu/share/doc/liblonejson/LICENSE"
+tar -C "$empty_license_package" -czf "$empty_license_dist/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
+  liblonejson-9.9.9-x86_64-linux-gnu
+(cd "$empty_license_dist" && sha256sum liblonejson-9.9.9-x86_64-linux-gnu.tar.gz >CHECKSUMS)
+if "$repo_root/scripts/verify_release_archives.sh" "$repo_root" \
+    "$empty_license_dist/CHECKSUMS" "$build_root" >"$tmp_dir/empty-license.log" 2>&1; then
+  echo 'empty project license accepted' >&2; exit 1
+fi
+grep -F 'missing project license text' "$tmp_dir/empty-license.log" >/dev/null
+
 openssl_build_input_dist_dir="$tmp_dir/openssl-build-input-dist"
 openssl_build_input_package_dir="$tmp_dir/openssl-build-input-package"
 openssl_build_input_root="$openssl_build_input_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
 mkdir -p "$openssl_build_input_dist_dir"
 cp -R "$tmp_dir/package" "$openssl_build_input_package_dir"
-perl -0pi -e 's/"curl"/"curl",\n        "openssl"/' \
+perl -0pi -e 's/"external": true/"external": false/g' \
   "$openssl_build_input_root/share/lonejson/dependencies.json"
 tar -C "$openssl_build_input_package_dir" -czf \
   "$openssl_build_input_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \
@@ -789,10 +886,10 @@ if "$repo_root/scripts/verify_release_archives.sh" \
   "$repo_root" \
   "$openssl_build_input_dist_dir/lonejson-9.9.9-CHECKSUMS" \
   "$build_root" >"$openssl_build_input_log" 2>&1; then
-  printf 'expected archive verification to fail when core metadata advertises OpenSSL build input\n' >&2
+  printf 'expected archive verification to fail when facade requirements are not external\n' >&2
   exit 1
 fi
-grep -F 'unexpected OpenSSL build input in core lonejson SDK metadata' "$openssl_build_input_log" >/dev/null
+grep -F 'dependency manifest mismatch: curl.external' "$openssl_build_input_log" >/dev/null
 
 broken_dist_dir="$tmp_dir/broken-dist"
 broken_package_dir="$tmp_dir/broken-package"
