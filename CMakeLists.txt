@@ -29,6 +29,13 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonCompiler.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CpktDependencyCache.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonDevelopmentRuntime.cmake")
 project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
+set(LONEJSON_VERSION "${PROJECT_VERSION}")
+if(NOT DEFINED LONEJSON_RELEASE_TARGETS AND DEFINED ENV{LONEJSON_RELEASE_TARGETS})
+  set(LONEJSON_RELEASE_TARGETS "$ENV{LONEJSON_RELEASE_TARGETS}")
+endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/release_artifacts.cmake")
+set(LONEJSON_RELEASE_TARGETS "${LONEJSON_RELEASE_TARGETS}" CACHE STRING
+  "Target IDs required by release artifact inventories.")
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT LONEJSON_BOOTLIN_TOOLCHAIN_ROOT)
   message(FATAL_ERROR "Linux builds require the pinned Bootlin toolchain; host or custom compiler collections are unsupported")
@@ -654,6 +661,9 @@ if(LONEJSON_BUILD_TESTS)
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_rock_makefile_deps.sh"
           "${CMAKE_CURRENT_SOURCE_DIR}"
           "${LONEJSON_LUAROCKS_EXECUTABLE}")
+      set_tests_properties(lonejson_bench_baseline_history_tests
+        lonejson_bench_retry_confirm_tests lonejson_lua_rock_makefile_deps_tests
+        PROPERTIES LABELS "local;host-policy")
     endif()
   endif()
 
@@ -793,6 +803,7 @@ if(LONEJSON_BUILD_TESTS)
       COMMAND lonejson_lua_interop_tests
         "${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
+  get_property(lonejson_runtime_tests DIRECTORY PROPERTY TESTS)
   if(LONEJSON_BASH_EXECUTABLE)
     add_test(NAME lonejson_release_identity_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
@@ -1049,6 +1060,12 @@ if(LONEJSON_BUILD_TESTS)
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ctest_metadata.sh"
         "${CMAKE_CURRENT_BINARY_DIR}")
+    get_property(lonejson_all_tests DIRECTORY PROPERTY TESTS)
+    foreach(test IN LISTS lonejson_all_tests)
+      if(NOT test IN_LIST lonejson_runtime_tests AND NOT test STREQUAL "lonejson_ctest_metadata_tests")
+        set_tests_properties("${test}" PROPERTIES LABELS "local;host-policy")
+      endif()
+    endforeach()
   endif()
 
   add_executable(lonejson_short_names_tests tests/test_short_names.c)
@@ -1567,9 +1584,20 @@ add_custom_target(package-checksums
     -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
     -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
     -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
+    "-DLONEJSON_RELEASE_TARGETS=${LONEJSON_RELEASE_TARGETS}"
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_checksums.cmake
   VERBATIM
 )
+
+add_custom_target(package-binary-checksums
+  COMMAND "${CMAKE_COMMAND}"
+    -DLONEJSON_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -DLONEJSON_DIST_DIR=${LONEJSON_DIST_DIR}
+    -DLONEJSON_VERSION=${LONEJSON_RESOLVED_VERSION}
+    "-DLONEJSON_RELEASE_TARGETS=${LONEJSON_RELEASE_TARGETS}"
+    -DLONEJSON_CHECKSUM_SCOPE=binary
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_checksums.cmake
+  VERBATIM)
 
 add_custom_target(package-clean-dist
   COMMAND "${CMAKE_COMMAND}"

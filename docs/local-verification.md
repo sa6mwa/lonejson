@@ -233,3 +233,19 @@ cleanup. The default `dist/` must be a real directory; a symlink is rejected.
 Explicit custom artifact destinations retain their ownership-marker policy.
 Completed artifacts are copied to their final destinations, including those
 on another filesystem; packaging intermediates remain under `build/`.
+
+## Artifact inventories and selected test scopes
+
+Binary preparation preserves existing `dist/` files and writes its explicit
+required inventory to `build/packaging/checksums/lonejson-<version>-binary-CHECKSUMS`.
+`make package-verify-binary` verifies those bytes, including extracted consumers,
+without claiming source-archive or full upload proof. `make package-checksums`
+requires all selected SDKs, Lua products, the standalone header, and the source
+archive before replacing the complete upload manifest in `dist/`.
+Verification rejects missing entries, unexpected entries, and changed bytes.
+Final full verification also rejects unlisted release-looking files.
+
+CTest labels host policy fixtures `host-policy`; matrix and hardening selections
+exclude that label while retaining target runtime, exports, strict headers,
+linking, versions, and metadata checks. Native Lua workflow fixtures require the
+prepared target runtime and fail if it is missing. They are not counted as skips.

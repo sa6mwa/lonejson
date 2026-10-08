@@ -26,7 +26,7 @@ if [[ ! -f "$checksums" ]]; then
   exit 1
 fi
 
-dist_dir="$(CDPATH= cd -- "$(dirname -- "$checksums")" && pwd)"
+dist_dir="$(CDPATH= cd -- "${4:-$(dirname -- "$checksums")}" && pwd)"
 if [[ -d "$build_root" ]]; then
   build_root="$(CDPATH= cd -- "$build_root" && pwd)"
 fi

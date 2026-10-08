@@ -28,6 +28,17 @@ write_checksums "$dist_dir" "$dist_dir/lonejson-1.2.3-CHECKSUMS" \
   "$(basename "$good_header")"
 "$repo_root/scripts/verify_release_artifacts.sh" \
   "$repo_root" "$dist_dir/lonejson-1.2.3-CHECKSUMS" >/dev/null
+mkdir "$tmp_dir/manifests"
+cp "$dist_dir/lonejson-1.2.3-CHECKSUMS" "$tmp_dir/manifests/binary-CHECKSUMS"
+printf retained >"$dist_dir/unrelated.tar.gz"
+"$repo_root/scripts/verify_release_artifacts.sh" "$repo_root" \
+  "$tmp_dir/manifests/binary-CHECKSUMS" "$dist_dir" binary >/dev/null
+[[ $(cat "$dist_dir/unrelated.tar.gz") == retained ]]
+if "$repo_root/scripts/verify_release_artifacts.sh" "$repo_root" \
+    "$tmp_dir/manifests/binary-CHECKSUMS" "$dist_dir" full >"$tmp_dir/unlisted" 2>&1; then
+  printf 'full artifact verification accepted an unlisted release payload\n' >&2; exit 1
+fi
+grep -F 'not checksum-listed' "$tmp_dir/unlisted" >/dev/null
 
 dist_dir="$tmp_dir/source-dist/dist"
 source_root="$tmp_dir/source-dist/lonejson-1.2.3/cmake"

@@ -13,7 +13,8 @@ optional Darwin artifacts, and source/SDK/Lua package names.
 | Python serves small test fixtures; Bash/CMake perform assertions, service rendering, and acquisition decisions. | HTTP rewind negative cases, cache origin request counts, JSON assertions, and Podman rendering/port/path tests. | Implemented |
 | One operation owns each mutable checkout workspace. Checkout-local locks and unsupported concurrent in-place tests are removed; shared verified archive acquisition retains its own locks. | Workspace/cleanup boundary tests and generated-header/version checks. | Implemented |
 
-Remaining work in this iteration: consolidate repeated host policy checks and
-binary preparation, verify source input closure and installed artifacts, then
-perform a final simplicity review. Final tagged release and publication are
+Binary preparation and host policy selection have converged: the six Linux
+runtime lanes and seven extracted SDKs, including Darwin link/metadata proof,
+passed with the required inventory. Remaining work is the final command and
+CTest ownership sweep, followed by clean source reconstruction. Final tagged release and publication are
 separate commitment actions.

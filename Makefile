@@ -24,6 +24,9 @@ RELEASE_BUILD_PRESETS := \
 	armhf-linux-gnu-release \
 	armhf-linux-musl-release \
 	$(shell if ./scripts/osxcross_available.sh >/dev/null 2>&1; then printf '%s' arm64-apple-darwin-release; fi)
+empty :=
+space := $(empty) $(empty)
+export LONEJSON_RELEASE_TARGETS := $(subst $(space),;,$(patsubst %-release,%,$(strip $(RELEASE_BUILD_PRESETS))))
 CROSS_RELEASE_PRESETS := \
 	aarch64-linux-gnu-release \
 	aarch64-linux-musl-release \
@@ -121,11 +124,9 @@ LUA_ROCK_LIBLONEJSON_SOURCES := \
 	src/lonejson_internal.h \
 	$(wildcard src/impl/*.h)
 
-SANITIZER_CTEST_EXCLUDE := lonejson_(bench_baseline_history_tests|bench_retry_confirm_tests|lua_legacy_uservalue_tests|lua_schema_cache_tests|lua_encode_stats_tests|lua_external_liblonejson_tests|lua_target_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|run_release_matrix_darwin_target_tests)
-HOST_POLICY_CTEST_EXCLUDE := lonejson_(discover_target_tools_tests|compiler_selection_tests|darwin_macho_metadata_tests|darwin_linker_route_tests|c_pkt_systems_fetch_retry_tests|cmake_threads_optional_tests|cmake_c_pkt_systems_root_tests|test_all_hardening_tests|bootlin_tsan_support_tests|cross_sanitizer_matrix_tests|cmake_fuzz_sanitizer_conflict_tests|cmake_fuzz_auth_optional_tests|release_werror_tests|source_release_tarball_tests|lua_legacy_uservalue_tests|lua_schema_cache_tests|lua_encode_stats_tests|lua_external_liblonejson_tests|lua_src_rock_privacy_tests|lua_public_boundary_tests|lua_surface_coverage_tests|lua_source_stage_manifest_tests|release_artifact_verify_tests|release_archive_verify_tests|lua_native_test_target_filter_tests|run_release_matrix_darwin_target_tests|release_checksum_manifest_tests|release_version_configuration_tests|ctest_metadata_tests|short_names_tests|short_names_disabled_tests|single_header_strict_warning_tests|single_header_strict_warning_build_tests|single_header_strict_toolchain_build_tests|single_header_config_default|single_header_config_omit_protocol|single_header_config_lj_implementation|single_header_config_lj_config_aliases|single_header_config_short_names_disabled|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|bench_gate_tests)
+SANITIZER_CTEST_EXCLUDE := ^lonejson_lua_(target|interop|target_runner_argument|benchmark_configuration)_tests$$
 SLICE_BUILD_TARGETS := lonejson_tests lonejson_map_cache_no_tls_tests lonejson_short_names_tests lonejson_short_names_disabled_tests lonejson_static_link_tests lonejson_shared_link_tests
 SLICE_CTEST_INCLUDE := ^lonejson_(tests|map_cache_no_tls_tests|short_names_tests|short_names_disabled_tests|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|library_exports_tests)$$
-SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUDE)
 
 .PHONY: \
 	help \
@@ -146,6 +147,7 @@ SANITIZER_CTEST_EXCLUDE := $(SANITIZER_CTEST_EXCLUDE)|$(HOST_POLICY_CTEST_EXCLUD
 	release-source-smoke \
 	release-darwin-smoke-bundle \
 	package-verify \
+	package-verify-binary \
 	verify-release-archives \
 	verify-release-privacy \
 	lifecycle-version-contract \
@@ -243,6 +245,7 @@ help:
 		'make package-single-header  Build the version-stamped standalone-header artifact in dist/.' \
 		'make release-lua-artifacts  Build the standalone Lua source package, release rockspec, and source rock in dist/.' \
 		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
+		'make package-verify-binary  Verify the explicit binary preparation inventory under build/, preserving other dist artifacts.' \
 		'make verify-release-archives Alias for make package-verify.' \
 		'make verify-release-privacy Alias for make package-verify.' \
 		'make lifecycle-version-contract Verify clean committed checkout and exact lightweight release tag without changing state.' \
@@ -419,6 +422,9 @@ prerelease-artifacts: release-matrix
 package-verify:
 	./scripts/package-verify.sh "$(RELEASE_CHECKSUMS)"
 
+package-verify-binary:
+	./scripts/package-verify.sh --binary
+
 verify-release-archives: package-verify
 
 verify-release-privacy: package-verify
@@ -539,7 +545,7 @@ test-host-curl: deps-host
 	ctest --no-tests=error --preset host-curl
 
 cross-test: deps-cross
-	./scripts/cross_test.sh "$(HOST_POLICY_CTEST_EXCLUDE)" $(CROSS_RELEASE_PRESETS)
+	./scripts/cross_test.sh "host-policy" $(CROSS_RELEASE_PRESETS)
 
 test-cross: cross-test
 
@@ -640,7 +646,7 @@ lua-bench-gate:
 asan:
 	cmake --preset $(ASAN_PRESET)
 	cmake --build --preset $(ASAN_PRESET)
-	ctest --no-tests=error --preset $(ASAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
+	ctest --no-tests=error --preset $(ASAN_PRESET) -LE host-policy -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 tsan:
 	@support="$(LONEJSON_HAVE_TSAN)"; \
@@ -653,7 +659,7 @@ tsan:
 	fi; \
 	cmake --preset $(TSAN_PRESET); \
 	cmake --build --preset $(TSAN_PRESET); \
-	ctest --no-tests=error --preset $(TSAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
+	ctest --no-tests=error --preset $(TSAN_PRESET) -LE host-policy -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 valgrind: deps-host
 	@command -v valgrind >/dev/null 2>&1 || { printf '%s\n' 'Valgrind is required for the native memory-check gate' >&2; exit 1; }

@@ -6,6 +6,8 @@ mkdir -p "$workspace_root/build"
 
 repo_root=${1:?usage: verify_release_artifacts.sh REPO_ROOT [CHECKSUMS]}
 checksums=${2:-}
+scope=${4:-full}
+case "$scope" in full|binary) ;; *) printf 'unknown artifact scope: %s\n' "$scope" >&2; exit 2 ;; esac
 
 repo_root="$(CDPATH= cd -- "$repo_root" && pwd)"
 if [[ -z "$checksums" ]]; then
@@ -17,8 +19,9 @@ if [[ ! -f "$checksums" ]]; then
   exit 1
 fi
 
-dist_dir="$(CDPATH= cd -- "$(dirname -- "$checksums")" && pwd)"
-checksums_name="$(basename -- "$checksums")"
+dist_dir="$(CDPATH= cd -- "${3:-$(dirname -- "$checksums")}" && pwd)"
+checksums="$(CDPATH= cd -- "$(dirname -- "$checksums")" && pwd -P)/$(basename -- "$checksums")"
+checksums_name=${checksums##*/}
 tmp_dir="$(mktemp -d "$workspace_root/build/verify_release_artifacts.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -45,7 +48,7 @@ require_command grep
 require_command strings
 require_command file
 
-(cd "$dist_dir" && sha256sum -c "$checksums_name" >/dev/null)
+(cd "$dist_dir" && sha256sum -c "$checksums" >/dev/null)
 
 declare -a artifacts=()
 while read -r _hash artifact; do
@@ -68,6 +71,7 @@ if [[ ${#artifacts[@]} -eq 0 ]]; then
   exit 1
 fi
 
+if [[ "$scope" == full ]]; then
 while IFS= read -r dist_file; do
   file_name="$(basename -- "$dist_file")"
   listed=0
@@ -86,6 +90,7 @@ done < <(find "$dist_dir" -maxdepth 1 -type f \
   \( -name '*.tar.gz' -o -name '*.tgz' -o -name '*.zip' -o -name '*.rock' \
      -o -name '*.src.rock' -o -name '*.rockspec' -o -name '*.h.gz' \) |
   sort)
+fi
 
 scan_text_for_local_paths() {
   local artifact=$1

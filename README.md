@@ -1323,6 +1323,12 @@ That command produces:
   rock, `lonejson-<version>-1.src.rock`
 - a SHA-256 manifest, `dist/lonejson-<version>-CHECKSUMS`
 
+Binary preparation keeps unrelated `dist/` artifacts and records its selected
+inventory under `build/packaging/checksums/`. Use `make package-verify-binary` for
+that scope. The full upload checksum manifest requires every selected SDK, Lua
+product, header, and source archive; full verification also rejects unlisted
+release artifacts. See [Local Verification](docs/local-verification.md).
+
 The compressed header artifact is the standalone embedded form for
 single-header integration. Its version macros are regenerated to match the
 resolved release version, from `VERSION` when present in a source package,
@@ -1468,3 +1474,4 @@ baselines deliberately with the documented freeze targets.
 ## License
 
 See [LICENSE](LICENSE).
+

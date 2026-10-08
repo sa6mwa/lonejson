@@ -83,15 +83,15 @@ fi
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OPENSSL=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_JWT=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OIDC=ON' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'run_target x86_64-linux-gnu-release x86_64-linux-gnu package-archive-x86_64-linux-gnu full' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'cross_ctest_exclude=' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'ctest --no-tests=error --preset "$preset" --output-on-failure -E "$ctest_exclude"' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'run_target x86_64-linux-gnu-release x86_64-linux-gnu package-archive-x86_64-linux-gnu' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'ctest --no-tests=error' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'ctest --no-tests=error --preset "$preset" --output-on-failure -LE host-policy' >/dev/null
 for non_host_target in \
-    'run_target x86_64-linux-musl-release x86_64-linux-musl package-archive-x86_64-linux-musl full "$cross_ctest_exclude"' \
-    'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu full "$cross_ctest_exclude"' \
-    'run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl full "$cross_ctest_exclude"' \
-    'run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu full "$cross_ctest_exclude"' \
-    'run_target armhf-linux-musl-release armhf-linux-musl package-archive-armhf-linux-musl full "$cross_ctest_exclude"'; do
+    'run_target x86_64-linux-musl-release x86_64-linux-musl package-archive-x86_64-linux-musl' \
+    'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu' \
+    'run_target aarch64-linux-musl-release aarch64-linux-musl package-archive-aarch64-linux-musl' \
+    'run_target armhf-linux-gnu-release armhf-linux-gnu package-archive-armhf-linux-gnu' \
+    'run_target armhf-linux-musl-release armhf-linux-musl package-archive-armhf-linux-musl'; do
   printf '%s\n' "$matrix_script" | grep -F -- "$non_host_target" >/dev/null
 done
 for target_id in \
@@ -179,3 +179,48 @@ preflight_output="$(PATH="$fake_bin:/usr/bin:/bin" \
   LONEJSON_RELEASE_MATRIX_PREFLIGHT_ONLY=1 \
   "$matrix_script_path")"
 printf '%s\n' "$preflight_output" | grep -Fx 'Release matrix preflight completed successfully.' >/dev/null
+
+# Execute the warm matrix with recording tools. It must retain existing outputs,
+# run each target suite once, and verify the binary inventory without cleaning.
+fixture="$tmp_dir/matrix-repo"
+mkdir -p "$fixture/scripts" "$fixture/dist" "$tmp_dir/recording-bin"
+cp "$matrix_script_path" "$fixture/scripts/run_release_matrix.sh"
+for script in deps cpkt-toolchains; do
+  cat >"$fixture/scripts/$script.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s %s\n' "${0##*/}" "$*" >>"$TEST_MATRIX_EVENTS"
+SH
+  chmod +x "$fixture/scripts/$script.sh"
+done
+printf '#!/bin/bash\nexit 1\n' >"$fixture/scripts/osxcross_available.sh"
+chmod +x "$fixture/scripts/osxcross_available.sh"
+for tool in cmake ctest make ninja luarocks qemu-x86_64 qemu-aarch64 qemu-arm; do
+  cat >"$tmp_dir/recording-bin/$tool" <<'SH'
+#!/usr/bin/env bash
+printf '%s %s\n' "${0##*/}" "$*" >>"$TEST_MATRIX_EVENTS"
+if [[ "${0##*/}" == ctest && "$*" == *"${TEST_MATRIX_FAIL:-never-fail}"* ]]; then exit 41; fi
+SH
+  chmod +x "$tmp_dir/recording-bin/$tool"
+done
+for target in x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl; do
+  mkdir -p "$fixture/.cache/c.pkt.systems/$target/root/lib/cmake/CURL"
+  touch "$fixture/.cache/c.pkt.systems/$target/root/lib/cmake/CURL/CURLConfig.cmake"
+done
+export TEST_MATRIX_EVENTS="$tmp_dir/matrix-events"
+printf retained >"$fixture/dist/retained.tar.gz"
+PATH="$tmp_dir/recording-bin:$PATH" "$fixture/scripts/run_release_matrix.sh" >"$tmp_dir/matrix-output"
+[[ $(cat "$fixture/dist/retained.tar.gz") == retained ]]
+[[ $(grep -c '^ctest ' "$TEST_MATRIX_EVENTS") == 6 ]]
+[[ $(grep -c 'ctest .* -LE host-policy$' "$TEST_MATRIX_EVENTS") == 6 ]]
+[[ $(grep -c '^cmake --build --preset package-archive-' "$TEST_MATRIX_EVENTS") == 6 ]]
+! grep -E 'clean|package-source|^cmake --build --preset package-checksums$|^make package-verify$' "$TEST_MATRIX_EVENTS"
+grep -Fx 'cmake --build --preset host --target package-binary-checksums' "$TEST_MATRIX_EVENTS"
+grep -Fx 'make package-verify-binary' "$TEST_MATRIX_EVENTS"
+: >"$TEST_MATRIX_EVENTS"
+if PATH="$tmp_dir/recording-bin:$PATH" TEST_MATRIX_FAIL=aarch64-linux-gnu-release \
+    "$fixture/scripts/run_release_matrix.sh" >"$tmp_dir/matrix-failed" 2>&1; then
+  printf 'binary matrix continued after a required target test failed\n' >&2; exit 1
+fi
+[[ $(grep -c '^ctest ' "$TEST_MATRIX_EVENTS") == 3 ]]
+! grep -E '^make |package-binary-checksums|package-archive-aarch64-linux-gnu|armhf-linux-gnu-release' "$TEST_MATRIX_EVENTS"
+[[ $(cat "$fixture/dist/retained.tar.gz") == retained ]]

@@ -29,3 +29,32 @@ foreach(index RANGE ${last})
     message(FATAL_ERROR "${name}: positive TIMEOUT and nonempty LABELS required")
   endif()
 endforeach()
+if(EXPECT_RUNTIME_TESTS)
+  execute_process(COMMAND "${ctest}" --test-dir "${BUILD_DIR}"
+    --show-only=json-v1 -LE host-policy
+    OUTPUT_VARIABLE runtime COMMAND_ERROR_IS_FATAL ANY)
+  string(JSON runtime_count LENGTH "${runtime}" tests)
+  if(runtime_count EQUAL 0)
+    message(FATAL_ERROR "runtime test selection is empty")
+  endif()
+  math(EXPR runtime_last "${runtime_count} - 1")
+  set(runtime_names "")
+  foreach(index RANGE ${runtime_last})
+    string(JSON name GET "${runtime}" tests ${index} name)
+    list(APPEND runtime_names "${name}")
+  endforeach()
+  foreach(required IN ITEMS lonejson_tests lonejson_static_link_tests
+      lonejson_shared_link_tests lonejson_single_header_strict_warning_tests
+      lonejson_header_abi_version_tests)
+    if(NOT required IN_LIST runtime_names)
+      message(FATAL_ERROR "required target check excluded from runtime selection: ${required}")
+    endif()
+  endforeach()
+  foreach(host_check IN ITEMS lonejson_release_identity_tests
+      lonejson_release_archive_verify_tests lonejson_release_checksum_manifest_tests
+      lonejson_bench_baseline_history_tests)
+    if(host_check IN_LIST runtime_names)
+      message(FATAL_ERROR "host policy check leaked into target selection: ${host_check}")
+    endif()
+  endforeach()
+endif()
