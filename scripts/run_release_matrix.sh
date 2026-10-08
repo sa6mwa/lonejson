@@ -40,9 +40,9 @@ run_target() {
     cmake --build --preset "$preset"
     if [ "$ctest_mode" = "full" ]; then
         if [ -n "$ctest_exclude" ]; then
-            ctest --preset "$preset" --output-on-failure -E "$ctest_exclude"
+            ctest --no-tests=error --preset "$preset" --output-on-failure -E "$ctest_exclude"
         else
-            ctest --preset "$preset"
+            ctest --no-tests=error --preset "$preset"
         fi
     fi
     cmake --build --preset "$package_preset"

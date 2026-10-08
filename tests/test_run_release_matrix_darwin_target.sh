@@ -85,7 +85,7 @@ printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_JWT=ON' >/de
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OIDC=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'run_target x86_64-linux-gnu-release x86_64-linux-gnu package-archive-x86_64-linux-gnu full' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'cross_ctest_exclude=' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'ctest --preset "$preset" --output-on-failure -E "$ctest_exclude"' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- 'ctest --no-tests=error --preset "$preset" --output-on-failure -E "$ctest_exclude"' >/dev/null
 for non_host_target in \
     'run_target x86_64-linux-musl-release x86_64-linux-musl package-archive-x86_64-linux-musl full "$cross_ctest_exclude"' \
     'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu full "$cross_ctest_exclude"' \

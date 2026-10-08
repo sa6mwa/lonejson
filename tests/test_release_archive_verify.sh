@@ -465,15 +465,10 @@ EOF
 # This metadata fixture implements the same export boundary as the real SDK.
 # Supplement its exercised API stubs with inert definitions for the other
 # approved symbols, then verify every extracted archive against the real list.
-python3 - "$repo_root/cmake/lonejson.exports" "$tmp_dir/lonejson_stub.c" <<'PY_STUB'
-import re, sys
-from pathlib import Path
-source = Path(sys.argv[2])
-text = source.read_text()
-defined = set(re.findall(r'\b(lonejson_\w+)\s*\([^;{}]*\)\s*\{', text))
-text += ''.join(f'void {name}(void) {{}}\n' for name in Path(sys.argv[1]).read_text().splitlines() if name not in defined)
-source.write_text(text)
-PY_STUB
+awk 'NR == FNR { source = source " " $0; next }
+  source !~ ($0 "[[:space:]]*\\([^;{}]*\\)[[:space:]]*\\{") { print "void " $0 "(void) {}" }' \
+  "$tmp_dir/lonejson_stub.c" "$repo_root/cmake/lonejson.exports" >"$tmp_dir/extra-stubs.c"
+cat "$tmp_dir/extra-stubs.c" >>"$tmp_dir/lonejson_stub.c"
 
 "$CC" -shared -fPIC -I"$package_root/include" "$tmp_dir/lonejson_stub.c" \
   -o "$package_root/lib/liblonejson.so"

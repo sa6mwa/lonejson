@@ -16,8 +16,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 if [[ "$(uname -s)" == Linux &&
       ! -x "$runner_build/lonejson_lua_target_runner" ]]; then
-  printf 'skipping Lua benchmark fixture: missing Bootlin target runner\n'
-  exit 77
+  printf 'missing required Bootlin target runner for Lua benchmark fixture\n'
+  exit 1
 fi
 
 run_lua_bench() {

@@ -17,25 +17,14 @@ trap cleanup EXIT
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     printf 'missing required command for M2M e2e: %s\n' "$1" >&2
-    exit 77
+    exit 1
   fi
 }
 
-json_field() {
-  local field=$1
-  python3 -c '
-import json
-import sys
-field = sys.argv[1]
-value = json.load(sys.stdin).get(field)
-if value is None:
-    sys.exit(2)
-print(value)
-' "$field"
-}
+source "$repo_root/tests/json_helpers.sh"
 
 require_command curl
-require_command python3
+require_command cmake
 
 if [[ ! -x "$repo_root/build/host-curl/lonejson_m2m_fixture_server" ]]; then
   printf 'missing build/host-curl/lonejson_m2m_fixture_server; run make test-m2m-e2e\n' >&2
@@ -72,24 +61,12 @@ fi
 
 curl -fsS --max-time 5 -u "$client_id:$client_secret" \
   "http://127.0.0.1:$server_port/protected" \
-  | python3 -c '
-import json
-import sys
-value = json.load(sys.stdin)
-if value.get("ok") is not True or value.get("authorized") is not True:
-    raise SystemExit("Basic credentials were not authorized")
-'
+  | json_assert ok=true authorized=true
 
 curl -fsS --max-time 5 \
   -H "Authorization: Bearer $api_key" \
   "http://127.0.0.1:$server_port/protected" \
-  | python3 -c '
-import json
-import sys
-value = json.load(sys.stdin)
-if value.get("ok") is not True or value.get("authorized") is not True:
-    raise SystemExit("Bearer API key was not authorized")
-'
+  | json_assert ok=true authorized=true
 
 if curl -fsS --max-time 5 -u "$client_id:wrong-secret" \
   "http://127.0.0.1:$server_port/protected" >/dev/null 2>&1; then
@@ -115,15 +92,7 @@ signup_client_id="$(printf '%s' "$signup_json" | json_field client_id)"
 signup_client_secret="$(printf '%s' "$signup_json" | json_field client_secret)"
 signup_api_key="$(printf '%s' "$signup_json" | json_field api_key)"
 
-printf '%s' "$signup_json" | python3 -c '
-import json
-import sys
-value = json.load(sys.stdin)
-if value.get("ok") is not True or value.get("signed_up") is not True:
-    raise SystemExit("signup completion did not succeed")
-if value.get("email") != "user@example.com":
-    raise SystemExit("signup completion did not preserve email")
-'
+printf '%s' "$signup_json" | json_assert ok=true signed_up=true email=user@example.com
 
 if curl -fsS --max-time 5 "${signup_url}&email=user@example.com" >/dev/null 2>&1; then
   printf 'signup endpoint accepted consumed signup seed\n' >&2
@@ -133,23 +102,11 @@ fi
 curl -fsS --max-time 5 \
   -H "Authorization: Bearer $signup_api_key" \
   "http://127.0.0.1:$server_port/protected" \
-  | python3 -c '
-import json
-import sys
-value = json.load(sys.stdin)
-if value.get("ok") is not True or value.get("authorized") is not True:
-    raise SystemExit("signup Bearer API key was not authorized")
-'
+  | json_assert ok=true authorized=true
 
 curl -fsS --max-time 5 -u "$signup_client_id:$signup_client_secret" \
   "http://127.0.0.1:$server_port/protected" \
-  | python3 -c '
-import json
-import sys
-value = json.load(sys.stdin)
-if value.get("ok") is not True or value.get("authorized") is not True:
-    raise SystemExit("signup Basic credentials were not authorized")
-'
+  | json_assert ok=true authorized=true
 
 wait "$server_pid"
 server_pid=

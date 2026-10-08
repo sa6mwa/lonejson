@@ -9,7 +9,7 @@ mkdir -p "$workspace_root/build"
 
 repo_root=$1
 tmp_dir="$(mktemp -d "$workspace_root/build/test_release_checksum_manifest.XXXXXX")"
-# Tag mutation belongs only to make lifecycle-version-contract. This test also
+# Lifecycle checks never mutate tags. This test also
 # runs from source archives nested inside a checkout and must not touch its refs.
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 trap 'printf "checksum manifest check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR

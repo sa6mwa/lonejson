@@ -216,7 +216,7 @@ run_target_sanitizer() {
     run_or_print cmake --build "$build_dir"
     if ! run_or_print env "$env_name=$env_value" \
         UBSAN_OPTIONS=halt_on_error=1:abort_on_error=1 \
-        ctest --test-dir "$build_dir" --output-on-failure --timeout 600 \
+        ctest --no-tests=error --test-dir "$build_dir" --output-on-failure --timeout 600 \
         -E "$host_policy_ctest_exclude"; then
         diagnostic cross-sanitizers "ctest-$target_id-$sanitizer" test "sanitized target tests failed" "fix the reported target sanitizer test failure"
         exit 1

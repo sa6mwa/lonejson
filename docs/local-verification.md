@@ -1,7 +1,8 @@
 # Local Verification
 
 `make prerelease` runs ordinary proof and the binary release matrix incrementally.
-`make release` first verifies the lightweight-tag contract, cleans generated
+`make release` first validates a clean committed owning checkout, exactly one
+lightweight `vX.Y.Z` tag on HEAD, and no candidate override, cleans generated
 state, and runs that proof graph. It then reconstructs the all-component source
 archive and verifies the complete checksum manifest. Source reconstruction stays
 out of the incremental binary matrix. The extracted archive runs host C and Lua
@@ -22,10 +23,10 @@ Lua suite, then checks formatting. It reuses configured builds and does not
 stage examples or run the repository-wide policy fixtures. Run the matching
 lifecycle or packaging fixtures separately when changing those surfaces.
 
-The tag-mutating `make lifecycle-version-contract` checks Make and the version
-resolver on the current checkout, using only a signing-disabled lightweight
-`v99.99.99` fixture. Ordinary CTest separately checks CMake override behavior and
-rejection of annotated/signed tag objects without modifying Git refs.
+`make lifecycle-version-contract` is read-only. It checks final release identity
+before any cleanup or producer runs. CTest uses disposable Git command fixtures
+to test tag identity and failures without changing checkout refs. Candidate
+version overrides remain available to preparation commands.
 
 Temporary test and verifier workspaces live under `build/`, resolved from each
 script's physical repository location. `make format-check` checks all maintained

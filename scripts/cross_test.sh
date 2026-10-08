@@ -14,5 +14,5 @@ fi
 for preset in "$@"; do
   cmake --preset "$preset"
   cmake --build --preset "$preset"
-  ctest --preset "$preset" --output-on-failure -E "$exclude"
+  ctest --no-tests=error --preset "$preset" --output-on-failure -E "$exclude"
 done

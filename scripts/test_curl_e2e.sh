@@ -29,7 +29,6 @@ for directory in "$repo_root" "$repo_root/examples" "$repo_root/examples/bin"; d
 done
 
 # Build the real-curl replay client through the pinned native toolchain.
-python3 -B "$repo_root/tests/test_curl_rewind_fixture.py"
 bundle_root="$("$repo_root/scripts/detect_c_pkt_systems_bundle.sh")"
 cmake --preset host-curl -S "$repo_root" -D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"
 cmake --build "$repo_root/build/host-curl" --target lonejson_curl_rewind_e2e

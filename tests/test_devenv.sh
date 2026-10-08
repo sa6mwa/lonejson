@@ -8,7 +8,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 mkdir -p "$tmp_dir/bin"
 for checkout in first second; do
   mkdir -p "$tmp_dir/$checkout/scripts"
-  cp "$repo_root/scripts/devenv.sh" "$repo_root/scripts/render_devenv.py" "$tmp_dir/$checkout/scripts/"
+  cp "$repo_root/scripts/devenv.sh" "$repo_root/scripts/render_devenv.cmake" "$tmp_dir/$checkout/scripts/"
   cp "$repo_root/devenv.yaml.in" "$tmp_dir/$checkout/"
 done
 export PODMAN_TEST_LOG="$tmp_dir/events"
@@ -127,19 +127,10 @@ done
 # Validate path escaping without third-party YAML dependencies.
 odd="$tmp_dir/checkout with \"quotes\""
 mkdir -p "$odd/scripts"
-cp "$first/scripts/render_devenv.py" "$odd/scripts/"
+cp "$first/scripts/render_devenv.cmake" "$odd/scripts/"
 cp "$repo_root/devenv.yaml.in" "$odd/"
-python3 "$odd/scripts/render_devenv.py" >/dev/null
-python3 - "$odd" <<'PY'
-import json
-from pathlib import Path
-import re
-import sys
-root = Path(sys.argv[1])
-text = (root / "build/devenv/devenv.yaml").read_text()
-paths = re.findall(r'hostPath: \{path: ("(?:[^"\\]|\\.)*")', text)
-assert len(paths) == 5
-assert json.loads(paths[0]) == str(root / "devenv")
-assert all(json.loads(value).startswith(str(root)) for value in paths)
-PY
+cmake -P "$odd/scripts/render_devenv.cmake" >/dev/null
+escaped=${odd//\"/\\\"}
+grep -F "hostPath: {path: \"$escaped/devenv\"" "$odd/build/devenv/devenv.yaml" >/dev/null
+[[ $(grep -c 'hostPath: {path:' "$odd/build/devenv/devenv.yaml") == 5 ]]
 printf '%s\n' 'Podman renderer, isolation, rootless policy, ports, and reset tests passed.'

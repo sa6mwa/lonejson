@@ -29,7 +29,7 @@ require_text 'prerelease: release-pipeline'
 require_text 'prerelease-hardening: prerelease'
 reject_text '+$(TIME_STEP) hardening/bench-check $(MAKE) bench-check'
 require_text 'release-pipeline:'
-require_text '+$(TIME_STEP) prerelease/format $(MAKE) format'
+require_text '+$(TIME_STEP) prerelease/format $(MAKE) format-check'
 require_text '+$(TIME_STEP) prerelease/test $(MAKE) test'
 reject_text 'LONEJSON_TEST_ALL_HOST_CURL'
 require_text '+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix'
@@ -37,7 +37,7 @@ require_text '+$(TIME_STEP) release/source-smoke $(MAKE) package-source-smoke'
 require_text '+$(TIME_STEP) release/package-verify $(MAKE) package-verify'
 require_text 'verify-release-privacy: package-verify'
 require_text 'lifecycle-version-contract:'
-require_text 'bash ./tests/test_release_version_override.sh "$(CURDIR)"'
+require_text 'bash ./scripts/check_release_identity.sh'
 require_text 'release:'
 require_text '+$(TIME_STEP) release/version-contract $(MAKE) lifecycle-version-contract'
 require_text '+$(TIME_STEP) release/clean $(MAKE) clean'
@@ -59,7 +59,7 @@ line_number() {
   grep -nF -- "$text" "$makefile" | head -n 1 | cut -d: -f1
 }
 
-format_line=$(line_number '+$(TIME_STEP) prerelease/format $(MAKE) format')
+format_line=$(line_number '+$(TIME_STEP) prerelease/format $(MAKE) format-check')
 test_line=$(line_number '+$(TIME_STEP) prerelease/test $(MAKE) test')
 matrix_line=$(line_number '+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix')
 source_smoke_line=$(line_number '+$(TIME_STEP) release/source-smoke $(MAKE) package-source-smoke')
@@ -104,7 +104,7 @@ MOCK_TIME
 chmod +x "$workspace/make" "$workspace/time"
 export TEST_RELEASE_GRAPH_LOG="$workspace/graph"
 export TEST_REAL_MAKE="$(command -v make)" TEST_REPO_ROOT="$repo_root" TEST_TIME_STEP="$workspace/time"
-proof=(format test asan tsan valgrind test-e2e fuzz-smoke bench-check release-matrix)
+proof=(format-check test asan tsan valgrind test-e2e fuzz-smoke bench-check release-matrix)
 make -s -C "$repo_root" MAKE="$workspace/make" TIME_STEP="$workspace/time" prerelease
 printf '%s\n' "${proof[@]}" >"$workspace/expected"
 diff -u "$workspace/expected" "$workspace/graph"
@@ -164,7 +164,7 @@ PATH="$workspace/bin:$PATH" make -s -C "$repo_root" MAKE="$workspace/make" final
 cat >"$workspace/expected" <<'EXPECTED'
 format
 cmake --build --preset debug --target lonejson_tests lonejson_map_cache_no_tls_tests lonejson_short_names_tests lonejson_short_names_disabled_tests lonejson_static_link_tests lonejson_shared_link_tests
-ctest --preset debug --output-on-failure -R ^lonejson_(tests|map_cache_no_tls_tests|short_names_tests|short_names_disabled_tests|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|library_exports_tests)$
+ctest --no-tests=error --preset debug --output-on-failure -R ^lonejson_(tests|map_cache_no_tls_tests|short_names_tests|short_names_disabled_tests|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|library_exports_tests)$
 lua-test
 format-check
 EXPECTED

@@ -2,7 +2,7 @@
   "version": 6,
   "cmakeMinimumRequired": {
     "major": 3,
-    "minor": 21,
+    "minor": 25,
     "patch": 0
   },
   "configurePresets": [
@@ -385,6 +385,11 @@
     {
       "name": "debug",
       "configurePreset": "debug",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -392,6 +397,11 @@
     {
       "name": "debug-lua",
       "configurePreset": "debug-lua",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -399,6 +409,11 @@
     {
       "name": "host",
       "configurePreset": "host",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -406,6 +421,11 @@
     {
       "name": "host-curl",
       "configurePreset": "host-curl",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -413,6 +433,11 @@
     {
       "name": "asan",
       "configurePreset": "asan",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -420,6 +445,11 @@
     {
       "name": "tsan",
       "configurePreset": "tsan",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -427,6 +457,11 @@
     {
       "name": "valgrind",
       "configurePreset": "valgrind",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -434,6 +469,11 @@
     {
       "name": "x86_64-linux-gnu-release",
       "configurePreset": "x86_64-linux-gnu-release",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -441,6 +481,11 @@
     {
       "name": "x86_64-linux-musl-release",
       "configurePreset": "x86_64-linux-musl-release",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -448,6 +493,11 @@
     {
       "name": "aarch64-linux-gnu-release",
       "configurePreset": "aarch64-linux-gnu-release",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -455,6 +505,11 @@
     {
       "name": "aarch64-linux-musl-release",
       "configurePreset": "aarch64-linux-musl-release",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -462,6 +517,11 @@
     {
       "name": "armhf-linux-gnu-release",
       "configurePreset": "armhf-linux-gnu-release",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -469,6 +529,11 @@
     {
       "name": "armhf-linux-musl-release",
       "configurePreset": "armhf-linux-musl-release",
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
       "output": {
         "outputOnFailure": true
       }

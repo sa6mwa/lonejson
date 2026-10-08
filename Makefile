@@ -3,6 +3,9 @@
 SHELL := bash
 .DEFAULT_GOAL := help
 MAKEFLAGS += --no-builtin-rules
+LONEJSON_BUILD_JOBS ?= 2
+export CMAKE_BUILD_PARALLEL_LEVEL ?= $(LONEJSON_BUILD_JOBS)
+export CTEST_PARALLEL_LEVEL := 1
 
 DEBUG_PRESET := debug
 HOST_PRESET := host
@@ -13,7 +16,6 @@ FUZZ_PRESET := fuzz
 TIME_STEP := ./scripts/run_timed.sh
 LONEJSON_HAVE_TSAN ?=
 LONEJSON_E2E_SERVICES_READY ?= 0
-LONEJSON_LOCK_TIMEOUT_SECONDS ?= 120
 RELEASE_BUILD_PRESETS := \
 	x86_64-linux-gnu-release \
 	x86_64-linux-musl-release \
@@ -78,7 +80,6 @@ FUZZ_LONG_TIME ?= 300
 LUA_ROCK_TREE := build/luarocks
 LUA_ROCKSPEC := $(LUA_ROCK_TREE)/lonejson-$(RELEASE_VERSION)-1.rockspec
 LUA_ROCK_STAMP := $(LUA_ROCK_TREE)/.installed.stamp
-LUA_ROCK_BUILD_LOCK := $(LUA_ROCK_TREE)/.build.lock
 LUA_ROCK_EXTRA_CFLAGS ?= -std=gnu89 -O3 -DNDEBUG -D_FILE_OFFSET_BITS=64 -fno-semantic-interposition
 LONEJSON_LUA_LIBDIR ?= $(CURDIR)/build/lua-sdk/lib
 LONEJSON_LUA_BENCH_LIBDIR ?= $(CURDIR)/build/$(HOST_PRESET)
@@ -244,7 +245,7 @@ help:
 		'make package-verify         Verify checksum-listed release artifacts for privacy, relocatability, and instrumentation leaks.' \
 		'make verify-release-archives Alias for make package-verify.' \
 		'make verify-release-privacy Alias for make package-verify.' \
-		'make lifecycle-version-contract Verify lightweight-tag release version behavior before release work.' \
+		'make lifecycle-version-contract Verify clean committed checkout and exact lightweight release tag without changing state.' \
 		'make prerelease             Run the deterministic release pipeline without cleaning generated state first.' \
 		'make prerelease-live        Refuse live external-provider release checks unless explicitly enabled.' \
 		'make prerelease-hardening   Alias for prerelease; native hardening and benchmark checks are already included.' \
@@ -332,7 +333,7 @@ help:
 finalize-slice:
 	$(MAKE) format
 	cmake --build --preset $(DEBUG_PRESET) --target $(SLICE_BUILD_TARGETS)
-	ctest --preset $(DEBUG_PRESET) --output-on-failure -R '$(SLICE_CTEST_INCLUDE)'
+	ctest --no-tests=error --preset $(DEBUG_PRESET) --output-on-failure -R '$(SLICE_CTEST_INCLUDE)'
 	$(MAKE) lua-test
 	$(MAKE) format-check
 
@@ -423,7 +424,7 @@ verify-release-archives: package-verify
 verify-release-privacy: package-verify
 
 lifecycle-version-contract:
-	bash ./tests/test_release_version_override.sh "$(CURDIR)"
+	bash ./scripts/check_release_identity.sh
 
 prerelease: release-pipeline
 
@@ -433,7 +434,7 @@ prerelease-live:
 prerelease-hardening: prerelease
 
 release-pipeline:
-	+$(TIME_STEP) prerelease/format $(MAKE) format
+	+$(TIME_STEP) prerelease/format $(MAKE) format-check
 	+$(TIME_STEP) prerelease/test $(MAKE) test
 	+$(TIME_STEP) prerelease/asan $(MAKE) asan
 	+$(TIME_STEP) prerelease/tsan $(MAKE) tsan
@@ -535,7 +536,7 @@ test-host: build-host
 test-host-curl: deps-host
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset host-curl
-	ctest --preset host-curl
+	ctest --no-tests=error --preset host-curl
 
 cross-test: deps-cross
 	./scripts/cross_test.sh "$(HOST_POLICY_CTEST_EXCLUDE)" $(CROSS_RELEASE_PRESETS)
@@ -579,7 +580,7 @@ $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES) $(LUA_ROCK_LIBLONEJSON_SO
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared lonejson_static
 	cmake --install "build/$(DEBUG_PRESET)" --prefix "$(CURDIR)/build/lua-sdk"
 	mkdir -p "$(CURDIR)/build/luarocks-native/tool-tmp"
-	lock_timeout="$(LONEJSON_LOCK_TIMEOUT_SECONDS)"; case "$$lock_timeout" in (*[!0-9]*|0|'') printf '%s\n' 'LONEJSON_LOCK_TIMEOUT_SECONDS must be a positive integer number of seconds' >&2; exit 1;; esac; flock -w "$$lock_timeout" "$(LUA_ROCK_BUILD_LOCK)" bash -lc 'set -e; export TMPDIR="$(CURDIR)/build/luarocks-native/tool-tmp"; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"'
+	set -e; export TMPDIR="$(CURDIR)/build/luarocks-native/tool-tmp"; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"
 
 lua-target-runner: deps-host
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
@@ -639,7 +640,7 @@ lua-bench-gate:
 asan:
 	cmake --preset $(ASAN_PRESET)
 	cmake --build --preset $(ASAN_PRESET)
-	ctest --preset $(ASAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
+	ctest --no-tests=error --preset $(ASAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 tsan:
 	@support="$(LONEJSON_HAVE_TSAN)"; \
@@ -652,13 +653,13 @@ tsan:
 	fi; \
 	cmake --preset $(TSAN_PRESET); \
 	cmake --build --preset $(TSAN_PRESET); \
-	ctest --preset $(TSAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
+	ctest --no-tests=error --preset $(TSAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 valgrind: deps-host
 	@command -v valgrind >/dev/null 2>&1 || { printf '%s\n' 'Valgrind is required for the native memory-check gate' >&2; exit 1; }
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(VALGRIND_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
 	cmake --build --preset $(VALGRIND_PRESET) --target lonejson_tests lonejson_curl_rewind_tests lonejson_lua_target_runner
-	cd build/$(VALGRIND_PRESET) && ctest -j 1 -T MemCheck --overwrite "MemoryCheckCommandOptions=--leak-check=full --track-origins=yes --keep-debuginfo=yes --num-callers=30 --error-exitcode=86 --quiet" -R '^lonejson_(tests|curl_rewind_tests|lua_target_tests)$$' --output-on-failure
+	cd build/$(VALGRIND_PRESET) && ctest --no-tests=error -j 1 -T MemCheck --overwrite "MemoryCheckCommandOptions=--leak-check=full --track-origins=yes --keep-debuginfo=yes --num-callers=30 --error-exitcode=86 --quiet" -R '^lonejson_(tests|curl_rewind_tests|lua_target_tests)$$' --output-on-failure
 
 fuzz: deps-host toolchains-aflpp
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"

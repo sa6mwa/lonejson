@@ -15,14 +15,12 @@ trap 'rm -rf "$tmp_dir"' EXIT
 lua_rock_tree="$tmp_dir/luarocks"
 lua_rockspec="$lua_rock_tree/lonejson-0.0.0-1.rockspec"
 lua_stamp="$lua_rock_tree/.installed.stamp"
-lua_lock="$lua_rock_tree/.build.lock"
 
 make_lua_rock() {
   make --no-print-directory -C "$repo_root" "$@" \
     LUA_ROCK_TREE="$lua_rock_tree" \
     LUA_ROCKSPEC="$lua_rockspec" \
     LUA_ROCK_STAMP="$lua_stamp" \
-    LUA_ROCK_BUILD_LOCK="$lua_lock" \
     LUAROCKS="$luarocks_exec"
 }
 
@@ -42,16 +40,7 @@ if [ "$configure_line" -ge "$build_line" ]; then
   printf 'lua-rock builds debug liblonejson before configuring debug\n' >&2
   exit 1
 fi
-if ! printf '%s\n' "$dry_run" | grep -F -- '-std=gnu89' >/dev/null; then
-  printf '%s\n' "$dry_run" >&2
-  printf 'lua-rock must compile the binding with the same C standard as liblonejson\n' >&2
-  exit 1
-fi
-if ! printf '%s\n' "$dry_run" | grep -F -- 'flock -w "$lock_timeout"' >/dev/null; then
-  printf '%s\n' "$dry_run" >&2
-  printf 'lua-rock must use a bounded build-lock wait\n' >&2
-  exit 1
-fi
+printf '%s\n' "$dry_run" | grep -F -- '-std=gnu89' >/dev/null
 
 mkdir -p "$lua_rock_tree"
 touch "$lua_rockspec" "$lua_stamp"

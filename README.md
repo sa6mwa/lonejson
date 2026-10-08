@@ -1328,8 +1328,9 @@ single-header integration. Its version macros are regenerated to match the
 resolved release version, from `VERSION` when present in a source package,
 otherwise from an exact lightweight `vX.Y.Z` tag on `HEAD`, and otherwise
 `0.0.0`. Before `make release` cleans generated state or builds artifacts, it
-runs `make lifecycle-version-contract` to verify that git-worktree version
-detection and Make agree on exact lightweight tags and explicit overrides.
+runs the read-only `make lifecycle-version-contract` check: the owning checkout
+must be clean and committed, HEAD must have exactly one lightweight `vX.Y.Z`
+tag, and no candidate override may be set.
 Ordinary CTest checks CMake overrides separately without mutating tags. The project-prefixed
 `LONEJSON_VERSION_OVERRIDE=X.Y.Z` escape hatch is for release-candidate
 rehearsals only; Make exports an explicit command-line override, and CMake
@@ -1379,8 +1380,14 @@ an explicit osxcross/SDK setup; the project never downloads Apple SDKs.
 native Apple tools on macOS and optional local osxcross availability on Linux.
 Shared Bootlin and AFL++ provisioning waits at most
 `${CPKT_TOOLCHAIN_LOCK_TIMEOUT:-600}` seconds for the matching cache lock.
-Checkout-local fixture, Lua-rock, and standalone-header locks use
-`${LONEJSON_LOCK_TIMEOUT_SECONDS:-120}` seconds.
+Each operation owns its mutable checkout workspaces. Run lifecycle commands
+serially with stable sources, configuration, and prepared tool collections.
+`make` defaults to two build jobs; set `LONEJSON_BUILD_JOBS` or
+`CMAKE_BUILD_PARALLEL_LEVEL` to change that limit. CTest presets run serially,
+reject empty selections, and stop on failure. The terminal or job runner cancels
+the entire job/process group; signalling only a helper PID is unsupported.
+After copying or restoring inputs with preserved timestamps, invalidate the
+affected build and verification state explicitly.
 
 Pinned c.pkt.systems SDK archives use the adjacent shared cache
 `${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.
@@ -1448,8 +1455,8 @@ mandatory sanitizer coverage. `make prerelease` runs the complete release
 pipeline without cleaning generated state first: native debug/Lua tests,
 sanitizers, Valgrind, deterministic e2e, fuzz smoke and benchmark checks, then
 the release matrix that builds, checksums, and verifies binary SDKs and Lua
-artifacts. `make release` is the final clean release gate; it first runs the lightweight-tag
-version contract, then cleans generated state, then runs the same release
+artifacts. `make release` is the final clean release gate; it first validates clean committed source and an exact lightweight
+release tag, then cleans generated state, then runs the same release
 pipeline, followed by source-archive reconstruction and full artifact
 verification. Source reconstruction is reserved for the final release path.
 `make test-all-bindings` is a compatibility alias for the Lua
