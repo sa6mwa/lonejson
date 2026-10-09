@@ -13,7 +13,7 @@ ASAN_PRESET := asan
 TSAN_PRESET := tsan
 VALGRIND_PRESET := valgrind
 FUZZ_PRESET := fuzz
-TIME_STEP := ./scripts/run_timed.sh
+TIME_STEP := ./scripts/time_step.sh
 LONEJSON_HAVE_TSAN ?=
 LONEJSON_E2E_SERVICES_READY ?= 0
 RELEASE_BUILD_PRESETS := \
@@ -124,7 +124,7 @@ LUA_ROCK_LIBLONEJSON_SOURCES := \
 	src/lonejson_internal.h \
 	$(wildcard src/impl/*.h)
 
-SANITIZER_CTEST_EXCLUDE := ^lonejson_lua_(target|interop|target_runner_argument|benchmark_configuration)_tests$$
+SANITIZER_CTEST_EXCLUDE := ^lonejson_lua_(target|fuzz|interop|target_runner_argument|benchmark_configuration)_tests$$
 SLICE_BUILD_TARGETS := lonejson_tests lonejson_map_cache_no_tls_tests lonejson_short_names_tests lonejson_short_names_disabled_tests lonejson_static_link_tests lonejson_shared_link_tests
 SLICE_CTEST_INCLUDE := ^lonejson_(tests|map_cache_no_tls_tests|short_names_tests|short_names_disabled_tests|static_link_tests|shared_link_tests|shared_soversion_tests|single_header_version_tests|header_abi_version_tests|single_header_release_version_tests|library_exports_tests)$$
 
@@ -223,6 +223,7 @@ SLICE_CTEST_INCLUDE := ^lonejson_(tests|map_cache_no_tls_tests|short_names_tests
 	dev-logs \
 	curl-examples \
 	test-e2e \
+	e2e-build \
 	test-curl-e2e \
 	test-oidc-e2e \
 	test-m2m-e2e \
@@ -250,7 +251,7 @@ help:
 		'make verify-release-privacy Alias for make package-verify.' \
 		'make lifecycle-version-contract Verify clean committed checkout and exact lightweight release tag without changing state.' \
 		'make prerelease             Run the deterministic release pipeline without cleaning generated state first.' \
-		'make prerelease-live        Refuse live external-provider release checks unless explicitly enabled.' \
+		'make prerelease-live        Report that no live external-provider release checks are defined.' \
 		'make prerelease-hardening   Alias for prerelease; native hardening and benchmark checks are already included.' \
 		'make release-pipeline       Internal shared release proof used by prerelease and release.' \
 		'make release-matrix         Build host release tests, then package, checksum, and verify every release target without cleaning first.' \
@@ -323,6 +324,7 @@ help:
 		'make dev-logs               Tail logs from the checkout-specific Podman pod.' \
 		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
 		'make test-e2e               Run all deterministic local e2e gates serially; set LONEJSON_*_E2E_PORT to avoid host-port conflicts.' \
+		'make e2e-build              Prepare the native curl and auth fixture executables for the e2e CTest preset.' \
 		'  Ports: LONEJSON_OAUTH2_E2E_PORT=8090, LONEJSON_OIDC_E2E_PORT=18443, LONEJSON_API_FIXTURE_E2E_PORT=18080,' \
 		'         LONEJSON_NGINX_HTTP_E2E_PORT=8080, LONEJSON_NGINX_HTTPS_E2E_PORT=8443; distinct loopback ports 1024..65535.' \
 		'  Set LONEJSON_E2E_KEEP_DEVSERVICES=1 to retain the pod and generated state for debugging; use dev-reset afterward.' \
@@ -377,12 +379,12 @@ $(RELEASE_ROCKSPEC): lonejson.rockspec.in scripts/render_release_rockspec.sh | $
 $(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_LUA_SOURCE_TARBALL)
 	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(notdir $(RELEASE_LUA_SOURCE_TARBALL))" "" "$$lib_ext" "lonejson-$(RELEASE_VERSION)"
 
-$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lua_src_rock.sh scripts/validate_luarocks.sh
+$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lua_src_rock.sh scripts/smoke_lua_src_rock.sh
 	./scripts/package_lua_src_rock.sh "$(RELEASE_ROCK)" "$(RELEASE_PACK_ROCKSPEC)" "$(RELEASE_LUA_SOURCE_TARBALL)"
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared lonejson_static
 	cmake --install "build/$(DEBUG_PRESET)" --prefix "$(CURDIR)/build/lua-sdk"
-	./scripts/validate_luarocks.sh "$(RELEASE_ROCK)" "$(LONEJSON_LUA_LIBDIR)" "$(LUA)" "$(LUAROCKS)"
+	./scripts/smoke_lua_src_rock.sh "$(RELEASE_ROCK)" "$(LONEJSON_LUA_LIBDIR)" "$(LUA)" "$(LUAROCKS)"
 	rm -rf "$(RELEASE_PACK_DIR)"
 
 release-lua-artifacts: $(RELEASE_ROCKSPEC) $(RELEASE_LUA_SOURCE_TARBALL) $(RELEASE_ROCK)
@@ -435,7 +437,7 @@ lifecycle-version-contract:
 prerelease: release-pipeline
 
 prerelease-live:
-	@test "$${LONEJSON_ENABLE_LIVE_TESTS:-}" = "1" || (printf '%s\n' 'Set LONEJSON_ENABLE_LIVE_TESTS=1 to run live prerelease checks; no live prerelease checks are currently defined.' >&2; exit 1)
+	@printf '%s\n' 'No live prerelease checks are defined; use make prerelease for local proof.' >&2; exit 1
 
 prerelease-hardening: prerelease
 
@@ -452,7 +454,7 @@ release-pipeline:
 	+$(TIME_STEP) prerelease/release-matrix $(MAKE) release-matrix
 
 release-matrix:
-	./scripts/run_linux_release_matrix.sh
+	./scripts/run_release_matrix.sh
 
 release:
 	+$(TIME_STEP) release/version-contract $(MAKE) lifecycle-version-contract
@@ -537,7 +539,7 @@ test: build
 test-debug: test
 
 test-host: build-host
-	./scripts/host_test.sh
+	./scripts/test.sh $(HOST_PRESET)
 
 test-host-curl: deps-host
 	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
@@ -598,22 +600,16 @@ lua-host-runtime: lua-rock
 
 ifeq ($(LONEJSON_HOST_OS),Linux)
 lua-test: lua-target-runner
-	./build/host-curl/lonejson_lua_target_runner "$(CURDIR)" "$(CURDIR)/build/host-curl" tests/test_lua.lua tests/test_lua_fuzz.lua tests/test_lua_schema_cache.lua tests/test_lua_encode_stats.lua
+	ctest --preset host-curl -R '^lonejson_lua_(target|fuzz)_tests$$'
 
 lua-fuzz: lua-target-runner
-	./build/host-curl/lonejson_lua_target_runner "$(CURDIR)" "$(CURDIR)/build/host-curl" tests/test_lua_fuzz.lua
+	ctest --preset host-curl -R '^lonejson_lua_fuzz_tests$$'
 else
 lua-test: lua-rock
-	mkdir -p "$(CURDIR)/build/test-tmp"
-	export LONEJSON_TEST_TEMP_DIR="$(CURDIR)/build/test-tmp"; eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && \
-	for script in tests/test_lua.lua tests/test_lua_fuzz.lua; do \
-		DYLD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) "$$script" || exit $$?; \
-	done
-	bash tests/test_lua_schema_cache.sh "$(CURDIR)" "$(LUA)" "$(LUAROCKS)" "$(LONEJSON_LUA_LIBDIR)"
-	bash tests/test_lua_encode_stats.sh "$(CURDIR)" "$(LUA)" "$(LUAROCKS)" "$(LONEJSON_LUA_LIBDIR)"
+	LUA="$(LUA)" LUAROCKS="$(LUAROCKS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" ctest --preset $(DEBUG_PRESET) -R '^lonejson_lua_(native|schema_cache|encode_stats)_tests$$'
 
 lua-fuzz: lua-rock
-	eval "$$($(LUAROCKS) path --tree $(LUA_ROCK_TREE))" && DYLD_LIBRARY_PATH="$(LONEJSON_LUA_LIBDIR):$${DYLD_LIBRARY_PATH:-}" $(LUA) tests/test_lua_fuzz.lua
+	LUA="$(LUA)" LUAROCKS="$(LUAROCKS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" ctest --preset $(DEBUG_PRESET) -R '^lonejson_lua_native_fuzz_tests$$'
 endif
 
 lua-bench-prerequisite: $(LUA_BENCH_PREPARE)
@@ -649,10 +645,11 @@ asan:
 	ctest --no-tests=error --preset $(ASAN_PRESET) -LE host-policy -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 tsan:
-	@support="$(LONEJSON_HAVE_TSAN)"; \
+	@set -e; support="$(LONEJSON_HAVE_TSAN)"; \
 	if [ -z "$$support" ]; then \
 		support="$$(./scripts/check_bootlin_tsan_support.sh)"; \
 	fi; \
+	case "$$support" in 0|1) ;; *) printf '%s\n' 'LONEJSON_HAVE_TSAN must be 0, 1, or empty for automatic detection' >&2; exit 1 ;; esac; \
 	if [ "$$support" != "1" ]; then \
 		printf '%s\n' 'Skipping tsan: unsupported toolchain'; \
 		exit 0; \
@@ -668,27 +665,10 @@ valgrind: deps-host
 	cd build/$(VALGRIND_PRESET) && ctest --no-tests=error -j 1 -T MemCheck --overwrite "MemoryCheckCommandOptions=--leak-check=full --track-origins=yes --keep-debuginfo=yes --num-callers=30 --error-exitcode=86 --quiet" -R '^lonejson_(tests|curl_rewind_tests|lua_target_tests)$$' --output-on-failure
 
 fuzz: deps-host toolchains-aflpp
-	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
-	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_base64 lonejson_fuzz_validate lonejson_fuzz_mapped_parse lonejson_fuzz_array_stream lonejson_fuzz_json_value lonejson_fuzz_value_visitor lonejson_fuzz_path_value_visitor lonejson_fuzz_value_rewrite lonejson_fuzz_reader_stream_generator lonejson_fuzz_writer_generator_backpressure lonejson_fuzz_writer_value_stream lonejson_fuzz_protocol_framing lonejson_fuzz_fixed_string_paths lonejson_fuzz_alloc_ceiling lonejson_fuzz_parser_boundaries lonejson_fuzz_jwt
-	cmake -D LONEJSON_COMPILE_COMMANDS="$(CURDIR)/build/$(FUZZ_PRESET)/compile_commands.json" -D LONEJSON_SOURCE_FILE="$(CURDIR)/src/lonejson.c" -D LONEJSON_AFL_COMPILER="$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^cc=//p')" -P cmake/check_fuzz_instrumentation.cmake
-	bash tests/test_fuzz_crash_handling.sh "$(CURDIR)"
-	$(TIME_STEP) fuzz/base64 ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" base64 ./build/$(FUZZ_PRESET)/lonejson_fuzz_base64 fuzz/corpus/base64
-	$(TIME_STEP) fuzz/validate ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" validate ./build/$(FUZZ_PRESET)/lonejson_fuzz_validate tests/fixtures/vendor/json_test_suite/test_parsing tests/fixtures/spec tests/fixtures/languages
-	$(TIME_STEP) fuzz/mapped ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" mapped ./build/$(FUZZ_PRESET)/lonejson_fuzz_mapped_parse fuzz/corpus/mapped tests/fixtures/spec
-	$(TIME_STEP) fuzz/array ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" array ./build/$(FUZZ_PRESET)/lonejson_fuzz_array_stream fuzz/corpus/array_stream fuzz/corpus/mapped
-	$(TIME_STEP) fuzz/json ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" json ./build/$(FUZZ_PRESET)/lonejson_fuzz_json_value fuzz/corpus/json_value fuzz/corpus/mapped
-	$(TIME_STEP) fuzz/visitor ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" visitor ./build/$(FUZZ_PRESET)/lonejson_fuzz_value_visitor fuzz/corpus/value_visitor fuzz/corpus/json_value
-	$(TIME_STEP) fuzz/path ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" path ./build/$(FUZZ_PRESET)/lonejson_fuzz_path_value_visitor fuzz/corpus/path_value_visitor fuzz/corpus/value_visitor
-	$(TIME_STEP) fuzz/rewrite ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" rewrite ./build/$(FUZZ_PRESET)/lonejson_fuzz_value_rewrite fuzz/corpus/value_rewrite fuzz/corpus/json_value
-	$(TIME_STEP) fuzz/reader ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" reader ./build/$(FUZZ_PRESET)/lonejson_fuzz_reader_stream_generator fuzz/corpus/mapped tests/fixtures/spec
-	$(TIME_STEP) fuzz/writer ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" writer ./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_generator_backpressure fuzz/corpus/mapped fuzz/corpus/json_value
-	$(TIME_STEP) fuzz/value-stream ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" value-stream ./build/$(FUZZ_PRESET)/lonejson_fuzz_writer_value_stream fuzz/corpus/json_value fuzz/corpus/value_visitor
-	$(TIME_STEP) fuzz/protocol ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" protocol ./build/$(FUZZ_PRESET)/lonejson_fuzz_protocol_framing fuzz/corpus/protocol_framing
-	$(TIME_STEP) fuzz/fixed ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" fixed ./build/$(FUZZ_PRESET)/lonejson_fuzz_fixed_string_paths fuzz/corpus/fixed_string_paths
-	$(TIME_STEP) fuzz/alloc ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" alloc ./build/$(FUZZ_PRESET)/lonejson_fuzz_alloc_ceiling fuzz/corpus/alloc_ceiling
-	$(TIME_STEP) fuzz/parser ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" parser ./build/$(FUZZ_PRESET)/lonejson_fuzz_parser_boundaries fuzz/corpus/parser_boundaries
-	$(TIME_STEP) fuzz/jwt ./scripts/fuzz.sh "$$($(CURDIR)/scripts/cpkt-aflpp.sh discover | sed -n 's/^afl_fuzz=//p')" "$(FUZZ_TIME)" jwt ./build/$(FUZZ_PRESET)/lonejson_fuzz_jwt fuzz/corpus/jwt
-	+$(TIME_STEP) fuzz/lua $(MAKE) lua-fuzz
+	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root" -D LONEJSON_FUZZ_SECONDS="$(FUZZ_TIME)"
+	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_targets
+	ctest --preset fuzz
+	$(MAKE) lua-fuzz
 
 fuzz-long:
 	$(MAKE) fuzz FUZZ_TIME=$(FUZZ_LONG_TIME)
@@ -796,29 +776,28 @@ dev-logs:
 curl-examples: deps-host
 	./scripts/build_curl_examples.sh
 
+e2e-build: curl-examples
+	cmake --build --preset host-curl --target lonejson_oidc_fixture_server lonejson_m2m_fixture_server lonejson_curl_rewind_e2e
+
 ifeq ($(LONEJSON_E2E_SERVICES_READY),1)
-test-curl-e2e: curl-examples
+test-curl-e2e: e2e-build
 else
-test-curl-e2e: dev-up curl-examples
+test-curl-e2e: dev-up e2e-build
 endif
-	./scripts/test_curl_e2e.sh
+	ctest --preset e2e -R '^lonejson_curl_e2e_tests$$'
 
 test-e2e:
 	./scripts/test-e2e.sh
 
 ifeq ($(LONEJSON_E2E_SERVICES_READY),1)
-test-oidc-e2e: deps-host
+test-oidc-e2e: e2e-build
 else
-test-oidc-e2e: dev-up deps-host
+test-oidc-e2e: dev-up e2e-build
 endif
-	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
-	cmake --build --preset host-curl --target lonejson_oidc_fixture_server
-	./scripts/test_oidc_e2e.sh
+	ctest --preset e2e -R '^lonejson_oidc_e2e_tests$$'
 
-test-m2m-e2e: deps-host
-	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
-	cmake --build --preset host-curl --target lonejson_m2m_fixture_server
-	./scripts/test_m2m_e2e.sh
+test-m2m-e2e: e2e-build
+	ctest --preset e2e -R '^lonejson_m2m_e2e_tests$$'
 
 clean:
 	./scripts/clean.sh

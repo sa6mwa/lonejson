@@ -147,15 +147,15 @@ write_baseline() {
 
 write_baseline 100 50 -
 git -C "$tmp_dir" add perflogs/hosts/testhost/baseline.json
-git -C "$tmp_dir" commit -q -m 'bench: add first baseline'
+git -C "$tmp_dir" commit -q -m 'test(bench): add first baseline'
 
 write_baseline 120 - 5
 git -C "$tmp_dir" add perflogs/hosts/testhost/baseline.json
-git -C "$tmp_dir" commit -q -m 'bench: add second baseline'
+git -C "$tmp_dir" commit -q -m 'test(bench): add second baseline'
 
 write_baseline 90 55 6
 git -C "$tmp_dir" add perflogs/hosts/testhost/baseline.json
-git -C "$tmp_dir" commit -q -m 'bench: add third baseline'
+git -C "$tmp_dir" commit -q -m 'test(bench): add third baseline'
 
 output=$(run_lua "$repo_root/scripts/bench_baseline_history.lua" --repo "$tmp_dir" --kind c --host-id testhost)
 

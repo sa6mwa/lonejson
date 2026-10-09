@@ -85,6 +85,7 @@ option(LONEJSON_BUILD_TESTS "Build lonejson tests." ON)
 option(LONEJSON_BUILD_EXAMPLES "Build lonejson examples." OFF)
 option(LONEJSON_BUILD_BENCHMARKS "Build lonejson benchmarks." OFF)
 option(LONEJSON_BUILD_FUZZERS "Build lonejson AFL++ fuzz targets." OFF)
+set(LONEJSON_FUZZ_SECONDS "30" CACHE STRING "Duration per AFL++ case; smoke uses LONEJSON_FUZZ_EXECUTIONS instead.")
 option(LONEJSON_ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer." OFF)
 option(LONEJSON_ASAN_DISABLE_LEAK_DETECTION
   "Disable LeakSanitizer in cross-emulated ASan test executables." OFF)
@@ -618,6 +619,22 @@ if(LONEJSON_BUILD_TESTS)
       lonejson
       OpenSSL::Crypto)
     lonejson_configure_c_target(lonejson_m2m_fixture_server)
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND
+        LONEJSON_CAN_RUN_LUA_NATIVE_TESTS AND NOT LONEJSON_ENABLE_ASAN AND
+        NOT LONEJSON_ENABLE_TSAN)
+      foreach(case IN ITEMS curl oidc m2m)
+        add_test(NAME lonejson_${case}_e2e_tests COMMAND bash
+          "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_${case}_e2e.sh")
+        set_tests_properties(lonejson_${case}_e2e_tests PROPERTIES
+          LABELS "local;e2e" TIMEOUT 300
+          ENVIRONMENT "LONEJSON_E2E_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}")
+      endforeach()
+      add_test(NAME lonejson_devenv_ownership_e2e_tests COMMAND bash
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_devenv_ownership.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+      set_tests_properties(lonejson_devenv_ownership_e2e_tests PROPERTIES
+        LABELS "local;e2e" TIMEOUT 60)
+    endif()
   endif()
 
   add_executable(lonejson_map_cache_no_tls_tests
@@ -634,6 +651,16 @@ if(LONEJSON_BUILD_TESTS)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_map_cache_no_tls_tests)
 
   find_program(LONEJSON_BASH_EXECUTABLE bash)
+  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND LONEJSON_CAN_RUN_LUA_NATIVE_TESTS)
+    add_test(NAME lonejson_lua_native_tests COMMAND bash
+      "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_lua_native.sh"
+      "${LONEJSON_LUA_EXECUTABLE}" "${LONEJSON_LUAROCKS_EXECUTABLE}"
+      tests/test_lua.lua tests/test_lua_fuzz.lua)
+    add_test(NAME lonejson_lua_native_fuzz_tests COMMAND bash
+      "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_lua_native.sh"
+      "${LONEJSON_LUA_EXECUTABLE}" "${LONEJSON_LUAROCKS_EXECUTABLE}"
+      tests/test_lua_fuzz.lua)
+  endif()
   if(LONEJSON_BASH_EXECUTABLE AND LONEJSON_LUA_EXECUTABLE
       AND LONEJSON_LUAROCKS_EXECUTABLE)
     if(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS AND
@@ -752,6 +779,9 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_fuzz.lua"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_schema_cache.lua"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_encode_stats.lua")
+    add_test(NAME lonejson_lua_fuzz_tests COMMAND lonejson_lua_target_runner
+      "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lua_fuzz.lua")
     add_test(
       NAME lonejson_lua_target_runner_argument_tests
       COMMAND lonejson_lua_target_runner
@@ -1324,60 +1354,95 @@ if(LONEJSON_BUILD_BENCHMARKS)
 endif()
 
 if(LONEJSON_BUILD_FUZZERS)
+  if(NOT LONEJSON_FUZZ_SECONDS MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "LONEJSON_FUZZ_SECONDS must be a positive integer")
+  endif()
+  if(NOT LONEJSON_AFL_FUZZ OR NOT EXISTS "${LONEJSON_AFL_FUZZ}")
+    message(FATAL_ERROR "Fuzzing requires the pinned AFL++ toolchain; configure with --preset fuzz")
+  endif()
+  enable_testing()
+  add_test(NAME lonejson_fuzz_instrumentation_tests COMMAND "${CMAKE_COMMAND}"
+    -DLONEJSON_COMPILE_COMMANDS=${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+    -DLONEJSON_SOURCE_FILE=${CMAKE_CURRENT_SOURCE_DIR}/src/lonejson.c
+    -DLONEJSON_AFL_COMPILER=${CMAKE_C_COMPILER}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_fuzz_instrumentation.cmake)
+  add_test(NAME lonejson_fuzz_crash_handling_tests COMMAND bash
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fuzz_crash_handling.sh"
+    "${CMAKE_CURRENT_SOURCE_DIR}")
+  set_tests_properties(lonejson_fuzz_instrumentation_tests lonejson_fuzz_crash_handling_tests
+    PROPERTIES LABELS "local;fuzz" TIMEOUT 30 FIXTURES_SETUP lonejson_fuzz_checks)
+  math(EXPR lonejson_fuzz_timeout "${LONEJSON_FUZZ_SECONDS} + 120")
+  add_custom_target(lonejson_fuzz_targets)
   add_library(lonejson_afl_driver STATIC fuzz/afl_driver.c)
   lonejson_configure_c_target(lonejson_afl_driver)
   # AFL++ instruments through its pinned GCC wrapper. Existing callbacks use
   # a small native file-input driver rather than an LLVM runtime.
-  function(lonejson_add_afl_fuzz_target target source)
+  function(lonejson_add_afl_fuzz_target target source name)
     add_executable("${target}" "${source}")
     target_include_directories("${target}" PRIVATE
       "${LONEJSON_PUBLIC_INCLUDE_DIR}")
     target_link_libraries("${target}" PRIVATE lonejson lonejson_afl_driver)
     target_compile_options("${target}" PRIVATE -fno-omit-frame-pointer)
     lonejson_configure_c_target("${target}")
+    add_dependencies(lonejson_fuzz_targets "${target}")
+    set(seeds "")
+    foreach(seed IN LISTS ARGN)
+      list(APPEND seeds "${CMAKE_CURRENT_SOURCE_DIR}/${seed}")
+    endforeach()
+    add_test(NAME ${target}_tests COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/fuzz.sh"
+      "${LONEJSON_AFL_FUZZ}" "${LONEJSON_FUZZ_SECONDS}" "${name}"
+      "$<TARGET_FILE:${target}>" ${seeds})
+    set_tests_properties(${target}_tests PROPERTIES LABELS "local;fuzz"
+      TIMEOUT "${lonejson_fuzz_timeout}" FIXTURES_REQUIRED lonejson_fuzz_checks)
   endfunction()
 
-  lonejson_add_afl_fuzz_target(lonejson_fuzz_base64 fuzz/fuzz_base64.c)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_base64 fuzz/fuzz_base64.c base64 fuzz/corpus/base64)
 
-  lonejson_add_afl_fuzz_target(lonejson_fuzz_validate fuzz/fuzz_validate.c)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_validate fuzz/fuzz_validate.c validate
+    tests/fixtures/vendor/json_test_suite/test_parsing tests/fixtures/spec tests/fixtures/languages)
 
-  lonejson_add_afl_fuzz_target(lonejson_fuzz_mapped_parse fuzz/fuzz_mapped_parse.c)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_mapped_parse fuzz/fuzz_mapped_parse.c mapped
+    fuzz/corpus/mapped tests/fixtures/spec)
 
-  lonejson_add_afl_fuzz_target(lonejson_fuzz_array_stream fuzz/fuzz_array_stream.c)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_array_stream fuzz/fuzz_array_stream.c array
+    fuzz/corpus/array_stream fuzz/corpus/mapped)
 
-  lonejson_add_afl_fuzz_target(lonejson_fuzz_json_value fuzz/fuzz_json_value.c)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_json_value fuzz/fuzz_json_value.c json
+    fuzz/corpus/json_value fuzz/corpus/mapped)
 
-  lonejson_add_afl_fuzz_target(lonejson_fuzz_value_visitor fuzz/fuzz_value_visitor.c)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_value_visitor fuzz/fuzz_value_visitor.c visitor
+    fuzz/corpus/value_visitor fuzz/corpus/json_value)
 
   lonejson_add_afl_fuzz_target(lonejson_fuzz_path_value_visitor
-    fuzz/fuzz_path_value_visitor.c)
+    fuzz/fuzz_path_value_visitor.c path fuzz/corpus/path_value_visitor fuzz/corpus/value_visitor)
 
-  lonejson_add_afl_fuzz_target(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c)
+  lonejson_add_afl_fuzz_target(lonejson_fuzz_value_rewrite fuzz/fuzz_value_rewrite.c rewrite
+    fuzz/corpus/value_rewrite fuzz/corpus/value_visitor)
 
   lonejson_add_afl_fuzz_target(lonejson_fuzz_reader_stream_generator
-    fuzz/fuzz_reader_stream_generator.c)
+    fuzz/fuzz_reader_stream_generator.c reader fuzz/corpus/mapped tests/fixtures/spec)
 
   lonejson_add_afl_fuzz_target(lonejson_fuzz_writer_generator_backpressure
-    fuzz/fuzz_writer_generator_backpressure.c)
+    fuzz/fuzz_writer_generator_backpressure.c writer fuzz/corpus/mapped fuzz/corpus/json_value)
 
   lonejson_add_afl_fuzz_target(lonejson_fuzz_writer_value_stream
-    fuzz/fuzz_writer_value_stream.c)
+    fuzz/fuzz_writer_value_stream.c writer-value-stream fuzz/corpus/json_value fuzz/corpus/value_visitor)
 
   lonejson_add_afl_fuzz_target(lonejson_fuzz_protocol_framing
-    fuzz/fuzz_protocol_framing.c)
+    fuzz/fuzz_protocol_framing.c protocol fuzz/corpus/protocol_framing)
 
   lonejson_add_afl_fuzz_target(lonejson_fuzz_fixed_string_paths
-    fuzz/fuzz_fixed_string_paths.c)
+    fuzz/fuzz_fixed_string_paths.c fixed fuzz/corpus/fixed_string_paths)
 
   lonejson_add_afl_fuzz_target(lonejson_fuzz_alloc_ceiling
-    fuzz/fuzz_alloc_ceiling.c)
+    fuzz/fuzz_alloc_ceiling.c alloc fuzz/corpus/alloc_ceiling)
 
   lonejson_add_afl_fuzz_target(lonejson_fuzz_parser_boundaries
-    fuzz/fuzz_parser_boundaries.c)
+    fuzz/fuzz_parser_boundaries.c parser fuzz/corpus/parser_boundaries)
 
   if(LONEJSON_BUILD_WITH_CURL AND LONEJSON_BUILD_WITH_OPENSSL AND
       LONEJSON_BUILD_WITH_JWT AND LONEJSON_BUILD_WITH_OIDC)
-    lonejson_add_afl_fuzz_target(lonejson_fuzz_jwt fuzz/fuzz_jwt.c)
+    lonejson_add_afl_fuzz_target(lonejson_fuzz_jwt fuzz/fuzz_jwt.c jwt fuzz/corpus/jwt)
     lonejson_target_include_curl(lonejson_fuzz_jwt)
     lonejson_target_include_openssl(lonejson_fuzz_jwt)
     target_link_libraries(lonejson_fuzz_jwt PRIVATE OpenSSL::Crypto)

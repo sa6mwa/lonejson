@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_dir=${LONEJSON_E2E_BUILD_DIR:-$repo_root/build/host-curl}
 server_port=${LONEJSON_M2M_E2E_SERVER_PORT:-18082}
 secrets_file="$repo_root/build/devenv/credentials/m2m-fixture-secrets.json"
 server_pid=
@@ -26,7 +27,7 @@ source "$repo_root/tests/json_helpers.sh"
 require_command curl
 require_command cmake
 
-if [[ ! -x "$repo_root/build/host-curl/lonejson_m2m_fixture_server" ]]; then
+if [[ ! -x "$build_dir/lonejson_m2m_fixture_server" ]]; then
   printf 'missing build/host-curl/lonejson_m2m_fixture_server; run make test-m2m-e2e\n' >&2
   exit 1
 fi
@@ -34,7 +35,7 @@ fi
 umask 077
 mkdir -p "$repo_root/build/devenv/credentials" "$repo_root/build/devenv/logs"
 rm -f "$secrets_file"
-"$repo_root/build/host-curl/lonejson_m2m_fixture_server" \
+"$build_dir/lonejson_m2m_fixture_server" \
   "$server_port" "$secrets_file" 11 >"$repo_root/build/devenv/logs/m2m-fixture-server.log" 2>&1 &
 server_pid=$!
 

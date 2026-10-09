@@ -20,7 +20,7 @@ printf '%s\n' 'All five images wrote state and temporary files as the host user.
 fixture=$(mktemp -d "$generated/tmp/yaml-😀.XXXXXX")
 trap 'rm -rf -- "$fixture"' EXIT
 mkdir -p "$fixture/scripts"
-cp "$repo_root/scripts/render_devenv.cmake" "$fixture/scripts/"
+cp "$repo_root/scripts/render_devenv.cmake" "$repo_root/scripts/require_build_workspace.sh" "$fixture/scripts/"
 cp "$repo_root/devenv.yaml.in" "$fixture/"
 cmake -P "$fixture/scripts/render_devenv.cmake" >/dev/null
 podman kube down "$fixture/build/devenv/devenv.yaml"

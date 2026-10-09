@@ -16,7 +16,7 @@ if [[ "$action" != logs && $# != 0 ]]; then
   exit 2
 fi
 
-mkdir -p "$repo_root/build"
+"$repo_root/scripts/require_build_workspace.sh" "$generated"
 if [[ "$action" == render ]]; then
   # Never change the teardown manifest beneath a live pod.
   if [[ -e "$manifest" ]]; then

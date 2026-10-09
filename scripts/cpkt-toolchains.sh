@@ -205,7 +205,7 @@ ensure_target() { require_target "$1"; if [[ "$1" == arm64-apple-darwin && "$("$
 
 print_env() {
   local target=$1 description key value
-  description=$(report_target "$target"); [[ "$description" == *$'status=ready'* ]] || die "target is missing; run: $0 ensure $target"
+  description=$(report_target "$target"); grep -Fx 'status=ready' <<<"$description" >/dev/null || die "target is missing; run: $0 ensure $target"
   for key in source root prefix sysroot cc cxx ld ar ranlib strip nm objcopy objdump addr2line gdb readelf libstdcxx_a libgcc_a otool install_name_tool; do
     value=$(printf '%s\n' "$description" | sed -n "s/^${key}=//p"); [[ -z "$value" ]] || printf 'export %s=%q\n' "CPKT_TOOLCHAIN_$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')" "$value"
   done

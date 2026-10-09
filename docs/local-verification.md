@@ -10,6 +10,13 @@ tests and builds its Lua release artifacts. Ordinary source-package checks use
 its `VERSION` and `RELEASE_MANIFEST`, even inside a Git checkout, without changing
 the parent checkout's tags.
 
+Make indexes commands, Bash sequences preparation, CMake owns build/install
+dependencies, and CTest owns test execution and results. Python is confined to
+small fixture servers and data preparation. Run one operation per mutable
+workspace with stable sources, configuration, and prepared tool collections.
+The terminal or job runner cancels the whole job/process group. Copied or
+restored inputs with preserved timestamps require explicit invalidation.
+
 The release pipeline runs native debug/Lua tests, sanitizers, Valgrind,
 deterministic e2e, fuzz smoke, and benchmark checks before the binary matrix.
 The matrix owns host release and cross-target testing once per configuration;
@@ -249,3 +256,19 @@ CTest labels host policy fixtures `host-policy`; matrix and hardening selections
 exclude that label while retaining target runtime, exports, strict headers,
 linking, versions, and metadata checks. Native Lua workflow fixtures require the
 prepared target runtime and fail if it is missing. They are not counted as skips.
+
+Ordinary test presets exclude the `e2e` label. `make test-e2e` starts and probes
+the owned Podman pod, prepares the native fixture executables once, and runs the
+four cases in `ctest --preset e2e`; it tears down resources it started unless
+retained-service debugging was selected. Individual e2e Make targets select the
+corresponding registered case. Preset selection regression tests exercise real
+CTest filtering, including separation of host policy and target runtime checks.
+
+The fuzz CMake graph declares every maintained executable and seed corpus.
+`lonejson_fuzz_targets` builds the required static library and fuzz executables
+without compiling an unused instrumented shared library. The fuzz CTest preset
+owns all 16 cases and its instrumentation/crash-handling prerequisites. Smoke
+uses a fixed seed and 1000 executions; longer commands retain the declared
+duration per case. Lua integration and isolated fuzz checks also run through
+CTest, using the Bootlin embedding runner on Linux and prepared LuaRocks tooling
+on native Darwin.

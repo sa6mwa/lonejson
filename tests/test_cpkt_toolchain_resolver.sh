@@ -183,3 +183,16 @@ download_file() { printf 'network called on digest hit\n' >&2; exit 1; }
 install_bootlin fixture
 EOF
 [[ -f "$recovery_cache/roots/fixture/.ready" ]]
+
+# Readiness is a field, not arbitrary text in a declared cache pathname.
+missing_cache="$tmp_dir/cache-status=ready"
+if CPKT_TOOLCHAIN_CACHE="$missing_cache" "$resolver" env x86_64-linux-gnu \
+    >"$tmp_dir/false-ready" 2>&1; then
+  printf 'cache pathname supplied false toolchain readiness\n' >&2; exit 1
+fi
+grep -F 'target is missing' "$tmp_dir/false-ready" >/dev/null
+if CPKT_TOOLCHAIN_CACHE="$missing_cache" "$repo_root/scripts/discover_target_tools.sh" \
+    --build-dir "$tmp_dir/build" --target-id x86_64-linux-gnu >"$tmp_dir/false-tools" 2>&1; then
+  printf 'target discovery accepted a missing collection\n' >&2; exit 1
+fi
+grep -F 'selected toolchain unavailable' "$tmp_dir/false-tools" >/dev/null

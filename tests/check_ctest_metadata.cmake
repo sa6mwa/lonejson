@@ -31,7 +31,7 @@ foreach(index RANGE ${last})
 endforeach()
 if(EXPECT_RUNTIME_TESTS)
   execute_process(COMMAND "${ctest}" --test-dir "${BUILD_DIR}"
-    --show-only=json-v1 -LE host-policy
+    --show-only=json-v1 -LE "host-policy|e2e"
     OUTPUT_VARIABLE runtime COMMAND_ERROR_IS_FATAL ANY)
   string(JSON runtime_count LENGTH "${runtime}" tests)
   if(runtime_count EQUAL 0)

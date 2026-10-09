@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 file(REAL_PATH "${CMAKE_CURRENT_LIST_DIR}/.." REPO_ROOT)
 set(DEVENV_ROOT "${REPO_ROOT}/build/devenv")
+execute_process(COMMAND "${REPO_ROOT}/scripts/require_build_workspace.sh" "${DEVENV_ROOT}"
+  COMMAND_ERROR_IS_FATAL ANY)
 string(SHA256 identity "${REPO_ROOT}")
 string(SUBSTRING "${identity}" 0 12 identity)
 set(POD_NAME "lonejson-e2e-${identity}")

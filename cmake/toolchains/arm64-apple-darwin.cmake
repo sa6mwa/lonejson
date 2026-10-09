@@ -22,7 +22,7 @@ endif()
 execute_process(
   COMMAND "${CMAKE_CURRENT_LIST_DIR}/../../scripts/cpkt-toolchains.sh" ensure arm64-apple-darwin
   RESULT_VARIABLE _darwin_status OUTPUT_VARIABLE _darwin_description ERROR_VARIABLE _darwin_error)
-if(NOT _darwin_status EQUAL 0 OR NOT _darwin_description MATCHES "status=ready")
+if(NOT _darwin_status EQUAL 0 OR NOT _darwin_description MATCHES "(^|\n)status=ready(\n|$)")
   message(FATAL_ERROR "Darwin lifecycle toolchain provisioning failed: ${_darwin_error}\n${_darwin_description}")
 endif()
 foreach(_pair root:LONEJSON_OSXCROSS_ROOT prefix:LONEJSON_OSXCROSS_HOST

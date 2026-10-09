@@ -385,6 +385,7 @@
     {
       "name": "debug",
       "configurePreset": "debug",
+      "filter": { "exclude": { "label": "e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -397,6 +398,7 @@
     {
       "name": "debug-lua",
       "configurePreset": "debug-lua",
+      "filter": { "exclude": { "label": "e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -409,6 +411,7 @@
     {
       "name": "host",
       "configurePreset": "host",
+      "filter": { "exclude": { "label": "e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -421,6 +424,7 @@
     {
       "name": "host-curl",
       "configurePreset": "host-curl",
+      "filter": { "exclude": { "label": "e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -433,6 +437,7 @@
     {
       "name": "asan",
       "configurePreset": "asan",
+      "filter": { "exclude": { "label": "host-policy|e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -445,6 +450,7 @@
     {
       "name": "tsan",
       "configurePreset": "tsan",
+      "filter": { "exclude": { "label": "host-policy|e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -457,6 +463,7 @@
     {
       "name": "valgrind",
       "configurePreset": "valgrind",
+      "filter": { "exclude": { "label": "e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -469,6 +476,7 @@
     {
       "name": "x86_64-linux-gnu-release",
       "configurePreset": "x86_64-linux-gnu-release",
+      "filter": { "exclude": { "label": "host-policy|e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -481,6 +489,7 @@
     {
       "name": "x86_64-linux-musl-release",
       "configurePreset": "x86_64-linux-musl-release",
+      "filter": { "exclude": { "label": "host-policy|e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -493,6 +502,7 @@
     {
       "name": "aarch64-linux-gnu-release",
       "configurePreset": "aarch64-linux-gnu-release",
+      "filter": { "exclude": { "label": "host-policy|e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -505,6 +515,7 @@
     {
       "name": "aarch64-linux-musl-release",
       "configurePreset": "aarch64-linux-musl-release",
+      "filter": { "exclude": { "label": "host-policy|e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -517,6 +528,7 @@
     {
       "name": "armhf-linux-gnu-release",
       "configurePreset": "armhf-linux-gnu-release",
+      "filter": { "exclude": { "label": "host-policy|e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -529,6 +541,7 @@
     {
       "name": "armhf-linux-musl-release",
       "configurePreset": "armhf-linux-musl-release",
+      "filter": { "exclude": { "label": "host-policy|e2e" } },
       "execution": {
         "jobs": 1,
         "noTestsAction": "error",
@@ -537,6 +550,19 @@
       "output": {
         "outputOnFailure": true
       }
+    },
+    {
+      "name": "e2e",
+      "configurePreset": "host-curl",
+      "filter": { "include": { "label": "e2e" } },
+      "execution": { "jobs": 1, "noTestsAction": "error", "stopOnFailure": true },
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "fuzz",
+      "configurePreset": "fuzz",
+      "execution": { "jobs": 1, "noTestsAction": "error", "stopOnFailure": true },
+      "output": { "outputOnFailure": true }
     }
   ]
 }

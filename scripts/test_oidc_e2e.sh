@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_dir=${LONEJSON_E2E_BUILD_DIR:-$repo_root/build/host-curl}
 oidc_port=${LONEJSON_OIDC_E2E_PORT:-18443}
 api_fixture_port=${LONEJSON_API_FIXTURE_E2E_PORT:-18080}
 issuer=${LONEJSON_OIDC_E2E_ISSUER:-https://localhost:${oidc_port}/default}
@@ -109,7 +110,7 @@ assert_protected_missing_bearer_rejected() {
 require_command curl
 require_command cmake
 
-if [[ ! -x "$repo_root/build/host-curl/lonejson_oidc_fixture_server" ]]; then
+if [[ ! -x "$build_dir/lonejson_oidc_fixture_server" ]]; then
   printf 'missing build/host-curl/lonejson_oidc_fixture_server; run make test-oidc-e2e\n' >&2
   exit 1
 fi
@@ -186,7 +187,7 @@ if [[ -z "$rotated_refresh_token" ]]; then
 fi
 
 LONEJSON_OIDC_E2E_CAINFO="$ca_file" \
-  "$repo_root/build/host-curl/lonejson_oidc_fixture_server" \
+  "$build_dir/lonejson_oidc_fixture_server" \
   "$issuer" "$audience" "$server_port" 10 \
   "$authorization_access_token" "$rotated_refresh_token" \
   >"$repo_root/build/devenv/logs/oidc-fixture-server.log" 2>&1 &
