@@ -318,6 +318,10 @@ Make supplies its current `LONEJSON_RELEASE_TARGETS` as an explicit CMake
 configuration argument, so a warm build cannot retain a previous Make selection
 or stale optional Darwin availability. Direct CMake callers can select their
 inventory with `-DLONEJSON_RELEASE_TARGETS=...`.
+Direct `scripts/package-verify.sh` calls default to all six Linux targets plus
+Darwin when the same read-only toolchain readiness check used by Make succeeds.
+Set `LONEJSON_RELEASE_TARGETS` explicitly to verify a different selected inventory;
+an explicitly empty selection is rejected.
 Verification rejects missing entries, unexpected entries, and changed bytes.
 Final full verification also rejects unlisted release-looking files.
 
