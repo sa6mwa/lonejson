@@ -214,6 +214,11 @@ Use `make test` as the debug lifecycle gate.
 the debug tree, stages standalone examples, runs the debug CTest preset, and
 then runs the full-feature Lua integration test through `make lua-test` on
 Linux. Darwin Lua coverage is already part of the debug CTest selection.
+On Linux x86_64, `make test`, `make test-host` and `make test-host-curl`
+prepare the pinned AFL++ collection before CTest, because their policy suites
+configure the real fuzz inventory and compiler checks. Preparation failures stop
+the gate. Darwin and other Linux architectures do not acquire AFL++ for these
+test targets; ordinary build targets require only their normal dependencies.
 
 Do not use `ctest --preset debug` as a completion, pre-release, release, or
 status gate. Raw CTest does not configure or build the tree, so it can report
@@ -221,9 +226,10 @@ results from stale or manually reconfigured artifacts. That is diagnostic
 output, not lifecycle evidence.
 
 Raw CTest is acceptable only for focused diagnosis after the matching debug
-configuration and build have already been run in the same flow. Reports that
-use raw CTest as evidence must include the configure/build command that made
-the artifacts current, for example:
+configuration and build have already been run in the same flow. On Linux x86_64,
+run `make toolchains-aflpp` before selecting AFL policy checks directly.
+Reports that use raw CTest as evidence must include the configure/build command
+that made the artifacts current, for example:
 
 ```sh
 cmake --preset debug

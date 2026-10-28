@@ -849,7 +849,8 @@ if(LONEJSON_BUILD_TESTS)
   endif()
   get_property(lonejson_runtime_tests DIRECTORY PROPERTY TESTS)
   if(LONEJSON_BASH_EXECUTABLE)
-    foreach(case native_lua_ctest native_host_workflows selected_release_build package_verify_directory required_tool_discovery)
+    foreach(case native_lua_ctest native_host_workflows native_test_prerequisites
+        selected_release_build package_verify_directory required_tool_discovery)
       add_test(NAME lonejson_${case}_tests
         COMMAND "${LONEJSON_BASH_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${case}.sh"

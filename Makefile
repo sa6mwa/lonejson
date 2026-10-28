@@ -529,6 +529,10 @@ bench-gate: toolchains-host
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
 	./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$(PERF_LATEST)"
 
+ifeq ($(LONEJSON_HOST_OS):$(shell uname -m),Linux:x86_64)
+test test-host test-host-curl: toolchains-aflpp
+endif
+
 test: build
 	./scripts/test.sh $(DEBUG_PRESET)
 ifeq ($(LONEJSON_HOST_OS),Linux)
