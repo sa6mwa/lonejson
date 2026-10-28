@@ -1,8 +1,9 @@
 # Local Verification
 
 `make prerelease` runs ordinary proof and the binary release matrix incrementally.
-`make release` first validates a clean committed owning checkout, exactly one
-lightweight `vX.Y.Z` tag on HEAD, and no candidate override, cleans generated
+`make release` first validates a clean owning checkout attached to its default
+branch, a verified commit signature, exactly one lightweight `vX.Y.Z` tag on
+HEAD, and no candidate override, cleans generated
 state, and runs that proof graph. It then reconstructs the all-component source
 archive and verifies the complete checksum manifest. Source reconstruction stays
 out of the incremental binary matrix. The extracted archive runs host C and Lua
@@ -35,6 +36,15 @@ before any cleanup or producer runs. CTest uses disposable Git command fixtures
 to test tag identity and failures without changing checkout refs. Candidate
 version overrides remain available to preparation commands.
 
+Implement and verify on one development branch. For an actual release, squash
+the verified change onto the local default branch before requesting final
+amendment/signing. Set `origin/HEAD` to the authoritative default branch. Sign
+that commit, add its exact local lightweight tag, and run the clean release
+gate. Keep remote branch and tag refs unchanged until all required local tests
+and final artifact checks pass. Hosted CI never supplies release proof or
+artifacts; Darwin proof uses local osxcross. A failed release stops for repair
+in a separately authorized iteration.
+
 Temporary test and verifier workspaces live under `build/`, resolved from each
 script's physical repository location. `make format-check` checks all maintained
 C sources and headers without changing them. Shared libraries and Lua modules
@@ -65,8 +75,10 @@ preset feature settings and silently reduce test coverage.
 
 CMake selects the pinned Bootlin collection matching the native Linux host's
 processor and libc for debug, host, and Lua workflows. Explicit Linux target
-toolchain files provision their matching pinned Bootlin collection into the
-lifecycle cache during configuration. To inspect status or warm every Linux
+toolchain files inspect prepared tools without acquisition, including compiler
+probes. Make entrypoints prepare their dependencies before configuring; direct
+CMake users must first run `make deps-host` or the selected `make deps-<target>`.
+To warm every Linux
 collection before a matrix build:
 
 ```sh
@@ -74,12 +86,16 @@ make toolchains-all
 ```
 
 The default cache is
-`${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/toolchains`; set
-`CPKT_TOOLCHAIN_CACHE` to use another shared cache location.
+`${XDG_CACHE_HOME:-$HOME/.cache}/cpkt/toolchains`; set
+`CPKT_TOOLCHAIN_CACHE` to use an owned `build/` or `.cache/` directory or the
+declared global cpkt cache. Overrides and symlinks must not borrow another
+checkout's generated state. The exact lifecycle helpers are vendored together
+under `tools/lifecycle/scripts`; CMake propagates that location through
+`CPKT_LIFECYCLE_SCRIPTS_DIR`. Host Bash 4.4 or newer is required.
 
 `scripts/cpkt-toolchains.sh discover` reports every lifecycle target without
-downloading it. The Darwin entry reports native Apple tools on macOS and local
-osxcross status on Linux.
+downloading it. On macOS, `discover arm64-apple-darwin` reports native Apple
+tools; on Linux it reports local osxcross and pinned host MIG readiness.
 
 Use `make cross-build` to configure/build the Linux cross presets and `make
 cross-test` (or the compatibility name `make test-cross`) to execute their
@@ -90,12 +106,32 @@ version-stamped single-header artifact without running a full release.
 building and verifying binary SDKs and Lua artifacts; host-only LuaRocks/tooling
 checks remain native. A missing required runner is a failure, not a skip.
 
-Pinned c.pkt.systems SDK archives are separate immutable cache entries under
-`${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/c.pkt.systems/deps}`.
+The core JSON library has no cpkt API dependency. The optional curl/auth
+features and Lua binding/tests use the upstream libraries supplied by
+[`c89systems/cpkt` 0.6.1](https://github.com/c89systems/cpkt/releases/tag/v0.6.1),
+including curl 8.22.0, OpenSSL 3.6.5, and Lua 5.5.1. No `cpktdb` or `cpktmisc`
+provider is needed. `LONEJSON_CPKT_ROOT` selects the independently extracted core
+SDK; do not merge provider prefixes. Acquisition checks the archive SHA-256 and
+the core package manifest's group, version and target.
+
+Pinned cpkt SDK archives are separate immutable cache entries under
+`${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/cpkt/deps}`.
 `make deps-host` and the target-specific dependency targets verify each archive
 by SHA-256 before reuse, then extract it into the checkout-local `.cache/`
 tree. `make clean` removes only that extracted local state and preserves the
 shared archive and toolchain caches.
+
+Run `make build` once after checkout or full cleanup to prepare dependency and
+generated headers and publish `build/debug/compile_commands.json`, the location
+used by `.clangd`. It includes the target Lua module as well as C sources. Clangd
+uses the owning compilation commands' standards and include paths. For a local
+discovery check, run `clangd --check=src/lonejson.c` and
+`clangd --check=src/lua/lonejson_lua.c` without database or driver overrides.
+Open `include/lonejson.h` in the ordinary clangd editor and verify empty
+diagnostics and API symbol discovery. Editor warnings remain warnings;
+builds still enforce `-Werror`. Refresh
+old configurations with `cmake --fresh --preset <preset>` after this migration:
+the provider and global cache paths changed.
 
 Every Linux native debug, host, and release build uses a single pinned Bootlin collection:
 its GCC driver, GNU linker, binutils/debug tools, libc sysroot, and target
@@ -225,8 +261,10 @@ LuaRocks builds keep their tool scratch beneath `build/` too.
 Darwin cross builds select the newest complete installed `arm64-apple-darwin25.x`
 prefix through the shared resolver. Set `CPKT_OSXCROSS_HOST` to pin an exact
 installed prefix. Configure, packaging, smoke consumers, and verification use
-the selected compiler and sibling tools. lonejson consumes prebuilt SDK bundles
-and generates no Mach interfaces, so it does not provision or require host MIG.
+the selected compiler and sibling tools. The lifecycle's Linux-to-Darwin
+collection also requires its checksum-pinned, Bootlin-built host MIG helper;
+`scripts/cpkt-toolchains.sh ensure arm64-apple-darwin` prepares it. The helper
+is build machinery and is never shipped with lonejson.
 
 `make package` builds and verifies packages incrementally. `make release` owns
 clean reconstruction and the full final gate. Native `make valgrind` enables

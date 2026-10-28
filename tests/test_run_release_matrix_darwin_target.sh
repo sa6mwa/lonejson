@@ -25,8 +25,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 printf '%s\n' "$verify_script" | grep -F -- 'darwin_deployment_target="$(target_darwin_deployment_target)"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- '-D "LONEJSON_MACOS_DEPLOYMENT_TARGET=$darwin_deployment_target"' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- '-D "CMAKE_OSX_DEPLOYMENT_TARGET=$darwin_deployment_target"' >/dev/null
-printf '%s\n' "$verify_script" | grep -F -- '-D "LONEJSON_C_PKT_SYSTEMS_ROOT=$adapter_dependency_root"' >/dev/null
-grep -F 'list(APPEND _lonejson_find_root_path "${LONEJSON_C_PKT_SYSTEMS_ROOT}")' \
+printf '%s\n' "$verify_script" | grep -F -- '-D "LONEJSON_CPKT_ROOT=$adapter_dependency_root"' >/dev/null
+grep -F 'list(APPEND _lonejson_find_root_path "${LONEJSON_CPKT_ROOT}")' \
   "$repo_root/cmake/toolchains/arm64-apple-darwin.cmake" >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'target_raw_compile_flags()' >/dev/null
 printf '%s\n' "$verify_script" | grep -F -- 'printf '\''%s\n'\'' "-std=c89 -Wall -Wextra -Werror -mmacosx-version-min=$(target_darwin_deployment_target)"' >/dev/null
@@ -54,16 +54,16 @@ if printf '%s\n' "$darwin_smoke_script" | grep -F -- 'libcrypto' >/dev/null; the
   printf 'Darwin smoke bundle must not link libcrypto for core static SDK smoke\n' >&2
   exit 1
 fi
-if printf '%s\n' "$darwin_smoke_script" | grep -F -- 'LONEJSON_C_PKT_SYSTEMS_ROOT is required for Darwin static smoke link' >/dev/null; then
-  printf 'Darwin smoke bundle must not require c.pkt.systems for core static SDK smoke\n' >&2
+if printf '%s\n' "$darwin_smoke_script" | grep -F -- 'LONEJSON_CPKT_ROOT is required for Darwin static smoke link' >/dev/null; then
+  printf 'Darwin smoke bundle must not require cpkt for core static SDK smoke\n' >&2
   exit 1
 fi
 if printf '%s\n' "$darwin_release_smoke_script" | grep -F -- 'libcrypto' >/dev/null; then
   printf 'Darwin release smoke must not link libcrypto for core static SDK smoke\n' >&2
   exit 1
 fi
-if printf '%s\n' "$darwin_release_smoke_script" | grep -F -- 'LONEJSON_C_PKT_SYSTEMS_ROOT for Darwin static smoke link' >/dev/null; then
-  printf 'Darwin release smoke must not require c.pkt.systems for core static SDK smoke\n' >&2
+if printf '%s\n' "$darwin_release_smoke_script" | grep -F -- 'LONEJSON_CPKT_ROOT for Darwin static smoke link' >/dev/null; then
+  printf 'Darwin release smoke must not require cpkt for core static SDK smoke\n' >&2
   exit 1
 fi
 if grep -F 'liblonejson.4.dylib' \
@@ -75,8 +75,8 @@ if printf '%s\n' "$matrix_script" | grep -F -- 'require_archive_contract' >/dev/
   printf 'run_release_matrix.sh must delegate archive checks to package-verify\n' >&2
   exit 1
 fi
-printf '%s\n' "$matrix_script" | grep -F -- 'missing c.pkt.systems CURL CMake package' >/dev/null
-if printf '%s\n' "$matrix_script" | grep -F -- 'missing c.pkt.systems OpenSSL CMake package' >/dev/null; then
+printf '%s\n' "$matrix_script" | grep -F -- 'missing cpkt CURL CMake package' >/dev/null
+if printf '%s\n' "$matrix_script" | grep -F -- 'missing cpkt OpenSSL CMake package' >/dev/null; then
   printf 'release matrix must not add a script-specific OpenSSL precheck\n' >&2
   exit 1
 fi
@@ -109,7 +109,7 @@ printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_JWT=${LONEJSON_
 printf '%s\n' "$cmake_lists" | grep -F -- '-DLONEJSON_BUILD_WITH_OIDC=${LONEJSON_BUILD_WITH_OIDC}' >/dev/null
 grep -F 'LINKER:-exported_symbols_list,${policy}' "$repo_root/cmake/lonejson_exports.cmake" >/dev/null
 grep -F 'lonejson_limit_exports(lonejson_shared' "$repo_root/CMakeLists.txt" >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"' >/dev/null
+printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_CPKT_ROOT="$bundle_root"' >/dev/null
 if printf '%s\n' "$matrix_script" | grep -F -- '-D CURL_LIBRARY_RELEASE=' >/dev/null; then
   printf 'run_release_matrix.sh must not inject raw CURL_LIBRARY_RELEASE paths\n' >&2
   exit 1
@@ -203,8 +203,8 @@ SH
   chmod +x "$tmp_dir/recording-bin/$tool"
 done
 for target in x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl; do
-  mkdir -p "$fixture/.cache/c.pkt.systems/$target/root/lib/cmake/CURL"
-  touch "$fixture/.cache/c.pkt.systems/$target/root/lib/cmake/CURL/CURLConfig.cmake"
+  mkdir -p "$fixture/.cache/cpkt/$target/root/lib/cmake/CURL"
+  touch "$fixture/.cache/cpkt/$target/root/lib/cmake/CURL/CURLConfig.cmake"
 done
 export TEST_MATRIX_EVENTS="$tmp_dir/matrix-events"
 printf retained >"$fixture/dist/retained.tar.gz"

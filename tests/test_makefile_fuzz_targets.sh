@@ -10,13 +10,13 @@ grep -F 'ctest --preset fuzz' <<<"$plan" >/dev/null
 grep -F 'make lua-fuzz' <<<"$plan" >/dev/null
 plan=$(make --no-print-directory -C "$repo_root" -n fuzz-smoke)
 grep -F 'LONEJSON_FUZZ_EXECUTIONS=1000' <<<"$plan" >/dev/null
-bundle=$("$repo_root/scripts/detect_c_pkt_systems_bundle.sh")
+bundle=$("$repo_root/scripts/detect_cpkt_bundle.sh")
 cmake -S "$repo_root" -B "$work/build" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$repo_root/cmake/toolchains/linux-x86_64-aflpp.cmake" \
   -DLONEJSON_BUILD_TESTS=OFF -DLONEJSON_BUILD_EXAMPLES=OFF -DLONEJSON_BUILD_FUZZERS=ON \
   -DLONEJSON_BUILD_WITH_CURL=ON -DLONEJSON_BUILD_WITH_OPENSSL=ON \
   -DLONEJSON_BUILD_WITH_JWT=ON -DLONEJSON_BUILD_WITH_OIDC=ON \
-  -DLONEJSON_C_PKT_SYSTEMS_ROOT="$bundle" >"$work/configure.log" 2>&1
+  -DLONEJSON_CPKT_ROOT="$bundle" >"$work/configure.log" 2>&1
 ctest --test-dir "$work/build" --show-only=json-v1 >"$work/inventory.json"
 cmake -DINVENTORY="$work/inventory.json" -P "$repo_root/tests/check_fuzz_inventory.cmake"
 ninja -C "$work/build" -t graph lonejson_fuzz_targets >"$work/graph"

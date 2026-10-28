@@ -105,8 +105,16 @@ set(LONEJSON_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(LONEJSON_GENERATED_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/include")
 set(LONEJSON_SINGLE_HEADER_ALIAS_INCLUDE_DIR "${LONEJSON_GENERATED_DIR}/single-header/include")
 set(LONEJSON_GENERATED_FIXTURE_DIR "${LONEJSON_SHARED_BUILD_DIR}/generated/fixtures")
-set(LONEJSON_TEST_BUNDLE_ROOT "" CACHE PATH "Root directory for extracted c.pkt.systems dependency bundle content used by tests.")
-set(LONEJSON_C_PKT_SYSTEMS_ROOT "" CACHE PATH "Root directory for extracted c.pkt.systems dependency bundle content.")
+set(LONEJSON_TEST_BUNDLE_ROOT "" CACHE PATH "Root directory for extracted cpkt dependency bundle content used by tests.")
+set(LONEJSON_CPKT_ROOT "" CACHE PATH "Root directory for extracted cpkt dependency bundle content.")
+if(LONEJSON_CPKT_ROOT AND IS_DIRECTORY "${LONEJSON_CPKT_ROOT}")
+  execute_process(COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/require_cache_path.sh"
+    --local "${LONEJSON_CPKT_ROOT}" RESULT_VARIABLE _cpkt_root_status
+    ERROR_VARIABLE _cpkt_root_error)
+  if(NOT _cpkt_root_status EQUAL 0)
+    message(FATAL_ERROR "${_cpkt_root_error}")
+  endif()
+endif()
 set(LONEJSON_TEST_TIMEOUT "120" CACHE STRING "Default timeout in seconds for CTest tests that do not set their own timeout.")
 set(LONEJSON_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "Artifact architecture name")
 set(LONEJSON_TARGET_OS "${CMAKE_SYSTEM_NAME}" CACHE STRING "Artifact operating system name")
@@ -237,27 +245,39 @@ if(NOT CMAKE_CROSSCOMPILING AND
   endif()
 endif()
 function(lonejson_find_curl)
-  if(LONEJSON_C_PKT_SYSTEMS_ROOT)
-    get_filename_component(_cpkt_root "${LONEJSON_C_PKT_SYSTEMS_ROOT}" ABSOLUTE)
+  if(LONEJSON_CPKT_ROOT)
+    get_filename_component(_cpkt_root "${LONEJSON_CPKT_ROOT}" ABSOLUTE)
     set(_cpkt_curl_config
         "${_cpkt_root}/lib/cmake/CURL/CURLConfig.cmake")
     if(NOT IS_DIRECTORY "${_cpkt_root}")
       message(FATAL_ERROR
-        "LONEJSON_C_PKT_SYSTEMS_ROOT does not exist: ${_cpkt_root}. "
+        "LONEJSON_CPKT_ROOT does not exist: ${_cpkt_root}. "
         "Run the matching make deps-* target or unset "
-        "LONEJSON_C_PKT_SYSTEMS_ROOT to use system curl.")
+        "LONEJSON_CPKT_ROOT to use system curl.")
     endif()
     if(NOT EXISTS "${_cpkt_curl_config}")
       message(FATAL_ERROR
-        "LONEJSON_C_PKT_SYSTEMS_ROOT is missing CURLConfig.cmake: "
-        "${_cpkt_curl_config}. Use a c.pkt.systems v0.2.0 or newer "
-        "bundle, or unset LONEJSON_C_PKT_SYSTEMS_ROOT to use system curl.")
+        "LONEJSON_CPKT_ROOT is missing CURLConfig.cmake: "
+        "${_cpkt_curl_config}. Use the pinned cpkt "
+        "bundle, or unset LONEJSON_CPKT_ROOT to use system curl.")
     endif()
-    set(LONEJSON_C_PKT_SYSTEMS_ROOT "${_cpkt_root}" CACHE PATH
-        "Root directory for extracted c.pkt.systems dependency bundle content."
+    set(LONEJSON_CPKT_ROOT "${_cpkt_root}" CACHE PATH
+        "Root directory for extracted cpkt dependency bundle content."
         FORCE)
     set(CURL_DIR "${_cpkt_root}/lib/cmake/CURL" CACHE PATH
         "Directory containing CURLConfig.cmake." FORCE)
+    # The split SDK's CURL config resolves its own transitive packages. Keep
+    # those lookups inside the same prefix, including cross configurations and
+    # configurations with stale package-directory cache entries.
+    list(PREPEND CMAKE_PREFIX_PATH "${_cpkt_root}")
+    list(PREPEND CMAKE_FIND_ROOT_PATH "${_cpkt_root}")
+    foreach(_package OpenSSL:OpenSSL ZLIB:zlib nghttp2:nghttp2 Libssh2:libssh2)
+      string(REPLACE ":" ";" _parts "${_package}")
+      list(GET _parts 0 _name)
+      list(GET _parts 1 _directory)
+      set(${_name}_DIR "${_cpkt_root}/lib/cmake/${_directory}" CACHE PATH
+        "Selected cpkt dependency package directory" FORCE)
+    endforeach()
     find_package(CURL CONFIG REQUIRED
       PATHS "${_cpkt_root}"
       NO_DEFAULT_PATH
@@ -276,24 +296,24 @@ if(LONEJSON_BUILD_WITH_CURL)
 endif()
 
 function(lonejson_find_openssl)
-  if(LONEJSON_C_PKT_SYSTEMS_ROOT)
-    get_filename_component(_cpkt_root "${LONEJSON_C_PKT_SYSTEMS_ROOT}" ABSOLUTE)
+  if(LONEJSON_CPKT_ROOT)
+    get_filename_component(_cpkt_root "${LONEJSON_CPKT_ROOT}" ABSOLUTE)
     set(_cpkt_openssl_config
         "${_cpkt_root}/lib/cmake/OpenSSL/OpenSSLConfig.cmake")
     if(NOT IS_DIRECTORY "${_cpkt_root}")
       message(FATAL_ERROR
-        "LONEJSON_C_PKT_SYSTEMS_ROOT does not exist: ${_cpkt_root}. "
+        "LONEJSON_CPKT_ROOT does not exist: ${_cpkt_root}. "
         "Run the matching make deps-* target or unset "
-        "LONEJSON_C_PKT_SYSTEMS_ROOT to use system OpenSSL.")
+        "LONEJSON_CPKT_ROOT to use system OpenSSL.")
     endif()
     if(NOT EXISTS "${_cpkt_openssl_config}")
       message(FATAL_ERROR
-        "LONEJSON_C_PKT_SYSTEMS_ROOT is missing OpenSSLConfig.cmake: "
-        "${_cpkt_openssl_config}. Use a c.pkt.systems v0.7.0 or newer "
-        "bundle, or unset LONEJSON_C_PKT_SYSTEMS_ROOT to use system OpenSSL.")
+        "LONEJSON_CPKT_ROOT is missing OpenSSLConfig.cmake: "
+        "${_cpkt_openssl_config}. Use the pinned cpkt "
+        "bundle, or unset LONEJSON_CPKT_ROOT to use system OpenSSL.")
     endif()
-    set(LONEJSON_C_PKT_SYSTEMS_ROOT "${_cpkt_root}" CACHE PATH
-        "Root directory for extracted c.pkt.systems dependency bundle content."
+    set(LONEJSON_CPKT_ROOT "${_cpkt_root}" CACHE PATH
+        "Root directory for extracted cpkt dependency bundle content."
         FORCE)
     set(OpenSSL_DIR "${_cpkt_root}/lib/cmake/OpenSSL" CACHE PATH
         "Directory containing OpenSSLConfig.cmake." FORCE)
@@ -665,7 +685,7 @@ if(LONEJSON_BUILD_TESTS)
       AND LONEJSON_LUAROCKS_EXECUTABLE)
     if(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS AND
         (NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" OR
-         EXISTS "${LONEJSON_C_PKT_SYSTEMS_ROOT}/include/lua.h"))
+         EXISTS "${LONEJSON_CPKT_ROOT}/include/lua.h"))
       add_test(
         NAME lonejson_bench_baseline_history_tests
         COMMAND "${LONEJSON_BASH_EXECUTABLE}"
@@ -695,11 +715,11 @@ if(LONEJSON_BUILD_TESTS)
   endif()
 
   set(LONEJSON_TARGET_LUA_INCLUDE_DIR
-    "${LONEJSON_C_PKT_SYSTEMS_ROOT}/include")
+    "${LONEJSON_CPKT_ROOT}/include")
   set(LONEJSON_TARGET_LUA_LIBRARY
-    "${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib/liblua.so")
+    "${LONEJSON_CPKT_ROOT}/lib/liblua.so")
   if(LONEJSON_TARGET_OS_LOWER STREQUAL "linux" AND
-      LONEJSON_C_PKT_SYSTEMS_ROOT AND
+      LONEJSON_CPKT_ROOT AND
       EXISTS "${LONEJSON_TARGET_LUA_INCLUDE_DIR}/lua.h" AND
       EXISTS "${LONEJSON_TARGET_LUA_LIBRARY}")
     foreach(lua_module_target IN ITEMS lonejson_lua_target_core lonejson_lua_benchmark_core)
@@ -720,7 +740,7 @@ if(LONEJSON_BUILD_TESTS)
         LIBRARY_OUTPUT_DIRECTORY
           "${lua_module_output}/lua-target/lonejson"
         BUILD_RPATH
-          "${CMAKE_CURRENT_BINARY_DIR};${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
+          "${CMAKE_CURRENT_BINARY_DIR};${LONEJSON_CPKT_ROOT}/lib")
       if(LONEJSON_BUILD_WITH_CURL)
         target_compile_definitions(${lua_module_target} PRIVATE
           LONEJSON_WITH_CURL)
@@ -760,7 +780,7 @@ if(LONEJSON_BUILD_TESTS)
     target_link_libraries(lonejson_lua_target_runner PRIVATE
       "${LONEJSON_TARGET_LUA_LIBRARY}")
     set_target_properties(lonejson_lua_target_runner PROPERTIES
-      BUILD_RPATH "${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
+      BUILD_RPATH "${LONEJSON_CPKT_ROOT}/lib")
     lonejson_configure_lua_c_target(lonejson_lua_target_runner)
     add_dependencies(lonejson_lua_target_runner
       lonejson_lua_target_core lonejson_lua_benchmark_core)
@@ -806,7 +826,7 @@ if(LONEJSON_BUILD_TESTS)
       lonejson_shared
       "${LONEJSON_TARGET_LUA_LIBRARY}")
     set_target_properties(lonejson_lua_interop_tests PROPERTIES
-      BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR};${LONEJSON_C_PKT_SYSTEMS_ROOT}/lib")
+      BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR};${LONEJSON_CPKT_ROOT}/lib")
     if(LONEJSON_BUILD_WITH_CURL)
       target_compile_definitions(lonejson_lua_interop_tests PRIVATE
         LONEJSON_WITH_CURL)
@@ -941,9 +961,9 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_path_index_formatting.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
-      NAME lonejson_c_pkt_systems_fetch_retry_tests
+      NAME lonejson_cpkt_fetch_retry_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fetch_c_pkt_systems.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fetch_cpkt.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_dependency_archive_cache_tests
@@ -956,9 +976,9 @@ if(LONEJSON_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_threads_optional.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
-      NAME lonejson_cmake_c_pkt_systems_root_tests
+      NAME lonejson_cmake_cpkt_root_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_c_pkt_systems_root.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_cpkt_root.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME lonejson_test_all_hardening_tests

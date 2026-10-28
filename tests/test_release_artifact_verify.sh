@@ -44,7 +44,7 @@ dist_dir="$tmp_dir/source-dist/dist"
 source_root="$tmp_dir/source-dist/lonejson-1.2.3/cmake"
 mkdir -p "$dist_dir" "$source_root"
 printf '%s\n' 'set(LONEJSON_TOOLCHAIN_DIR "/toolchains/")' \
-  >"$source_root/fetch_c_pkt_systems.cmake"
+  >"$source_root/fetch_cpkt.cmake"
 tar -czf "$dist_dir/lonejson-1.2.3.tar.gz" \
   -C "$tmp_dir/source-dist" lonejson-1.2.3
 write_checksums "$dist_dir" "$dist_dir/lonejson-1.2.3-CHECKSUMS" \
@@ -95,7 +95,7 @@ mkdir -p "$dist_dir"
 bad_bootlin_root="$tmp_dir/bad-bootlin/liblonejson-1.2.3-x86_64-linux-gnu/lib"
 mkdir -p "$bad_bootlin_root"
 printf '%s\n' \
-  '/srv/build-cache/c.pkt.systems/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib' \
+  '/srv/build-cache/cpkt/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib' \
   >"$bad_bootlin_root/liblonejson.so"
 tar -czf "$dist_dir/liblonejson-1.2.3-x86_64-linux-gnu.tar.gz" \
   -C "$tmp_dir/bad-bootlin" liblonejson-1.2.3-x86_64-linux-gnu
@@ -140,8 +140,8 @@ EOF
   toolchain_env=$("$repo_root/scripts/cpkt-toolchains.sh" env x86_64-linux-gnu)
   eval "$toolchain_env"
   "$CC" "$tmp_dir/release-probe.c" \
-    -Wl,--dynamic-linker,/srv/build-cache/c.pkt.systems/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib/ld-linux-x86-64.so.2 \
-    -Wl,-rpath,/srv/build-cache/c.pkt.systems/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib \
+    -Wl,--dynamic-linker,/srv/build-cache/cpkt/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib/ld-linux-x86-64.so.2 \
+    -Wl,-rpath,/srv/build-cache/cpkt/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib \
     -o "$loader_root/bin/release-probe"
   tar -czf "$loader_dist_dir/liblonejson-1.2.3-x86_64-linux-gnu.tar.gz" \
     -C "$tmp_dir/bad-bootlin-loader" liblonejson-1.2.3-x86_64-linux-gnu

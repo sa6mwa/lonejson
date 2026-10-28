@@ -72,8 +72,11 @@ resolve_staged_include() {
 
 require_manifest_entry src/lua/lonejson_lua_visitor_facade.inc.h
 require_manifest_entry scripts/cpkt-toolchains.sh
-require_manifest_entry scripts/cpkt-archive-cache.sh
 require_manifest_entry scripts/cpkt-native-apple.sh
+require_manifest_entry scripts/require_cache_path.sh
+for helper in require-host-bash cpkt-archive-cache cpkt-toolchains cpkt-aflpp cpkt-afl-runtime; do
+  require_manifest_entry "tools/lifecycle/scripts/$helper.sh"
+done
 require_manifest_entry scripts/detect_native_bootlin_target.sh
 require_manifest_entry cmake/toolchains/print_native_bootlin_target.cmake
 require_manifest_entry cmake/toolchains/lonejson_native_bootlin_target.cmake

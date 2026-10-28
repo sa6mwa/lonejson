@@ -30,7 +30,7 @@ configure_target() {
     -D "LONEJSON_TARGET_LIBC=$libc" \
     -D "LONEJSON_LUA_EXECUTABLE=$lua_exec" \
     -D "LONEJSON_LUAROCKS_EXECUTABLE=$luarocks_exec" \
-    -D "LONEJSON_C_PKT_SYSTEMS_ROOT=${3:-}" \
+    -D "LONEJSON_CPKT_ROOT=${3:-}" \
     -D LONEJSON_BUILD_TESTS=ON >/dev/null
 }
 
@@ -65,7 +65,7 @@ assert_lacks_native_lua_tests() {
   fi
 }
 
-bundle_root=$("$repo_root/scripts/detect_c_pkt_systems_bundle.sh")
+bundle_root=$("$repo_root/scripts/detect_cpkt_bundle.sh")
 configure_target "$tmp_dir/gnu" gnu "$bundle_root"
 gnu_tests="$(list_tests "$tmp_dir/gnu")"
 assert_has_native_lua_tests "$gnu_tests"

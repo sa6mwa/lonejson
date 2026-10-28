@@ -15,9 +15,9 @@ configure_release_target() {
     preset="$1"
     target_id="$2"
 
-    bundle_root="$repo_root/.cache/c.pkt.systems/$target_id/root"
+    bundle_root="$repo_root/.cache/cpkt/$target_id/root"
     if [ ! -f "$bundle_root/lib/cmake/CURL/CURLConfig.cmake" ]; then
-        printf 'missing c.pkt.systems CURL CMake package for %s under %s\n' "$target_id" "$bundle_root/lib/cmake/CURL" >&2
+        printf 'missing cpkt CURL CMake package for %s under %s\n' "$target_id" "$bundle_root/lib/cmake/CURL" >&2
         exit 1
     fi
     cmake --preset "$preset" \
@@ -25,7 +25,7 @@ configure_release_target() {
         -D LONEJSON_BUILD_WITH_OPENSSL=ON \
         -D LONEJSON_BUILD_WITH_JWT=ON \
         -D LONEJSON_BUILD_WITH_OIDC=ON \
-        -D LONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"
+        -D LONEJSON_CPKT_ROOT="$bundle_root"
 }
 
 run_target() {

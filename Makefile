@@ -93,12 +93,17 @@ LUA_ROCK_SOURCES := \
 	lonejson.rockspec.in \
 	scripts/build_lua_rock.sh \
 	scripts/cpkt-toolchains.sh \
-	scripts/cpkt-archive-cache.sh \
 	scripts/cpkt-native-apple.sh \
+	scripts/require_cache_path.sh \
+	tools/lifecycle/scripts/require-host-bash.sh \
+	tools/lifecycle/scripts/cpkt-archive-cache.sh \
+	tools/lifecycle/scripts/cpkt-toolchains.sh \
+	tools/lifecycle/scripts/cpkt-aflpp.sh \
+	tools/lifecycle/scripts/cpkt-afl-runtime.sh \
 	scripts/deps.sh \
-	cmake/fetch_c_pkt_systems.cmake \
+	cmake/fetch_cpkt.cmake \
 	cmake/CpktDependencyCache.cmake \
-	cmake/c_pkt_systems_metadata.cmake \
+	cmake/cpkt_metadata.cmake \
 	cmake/lonejson_lua.exports \
 	cmake/lonejson.exports \
 	scripts/check_library_exports.sh \
@@ -299,7 +304,8 @@ help:
 		'make format-check           Check formatting without modifying sources.' \
 		'make deps-debug             Alias for make deps-host.' \
 		'make deps-release           Alias for make deps-all.' \
-		'make deps-host              Cache the verified host c.pkt.systems archive globally, then extract it under .cache/.' \
+		'make deps-host              Cache the verified host cpkt archive globally, then extract it under .cache/.' \
+		'make toolchains-host        Prepare the selected native compiler collection.' \
 		'make toolchains-x86_64-linux-gnu Install the pinned x86_64 glibc Bootlin collection.' \
 		'make toolchains-x86_64-linux-musl Install the pinned x86_64 musl Bootlin collection.' \
 		'make toolchains-aarch64-linux-gnu Install the pinned aarch64 glibc Bootlin collection.' \
@@ -307,22 +313,22 @@ help:
 		'make toolchains-armhf-linux-gnu Install the pinned armhf glibc Bootlin collection.' \
 		'make toolchains-armhf-linux-musl Install the pinned armhf musl Bootlin collection.' \
 		'make toolchains-all         Install pinned Bootlin Linux toolchains in the shared lifecycle cache.' \
-		'make deps-x86_64-linux-gnu  Download and extract the x86_64 glibc c.pkt.systems bundle.' \
-		'make deps-x86_64-linux-musl Download and extract the x86_64 musl c.pkt.systems bundle.' \
-		'make deps-aarch64-linux-gnu Download and extract the aarch64 glibc c.pkt.systems bundle.' \
-		'make deps-aarch64-linux-musl Download and extract the aarch64 musl c.pkt.systems bundle.' \
-		'make deps-armhf-linux-gnu   Download and extract the armhf glibc c.pkt.systems bundle.' \
-		'make deps-armhf-linux-musl  Download and extract the armhf musl c.pkt.systems bundle.' \
-		'make deps-arm64-apple-darwin Download and extract the arm64 Darwin c.pkt.systems bundle.' \
+		'make deps-x86_64-linux-gnu  Download and extract the x86_64 glibc cpkt bundle.' \
+		'make deps-x86_64-linux-musl Download and extract the x86_64 musl cpkt bundle.' \
+		'make deps-aarch64-linux-gnu Download and extract the aarch64 glibc cpkt bundle.' \
+		'make deps-aarch64-linux-musl Download and extract the aarch64 musl cpkt bundle.' \
+		'make deps-armhf-linux-gnu   Download and extract the armhf glibc cpkt bundle.' \
+		'make deps-armhf-linux-musl  Download and extract the armhf musl cpkt bundle.' \
+		'make deps-arm64-apple-darwin Download and extract the arm64 Darwin cpkt bundle.' \
 		'make deps-cross             Download and extract bundles required by make test-cross.' \
-		'make deps-all               Download and extract every supported c.pkt.systems bundle.' \
+		'make deps-all               Download and extract every supported cpkt bundle.' \
 		'make certs                  Generate the local self-signed localhost TLS cert for nginx.' \
 		'make dev-up                 Start the rootless Podman Kube e2e pod through scripts/devenv.sh.' \
 		'make dev-down               Stop the checkout-specific Podman Kube pod using its saved manifest.' \
 		'make dev-reset              Stop the Podman pod, then remove build/devenv/ as the host user.' \
 		'make dev-ps                 Show the checkout-specific Podman pod status.' \
 		'make dev-logs               Tail logs from the checkout-specific Podman pod.' \
-		'make curl-examples          Build the curl examples against the host c.pkt.systems dependency bundle.' \
+		'make curl-examples          Build the curl examples against the host cpkt dependency bundle.' \
 		'make test-e2e               Run all deterministic local e2e gates serially; set LONEJSON_*_E2E_PORT to avoid host-port conflicts.' \
 		'make e2e-build              Prepare the native curl and auth fixture executables for the e2e CTest preset.' \
 		'  Ports: LONEJSON_OAUTH2_E2E_PORT=8090, LONEJSON_OIDC_E2E_PORT=18443, LONEJSON_API_FIXTURE_E2E_PORT=18080,' \
@@ -342,12 +348,12 @@ finalize-slice:
 	$(MAKE) lua-test
 	$(MAKE) format-check
 
-build:
+build: deps-host
 	./scripts/build.sh $(DEBUG_PRESET) --stage-examples
 
 build-debug: build
 
-build-host:
+build-host: deps-host
 	./scripts/build.sh $(HOST_PRESET)
 
 build-release: deps-all
@@ -379,7 +385,7 @@ $(RELEASE_ROCKSPEC): lonejson.rockspec.in scripts/render_release_rockspec.sh | $
 $(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_LUA_SOURCE_TARBALL)
 	cd "$(RELEASE_PACK_STAGE_DIR)" && lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)" && ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "../$(notdir $(RELEASE_PACK_ROCKSPEC))" "file://$(notdir $(RELEASE_LUA_SOURCE_TARBALL))" "" "$$lib_ext" "lonejson-$(RELEASE_VERSION)"
 
-$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lua_src_rock.sh scripts/smoke_lua_src_rock.sh
+$(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lua_src_rock.sh scripts/smoke_lua_src_rock.sh | toolchains-host
 	./scripts/package_lua_src_rock.sh "$(RELEASE_ROCK)" "$(RELEASE_PACK_ROCKSPEC)" "$(RELEASE_LUA_SOURCE_TARBALL)"
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared lonejson_static
@@ -394,7 +400,7 @@ package:
 
 package-source: release-source-artifact
 
-release-source-artifact:
+release-source-artifact: toolchains-host
 	cmake --preset $(HOST_PRESET)
 	cmake --build --preset package-source
 
@@ -407,11 +413,11 @@ release-source-smoke: release-source-artifact
 
 package-source-smoke: release-source-smoke
 
-package-checksums:
+package-checksums: toolchains-host
 	cmake --preset $(HOST_PRESET)
 	cmake --build --preset package-checksums
 
-package-single-header:
+package-single-header: toolchains-host
 	cmake --preset $(HOST_PRESET)
 	cmake --build --preset package-single-header
 
@@ -466,7 +472,7 @@ release:
 print-release-version:
 	@printf '%s\n' "$(RELEASE_VERSION)"
 
-bench:
+bench: toolchains-host
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
@@ -475,7 +481,7 @@ bench:
 		./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$(PERF_LATEST)"; \
 	fi
 
-bench-check:
+bench-check: toolchains-host
 ifeq ($(and $(wildcard $(PERF_BASELINE)),$(wildcard $(LUA_PERF_BASELINE))),)
 	@if [ ! -f "$(PERF_BASELINE)" ] || [ ! -f "$(LUA_PERF_BASELINE)" ]; then \
 		printf '%s\n' "bench-check skipped: missing frozen benchmark baseline for host $(PERF_HOST_ID)" >&2; \
@@ -510,13 +516,13 @@ else
 	fi
 endif
 
-bench-freeze-baseline:
+bench-freeze-baseline: toolchains-host
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
 	./build/$(HOST_PRESET)/lonejson_bench freeze-baseline "$(PERF_HISTORY)" "$(PERF_BASELINE)"
 
-bench-compare:
+bench-compare: toolchains-host
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
@@ -526,7 +532,7 @@ bench-baseline-history:
 	@$(MAKE) --no-print-directory lua-bench-prerequisite >/dev/null
 	$(LUA_BENCH_RUN) scripts/bench_baseline_history.lua --repo "$(CURDIR)" --host-id "$(PERF_HOST_ID)"
 
-bench-gate:
+bench-gate: toolchains-host
 	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
@@ -542,7 +548,7 @@ test-host: build-host
 	./scripts/test.sh $(HOST_PRESET)
 
 test-host-curl: deps-host
-	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
+	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset host-curl -D LONEJSON_CPKT_ROOT="$$bundle_root"
 	cmake --build --preset host-curl
 	ctest --no-tests=error --preset host-curl
 
@@ -583,7 +589,7 @@ $(LUA_ROCKSPEC): $(LUA_ROCK_SOURCES)
 	mkdir -p "$(LUA_ROCK_TREE)"
 	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(LUA_ROCKSPEC)" "git+file://$(CURDIR)" "" "$$lib_ext"
 
-$(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES) $(LUA_ROCK_LIBLONEJSON_SOURCES)
+$(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES) $(LUA_ROCK_LIBLONEJSON_SOURCES) | toolchains-host
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared lonejson_static
 	cmake --install "build/$(DEBUG_PRESET)" --prefix "$(CURDIR)/build/lua-sdk"
@@ -591,7 +597,7 @@ $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES) $(LUA_ROCK_LIBLONEJSON_SO
 	set -e; export TMPDIR="$(CURDIR)/build/luarocks-native/tool-tmp"; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"
 
 lua-target-runner: deps-host
-	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset host-curl -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
+	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset host-curl -D LONEJSON_CPKT_ROOT="$$bundle_root"
 	cmake --build --preset host-curl --target lonejson_lua_target_runner
 
 lua-host-runtime: lua-rock
@@ -639,7 +645,7 @@ lua-bench-gate:
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" $(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
 	$(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
 
-asan:
+asan: toolchains-host
 	cmake --preset $(ASAN_PRESET)
 	cmake --build --preset $(ASAN_PRESET)
 	ctest --no-tests=error --preset $(ASAN_PRESET) -LE host-policy -E "$(SANITIZER_CTEST_EXCLUDE)"
@@ -654,18 +660,20 @@ tsan:
 		printf '%s\n' 'Skipping tsan: unsupported toolchain'; \
 		exit 0; \
 	fi; \
+	target_id="$$(./scripts/detect_native_target.sh)"; \
+	./scripts/cpkt-toolchains.sh ensure "$$target_id" >/dev/null; \
 	cmake --preset $(TSAN_PRESET); \
 	cmake --build --preset $(TSAN_PRESET); \
 	ctest --no-tests=error --preset $(TSAN_PRESET) -LE host-policy -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 valgrind: deps-host
 	@command -v valgrind >/dev/null 2>&1 || { printf '%s\n' 'Valgrind is required for the native memory-check gate' >&2; exit 1; }
-	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(VALGRIND_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root"
+	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset $(VALGRIND_PRESET) -D LONEJSON_CPKT_ROOT="$$bundle_root"
 	cmake --build --preset $(VALGRIND_PRESET) --target lonejson_tests lonejson_curl_rewind_tests lonejson_lua_target_runner
 	cd build/$(VALGRIND_PRESET) && ctest --no-tests=error -j 1 -T MemCheck --overwrite "MemoryCheckCommandOptions=--leak-check=full --track-origins=yes --keep-debuginfo=yes --num-callers=30 --error-exitcode=86 --quiet" -R '^lonejson_(tests|curl_rewind_tests|lua_target_tests)$$' --output-on-failure
 
 fuzz: deps-host toolchains-aflpp
-	bundle_root="$$(./scripts/detect_c_pkt_systems_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_C_PKT_SYSTEMS_ROOT="$$bundle_root" -D LONEJSON_FUZZ_SECONDS="$(FUZZ_TIME)"
+	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_CPKT_ROOT="$$bundle_root" -D LONEJSON_FUZZ_SECONDS="$(FUZZ_TIME)"
 	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_targets
 	ctest --preset fuzz
 	$(MAKE) lua-fuzz
@@ -676,15 +684,15 @@ fuzz-long:
 fuzz-smoke:
 	LONEJSON_FUZZ_EXECUTIONS=1000 $(MAKE) fuzz
 
-stack-usage:
+stack-usage: toolchains-host
 	cmake --preset stack-usage
 	cmake --build --preset stack-usage-report
 
-format:
+format: toolchains-host
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset format
 
-format-check:
+format-check: toolchains-host
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset $(DEBUG_PRESET) --target format-check
 
@@ -697,6 +705,10 @@ deps-release: deps-all
 
 deps-host:
 	target_id="$$(./scripts/detect_native_target.sh)" && ./scripts/deps.sh "$$target_id"
+
+.PHONY: toolchains-host
+toolchains-host:
+	target_id="$$(./scripts/detect_native_target.sh)" && ./scripts/cpkt-toolchains.sh ensure "$$target_id" >/dev/null
 
 toolchains-x86_64-linux-gnu:
 	./scripts/cpkt-toolchains.sh ensure x86_64-linux-gnu

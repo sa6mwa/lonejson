@@ -16,7 +16,13 @@ case "$1" in
   status) printf '%s' "${TEST_IDENTITY_DIRTY:-}" ;;
   tag) [[ "$2" == --points-at ]] || exit 91; printf '%s\n' "${TEST_IDENTITY_TAGS:-}" ;;
   cat-file) printf '%s\n' "${TEST_IDENTITY_TYPE:-commit}" ;;
-  symbolic-ref) [[ "${TEST_IDENTITY_SYMBOLIC:-0}" == 1 ]] ;;
+  symbolic-ref)
+    case "${@: -1}" in
+      refs/remotes/origin/HEAD) [[ ${TEST_IDENTITY_NO_DEFAULT:-0} == 0 ]] || exit 1; printf 'refs/remotes/origin/%s\n' "${TEST_IDENTITY_DEFAULT:-trunk}" ;;
+      HEAD) [[ ${TEST_IDENTITY_DETACHED:-0} == 0 ]] || exit 1; printf '%s\n' "${TEST_IDENTITY_BRANCH:-trunk}" ;;
+      *) [[ "${TEST_IDENTITY_SYMBOLIC:-0}" == 1 ]] ;;
+    esac ;;
+  verify-commit) [[ ${TEST_IDENTITY_UNSIGNED:-0} == 0 ]] ;;
   *) printf 'unexpected Git mutation: %s\n' "$*" >&2; exit 92 ;;
 esac
 GIT
@@ -30,6 +36,11 @@ reject() {
   grep -F "$expected" "$work/rejected" >/dev/null
 }
 TEST_IDENTITY_TAGS=v1.2.3 check | grep -F 'Release identity verified: v1.2.3 0123456789'
+TEST_IDENTITY_TAGS=v1.2.3 TEST_IDENTITY_DEFAULT=main TEST_IDENTITY_BRANCH=main check >/dev/null
+TEST_IDENTITY_TAGS=v1.2.3 TEST_IDENTITY_BRANCH=feature reject 'requires the default branch trunk' check
+TEST_IDENTITY_TAGS=v1.2.3 TEST_IDENTITY_DETACHED=1 reject 'attached default branch' check
+TEST_IDENTITY_TAGS=v1.2.3 TEST_IDENTITY_NO_DEFAULT=1 reject 'authoritative default branch' check
+TEST_IDENTITY_TAGS=v1.2.3 TEST_IDENTITY_UNSIGNED=1 reject 'verified commit signature' check
 reject 'exactly one lightweight' check
 TEST_IDENTITY_TAGS=$'v1.2.3\nv2.3.4' reject 'exactly one lightweight' check
 TEST_IDENTITY_TAGS=v1.2.3 TEST_IDENTITY_TYPE=tag reject 'must be lightweight' check

@@ -130,7 +130,7 @@ scan_shipped_payload_for_bootlin_toolchain_paths() {
   # Bootlin collection.  Match both the lifecycle cache layout and the stable
   # collection directory itself so a CPKT_TOOLCHAIN_CACHE override cannot hide
   # the leak behind a different parent directory.
-  toolchain_path_pattern='/(c\.pkt\.systems/)?toolchains(/roots)?/|/[^[:space:]:;]*(x86-64|aarch64|armv7-eabihf)--(glibc|musl)--stable-[^[:space:]:;]*'
+  toolchain_path_pattern='/(cpkt/)?toolchains(/roots)?/|/[^[:space:]:;]*(x86-64|aarch64|armv7-eabihf)--(glibc|musl)--stable-[^[:space:]:;]*'
 
   while IFS= read -r file_path; do
     rel_path="${file_path#"$root"/}"
@@ -184,14 +184,16 @@ scan_loader_metadata() {
     for candidate in x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl arm64-apple-darwin; do
       if [[ "$artifact" == *"-$candidate"* ]]; then target_id=$candidate; break; fi
     done
-    eval "$("$repo_root/scripts/discover_target_tools.sh" \
-      --build-dir "$repo_root/build/$target_id-release" --target-id "$target_id")"
+    local description
+    description=$("$repo_root/scripts/discover_target_tools.sh" \
+      --build-dir "$repo_root/build/$target_id-release" --target-id "$target_id") || exit 1
+    eval "$description"
     tools_loaded=1
   }
 
   # Keep this separate from the general path scan: ELF interpreter and
   # RPATH metadata must never point at a pinned Bootlin collection.
-  bootlin_loader_path_pattern='c\.pkt\.systems/toolchains/|/(x86-64|aarch64|armv7-eabihf)--(glibc|musl)--stable-'
+  bootlin_loader_path_pattern='cpkt/toolchains/|/(x86-64|aarch64|armv7-eabihf)--(glibc|musl)--stable-'
 
   while IFS= read -r file_path; do
     rel_path="${file_path#"$root"/}"
@@ -208,7 +210,7 @@ scan_loader_metadata() {
               "pinned Bootlin ELF interpreter or RPATH leaked"
           fi
           if printf '%s\n' "$metadata" | grep -E \
-              '(libasan|libtsan|RUNPATH|RPATH|Requesting program interpreter).*(/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/|c\.pkt\.systems/toolchains/|--(glibc|musl)--stable-)' \
+              '(libasan|libtsan|RUNPATH|RPATH|Requesting program interpreter).*(/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/|cpkt/toolchains/|--(glibc|musl)--stable-)' \
               >/dev/null; then
             fail_artifact "$artifact" "$rel_path" \
               "non-relocatable, pinned Bootlin, or sanitizer ELF loader metadata"
@@ -223,7 +225,7 @@ scan_loader_metadata() {
           $1 == "name" || $1 == "path" { print }
         ')"
           if printf '%s\n' "$metadata" | grep -E \
-              '(libasan|libtsan|/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/|c\.pkt\.systems/toolchains/|--(glibc|musl)--stable-)' \
+              '(libasan|libtsan|/home/|/tmp/|/var/tmp|/build/|/\.cache/|/\.deps/|cpkt/toolchains/|--(glibc|musl)--stable-)' \
               >/dev/null; then
             fail_artifact "$artifact" "$rel_path" \
               "non-relocatable, pinned Bootlin, or sanitizer Mach-O loader metadata"

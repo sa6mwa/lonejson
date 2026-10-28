@@ -20,7 +20,12 @@ if [[ $# -ne 0 ]]; then
 fi
 
 cd "$repo_root"
-cmake --preset "$preset" -S "$repo_root"
+case "$preset" in
+  debug|debug-lua|host)
+    bundle_root=$("$repo_root/scripts/detect_cpkt_bundle.sh")
+    cmake --preset "$preset" -S "$repo_root" -D "LONEJSON_CPKT_ROOT=$bundle_root" ;;
+  *) cmake --preset "$preset" -S "$repo_root" ;;
+esac
 cmake --build --preset "$preset"
 if [[ "$stage_examples" -eq 1 ]]; then
   "$repo_root/scripts/stage_standalone_examples.sh"

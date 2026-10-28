@@ -40,7 +40,7 @@ for target_id in \
   require_text '"name": "'"$target_id"'-release"'
   require_text '"LONEJSON_TARGET_ID": "'"$target_id"'"'
   require_text '"LONEJSON_DIST_DIR": "${sourceDir}/dist"'
-  require_text '"LONEJSON_C_PKT_SYSTEMS_ROOT": "${sourceDir}/.cache/c.pkt.systems/'"$target_id"'/root"'
+  require_text '"LONEJSON_CPKT_ROOT": "${sourceDir}/.cache/cpkt/'"$target_id"'/root"'
 done
 
 while IFS='|' read -r target_id target_arch target_os target_libc; do
@@ -91,7 +91,7 @@ reject_text '"name": "linux-gnu-release"'
 reject_text '"name": "linux-musl-release"'
 reject_text '"configurePreset": "linux-gnu-release"'
 reject_text '"configurePreset": "linux-musl-release"'
-reject_text '${sourceDir}/.deps/c.pkt.systems'
+reject_text '${sourceDir}/.deps/cpkt'
 
 # Verify real preset selection with a minimal inventory; preset filters can
 # override command-line filters, so text checks alone do not establish scope.

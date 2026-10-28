@@ -40,6 +40,9 @@ trap 'rm -rf -- "$work"' EXIT
 mkdir "$work/bin"
 cat >"$work/bin/cmake" <<'SH'
 #!/bin/bash
+for argument in "$@"; do
+  if [[ "$argument" == -P ]]; then exec "$TSAN_REAL_CMAKE" "$@"; fi
+done
 printf 'cmake %s\n' "$*" >>"$TSAN_GATE_EVENTS"
 case "$1" in
   --preset) [[ "${TSAN_GATE_FAIL:-}" != configure ]] ;;
@@ -54,6 +57,7 @@ printf 'ctest %s\n' "$*" >>"$TSAN_GATE_EVENTS"
 SH
 chmod +x "$work/bin/"*
 export TSAN_GATE_EVENTS="$work/events"
+export TSAN_REAL_CMAKE="$(command -v cmake)"
 for phase in configure build test; do
   : >"$TSAN_GATE_EVENTS"
   if PATH="$work/bin:$PATH" TSAN_GATE_FAIL="$phase" \

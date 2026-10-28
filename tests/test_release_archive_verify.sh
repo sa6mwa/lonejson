@@ -579,12 +579,12 @@ cat >"$package_root/share/lonejson/dependencies.json" <<'EOF'
   "dependencies": [
     {
       "target_id": "x86_64-linux-gnu",
-      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.10.0/c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
-      "sha256": "fb64caa3cad66e01669705412cd88cb4267025ca0a083fa936fe25786011391d",
-      "archive_name": "c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
+      "source_url": "https://github.com/c89systems/cpkt/releases/download/v0.6.1/cpkt-0.6.1-x86_64-linux-gnu.tar.gz",
+      "sha256": "99625b7889f78b6e467d38e7dbec08d9d0ed6f599ff4571244060ce67c6ca62f",
+      "archive_name": "cpkt-0.6.1-x86_64-linux-gnu.tar.gz",
       "bundled": false,
-      "name": "c.pkt.systems",
-      "version": "0.10.0",
+      "name": "cpkt",
+      "version": "0.6.1",
       "source_system": "GitHub release",
       "license": "MIT",
       "external": false,
@@ -596,26 +596,26 @@ cat >"$package_root/share/lonejson/dependencies.json" <<'EOF'
     },
     {
       "target_id": "x86_64-linux-gnu",
-      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.10.0/c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
-      "sha256": "fb64caa3cad66e01669705412cd88cb4267025ca0a083fa936fe25786011391d",
-      "archive_name": "c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
+      "source_url": "https://github.com/c89systems/cpkt/releases/download/v0.6.1/cpkt-0.6.1-x86_64-linux-gnu.tar.gz",
+      "sha256": "99625b7889f78b6e467d38e7dbec08d9d0ed6f599ff4571244060ce67c6ca62f",
+      "archive_name": "cpkt-0.6.1-x86_64-linux-gnu.tar.gz",
       "bundled": false,
       "name": "curl",
       "version": "8.22.0",
-      "source_system": "c.pkt.systems",
+      "source_system": "cpkt",
       "license": "curl",
       "external": true,
       "role": "optional-facade-consumer-requirement"
     },
     {
       "target_id": "x86_64-linux-gnu",
-      "source_url": "https://github.com/sa6mwa/c.pkt.systems/releases/download/v0.10.0/c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
-      "sha256": "fb64caa3cad66e01669705412cd88cb4267025ca0a083fa936fe25786011391d",
-      "archive_name": "c.pkt.systems-0.10.0-x86_64-linux-gnu.tar.gz",
+      "source_url": "https://github.com/c89systems/cpkt/releases/download/v0.6.1/cpkt-0.6.1-x86_64-linux-gnu.tar.gz",
+      "sha256": "99625b7889f78b6e467d38e7dbec08d9d0ed6f599ff4571244060ce67c6ca62f",
+      "archive_name": "cpkt-0.6.1-x86_64-linux-gnu.tar.gz",
       "bundled": false,
       "name": "openssl",
-      "version": "3.6.4",
-      "source_system": "c.pkt.systems",
+      "version": "3.6.5",
+      "source_system": "cpkt",
       "license": "Apache-2.0",
       "external": true,
       "role": "optional-facade-consumer-requirement"
@@ -628,7 +628,7 @@ EOF
 for defect in sha256 license bundled external version malformed; do
   cp "$package_root/share/lonejson/dependencies.json" "$tmp_dir/manifest-$defect.json"
   case "$defect" in
-    sha256) perl -pi -e 's/fb64caa3/00000000/g' "$tmp_dir/manifest-$defect.json" ;;
+    sha256) perl -pi -e 's/99625b78/00000000/g' "$tmp_dir/manifest-$defect.json" ;;
     license) perl -pi -e 's/Apache-2.0/MIT/' "$tmp_dir/manifest-$defect.json" ;;
     bundled) perl -pi -e 's/"bundled": false/"bundled": true/g' "$tmp_dir/manifest-$defect.json" ;;
     external) perl -pi -e 's/"external": true/"external": false/g' "$tmp_dir/manifest-$defect.json" ;;
@@ -652,7 +652,7 @@ CMAKE_READELF:FILEPATH=$CPKT_TOOLCHAIN_READELF
 CMAKE_SYSROOT:PATH=$CPKT_SYSROOT
 LONEJSON_BOOTLIN_LIBC:STRING=gnu
 LONEJSON_BOOTLIN_TOOLCHAIN_ROOT:PATH=$CPKT_TOOLCHAIN_ROOT
-LONEJSON_C_PKT_SYSTEMS_ROOT:PATH=$dependency_root
+LONEJSON_CPKT_ROOT:PATH=$dependency_root
 EOF
 
 "$AR" rcs "$dependency_root/lib/libcurl.a"
@@ -729,7 +729,7 @@ bootlin_path_root="$bootlin_path_package_dir/liblonejson-9.9.9-x86_64-linux-gnu"
 mkdir -p "$bootlin_path_dist_dir"
 cp -R "$tmp_dir/package" "$bootlin_path_package_dir"
 cat >>"$bootlin_path_root/lib/pkgconfig/lonejson.pc" <<'EOF'
-Libs.private: -Wl,-rpath,/srv/build-cache/c.pkt.systems/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib
+Libs.private: -Wl,-rpath,/srv/build-cache/cpkt/toolchains/roots/x86-64--glibc--stable-2026.08-1/sysroot/lib
 EOF
 tar -C "$bootlin_path_package_dir" -czf \
   "$bootlin_path_dist_dir/liblonejson-9.9.9-x86_64-linux-gnu.tar.gz" \

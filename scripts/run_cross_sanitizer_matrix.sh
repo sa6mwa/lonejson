@@ -181,7 +181,7 @@ run_target_sanitizer() {
     sanitizer="$3"
     build_dir="$repo_root/build/$preset-$sanitizer"
     toolchain_file="$(target_toolchain_file "$target_id")"
-    bundle_root="$repo_root/.cache/c.pkt.systems/$target_id/root"
+    bundle_root="$repo_root/.cache/cpkt/$target_id/root"
     sanitizer_flag="$(sanitizer_cmake_flag "$sanitizer")"
     sanitizer_runtime_dir=""
     env_name="$(sanitizer_env_name "$sanitizer")"
@@ -212,7 +212,7 @@ run_target_sanitizer() {
         -DLONEJSON_BUILD_WITH_JWT=ON \
         -DLONEJSON_BUILD_WITH_OIDC=ON \
         -DLONEJSON_TEST_TIMEOUT=600 \
-        -DLONEJSON_C_PKT_SYSTEMS_ROOT="$bundle_root"
+        -DLONEJSON_CPKT_ROOT="$bundle_root"
     run_or_print cmake --build "$build_dir"
     if ! run_or_print env "$env_name=$env_value" \
         UBSAN_OPTIONS=halt_on_error=1:abort_on_error=1 \
