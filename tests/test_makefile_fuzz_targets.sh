@@ -10,6 +10,10 @@ grep -F 'ctest --preset fuzz' <<<"$plan" >/dev/null
 grep -F 'make lua-fuzz' <<<"$plan" >/dev/null
 plan=$(make --no-print-directory -C "$repo_root" -n fuzz-smoke)
 grep -F 'LONEJSON_FUZZ_EXECUTIONS=1000' <<<"$plan" >/dev/null
+# The Make surface is portable; the real AFL collection is native Linux x86_64.
+if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
+  exit 0
+fi
 bundle=$("$repo_root/scripts/detect_cpkt_bundle.sh")
 cmake -S "$repo_root" -B "$work/build" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$repo_root/cmake/toolchains/linux-x86_64-aflpp.cmake" \

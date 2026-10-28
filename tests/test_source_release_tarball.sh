@@ -157,6 +157,7 @@ if [[ "$(uname -s)" == Linux ]]; then
   PATH="$test_root/bin:$PATH" bash "$stage_dir/tests/test_bench_baseline_history.sh" \
     "$stage_dir" "$lua_exec" luarocks "$stage_dir/build/host-curl"
 else
+  make --no-print-directory -C "$stage_dir" lua-rock LUA="$lua_exec" >/dev/null
   PATH="$test_root/bin:$PATH" bash "$stage_dir/tests/test_bench_baseline_history.sh" "$stage_dir" "$lua_exec"
 fi
 PATH="$test_root/bin:$PATH" bash "$stage_dir/tests/test_release_checksum_manifest.sh" "$stage_dir"

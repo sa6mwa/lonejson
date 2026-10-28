@@ -173,6 +173,9 @@ selecting the debug library. Native Darwin ASan and TSan configurations omit
 these Lua module tests and their setup fixture: the ordinary Lua interpreter
 cannot load their sanitizer runtime safely. Compiled C sanitizer tests remain
 selected.
+The source-archive check invokes the benchmark script directly in a fresh
+extracted tree. On Darwin that caller prepares its own Lua SDK and rock before
+the benchmark; it does not depend on the parent checkout's CTest fixture.
 
 `make package-verify` rejects every checksum-listed artifact if a packaged
 library, archive, or consumer metadata contains a Bootlin cache or stable
@@ -334,6 +337,9 @@ use the presets' label exclusions without adding a narrower `-LE` expression:
 CTest combines repeated label exclusions by intersection, which would allow
 service tests back into the selection after service teardown.
 
+The portable fuzz Make-surface assertions run on every supported host. Real
+AFL configuration, inventory and compiler-policy checks run on Linux x86_64,
+where the declared AFL collection is supported.
 The fuzz CMake graph declares every maintained executable and seed corpus.
 `lonejson_fuzz_targets` builds the required static library and fuzz executables
 without compiling an unused instrumented shared library. The fuzz CTest preset

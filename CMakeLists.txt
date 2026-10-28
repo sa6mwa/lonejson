@@ -849,7 +849,7 @@ if(LONEJSON_BUILD_TESTS)
   endif()
   get_property(lonejson_runtime_tests DIRECTORY PROPERTY TESTS)
   if(LONEJSON_BASH_EXECUTABLE)
-    foreach(case native_lua_ctest selected_release_build package_verify_directory required_tool_discovery)
+    foreach(case native_lua_ctest native_host_workflows selected_release_build package_verify_directory required_tool_discovery)
       add_test(NAME lonejson_${case}_tests
         COMMAND "${LONEJSON_BASH_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${case}.sh"
@@ -1000,16 +1000,19 @@ if(LONEJSON_BUILD_TESTS)
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cross_sanitizer_matrix.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}")
-    add_test(
-      NAME lonejson_cmake_fuzz_sanitizer_conflict_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_sanitizer_conflicts.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}")
-    add_test(
-      NAME lonejson_cmake_fuzz_auth_optional_tests
-      COMMAND "${LONEJSON_BASH_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_auth_optional.sh"
-        "${CMAKE_CURRENT_SOURCE_DIR}")
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND
+        CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64")
+      add_test(
+        NAME lonejson_cmake_fuzz_sanitizer_conflict_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_sanitizer_conflicts.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+      add_test(
+        NAME lonejson_cmake_fuzz_auth_optional_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_fuzz_auth_optional.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+    endif()
     add_test(
       NAME lonejson_oidc_pkce_provider_no_openssl_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
