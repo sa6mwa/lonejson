@@ -146,9 +146,10 @@ load_target_tools() {
   local preset=$1
   local target_id=$2
 
-  eval "$("$repo_root/scripts/discover_target_tools.sh" \
+  resolved_environment=$("$repo_root/scripts/discover_target_tools.sh" \
     --build-dir "$build_root/$preset" \
-    --target-id "$target_id")"
+    --target-id "$target_id") || exit $?
+  eval "$resolved_environment"
 }
 
 target_cache_value() {

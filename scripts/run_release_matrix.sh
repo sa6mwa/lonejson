@@ -21,6 +21,7 @@ configure_release_target() {
         exit 1
     fi
     cmake --preset "$preset" \
+        -D "LONEJSON_RELEASE_TARGETS=$targets" \
         -D LONEJSON_BUILD_WITH_CURL=ON \
         -D LONEJSON_BUILD_WITH_OPENSSL=ON \
         -D LONEJSON_BUILD_WITH_JWT=ON \

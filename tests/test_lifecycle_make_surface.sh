@@ -132,6 +132,13 @@ if grep -F 'lonejson_lua_target_runner' <<<"$darwin_lua_test" >/dev/null; then
   exit 1
 fi
 printf '%s\n' "$darwin_lua_test" | grep -F 'luarocks' >/dev/null
+if grep -F 'cmake --install' <<<"$darwin_lua_test"; then
+  printf 'Darwin Lua preparation must be owned by the CTest fixture\n' >&2; exit 1
+fi
+darwin_debug_test=$(make --no-print-directory -C "$repo_root" -n LONEJSON_HOST_OS=Darwin test)
+if grep -F 'make lua-test' <<<"$darwin_debug_test"; then
+  printf 'Darwin debug tests repeat the Lua CTest selection\n' >&2; exit 1
+fi
 
 darwin_lua_bench=$(make --no-print-directory -C "$repo_root" -n \
   LONEJSON_HOST_OS=Darwin lua-bench)

@@ -4,6 +4,10 @@ set -euo pipefail
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 toolchain_resolver="$repo_root/scripts/cpkt-toolchains.sh"
 host_policy_ctest_exclude=host-policy
+configure_args=()
+if [[ ${LONEJSON_RELEASE_TARGETS+x} ]]; then
+    configure_args+=("-DLONEJSON_RELEASE_TARGETS=$LONEJSON_RELEASE_TARGETS")
+fi
 
 usage() {
     printf 'usage: %s [--dry-run]\n' "$(basename -- "$0")" >&2
@@ -202,6 +206,7 @@ run_target_sanitizer() {
         run_probe "$target_id" "$sanitizer" ""
     fi
     run_or_print cmake -S "$repo_root" -B "$build_dir" -G Ninja \
+        "${configure_args[@]}" \
         -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" \
         "${compiler_args[@]}" \
         -DCMAKE_BUILD_TYPE=Debug \

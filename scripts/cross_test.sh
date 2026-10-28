@@ -11,8 +11,12 @@ if [[ -z "$exclude" || $# -eq 0 ]]; then
   exit 2
 fi
 
+configure_args=()
+if [[ ${LONEJSON_RELEASE_TARGETS+x} ]]; then
+  configure_args+=("-DLONEJSON_RELEASE_TARGETS=$LONEJSON_RELEASE_TARGETS")
+fi
 for preset in "$@"; do
-  cmake --preset "$preset"
+  cmake --preset "$preset" "${configure_args[@]}"
   cmake --build --preset "$preset"
   ctest --no-tests=error --preset "$preset" --output-on-failure -LE "$exclude"
 done

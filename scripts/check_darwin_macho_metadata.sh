@@ -25,9 +25,10 @@ if [[ ! -f "$macho_file" ]]; then
   exit 1
 fi
 
-eval "$("$repo_root/scripts/discover_target_tools.sh" \
+resolved_environment=$("$repo_root/scripts/discover_target_tools.sh" \
   --build-dir "$build_dir" \
-  --target-id "$target_id")"
+  --target-id "$target_id") || exit $?
+eval "$resolved_environment"
 
 if [[ -z "${OTOOL:-}" ]]; then
   printf 'missing target otool for %s\n' "$target_id" >&2

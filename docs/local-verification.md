@@ -163,6 +163,11 @@ direct CTest selections. Schema-cache and encode-stat checks run as separate
 tests that build their instrumented Lua modules against that installed SDK.
 The fixture reuses its configured build through `LONEJSON_LUA_BUILD_DIR`;
 it does not reconfigure the active test build with the debug preset.
+Lua preparation always builds and installs that selected library and runs
+LuaRocks with the current flags. A shared installation stamp cannot establish
+that a different configuration is installed. CMake still reuses unchanged
+library outputs through its normal dependency graph. CTest owns Darwin Lua
+preparation; the Make Lua test targets do not prepare it a second time.
 
 `make package-verify` rejects every checksum-listed artifact if a packaged
 library, archive, or consumer metadata contains a Bootlin cache or stable
@@ -199,7 +204,8 @@ Use `make test` as the debug lifecycle gate.
 
 `make test` is intentionally broader than raw CTest: it configures and builds
 the debug tree, stages standalone examples, runs the debug CTest preset, and
-then runs the Lua integration test through `make lua-test`.
+then runs the full-feature Lua integration test through `make lua-test` on
+Linux. Darwin Lua coverage is already part of the debug CTest selection.
 
 Do not use `ctest --preset debug` as a completion, pre-release, release, or
 status gate. Raw CTest does not configure or build the tree, so it can report
@@ -300,6 +306,10 @@ required inventory to `build/packaging/checksums/lonejson-<version>-binary-CHECK
 without claiming source-archive or full upload proof. `make package-checksums`
 requires all selected SDKs, Lua products, the standalone header, and the source
 archive before replacing the complete upload manifest in `dist/`.
+Make supplies its current `LONEJSON_RELEASE_TARGETS` as an explicit CMake
+configuration argument, so a warm build cannot retain a previous Make selection
+or stale optional Darwin availability. Direct CMake callers can select their
+inventory with `-DLONEJSON_RELEASE_TARGETS=...`.
 Verification rejects missing entries, unexpected entries, and changed bytes.
 Final full verification also rejects unlisted release-looking files.
 

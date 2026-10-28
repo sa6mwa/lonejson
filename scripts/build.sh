@@ -20,11 +20,15 @@ if [[ $# -ne 0 ]]; then
 fi
 
 cd "$repo_root"
+configure_args=()
+if [[ ${LONEJSON_RELEASE_TARGETS+x} ]]; then
+  configure_args+=("-DLONEJSON_RELEASE_TARGETS=$LONEJSON_RELEASE_TARGETS")
+fi
 case "$preset" in
   debug|debug-lua|host)
     bundle_root=$("$repo_root/scripts/detect_cpkt_bundle.sh")
-    cmake --preset "$preset" -S "$repo_root" -D "LONEJSON_CPKT_ROOT=$bundle_root" ;;
-  *) cmake --preset "$preset" -S "$repo_root" ;;
+    cmake --preset "$preset" -S "$repo_root" -D "LONEJSON_CPKT_ROOT=$bundle_root" "${configure_args[@]}" ;;
+  *) cmake --preset "$preset" -S "$repo_root" "${configure_args[@]}" ;;
 esac
 cmake --build --preset "$preset"
 if [[ "$stage_examples" -eq 1 ]]; then

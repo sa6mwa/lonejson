@@ -30,6 +30,8 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CpktDependencyCache.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonDevelopmentRuntime.cmake")
 project(lonejson VERSION ${LONEJSON_RESOLVED_VERSION} LANGUAGES C)
 set(LONEJSON_VERSION "${PROJECT_VERSION}")
+# Environment supplies a default for direct CMake callers. Make supplies -D
+# on every configure so its current selection replaces any cached inventory.
 if(NOT DEFINED LONEJSON_RELEASE_TARGETS AND DEFINED ENV{LONEJSON_RELEASE_TARGETS})
   set(LONEJSON_RELEASE_TARGETS "$ENV{LONEJSON_RELEASE_TARGETS}")
 endif()
@@ -847,7 +849,7 @@ if(LONEJSON_BUILD_TESTS)
   endif()
   get_property(lonejson_runtime_tests DIRECTORY PROPERTY TESTS)
   if(LONEJSON_BASH_EXECUTABLE)
-    foreach(case native_lua_ctest selected_release_build package_verify_directory)
+    foreach(case native_lua_ctest selected_release_build package_verify_directory required_tool_discovery)
       add_test(NAME lonejson_${case}_tests
         COMMAND "${LONEJSON_BASH_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${case}.sh"

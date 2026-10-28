@@ -91,7 +91,8 @@ fi
 
 mkdir -p "$tmp_dir/tool-tmp"
 TMPDIR="$tmp_dir/tool-tmp" LONEJSON_LIBDIR="$lonejson_libdir" "$luarocks_exec" install --tree "$tmp_dir/tree" "$rock_path"
-eval "$("$luarocks_exec" path --tree "$tmp_dir/tree")"
+resolved_environment=$("$luarocks_exec" path --tree "$tmp_dir/tree") || exit $?
+eval "$resolved_environment"
 printf '%s\n' 'assert(require("lonejson.init"))' >"$tmp_dir/smoke.lua"
 "$repo_root/scripts/run_installed_lua.sh" "$tmp_dir/tree" "$lonejson_libdir" "$lua_exec" \
   "$tmp_dir/smoke.lua" "$repo_root/tests/test_lua.lua" "$repo_root/tests/test_lua_fuzz.lua"

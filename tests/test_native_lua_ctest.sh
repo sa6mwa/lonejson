@@ -35,7 +35,9 @@ while [[ $# -gt 0 ]]; do
 done
 case $mode in
   config) printf 'so\n' ;;
-  path) printf 'export TEST_ACTIVE_ROCK=%q\n' "$tree" ;;
+  path)
+    [[ ${FAIL_LUA_PATH:-0} == 0 ]] || exit 39
+    printf 'export TEST_ACTIVE_ROCK=%q\n' "$tree" ;;
   make)
     [[ -d "$LONEJSON_LIBDIR" ]]
     [[ "$LONEJSON_LIBDIR" == "$EXPECTED_LUA_LIBDIR" ]]
@@ -105,6 +107,13 @@ if FAIL_NATIVE_PREPARE=1 run_tests -R '^lonejson_lua_native_tests$' >"$work/fail
 fi
 [[ $(cat "$NATIVE_TEST_EVENTS") == prepare ]]
 grep -F 'Not Run' "$work/failed.log" >/dev/null
+: >"$NATIVE_TEST_EVENTS"
+# Failed path discovery cannot fall through to a previously usable module.
+if FAIL_LUA_PATH=1 TEST_ACTIVE_ROCK="$fixture/build/luarocks" \
+    run_tests -R '^lonejson_lua_(schema_cache|encode_stats)_tests$' >"$work/path-failed.log" 2>&1; then
+  printf 'instrumented tests accepted failed Lua path discovery\n' >&2; exit 1
+fi
+! grep '^lua ' "$NATIVE_TEST_EVENTS"
 cmake -S "$fixture" -B "$fixture/build/native" -D TEST_NATIVE_HOST=Linux >"$work/linux.log" 2>&1
 ctest --test-dir "$fixture/build/native" -N >"$work/linux-tests"
 ! grep -F lonejson_lua_ "$work/linux-tests"

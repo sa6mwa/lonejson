@@ -27,6 +27,7 @@ RELEASE_BUILD_PRESETS := \
 empty :=
 space := $(empty) $(empty)
 export LONEJSON_RELEASE_TARGETS := $(subst $(space),;,$(patsubst %-release,%,$(strip $(RELEASE_BUILD_PRESETS))))
+LONEJSON_CMAKE_RELEASE_ARGS := "-DLONEJSON_RELEASE_TARGETS=$(LONEJSON_RELEASE_TARGETS)"
 CROSS_RELEASE_PRESETS := \
 	aarch64-linux-gnu-release \
 	aarch64-linux-musl-release \
@@ -82,7 +83,6 @@ FUZZ_TIME ?= 30
 FUZZ_LONG_TIME ?= 300
 LUA_ROCK_TREE := build/luarocks
 LUA_ROCKSPEC := $(LUA_ROCK_TREE)/lonejson-$(RELEASE_VERSION)-1.rockspec
-LUA_ROCK_STAMP := $(LUA_ROCK_TREE)/.installed.stamp
 LUA_ROCK_EXTRA_CFLAGS ?= -std=gnu89 -O3 -DNDEBUG -D_FILE_OFFSET_BITS=64 -fno-semantic-interposition
 LONEJSON_LUA_LIBDIR ?= $(CURDIR)/build/lua-sdk/lib
 LONEJSON_LUA_BENCH_LIBDIR ?= $(CURDIR)/build/$(HOST_PRESET)
@@ -119,15 +119,6 @@ LUA_ROCK_SOURCES := \
 	src/lua/lonejson_lua.h \
 	$(wildcard src/lua/*.inc.h) \
 	lua/lonejson/init.lua
-LUA_ROCK_LIBLONEJSON_SOURCES := \
-	CMakeLists.txt \
-	cmake/LonejsonLinkWarnings.cmake \
-	cmake/lonejson_exports.cmake \
-	$(wildcard cmake/*.exports) \
-	src/lonejson.c \
-	src/lonejson_impl.h \
-	src/lonejson_internal.h \
-	$(wildcard src/impl/*.h)
 
 SANITIZER_CTEST_EXCLUDE := ^lonejson_lua_(target|fuzz|interop|target_runner_argument|benchmark_configuration)_tests$$
 SLICE_BUILD_TARGETS := lonejson_tests lonejson_map_cache_no_tls_tests lonejson_short_names_tests lonejson_short_names_disabled_tests lonejson_static_link_tests lonejson_shared_link_tests
@@ -387,7 +378,7 @@ $(RELEASE_PACK_ROCKSPEC): Makefile $(RELEASE_LUA_SOURCE_TARBALL)
 
 $(RELEASE_ROCK): $(RELEASE_PACK_ROCKSPEC) $(RELEASE_ROCKSPEC) scripts/package_lua_src_rock.sh scripts/smoke_lua_src_rock.sh | toolchains-host
 	./scripts/package_lua_src_rock.sh "$(RELEASE_ROCK)" "$(RELEASE_PACK_ROCKSPEC)" "$(RELEASE_LUA_SOURCE_TARBALL)"
-	cmake --preset $(DEBUG_PRESET)
+	cmake --preset $(DEBUG_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared lonejson_static
 	cmake --install "build/$(DEBUG_PRESET)" --prefix "$(CURDIR)/build/lua-sdk"
 	./scripts/smoke_lua_src_rock.sh "$(RELEASE_ROCK)" "$(LONEJSON_LUA_LIBDIR)" "$(LUA)" "$(LUAROCKS)"
@@ -401,7 +392,7 @@ package:
 package-source: release-source-artifact
 
 release-source-artifact: toolchains-host
-	cmake --preset $(HOST_PRESET)
+	cmake --preset $(HOST_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset package-source
 
 $(RELEASE_SOURCE_TARBALL):
@@ -414,15 +405,15 @@ release-source-smoke: release-source-artifact
 package-source-smoke: release-source-smoke
 
 package-checksums: toolchains-host
-	cmake --preset $(HOST_PRESET)
+	cmake --preset $(HOST_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset package-checksums
 
 package-single-header: toolchains-host
-	cmake --preset $(HOST_PRESET)
+	cmake --preset $(HOST_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset package-single-header
 
 release-darwin-smoke-bundle: deps-arm64-apple-darwin
-	cmake --preset arm64-apple-darwin-release
+	cmake --preset arm64-apple-darwin-release $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset arm64-apple-darwin-release --target package-darwin-smoke-bundle
 
 prerelease-artifacts: release-matrix
@@ -473,7 +464,7 @@ print-release-version:
 	@printf '%s\n' "$(RELEASE_VERSION)"
 
 bench: toolchains-host
-	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
+	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON $(LONEJSON_CMAKE_RELEASE_ARGS) && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
 	if [ -f "$(PERF_BASELINE)" ]; then \
@@ -500,7 +491,7 @@ else
 	lua_latest="$$tmp_dir/lua-latest.json"; \
 	lua_history="$$tmp_dir/lua-history.jsonl"; \
 	lua_runs="$$tmp_dir/lua-runs"; \
-	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
+	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON $(LONEJSON_CMAKE_RELEASE_ARGS) && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench lonejson_shared && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$$c_latest" "$$c_history" "$$c_runs" "$(PERF_ITERATIONS)" && \
 	if ! ./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$$c_latest"; then \
@@ -517,13 +508,13 @@ else
 endif
 
 bench-freeze-baseline: toolchains-host
-	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
+	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON $(LONEJSON_CMAKE_RELEASE_ARGS) && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
 	./build/$(HOST_PRESET)/lonejson_bench freeze-baseline "$(PERF_HISTORY)" "$(PERF_BASELINE)"
 
 bench-compare: toolchains-host
-	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
+	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON $(LONEJSON_CMAKE_RELEASE_ARGS) && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
 	./build/$(HOST_PRESET)/lonejson_bench compare "$(PERF_BASELINE)" "$(PERF_LATEST)"
@@ -533,14 +524,16 @@ bench-baseline-history:
 	$(LUA_BENCH_RUN) scripts/bench_baseline_history.lua --repo "$(CURDIR)" --host-id "$(PERF_HOST_ID)"
 
 bench-gate: toolchains-host
-	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
+	@cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON $(LONEJSON_CMAKE_RELEASE_ARGS) && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
 	./build/$(HOST_PRESET)/lonejson_bench gate "$(PERF_BASELINE)" "$(PERF_LATEST)"
 
 test: build
 	./scripts/test.sh $(DEBUG_PRESET)
+ifeq ($(LONEJSON_HOST_OS),Linux)
 	$(MAKE) lua-test
+endif
 
 test-debug: test
 
@@ -548,7 +541,7 @@ test-host: build-host
 	./scripts/test.sh $(HOST_PRESET)
 
 test-host-curl: deps-host
-	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset host-curl -D LONEJSON_CPKT_ROOT="$$bundle_root"
+	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset host-curl -D LONEJSON_CPKT_ROOT="$$bundle_root" $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset host-curl
 	ctest --no-tests=error --preset host-curl
 
@@ -579,8 +572,6 @@ test-install-tree: package-verify
 
 example-smoke-local: build
 
-lua-rock: $(LUA_ROCK_STAMP)
-
 lua-env: lua-rock
 	@$(LUAROCKS) path --tree "$(LUA_ROCK_TREE)"
 	@printf 'export LONEJSON_LIBDIR=%q\n' "$(LONEJSON_LUA_LIBDIR)"
@@ -589,9 +580,9 @@ $(LUA_ROCKSPEC): $(LUA_ROCK_SOURCES)
 	mkdir -p "$(LUA_ROCK_TREE)"
 	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(LUA_ROCKSPEC)" "git+file://$(CURDIR)" "" "$$lib_ext"
 
-$(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES) $(LUA_ROCK_LIBLONEJSON_SOURCES) | toolchains-host
+lua-rock: $(LUA_ROCKSPEC) toolchains-host
 ifeq ($(strip $(LONEJSON_LUA_BUILD_DIR)),)
-	cmake --preset $(DEBUG_PRESET)
+	cmake --preset $(DEBUG_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared lonejson_static
 	cmake --install "build/$(DEBUG_PRESET)" --prefix "$(CURDIR)/build/lua-sdk"
 else
@@ -599,14 +590,14 @@ else
 	cmake --install "$(LONEJSON_LUA_BUILD_DIR)" --prefix "$(CURDIR)/build/lua-sdk"
 endif
 	mkdir -p "$(CURDIR)/build/luarocks-native/tool-tmp"
-	set -e; export TMPDIR="$(CURDIR)/build/luarocks-native/tool-tmp"; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"
+	set -e; export TMPDIR="$(CURDIR)/build/luarocks-native/tool-tmp"; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS)
 
 lua-target-runner: deps-host
-	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset host-curl -D LONEJSON_CPKT_ROOT="$$bundle_root"
+	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset host-curl -D LONEJSON_CPKT_ROOT="$$bundle_root" $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset host-curl --target lonejson_lua_target_runner
 
 lua-host-runtime: lua-rock
-	cmake --preset $(HOST_PRESET)
+	cmake --preset $(HOST_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset $(HOST_PRESET) --target lonejson_shared
 
 ifeq ($(LONEJSON_HOST_OS),Linux)
@@ -616,10 +607,12 @@ lua-test: lua-target-runner
 lua-fuzz: lua-target-runner
 	ctest --preset host-curl -R '^lonejson_lua_fuzz_tests$$'
 else
-lua-test: lua-rock
+lua-test: toolchains-host
+	cmake --preset $(DEBUG_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	LUA="$(LUA)" LUAROCKS="$(LUAROCKS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" ctest --preset $(DEBUG_PRESET) -R '^lonejson_lua_(native|schema_cache|encode_stats)_tests$$'
 
-lua-fuzz: lua-rock
+lua-fuzz: toolchains-host
+	cmake --preset $(DEBUG_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	LUA="$(LUA)" LUAROCKS="$(LUAROCKS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" ctest --preset $(DEBUG_PRESET) -R '^lonejson_lua_native_fuzz_tests$$'
 endif
 
@@ -634,7 +627,7 @@ lua-bench:
 	fi
 
 lua-bench-freeze-baseline: lua-bench-prerequisite
-	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON && \
+	cmake --preset $(HOST_PRESET) -D LONEJSON_BUILD_BENCHMARKS=ON $(LONEJSON_CMAKE_RELEASE_ARGS) && \
 	cmake --build --preset $(HOST_PRESET) --target lonejson_bench && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" ./build/$(HOST_PRESET)/lonejson_bench run "$(PERF_CORPUS)" "$(PERF_LATEST)" "$(PERF_HISTORY)" "$(PERF_ARCHIVE_DIR)" "$(PERF_ITERATIONS)" && \
 	LONEJSON_BENCH_HOST_ID="$(PERF_HOST_ID)" $(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua run "$(PERF_LATEST)" "$(LUA_PERF_LATEST)" "$(LUA_PERF_HISTORY)" "$(LUA_PERF_ARCHIVE_DIR)" "$(LUA_PERF_ITERATIONS)" && \
@@ -651,7 +644,7 @@ lua-bench-gate:
 	$(LUA_BENCH_RUN) bench/lonejson_lua_bench.lua gate "$(LUA_PERF_BASELINE)" "$(LUA_PERF_LATEST)"
 
 asan: toolchains-host
-	cmake --preset $(ASAN_PRESET)
+	cmake --preset $(ASAN_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset $(ASAN_PRESET)
 	ctest --no-tests=error --preset $(ASAN_PRESET) -LE host-policy -E "$(SANITIZER_CTEST_EXCLUDE)"
 
@@ -667,18 +660,18 @@ tsan:
 	fi; \
 	target_id="$$(./scripts/detect_native_target.sh)"; \
 	./scripts/cpkt-toolchains.sh ensure "$$target_id" >/dev/null; \
-	cmake --preset $(TSAN_PRESET); \
+	cmake --preset $(TSAN_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS); \
 	cmake --build --preset $(TSAN_PRESET); \
 	ctest --no-tests=error --preset $(TSAN_PRESET) -LE host-policy -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 valgrind: deps-host
 	@command -v valgrind >/dev/null 2>&1 || { printf '%s\n' 'Valgrind is required for the native memory-check gate' >&2; exit 1; }
-	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset $(VALGRIND_PRESET) -D LONEJSON_CPKT_ROOT="$$bundle_root"
+	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset $(VALGRIND_PRESET) -D LONEJSON_CPKT_ROOT="$$bundle_root" $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset $(VALGRIND_PRESET) --target lonejson_tests lonejson_curl_rewind_tests lonejson_lua_target_runner
 	cd build/$(VALGRIND_PRESET) && ctest --no-tests=error -j 1 -T MemCheck --overwrite "MemoryCheckCommandOptions=--leak-check=full --track-origins=yes --keep-debuginfo=yes --num-callers=30 --error-exitcode=86 --quiet" -R '^lonejson_(tests|curl_rewind_tests|lua_target_tests)$$' --output-on-failure
 
 fuzz: deps-host toolchains-aflpp
-	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_CPKT_ROOT="$$bundle_root" -D LONEJSON_FUZZ_SECONDS="$(FUZZ_TIME)"
+	bundle_root="$$(./scripts/detect_cpkt_bundle.sh)" && cmake --preset $(FUZZ_PRESET) -D LONEJSON_CPKT_ROOT="$$bundle_root" -D LONEJSON_FUZZ_SECONDS="$(FUZZ_TIME)" $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset $(FUZZ_PRESET) --target lonejson_fuzz_targets
 	ctest --preset fuzz
 	$(MAKE) lua-fuzz
@@ -690,15 +683,15 @@ fuzz-smoke:
 	LONEJSON_FUZZ_EXECUTIONS=1000 $(MAKE) fuzz
 
 stack-usage: toolchains-host
-	cmake --preset stack-usage
+	cmake --preset stack-usage $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset stack-usage-report
 
 format: toolchains-host
-	cmake --preset $(DEBUG_PRESET)
+	cmake --preset $(DEBUG_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset format
 
 format-check: toolchains-host
-	cmake --preset $(DEBUG_PRESET)
+	cmake --preset $(DEBUG_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset $(DEBUG_PRESET) --target format-check
 
 deps-debug: deps-host
