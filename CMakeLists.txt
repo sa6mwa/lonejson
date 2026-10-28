@@ -671,16 +671,6 @@ if(LONEJSON_BUILD_TESTS)
   list(APPEND LONEJSON_STACK_USAGE_TARGETS lonejson_map_cache_no_tls_tests)
 
   find_program(LONEJSON_BASH_EXECUTABLE bash)
-  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND LONEJSON_CAN_RUN_LUA_NATIVE_TESTS)
-    add_test(NAME lonejson_lua_native_tests COMMAND bash
-      "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_lua_native.sh"
-      "${LONEJSON_LUA_EXECUTABLE}" "${LONEJSON_LUAROCKS_EXECUTABLE}"
-      tests/test_lua.lua tests/test_lua_fuzz.lua)
-    add_test(NAME lonejson_lua_native_fuzz_tests COMMAND bash
-      "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_lua_native.sh"
-      "${LONEJSON_LUA_EXECUTABLE}" "${LONEJSON_LUAROCKS_EXECUTABLE}"
-      tests/test_lua_fuzz.lua)
-  endif()
   if(LONEJSON_BASH_EXECUTABLE AND LONEJSON_LUA_EXECUTABLE
       AND LONEJSON_LUAROCKS_EXECUTABLE)
     if(LONEJSON_CAN_RUN_LUA_NATIVE_TESTS AND
@@ -713,6 +703,8 @@ if(LONEJSON_BUILD_TESTS)
         PROPERTIES LABELS "local;host-policy")
     endif()
   endif()
+
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/LonejsonNativeLuaTests.cmake")
 
   set(LONEJSON_TARGET_LUA_INCLUDE_DIR
     "${LONEJSON_CPKT_ROOT}/include")
@@ -855,6 +847,12 @@ if(LONEJSON_BUILD_TESTS)
   endif()
   get_property(lonejson_runtime_tests DIRECTORY PROPERTY TESTS)
   if(LONEJSON_BASH_EXECUTABLE)
+    foreach(case native_lua_ctest selected_release_build package_verify_directory)
+      add_test(NAME lonejson_${case}_tests
+        COMMAND "${LONEJSON_BASH_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_${case}.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}")
+    endforeach()
     add_test(NAME lonejson_release_identity_tests
       COMMAND "${LONEJSON_BASH_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_release_identity.sh"

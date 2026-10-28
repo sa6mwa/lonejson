@@ -70,3 +70,13 @@ if printf '%s\n' "$env_commands" | grep -E 'export (LD_LIBRARY_PATH|DYLD_LIBRARY
 fi
 printf '%s\n' "$env_commands" | grep -F 'export LONEJSON_LIBDIR=' >/dev/null
 printf '%s\n' "$dry_run" | grep -F 'export TMPDIR=' >/dev/null
+
+# CTest supplies its already-configured build. Preparing Lua must not reset
+# the active configuration to the debug preset while its tests are running.
+prepared_build="$tmp_dir/prepared-build"
+prepared_plan=$(make_lua_rock -B -n lua-rock LONEJSON_LUA_BUILD_DIR="$prepared_build")
+if grep -F 'cmake --preset' <<<"$prepared_plan"; then
+  printf 'Lua preparation reconfigures an active CTest build\n' >&2; exit 1
+fi
+grep -F "cmake --build \"$prepared_build\" --target lonejson_shared lonejson_static" <<<"$prepared_plan" >/dev/null
+grep -F "cmake --install \"$prepared_build\"" <<<"$prepared_plan" >/dev/null

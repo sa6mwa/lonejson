@@ -58,6 +58,9 @@ preset, curl examples, and LuaRocks use the active Apple compiler and macOS SDK
 reported by `xcrun`. Install Xcode or Command Line Tools first. Native builds
 do not require osxcross. Linux hosts use osxcross for Darwin artifacts and
 Bootlin for Linux targets; Apple SDKs are never downloaded by the project.
+`make build-release` prepares dependencies only for `RELEASE_BUILD_PRESETS`.
+Without a prepared osxcross collection, the default selection builds the six
+Linux targets without attempting Darwin preparation.
 The native preset toolchain is now `cmake/toolchains/native.cmake`; refresh an
 existing build cache with `cmake --fresh --preset <preset>` after updating.
 
@@ -154,6 +157,12 @@ separate production-configured module; test-only uservalue, integer, and
 statistics definitions remain confined to the test module. Native Darwin Lua
 tests and benchmarks use its native LuaRocks runtime and the host build;
 source-rock packaging remains host-side tooling.
+On native Darwin, CTest prepares the installed SDK and Lua rock with a fixture
+before any selected Lua or Lua benchmark test loads it. This also applies to
+direct CTest selections. Schema-cache and encode-stat checks run as separate
+tests that build their instrumented Lua modules against that installed SDK.
+The fixture reuses its configured build through `LONEJSON_LUA_BUILD_DIR`;
+it does not reconfigure the active test build with the debug preset.
 
 `make package-verify` rejects every checksum-listed artifact if a packaged
 library, archive, or consumer metadata contains a Bootlin cache or stable
@@ -278,6 +287,10 @@ cleanup. The default `dist/` must be a real directory; a symlink is rejected.
 Explicit custom artifact destinations retain their ownership-marker policy.
 Completed artifacts are copied to their final destinations, including those
 on another filesystem; packaging intermediates remain under `build/`.
+For a full upload in a custom directory, pass its checksum manifest to
+`scripts/package-verify.sh`; all verification stages use the manifest's directory
+as the payload directory. Binary preparation manifests remain under `build/`
+and refer to the checkout's `dist/` payload.
 
 ## Artifact inventories and selected test scopes
 

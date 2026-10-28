@@ -7,7 +7,7 @@ mkdir -p "$workspace_root/build"
 repo_root=$1
 lua_exec=${2:-lua}
 luarocks_exec=${3:-luarocks}
-libdir=${4:-"$repo_root/build/lua-sdk/lib"}
+libdir=${4:-${LONEJSON_LIBDIR:-"$repo_root/build/lua-sdk/lib"}}
 tmp_dir=$(mktemp -d "$workspace_root/build/test_lua_encode_stats.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 export TMPDIR="$tmp_dir"

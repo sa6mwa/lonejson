@@ -356,7 +356,7 @@ build-debug: build
 build-host: deps-host
 	./scripts/build.sh $(HOST_PRESET)
 
-build-release: deps-all
+build-release: $(patsubst %-release,deps-%,$(RELEASE_BUILD_PRESETS))
 	@set -e; for preset in $(RELEASE_BUILD_PRESETS); do \
 		./scripts/build.sh "$$preset"; \
 	done
@@ -590,9 +590,14 @@ $(LUA_ROCKSPEC): $(LUA_ROCK_SOURCES)
 	lib_ext="$$($(LUAROCKS) config variables.LIB_EXTENSION)"; ./scripts/render_release_rockspec.sh "$(RELEASE_VERSION)" "$(LUA_ROCKSPEC)" "git+file://$(CURDIR)" "" "$$lib_ext"
 
 $(LUA_ROCK_STAMP): $(LUA_ROCKSPEC) $(LUA_ROCK_SOURCES) $(LUA_ROCK_LIBLONEJSON_SOURCES) | toolchains-host
+ifeq ($(strip $(LONEJSON_LUA_BUILD_DIR)),)
 	cmake --preset $(DEBUG_PRESET)
 	cmake --build --preset $(DEBUG_PRESET) --target lonejson_shared lonejson_static
 	cmake --install "build/$(DEBUG_PRESET)" --prefix "$(CURDIR)/build/lua-sdk"
+else
+	cmake --build "$(LONEJSON_LUA_BUILD_DIR)" --target lonejson_shared lonejson_static
+	cmake --install "$(LONEJSON_LUA_BUILD_DIR)" --prefix "$(CURDIR)/build/lua-sdk"
+endif
 	mkdir -p "$(CURDIR)/build/luarocks-native/tool-tmp"
 	set -e; export TMPDIR="$(CURDIR)/build/luarocks-native/tool-tmp"; CFLAGS="$${CFLAGS:+$$CFLAGS }$(LUA_ROCK_EXTRA_CFLAGS)" LONEJSON_LIBDIR="$(LONEJSON_LUA_LIBDIR)" "$(LUAROCKS)" make --tree "$(LUA_ROCK_TREE)" "$(LUA_ROCKSPEC)"; rm -rf $(LUA_ROCK_BUILD_BYPRODUCTS); touch "$(LUA_ROCK_STAMP)"
 
