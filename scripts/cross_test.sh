@@ -4,10 +4,8 @@ set -euo pipefail
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$repo_root"
 
-exclude=${1:-}
-shift || true
-if [[ -z "$exclude" || $# -eq 0 ]]; then
-  printf 'usage: %s EXCLUDE_LABEL PRESET...\n' "$0" >&2
+if [[ $# -eq 0 ]]; then
+  printf 'usage: %s PRESET...\n' "$0" >&2
   exit 2
 fi
 
@@ -18,5 +16,5 @@ fi
 for preset in "$@"; do
   cmake --preset "$preset" "${configure_args[@]}"
   cmake --build --preset "$preset"
-  ctest --no-tests=error --preset "$preset" --output-on-failure -LE "$exclude"
+  ctest --no-tests=error --preset "$preset" --output-on-failure
 done

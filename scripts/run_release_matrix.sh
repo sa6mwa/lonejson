@@ -37,7 +37,7 @@ run_target() {
     printf '\n== %s ==\n' "$preset"
     configure_release_target "$preset" "$target_id"
     cmake --build --preset "$preset"
-    ctest --no-tests=error --preset "$preset" --output-on-failure -LE host-policy
+    ctest --no-tests=error --preset "$preset" --output-on-failure
     cmake --build --preset "$package_preset"
 }
 

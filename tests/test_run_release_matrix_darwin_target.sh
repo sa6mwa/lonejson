@@ -85,7 +85,6 @@ printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_JWT=ON' >/de
 printf '%s\n' "$matrix_script" | grep -F -- '-D LONEJSON_BUILD_WITH_OIDC=ON' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'run_target x86_64-linux-gnu-release x86_64-linux-gnu package-archive-x86_64-linux-gnu' >/dev/null
 printf '%s\n' "$matrix_script" | grep -F -- 'ctest --no-tests=error' >/dev/null
-printf '%s\n' "$matrix_script" | grep -F -- 'ctest --no-tests=error --preset "$preset" --output-on-failure -LE host-policy' >/dev/null
 for non_host_target in \
     'run_target x86_64-linux-musl-release x86_64-linux-musl package-archive-x86_64-linux-musl' \
     'run_target aarch64-linux-gnu-release aarch64-linux-gnu package-archive-aarch64-linux-gnu' \
@@ -180,11 +179,16 @@ preflight_output="$(PATH="$fake_bin:/usr/bin:/bin" \
   "$matrix_script_path")"
 printf '%s\n' "$preflight_output" | grep -Fx 'Release matrix preflight completed successfully.' >/dev/null
 
-# Execute the warm matrix with recording tools. It must retain existing outputs,
-# run each target suite once, and verify the binary inventory without cleaning.
+# Execute the actual matrix selections through CTest and the shipped presets.
+# Only runtime may run: policy and service cases fail if a filter leaks them.
+# Recording build tools avoid compiling the six targets for this scope check.
 fixture="$tmp_dir/matrix-repo"
 mkdir -p "$fixture/scripts" "$fixture/dist" "$tmp_dir/recording-bin"
 cp "$matrix_script_path" "$fixture/scripts/run_release_matrix.sh"
+cp "$repo_root/scripts/cross_test.sh" "$fixture/scripts/cross_test.sh"
+cp "$repo_root/CMakePresets.json" "$fixture/CMakePresets.json"
+export TEST_MATRIX_REAL_CTEST="$(command -v ctest)"
+real_cmake="$(command -v cmake)"
 for script in deps cpkt-toolchains; do
   cat >"$fixture/scripts/$script.sh" <<'SH'
 #!/usr/bin/env bash
@@ -198,26 +202,67 @@ for tool in cmake ctest make ninja luarocks qemu-x86_64 qemu-aarch64 qemu-arm; d
   cat >"$tmp_dir/recording-bin/$tool" <<'SH'
 #!/usr/bin/env bash
 printf '%s %s\n' "${0##*/}" "$*" >>"$TEST_MATRIX_EVENTS"
-if [[ "${0##*/}" == ctest && "$*" == *"${TEST_MATRIX_FAIL:-never-fail}"* ]]; then exit 41; fi
+if [[ "${0##*/}" == ctest ]]; then exec "$TEST_MATRIX_REAL_CTEST" "$@"; fi
 SH
   chmod +x "$tmp_dir/recording-bin/$tool"
 done
 for target in x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl; do
   mkdir -p "$fixture/.cache/cpkt/$target/root/lib/cmake/CURL"
   touch "$fixture/.cache/cpkt/$target/root/lib/cmake/CURL/CURLConfig.cmake"
+  mkdir -p "$fixture/build/$target-release"
+  cat >"$fixture/build/$target-release/CTestTestfile.cmake" <<TESTS
+add_test(runtime "$real_cmake" -E true)
+set_tests_properties(runtime PROPERTIES LABELS local TIMEOUT 5)
+add_test(policy "$real_cmake" -E false)
+set_tests_properties(policy PROPERTIES LABELS host-policy TIMEOUT 5)
+add_test(service "$real_cmake" -E false)
+set_tests_properties(service PROPERTIES LABELS e2e TIMEOUT 5)
+TESTS
 done
 export TEST_MATRIX_EVENTS="$tmp_dir/matrix-events"
 printf retained >"$fixture/dist/retained.tar.gz"
-PATH="$tmp_dir/recording-bin:$PATH" "$fixture/scripts/run_release_matrix.sh" >"$tmp_dir/matrix-output"
+if ! PATH="$tmp_dir/recording-bin:$PATH" "$fixture/scripts/run_release_matrix.sh" >"$tmp_dir/matrix-output" 2>&1; then
+  cat "$tmp_dir/matrix-output" >&2; exit 1
+fi
 [[ $(cat "$fixture/dist/retained.tar.gz") == retained ]]
 [[ $(grep -c '^ctest ' "$TEST_MATRIX_EVENTS") == 6 ]]
-[[ $(grep -c 'ctest .* -LE host-policy$' "$TEST_MATRIX_EVENTS") == 6 ]]
+[[ $(grep -c '100% tests passed, 0 tests failed out of 1' "$tmp_dir/matrix-output") == 6 ]]
 [[ $(grep -c '^cmake --build --preset package-archive-' "$TEST_MATRIX_EVENTS") == 6 ]]
 ! grep -E 'clean|package-source|^cmake --build --preset package-checksums$|^make package-verify$' "$TEST_MATRIX_EVENTS"
 grep -Fx 'cmake --build --preset host --target package-binary-checksums' "$TEST_MATRIX_EVENTS"
 grep -Fx 'make package-verify-binary' "$TEST_MATRIX_EVENTS"
+
+# The ordinary cross-test entry point must preserve the same preset scope.
 : >"$TEST_MATRIX_EVENTS"
-if PATH="$tmp_dir/recording-bin:$PATH" TEST_MATRIX_FAIL=aarch64-linux-gnu-release \
+if ! PATH="$tmp_dir/recording-bin:$PATH" "$fixture/scripts/cross_test.sh" \
+  x86_64-linux-gnu-release x86_64-linux-musl-release \
+  aarch64-linux-gnu-release aarch64-linux-musl-release \
+  armhf-linux-gnu-release armhf-linux-musl-release >"$tmp_dir/cross-output" 2>&1; then
+  cat "$tmp_dir/cross-output" >&2; exit 1
+fi
+[[ $(grep -c '^ctest ' "$TEST_MATRIX_EVENTS") == 6 ]]
+[[ $(grep -c '100% tests passed, 0 tests failed out of 1' "$tmp_dir/cross-output") == 6 ]]
+
+# Excluding every registered case must fail, rather than claim target coverage.
+sed '/^add_test(runtime /d; /^set_tests_properties(runtime /d' \
+  "$fixture/build/x86_64-linux-musl-release/CTestTestfile.cmake" \
+  >"$fixture/build/x86_64-linux-gnu-release/CTestTestfile.cmake"
+: >"$TEST_MATRIX_EVENTS"
+if PATH="$tmp_dir/recording-bin:$PATH" "$fixture/scripts/run_release_matrix.sh" >"$tmp_dir/matrix-empty" 2>&1; then
+  printf 'binary matrix accepted an empty runtime selection\n' >&2; exit 1
+fi
+grep -F 'No tests were found' "$tmp_dir/matrix-empty" >/dev/null
+[[ $(grep -c '^ctest ' "$TEST_MATRIX_EVENTS") == 1 ]]
+! grep -E 'package-archive-|^make ' "$TEST_MATRIX_EVENTS"
+cp "$fixture/build/x86_64-linux-musl-release/CTestTestfile.cmake" \
+  "$fixture/build/x86_64-linux-gnu-release/CTestTestfile.cmake"
+
+# A real failing runtime test stops before packaging that target or later ones.
+sed 's/-E true)/-E false)/' \
+  "$fixture/build/x86_64-linux-musl-release/CTestTestfile.cmake" \
+  >"$fixture/build/aarch64-linux-gnu-release/CTestTestfile.cmake"
+: >"$TEST_MATRIX_EVENTS"
+if PATH="$tmp_dir/recording-bin:$PATH" \
     "$fixture/scripts/run_release_matrix.sh" >"$tmp_dir/matrix-failed" 2>&1; then
   printf 'binary matrix continued after a required target test failed\n' >&2; exit 1
 fi

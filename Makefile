@@ -546,7 +546,7 @@ test-host-curl: deps-host
 	ctest --no-tests=error --preset host-curl
 
 cross-test: deps-cross
-	./scripts/cross_test.sh "host-policy" $(CROSS_RELEASE_PRESETS)
+	./scripts/cross_test.sh $(CROSS_RELEASE_PRESETS)
 
 test-cross: cross-test
 
@@ -646,7 +646,7 @@ lua-bench-gate:
 asan: toolchains-host
 	cmake --preset $(ASAN_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS)
 	cmake --build --preset $(ASAN_PRESET)
-	ctest --no-tests=error --preset $(ASAN_PRESET) -LE host-policy -E "$(SANITIZER_CTEST_EXCLUDE)"
+	ctest --no-tests=error --preset $(ASAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 tsan:
 	@set -e; support="$(LONEJSON_HAVE_TSAN)"; \
@@ -662,7 +662,7 @@ tsan:
 	./scripts/cpkt-toolchains.sh ensure "$$target_id" >/dev/null; \
 	cmake --preset $(TSAN_PRESET) $(LONEJSON_CMAKE_RELEASE_ARGS); \
 	cmake --build --preset $(TSAN_PRESET); \
-	ctest --no-tests=error --preset $(TSAN_PRESET) -LE host-policy -E "$(SANITIZER_CTEST_EXCLUDE)"
+	ctest --no-tests=error --preset $(TSAN_PRESET) -E "$(SANITIZER_CTEST_EXCLUDE)"
 
 valgrind: deps-host
 	@command -v valgrind >/dev/null 2>&1 || { printf '%s\n' 'Valgrind is required for the native memory-check gate' >&2; exit 1; }

@@ -53,11 +53,30 @@ SH
 cat >"$work/bin/ctest" <<'SH'
 #!/bin/bash
 printf 'ctest %s\n' "$*" >>"$TSAN_GATE_EVENTS"
-[[ "${TSAN_GATE_FAIL:-}" != test ]]
+[[ "${TSAN_GATE_FAIL:-}" != test ]] || exit 1
+cd "$HARDENING_TEST_REPO"
+exec "$HARDENING_REAL_CTEST" "$@"
 SH
 chmod +x "$work/bin/"*
 export TSAN_GATE_EVENTS="$work/events"
 export TSAN_REAL_CMAKE="$(command -v cmake)"
+export HARDENING_REAL_CTEST="$(command -v ctest)"
+export HARDENING_TEST_REPO="$work/repo"
+mkdir -p "$HARDENING_TEST_REPO"
+cp "$repo_root/CMakePresets.json" "$HARDENING_TEST_REPO/CMakePresets.json"
+for preset in asan tsan; do
+  mkdir -p "$HARDENING_TEST_REPO/build/$preset"
+  cat >"$HARDENING_TEST_REPO/build/$preset/CTestTestfile.cmake" <<TESTS
+add_test(runtime "$TSAN_REAL_CMAKE" -E true)
+set_tests_properties(runtime PROPERTIES LABELS local TIMEOUT 5)
+add_test(policy "$TSAN_REAL_CMAKE" -E false)
+set_tests_properties(policy PROPERTIES LABELS host-policy TIMEOUT 5)
+add_test(service "$TSAN_REAL_CMAKE" -E false)
+set_tests_properties(service PROPERTIES LABELS e2e TIMEOUT 5)
+add_test(lonejson_lua_target_tests "$TSAN_REAL_CMAKE" -E false)
+set_tests_properties(lonejson_lua_target_tests PROPERTIES LABELS local TIMEOUT 5)
+TESTS
+done
 for phase in configure build test; do
   : >"$TSAN_GATE_EVENTS"
   if PATH="$work/bin:$PATH" TSAN_GATE_FAIL="$phase" \
@@ -77,3 +96,14 @@ if PATH="$work/bin:$PATH" make -s -C "$repo_root" tsan LONEJSON_HAVE_TSAN=invali
 fi
 grep -F 'LONEJSON_HAVE_TSAN must be' "$work/invalid" >/dev/null
 [[ ! -s "$TSAN_GATE_EVENTS" ]]
+
+# Execute the CTest arguments produced by both real Make recipes, including
+# their name exclusion. Preset label exclusions must survive the wrappers.
+for preset in asan tsan; do
+  : >"$TSAN_GATE_EVENTS"
+  if ! PATH="$work/bin:$PATH" make -s -C "$repo_root" "$preset" LONEJSON_HAVE_TSAN=1 >"$work/selected" 2>&1; then
+    cat "$work/selected" >&2; exit 1
+  fi
+  [[ $(grep -c '^ctest ' "$TSAN_GATE_EVENTS") == 1 ]]
+  grep -F '100% tests passed, 0 tests failed out of 1' "$work/selected" >/dev/null
+done

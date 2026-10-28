@@ -323,7 +323,11 @@ the owned Podman pod, prepares the native fixture executables once, and runs the
 four cases in `ctest --preset e2e`; it tears down resources it started unless
 retained-service debugging was selected. Individual e2e Make targets select the
 corresponding registered case. Preset selection regression tests exercise real
-CTest filtering, including separation of host policy and target runtime checks.
+CTest filtering through the matrix, cross-test and native sanitizer commands,
+including separation of host policy and target runtime checks. Those commands
+use the presets' label exclusions without adding a narrower `-LE` expression:
+CTest combines repeated label exclusions by intersection, which would allow
+service tests back into the selection after service teardown.
 
 The fuzz CMake graph declares every maintained executable and seed corpus.
 `lonejson_fuzz_targets` builds the required static library and fuzz executables
