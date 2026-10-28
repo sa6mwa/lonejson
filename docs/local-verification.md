@@ -168,6 +168,11 @@ LuaRocks with the current flags. A shared installation stamp cannot establish
 that a different configuration is installed. CMake still reuses unchanged
 library outputs through its normal dependency graph. CTest owns Darwin Lua
 preparation; the Make Lua test targets do not prepare it a second time.
+The benchmark tests also consume that prepared SDK without rebuilding it or
+selecting the debug library. Native Darwin ASan and TSan configurations omit
+these Lua module tests and their setup fixture: the ordinary Lua interpreter
+cannot load their sanitizer runtime safely. Compiled C sanitizer tests remain
+selected.
 
 `make package-verify` rejects every checksum-listed artifact if a packaged
 library, archive, or consumer metadata contains a Bootlin cache or stable

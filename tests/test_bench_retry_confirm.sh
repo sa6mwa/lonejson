@@ -30,11 +30,9 @@ run_lua_bench() {
 }
 
 if [[ ! -x "$runner_build/lonejson_lua_target_runner" ]]; then
-  make --no-print-directory -C "$repo_root" lua-rock \
-    LUA="$lua_exec" LUAROCKS="$luarocks_exec" >/dev/null
   resolved_environment=$("$luarocks_exec" path --tree "$repo_root/build/luarocks") || exit $?
   eval "$resolved_environment"
-  export DYLD_LIBRARY_PATH="$repo_root/build/debug:${DYLD_LIBRARY_PATH:-}"
+  export DYLD_LIBRARY_PATH="${LONEJSON_LIBDIR:-$repo_root/build/lua-sdk/lib}:${DYLD_LIBRARY_PATH:-}"
 fi
 
 write_run() {

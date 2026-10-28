@@ -1,6 +1,9 @@
 # Native Darwin loads LuaRocks modules rather than the Linux embedding runner.
 # CTest fixtures prepare that installed SDK/rock even for a direct test selection.
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND LONEJSON_CAN_RUN_LUA_NATIVE_TESTS)
+# The ordinary Lua interpreter cannot initialize a sanitizer runtime loaded later
+# through the module; sanitizer coverage uses the compiled C tests instead.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND LONEJSON_CAN_RUN_LUA_NATIVE_TESTS
+    AND NOT LONEJSON_ENABLE_ASAN AND NOT LONEJSON_ENABLE_TSAN)
   find_program(LONEJSON_MAKE_EXECUTABLE NAMES gmake make REQUIRED)
   add_test(NAME lonejson_lua_native_prepare COMMAND "${LONEJSON_MAKE_EXECUTABLE}"
     -C "${CMAKE_CURRENT_SOURCE_DIR}" lua-rock
