@@ -296,7 +296,11 @@ collection also requires its checksum-pinned, Bootlin-built host MIG helper;
 is build machinery and is never shipped with lonejson.
 
 `make package` builds and verifies packages incrementally. `make release` owns
-clean reconstruction and the full final gate. Native `make valgrind` enables
+clean reconstruction and the full final gate. `make package-source-smoke` (also
+`make release-source-smoke`) validates reconstruction from the source archive
+with only the source artifact in the parent checkout. `make release` generates
+the complete checksum manifest after source smoke and before final package
+verification. Native `make valgrind` enables
 curl, OpenSSL, JWT and OIDC and runs the main, curl rewind, and Lua tests through
 CTest Memcheck serially with a 30 minute timeout. Binary SDK manifests record
 curl and OpenSSL as external optional facade requirements; core libraries do

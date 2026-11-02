@@ -400,7 +400,6 @@ $(RELEASE_SOURCE_TARBALL):
 
 release-source-smoke: release-source-artifact
 	./scripts/test_release_from_source.sh "$(CURDIR)" "$(DIST_DIR)/lonejson-$(RELEASE_VERSION).tar.gz"
-	cmake --build --preset package-checksums
 
 package-source-smoke: release-source-smoke
 
@@ -458,6 +457,7 @@ release:
 	+$(TIME_STEP) release/clean $(MAKE) clean
 	+$(TIME_STEP) release/pipeline $(MAKE) release-pipeline
 	+$(TIME_STEP) release/source-smoke $(MAKE) package-source-smoke
+	+$(TIME_STEP) release/package-checksums $(MAKE) package-checksums
 	+$(TIME_STEP) release/package-verify $(MAKE) package-verify
 
 print-release-version:
